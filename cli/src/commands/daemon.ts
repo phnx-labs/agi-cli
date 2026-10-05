@@ -733,8 +733,7 @@ export function registerDaemonCommand(program: Command): void {
 
       # Toggle or restart a service live — applies without a daemon restart
       # for supervisor-managed services (account-state, session-index,
-      # monitors' off-transition, watchdog, device-probe, self-heal,
-      # state-dir-check)
+      # watchdog, device-probe, self-heal, state-dir-check)
       agents daemon services disable account-state
       agents daemon services enable account-state
       agents daemon services restart account-state
@@ -758,7 +757,7 @@ export function registerDaemonCommand(program: Command): void {
       always. Use 'agents routines stats' for per-routine failure detail.
 
       'disable' is a persisted kill switch: it stops routines/add,
-      routines/start, routines/catchup, monitors/add, and webhook triggers from auto-starting
+      routines/start, routines/catchup, and webhook triggers from auto-starting
       the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).
       'agents daemon start' still starts it explicitly, same as
       'systemctl start' on a disabled unit.
@@ -775,8 +774,8 @@ export function registerDaemonCommand(program: Command): void {
       'agents daemon services enable|disable|restart <id>' applies live (no
       daemon restart) for supervisor-managed services that were registered at
       boot. The inline scheduler re-evaluates its toggle on every reload as
-      well. A boot-disabled service other than the monitor on-transition and
-      webhook-receiver still needs an operator 'agents daemon restart'. 'agents
+      well. A boot-disabled service other than webhook-receiver still needs
+      an operator 'agents daemon restart'. 'agents
       daemon services' names which case you're in per row.
     `,
   });
@@ -847,7 +846,7 @@ export function registerDaemonCommand(program: Command): void {
     .description('Clear the daemon.enabled kill switch. Does not start the daemon by itself.')
     .action(() => {
       setConfigValue('daemon.enabled', true);
-      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (routines add/start/catchup, monitors add, webhooks) may bring the daemon up again'));
+      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (routines add/start/catchup, webhooks) may bring the daemon up again'));
     });
 
   cmd.command('disable')
@@ -899,8 +898,8 @@ export function registerDaemonCommand(program: Command): void {
     notes: `
       A service disabled at daemon boot is normally not registered on the
       supervisor, so enabling it needs an operator restart. The inline
-      scheduler applies enable/disable on reload; webhook-receiver and the
-      monitor on-transition still require 'agents daemon restart'. Each row in
+      scheduler applies enable/disable on reload; webhook-receiver still
+      requires 'agents daemon restart'. Each row in
       the plain-text view names which case it is; 'supervised: true/false' does
       the same in --json.
     `,

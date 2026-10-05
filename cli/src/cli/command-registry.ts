@@ -28,7 +28,6 @@ export const loadUpdate: ModuleLoader = async () => (await import('../commands/u
 const loadImport: ModuleLoader = async () => (await import('../commands/import.js')).registerImportCommand;
 const loadPackages: ModuleLoader = async () => (await import('../commands/packages.js')).registerPackagesCommands;
 const loadRoutines: ModuleLoader = async () => (await import('../commands/routines.js')).registerRoutinesCommands;
-const loadMonitors: ModuleLoader = async () => (await import('../commands/monitors.js')).registerMonitorsCommands;
 const loadProjects: ModuleLoader = async () => (await import('../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../commands/exec.js')).registerRunCommand;
 const loadOpen: ModuleLoader = async () => (await import('../commands/open.js')).registerOpenCommand;
@@ -113,7 +112,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   install: [loadPackages],
   packages: [loadPackages],
   routines: [loadRoutines],
-  monitors: [loadMonitors],
   projects: [loadProjects],
   run: [loadRun],
   _callback: [loadOpen],

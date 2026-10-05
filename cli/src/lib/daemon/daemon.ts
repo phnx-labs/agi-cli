@@ -511,7 +511,6 @@ export async function runDaemon(): Promise<void> {
     { SessionIndexService },
     { SessionSummarizerService },
     { SessionTitleService },
-    { MonitorEngineService },
     { AccountUsageService, AccountAuthService },
     { CatchupService },
     { WatchdogService },
@@ -532,7 +531,6 @@ export async function runDaemon(): Promise<void> {
     import('./session-index-service.js'),
     import('./session-summarizer-service.js'),
     import('./session-title-service.js'),
-    import('./monitor-engine-service.js'),
     import('./account-state-daemon-service.js'),
     import('./catchup-service.js'),
     import('./watchdog-service.js'),
@@ -622,10 +620,6 @@ export async function runDaemon(): Promise<void> {
 
   supervisor.register(new FeedStreamService(), { enabled: isEnabled('feed-stream') });
   if (!isEnabled('feed-stream')) log('INFO', 'Shared feed stream service disabled');
-
-  const monitorEngineSvc = new MonitorEngineService();
-  if (isEnabled('monitors')) supervisor.register(monitorEngineSvc);
-  else log('INFO', 'Monitor engine disabled');
 
   if (isEnabled('account-state')) supervisor.register(new AccountUsageService());
   else log('INFO', 'Account-state service disabled');
@@ -879,14 +873,6 @@ export async function runDaemon(): Promise<void> {
       scheduler!.reloadAll();
       const reloaded = scheduler!.listScheduled();
       log('INFO', `Reloaded ${reloaded.length} jobs`);
-    }
-    const liveMonitorEngine = monitorEngineSvc.getEngine();
-    if (liveMonitorEngine && reloadedEnabled('monitors')) {
-      try {
-        liveMonitorEngine.reload();
-      } catch (err) {
-        log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
-      }
     }
   };
 

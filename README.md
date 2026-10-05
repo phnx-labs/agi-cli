@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agi-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagi--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents insights` (latency lives at `agents insights perf`), fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents insights` (latency lives at `agents insights perf`), fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -100,7 +100,6 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Accounts](#accounts)
 - [Secrets](#secrets)
 - [Routines](#routines)
-- [Monitors](#monitors)
 - [Share](#share)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
@@ -139,7 +138,7 @@ agents routines add nightly-payments-audit \
 agents menubar setup
 ```
 
-`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); monitors fire it on a change instead of a clock ([Monitors](#monitors)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
+`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
@@ -1398,7 +1397,7 @@ agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
 ```
 
-Each hosted responsibility (browser IPC, scheduler, monitors, watchdog, device
+Each hosted responsibility (browser IPC, scheduler, watchdog, device
 probe, self-heal, self-update, account-state refresh, state-dir checks) is an
 independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
@@ -1409,55 +1408,17 @@ with auto-update forced off and only picked up new code on a manual
 `agents daemon services list` shows every service; `enable|disable <id>` flips
 one. Missing keys default to enabled, so upgrades are no-ops. Most services take
 effect on the next daemon start; browser IPC is registered even when boot-disabled
-so browser commands can enable it live, while scheduler and monitor engine also
-re-evaluate on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
+so browser commands can enable it live, while the scheduler also
+re-evaluates on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
 whole process lifecycle. Browser and routines clients change their own service
 state without evicting sibling work.
 
 There is no `agents daemon jobs` -- scheduled work is always `agents routines`
 (see `agents routines stats` for per-routine failure detail). `disable` is a
 device-local kill switch: with it set, `routines add`/`routines start`/
-`routines catchup`/`monitors add`/webhook triggers stop auto-starting the daemon, mirroring
+`routines catchup`/webhook triggers stop auto-starting the daemon, mirroring
 `systemctl disable` -- `agents daemon start` still works as the explicit
 override.
-
----
-
-## Monitors
-
-<p align="center">
-  <img src="assets/monitors.svg" alt="agents monitors: a watched source (poll a command, an HTTP endpoint, a file, or a fleet device) flows into a condition (changed? matched? deduped by a native state store) that fires an action — run an agent with the event in its prompt, kick a routine, or notify. Pin the owner device for exactly-once." width="100%" />
-</p>
-
-```bash
-# Routines fire on a clock. Monitors fire on a change: watch a source, and when
-# it flips, spawn an agent, kick a routine, or notify. The cross-agent layer --
-# agents watching sources (including the fleet and other agents) and reacting.
-
-# CI goes red -> a Claude agent triages it (poll a command, diff, match a pattern)
-agents monitors add ci-red \
-  --poll 'gh pr checks 1249 --json name,bucket' 30s --match fail \
-  --run claude --prompt 'CI failed: {event}. Diagnose and fix.' \
-  --device yosemite-s0
-
-# Merge-on-green: ok only if the PR actually merged, not just because the agent exited 0
-agents monitors add merge-1682 \
-  --poll 'gh pr view 1682 --json state --jq .state' 2m --match OPEN \
-  --run claude --prompt 'Rebase-merge #1682: {event}' \
-  --postcondition 'gh pr view 1682 --json state --jq .state | grep -qx MERGED'
-
-# A fleet box goes unreachable or overloaded -> notify (watch the fleet itself)
-agents monitors add box-down --watch-device mac-mini --on-change --notify telegram
-
-# Poll an endpoint every 8h; fire once when the body flips to "issued"
-agents monitors add cert-issued \
-  --poll-http 'https://secure.ssl.com/.../order' 8h --match issued --notify telegram
-
-agents monitors test ci-red    # Dry-run: evaluate the source once, show what it would fire -- no action
-agents monitors list           # Every monitor: source, owner device, last fired
-```
-
-Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-http`), a file (`--watch-file`), or a fleet device's reachability + load (`--watch-device`). Push sources -- a signed webhook (`--on`) and a WebSocket (`--ws`) -- are accepted today and delivered through a receiver wired in a follow-up. Conditions: fire on any change (`--on-change`), on a regex (`--match`), or `--every` tick -- deduped by a native state store, so a monitor stays silent until something *actually* changes. Actions: `--run <agent>` (the event is injected into the prompt as `{event}`), `--routine`, `--notify`, or `--webhook-out`. A `--run`/`--routine` action can take `--postcondition '<cmd>'` — a shell command that must exit 0 after the agent settles, otherwise `agents monitors runs` records `no effect` rather than `ok`. Pin a monitor to one owner device with `--device` (exactly-once), or offload the action elsewhere with `--run-on`. Runs in the routines daemon; `agents monitors pause` / `resume` any time.
 
 ---
 

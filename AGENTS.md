@@ -119,7 +119,7 @@ and [`architecture.md`](cli/docs/architecture.md).
   in the CLI and every consumer benefits.
 - **One scheduler, one executor — fleet-affecting features never run twice.** Anything
   that can *act* on this machine or another fleet device — launch/resume/kill a session,
-  fire a routine or monitor, inject into a terminal, rotate an account — has exactly ONE
+  fire a routine, inject into a terminal, rotate an account — has exactly ONE
   scheduler and ONE executor: the agents-cli daemon (`agents __daemon-run`) or a CLI
   command it drives. UI surfaces (the ext, the menubar) are **thin
   wrappers**: they render state and offer controls that call the CLI; they MUST NOT own
@@ -435,8 +435,8 @@ right home if one is staged.
   `cli/src/lib/github/pr-mergeable.ts`'s `listMergeableRefs` — it still calls
   `gh pr list --json …statusCheckRollup`, the exact GraphQL pattern this rule bans
   (migrating it onto `rest.ts` is part of PHNX-3557). NEVER poll in a tight loop —
-  arm a daemon monitor (`agents monitors add`, 10-min cadence) or a single spaced
-  check; on a rate-limit error, back off, do not retry. Mutations
+  turn on GitHub auto-merge (`agents projects prs automerge`) or make a single
+  spaced check; on a rate-limit error, back off, do not retry. Mutations
   (`gh pr merge`, `gh pr create`, and `gh pr comment`) also resolve through GraphQL,
   not REST — but each is a single call, so it does not *drain* the budget the way a
   poll loop does. It will still *fail* once the shared GraphQL budget is already

@@ -53,7 +53,7 @@ describe('daemon-health', () => {
   });
 
   it('reports no record for a subsystem that has never checked in', () => {
-    expect(readSubsystemHealth('monitors')).toBeNull();
+    expect(readSubsystemHealth('watchdog')).toBeNull();
     expect(readAllSubsystemHealth()).toEqual([]);
   });
 
@@ -69,19 +69,19 @@ describe('daemon-health', () => {
   });
 
   it('accumulates consecutive failures and keeps the most recent error', () => {
-    recordSubsystemError('monitors', 'ENOENT: socket missing', '2026-01-01T00:00:00.000Z');
-    recordSubsystemError('monitors', 'ECONNREFUSED', '2026-01-01T00:01:00.000Z');
-    const record = readSubsystemHealth('monitors');
+    recordSubsystemError('watchdog', 'ENOENT: socket missing', '2026-01-01T00:00:00.000Z');
+    recordSubsystemError('watchdog', 'ECONNREFUSED', '2026-01-01T00:01:00.000Z');
+    const record = readSubsystemHealth('watchdog');
     expect(record?.consecutiveFailures).toBe(2);
     expect(record?.lastError).toBe('ECONNREFUSED');
     expect(record?.lastErrorAt).toBe('2026-01-01T00:01:00.000Z');
   });
 
   it('a success after failures clears the streak but keeps the failure history in lastError', () => {
-    recordSubsystemError('monitors', 'boom', '2026-01-01T00:00:00.000Z');
-    recordSubsystemError('monitors', 'boom again', '2026-01-01T00:01:00.000Z');
-    recordSubsystemOk('monitors', '2026-01-01T00:02:00.000Z');
-    const record = readSubsystemHealth('monitors');
+    recordSubsystemError('watchdog', 'boom', '2026-01-01T00:00:00.000Z');
+    recordSubsystemError('watchdog', 'boom again', '2026-01-01T00:01:00.000Z');
+    recordSubsystemOk('watchdog', '2026-01-01T00:02:00.000Z');
+    const record = readSubsystemHealth('watchdog');
     expect(record?.consecutiveFailures).toBe(0);
     expect(record?.lastOkAt).toBe('2026-01-01T00:02:00.000Z');
     expect(record?.lastError).toBe('boom again');
@@ -89,10 +89,10 @@ describe('daemon-health', () => {
 
   it('tracks multiple subsystems independently and returns them sorted by name', () => {
     recordSubsystemOk('browser-ipc');
-    recordSubsystemError('monitors', 'unreachable');
+    recordSubsystemError('watchdog', 'unreachable');
     const all = readAllSubsystemHealth();
-    expect(all.map((r) => r.subsystem)).toEqual(['browser-ipc', 'monitors']);
-    expect(all.find((r) => r.subsystem === 'monitors')?.consecutiveFailures).toBe(1);
+    expect(all.map((r) => r.subsystem)).toEqual(['browser-ipc', 'watchdog']);
+    expect(all.find((r) => r.subsystem === 'watchdog')?.consecutiveFailures).toBe(1);
   });
 
   it('persists on disk under the daemon dir — a separate reader process sees the same record', () => {
@@ -126,8 +126,8 @@ describe('daemon-health', () => {
   it('a malformed health.json is treated as empty rather than throwing', () => {
     fs.writeFileSync(path.join(dir, 'health.json'), 'not json');
     expect(readAllSubsystemHealth()).toEqual([]);
-    recordSubsystemOk('monitors');
-    expect(readSubsystemHealth('monitors')?.consecutiveFailures).toBe(0);
+    recordSubsystemOk('watchdog');
+    expect(readSubsystemHealth('watchdog')?.consecutiveFailures).toBe(0);
   });
 
   it('recordSubsystemOk/Error never throw even when the health file cannot be written', () => {

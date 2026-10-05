@@ -22,8 +22,8 @@ export function formatOrphanedOpenPrWarning(pr: BranchOpenPr): string {
     `  PR #${pr.number} is still OPEN and nothing is watching it. A background`,
     '  `gh pr checks --watch` child dies when a headless agent exits, so the PR',
     '  will sit green and unmerged.',
-    '  Merge it once CI is green and a non-author review has cleared it, or set up',
-    '  a merge-on-green monitor (`agents monitors`) that outlives this process.',
+    '  Merge it once CI is green and a non-author review has cleared it, or turn on',
+    '  GitHub auto-merge after that review (`agents projects prs automerge`).',
     '',
   ];
   return lines.join('\n');

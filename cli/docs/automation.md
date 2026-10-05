@@ -1,12 +1,12 @@
 # Automation
 
-The daemon is the sole scheduler for routines, monitors, watchdog passes, and periodic
+The daemon is the sole scheduler for routines, webhook triggers, watchdog passes, and periodic
 maintenance. UI clients may request a run or render state; they never own an acting timer.
 
 ```mermaid
 flowchart TB
   SCH[Schedule] --> D[Daemon decision loop]
-  OBS[Observed change] --> D
+  OBS[Webhook delivery] --> D
   SES[Session progress] --> D
   D --> CLAIM[Durable claim or policy decision]
   CLAIM --> EXEC[Execution engine]
@@ -26,33 +26,6 @@ fake session.
 The occurrence claim answers whether this scheduled slot may dispatch. The active-run
 claim answers whether another instance is already executing. Keeping them separate makes
 catch-up, overlap policy, and crash recovery observable rather than timing-dependent.
-
-## Monitors
-
-A monitor observes a source, compares it with durable observed state, and submits an
-action through the same execution path as a routine. Semantic identity deduplicates the
-watched condition across the fleet; execution placement is not part of that identity.
-A `run`/`routine` action may declare a `postcondition` shell command; after the
-dispatched run settles, the fire is `ok` only if that command exits 0. `completed`
-without a met postcondition is `no effect`, not success.
-
-A poll that **fails to observe** is not a value change (PHNX-3510). A command/poll
-source that exits non-zero, or whose output carries a transport/auth/rate-limit error
-shape — even on exit 0, as `gh … | jq` swallows the failing half's exit code — is an
-*observation failure*: the engine skips it, leaving watched-state untouched (so an
-`on-change` monitor never reads an empty→error→empty flap as two value changes and
-dispatches on a dead premise), does not fire, and records it as a failed check. A
-sustained streak escalates to the owner as a drought, the same health surface the
-`postcondition` guards on the action side. `agents monitors test` labels a failed poll
-and reports `Would fire: no`.
-
-This means a non-zero exit is an *observation failure*, not a value — a deliberate
-change from the earlier behavior where a command's exit status could itself be the
-watched signal. A monitor that genuinely wants to watch a command's success/failure
-should emit a **stable token** so the state it cares about is a value, not a failure:
-`sh -c 'curl -fsS https://svc/health >/dev/null && echo UP || echo DOWN'` always exits
-0 and diffs `UP`/`DOWN`, so an `on-change` monitor fires on the flip. Sustained
-observation failures still reach the owner through the drought escalation above.
 
 ## Watchdog
 

@@ -72,7 +72,7 @@ row its surface sits in.
 | Coverage | Surfaces | What that means |
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
-| **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
+| **Governed in part** | `doctor`, `daemon` | One requirement reaches them, no command contract does. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `webhook`, `daemon funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
@@ -3100,7 +3100,7 @@ A fleet-affecting feature that runs on a timer or watcher in two places fires tw
 two resume-tabs for one exhausted session, two executions of one cron job, two
 injected nudges racing the same agent. This section makes that class of bug
 unrepresentable. In scope: every capability that can **act** — launch, resume, kill,
-or rotate a session; fire a routine or monitor; inject into a terminal; dispatch to
+or rotate a session; fire a routine; inject into a terminal; dispatch to
 a host or the cloud. Out of scope: read-only polling that renders state for a human
 (panels refreshing, presence heartbeats), which MAY live anywhere provided it writes
 nothing but its own view cache.
@@ -3191,7 +3191,7 @@ nothing but its own view cache.
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
   daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`), every `routines`
   auto-start call site (`add`, `start`, `catchup`, webhook triggers,
-  `commands/routines.ts`), and `monitors add` (`commands/monitors.ts`). It MUST NOT
+  `commands/routines.ts`). It MUST NOT
   stop an already-running daemon and MUST NOT block the explicit override
   (`agents daemon start`), mirroring `systemctl disable` — a disabled unit still
   starts on a direct `systemctl start`. This is the daemon-wide sibling of
@@ -3233,18 +3233,15 @@ nothing but its own view cache.
   blocked, skipped, failed, timed-out, missed, and completed attempt remains
   inspectable without requiring an archived session transcript.
 - **SING-5f (MUST).** The routine activation manifest of SING-5a governs ROUTINES
-  only. A job a monitor synthesizes for its `run` action (`lib/monitors/dispatch.ts`)
-  has no definition and no manifest membership, so it MUST NOT be gated on that
-  manifest; its exactly-once ownership is the monitor's own `device:` pin
-  (`monitorRunsOnThisDevice`, `lib/monitors/config.ts`), resolved before dispatch.
-  The exemption MUST be carried by an explicit marker on the dispatched job
-  (`dispatchedBy: 'monitor'`, read by `jobRunsOnThisDevice`, `lib/routines.ts`) and
-  MUST NOT be inferred from whether a routine of that name exists. Monitor names
-  MUST NOT be written into a device's routine manifest. A monitor's `routine`
-  action fires a real routine and MUST still honour SING-5a: a routine defined but
-  not activated on the firing device is refused. Landed (RUSH-2681); before it,
-  every monitor `run` action recorded `skipReason: "wrong_owner"` with an empty
-  allowlist and no action ever executed.
+  only. A job a webhook handler synthesizes for its `run.agent`/`run.workflow`
+  action (`lib/triggers/handlers.ts`) has no definition and no manifest membership,
+  so it MUST NOT be gated on that manifest; its ownership is the one device the
+  webhook was delivered to. The exemption MUST be carried by an explicit marker on
+  the dispatched job (`dispatchedBy: 'webhook'`, read by `jobRunsOnThisDevice`,
+  `lib/scheduling/routines.ts`) and MUST NOT be inferred from whether a routine of
+  that name exists. A handler's `routine:` delegate fires a real routine and MUST
+  still honour SING-5a: a routine defined but not activated on the firing device
+  is refused.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3
@@ -3300,7 +3297,7 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   repos, sessions, caches, accounts). `git-hygiene` on each device's own checkout is
   the canonical legal shape; the watchdog rotating its own machine's sessions is
   another.
-- **SING-9 (MUST).** A routine or monitor that consumes **shared** input — a ticket
+- **SING-9 (MUST).** A routine that consumes **shared** input — a ticket
   tracker, a PR queue, the feed, an R2/sync bucket, another device's sessions —
   MUST have exactly one executor per work item, achieved one of three ways:
   (a) **owner pin** — `devices: [<one>]`, so `routineOwnerDevice`
@@ -3316,19 +3313,6 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   MUST be part of the implementation, not a comment — shared-queue consumers
   without an owner pin ship with a test that two concurrent fires cannot process
   the same item.
-- **SING-9a (MUST).** A **system built-in monitor** ships enabled on every install
-  (PHNX-2506), so enabled-by-default MUST NOT itself grant fleet-wide firing for a
-  shared-input built-in. An UNPINNED built-in (no `device` / `devices`) is placed
-  on a single owner **in code** — `requiresSingleOwner` / `monitorRunsOnThisDevice`
-  (`lib/monitors/config.ts`) treat a `scope: 'system'` monitor as shared-input
-  unless it sets `sharedInput: false`, and fire it only on `monitorSharedInputOwner()`
-  (the configured `interactive.host`, else the sole box on a single-device fleet,
-  else NOWHERE). This is defense-in-depth: even a built-in whose shipped YAML forgot
-  a `device:` pin cannot fan out across the fleet and double-fire on a shared queue
-  (`pr-merge-on-green` is the canonical case). A device-local built-in (input = the
-  firing box's own state) opts back into fleet-wide firing with `sharedInput: false`;
-  a user monitor keeps its fleet-wide default and opts INTO owner-only with
-  `sharedInput: true`.
 
 #### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
 

@@ -1045,7 +1045,7 @@ The agent can only:
 **GitHub CLI auth the overlay would otherwise hide is forwarded** (RUSH-2860):
 `prepareJobHome` links this machine's `~/.config/gh` (or `$GH_CONFIG_DIR`) into
 the overlay, and `buildSpawnEnv` pins `GH_CONFIG_DIR` and forwards
-`GH_TOKEN`/`GITHUB_TOKEN`, so a sandboxed monitor `--run` child sees the same
+`GH_TOKEN`/`GITHUB_TOKEN`, so a sandboxed routine agent child sees the same
 GitHub CLI auth as interactive `agents run`. Same-host only — credentials are
 never copied to another box. Nothing else from the host home is linked in: the
 overlay still does not contain `~/.ssh`, `~/.gitconfig`, or `~/.agents` (which
@@ -1511,7 +1511,7 @@ run produces exactly one start + one finish notification.
 Notifications are actionable where a target exists: clicking a **Finish** opens
 the run's `report.md`/`stdout.log`; **Start**/**Overdue** open the runs folder.
 The finish notification only fires for locally-run routines — `host:`-placed
-runs are finalized by the monitor sweep and do not emit one.
+runs are finalized by the daemon's running-job sweep and do not emit one.
 
 ### Owner notification on failure (RUSH-2288)
 

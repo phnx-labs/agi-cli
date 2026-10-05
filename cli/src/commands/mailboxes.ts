@@ -459,7 +459,7 @@ export function registerMailboxesCommand(program: Command): void {
       # One-shot sweep using the live session set as the liveness source
       agents mailboxes prune
 
-      # Machine-readable summary (for scripts / monitors)
+      # Machine-readable summary (for scripts)
       agents mailboxes prune --json
     `,
     notes: `

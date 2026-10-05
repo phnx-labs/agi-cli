@@ -318,7 +318,7 @@ export interface JobConfig {
   loop?: LoopConfig;
   actor?: string;
   projects?: string[];
-  dispatchedBy?: 'monitor' | 'webhook';
+  dispatchedBy?: 'webhook';
 }
 
 export function normalizeProjects(projects: string[] | undefined): string[] | undefined {
@@ -671,7 +671,7 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
   }
 
   if (Object.prototype.hasOwnProperty.call(parsed, 'dispatchedBy')) {
-    return { config: null, problem: '`dispatchedBy:` is a runtime-only monitor/webhook marker, not a routine field — routine is inert' };
+    return { config: null, problem: '`dispatchedBy:` is a runtime-only webhook marker, not a routine field — routine is inert' };
   }
 
   return {

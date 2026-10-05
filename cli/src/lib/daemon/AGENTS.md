@@ -1,7 +1,7 @@
 # Daemon module
 
 The background process behind `agents __daemon-run` — the interval-driven
-services that keep sessions, watchdog checks, device probes, monitors,
+services that keep sessions, watchdog checks, device probes,
 self-heal, and reapers running on each machine without a human polling them.
 
 ## Current architecture
@@ -34,7 +34,7 @@ detects HOME pointing away from the account's real home, unless the caller opted
 in with `AGENTS_ALLOW_TEST_DAEMON=1` (the deliberate test/e2e seam — a harness
 that sets it owns stopping what it starts). The explicit start commands
 (`daemon start`, `routines start`) fail loud; auto-start side effects
-(`routines add`, webhook fires, `monitors add`) catch the refusal, state it,
+(`routines add`, webhook fires) catch the refusal, state it,
 and leave the foreground command green — the same tier split as the auto-start
 circuit breaker. A daemon launched under a temp HOME
 keeps its own pid file there, so the real install's pid-file takeover can never
@@ -67,8 +67,7 @@ record of `null` for it.
   failures parks only usage and never starves the slower auth refresh), `catchup`
   (`catchup-service.ts`, PHNX-3608 — the scheduler's missed-fire recovery pass,
   self-gated on the scheduler being booted), `session-index`
-  (`session-index-service.ts`), `monitors` (`monitor-engine-service.ts`)
-  (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
+  (`session-index-service.ts`) (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
   `device-probe` (`device-probe-service.ts`), `self-heal`
   (`self-heal-service.ts`), and
   `state-dir-check` (`state-dir-check-service.ts`), `session-state`
@@ -185,16 +184,12 @@ record of `null` for it.
   persists the attempt time (`self-heal-last-attempt` in the daemon dir) before
   spawning and skips a tick inside the interval, so a restart cannot re-run it.
 
-  **A slow tick breaches too, even on a live loop.** The monitors tick ran every
-  due poll one after another. With 26 monitors, a dozen of them
-  `agents devices ps | grep` at about 30 s each, the first tick after boot ran past
-  its 2-minute deadline, the supervisor exited, and the restart found every
-  monitor due again: an exit every two minutes. The engine
-  (`../monitors/engine.ts`) now runs at most four polls at once, launches new
-  ones only in the first `POLL_TIMEOUT_MS` (60 s) of a tick, and leaves the rest
-  due, longest-waiting first, for the next tick; the service deadline is three
-  poll timeouts. A command poll runs through `execFileBounded`, so its timeout
-  kills the whole pipeline rather than only the shell.
+  **A slow tick breaches too, even on a live loop.** The since-removed
+  monitor engine (PHNX-4241) ran every due poll one after another; with 26
+  monitors the first tick after boot ran past its 2-minute deadline, the
+  supervisor exited, and the restart found every poll due again: an exit every
+  two minutes. Bound a tick's work, not only its IO: cap concurrency, stop
+  launching new work partway through the deadline, and leave the rest due.
 
   **The worst tick-path halt was the event-log LOCK, and it is reached far more
   broadly than one service.** `emit()`/`emitRoutineEnd()` (`feed/events.ts`)
@@ -385,7 +380,8 @@ most daemon-adjacent caching has no shared eviction policy today.
 
 **Shipped:** the `DaemonService`/`PeriodicService` contract and
 `ServiceSupervisor` (P1); the first 5 services migrated onto it — secrets-broker,
-browser-ipc, account-state, session-index, monitors (P2); the operator
+browser-ipc, account-state, session-index, monitors (P2; `monitors`
+was later removed with the feature, PHNX-4241); the operator
 surface — `agents daemon services` reporting every registered service's
 health plus live `enable`/`disable`/`restart` for the supervised set over the
 existing SIGHUP reload path (P4); and the remaining 5 interval-driven
