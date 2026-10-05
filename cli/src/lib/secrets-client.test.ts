@@ -1,20 +1,3 @@
-/**
- * Tests for the standalone-secrets process client (secrets-client.ts).
- *
- * The integration block drives the REAL standalone `secrets __serve` server (no
- * mocks — repo rule): it spawns the actual executable and exchanges real wire
- * messages over the fd 3 / fd 4 pipes. It is gated on AGENTS_TEST_SECRETS_BIN
- * pointing at a built standalone entrypoint (e.g. `dist/index.js` from a
- * `secrets-cli` checkout after `bash scripts/build.sh`); with the var unset it
- * skips cleanly, so CI — which has no standalone checkout — stays green. Point
- * it at the binary to exercise it:
- *
- *   AGENTS_TEST_SECRETS_BIN=/path/to/secrets-cli/dist/index.js \
- *     bun run test src/lib/secrets-client.test.ts
- *
- * Every op runs against a throwaway HOME/SECRETS_HOME so the real user store is
- * never touched (the standalone's file store is keyed off HOME).
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -76,7 +59,7 @@ describe('resolveSecretsBin', () => {
 
   it('fails loud with install guidance and no engine fallback when absent', () => {
     delete process.env.SECRETS_BIN;
-    process.env.PATH = ''; // nothing to resolve `secrets` from
+    process.env.PATH = '';
     _resetSecretsClientForTest();
     try {
       resolveSecretsBin();
@@ -88,11 +71,6 @@ describe('resolveSecretsBin', () => {
     }
   });
 
-  // The pre-PHNX-3989 shims dir carried a `secrets` command shim that `exec`s
-  // `agents secrets` — first on PATH, and alive across every in-place upgrade. A
-  // resolver that took it spawned `agents secrets` → shim → `agents secrets` → …
-  // without bound. The real standalone bin further down PATH must win, and with
-  // nothing but the shim the answer is MISSING, never the shim.
   describe.skipIf(process.platform === 'win32')('never resolves to the legacy shim in agents-cli\'s own shims dir', () => {
     let realDir: string;
     let shimsDir: string;
@@ -147,8 +125,6 @@ describe('resolveSecretsBin', () => {
 
 describe('withRemoteStateRoot', () => {
   it('names the remote user agents dir for a push unless the caller chose a root', () => {
-    // The receiving agents-cli reads pushed bundles from ~/.agents (MIG-1 on
-    // its end too); a push without this lands in the remote's default ~/.secrets.
     expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam' }).remoteSecretsHome).toBe(REMOTE_USER_AGENTS_DIR);
     expect(REMOTE_USER_AGENTS_DIR).toBe('~/.agents');
     expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam', remoteSecretsHome: '/srv/agents' }).remoteSecretsHome).toBe('/srv/agents');
@@ -162,9 +138,6 @@ describe('buildServeEnv', () => {
   });
 
   it('bridges the old AGENTS_SECRETS_PASSPHRASE onto the standalone SECRETS_PASSPHRASE', () => {
-    // The standalone renamed AGENTS_SECRETS_* -> SECRETS_*; without this bridge
-    // it never sees the passphrase agents-cli's own file store was written under
-    // and would provision a fresh machine-local key it can't decrypt with.
     expect(buildServeEnv({ AGENTS_SECRETS_PASSPHRASE: 'p1' }).SECRETS_PASSPHRASE).toBe('p1');
   });
 
@@ -204,10 +177,6 @@ describe('item naming (the seam\'s shared identifier scheme)', () => {
 });
 
 describe('SecretsClientError serializes to a plain {code, message}', () => {
-  // A consumer that folds a failure into a JSON.stringify'd structure (a
-  // teammate's meta.json, a failure record, a spawn env) must never make the
-  // serializer chase the Error's internal references and throw `Converting
-  // circular structure to JSON` mid-launch (PHNX-3989 design constraint b).
   it('JSON.stringify yields only code and message', () => {
     expect(JSON.parse(JSON.stringify(new SecretsClientError('LOCKED', 'boom')))).toEqual({
       code: 'LOCKED',
@@ -222,13 +191,6 @@ describe('SecretsClientError serializes to a plain {code, message}', () => {
   });
 });
 
-// The synchronous read-only STATUS path, exercised WITHOUT the real standalone
-// so it runs on every runtime. It reproduces the PHNX-3989 CI failure shapes — a
-// standalone that hangs (the 60s deadlock when it ran under Bun) and one that
-// answers with non-JSON — and pins the hard bound + fd-4 diagnostic that keep a
-// read-only surface from blocking or failing blind. The hang test shortens the
-// bound through the test seam: the shipped 30s absorbs a cold standalone boot on
-// a loaded box, but a planted never-answering mock needs no such headroom.
 describe.skipIf(process.platform === 'win32')('synchronous status path is bounded and diagnosable', () => {
   let dir: string;
   const savedBin = process.env.SECRETS_BIN;
@@ -254,7 +216,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a hanging standalone fails loud at the bound, never the server 60s deadline', () => {
-    plantServe('sleep 30'); // never answers on fd 4
+    plantServe('sleep 30');
     _setSyncServeTimeoutForTest(3_000);
     const t0 = Date.now();
     try {
@@ -265,19 +227,11 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
       expect((error as SecretsClientError).code).toBe('TIMEOUT');
       expect((error as SecretsClientError).message).toContain('did not answer within 3s');
       expect((error as SecretsClientError).message).toContain('secrets --version');
-      expect(Date.now() - t0).toBeLessThan(6_000); // 3s bound + spawn slack, far under 60s
+      expect(Date.now() - t0).toBeLessThan(6_000);
     }
   });
 
   it('the shipped bound absorbs a cold standalone boot on a loaded box', () => {
-    // 2026-09-12: `agents run claude` died with `spawnSync sh ETIMEDOUT` on a
-    // desktop at load average ~100, where each cold `secrets __serve` spawn took
-    // 0.4–2.6s against the old 3s bound. A standalone that answers after a slow
-    // boot must still be accepted.
-    // One request is one spawn, so the single spawn IS the slow cold boot. Like
-    // the real standalone, the mock drains the request on fd 3 before answering
-    // — a mock that exits without reading races `spawnSync`'s stdin write and
-    // surfaces as EPIPE.
     plantServe(
       `cat <&3 >/dev/null; sleep 4; ` +
         `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
@@ -288,12 +242,6 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('one request is one spawn — no handshake round trip precedes the first op', () => {
-    // Every request is a cold `secrets __serve` process (a full Node boot for
-    // the real standalone: 0.3-2.6s on a box at load average ~100). A separate
-    // version-negotiation spawn therefore charged one whole boot to the first
-    // secrets read of EVERY command — 1 of the 7 spawns an `agents run claude`
-    // launch made (PHNX-4082). Counting real executions of a planted standalone
-    // is what pins that: N requests MUST be exactly N spawns.
     const tally = path.join(dir, 'spawns');
     plantServe(
       `cat <&3 >/dev/null; echo x >> '${tally}'; ` +
@@ -306,10 +254,6 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a standalone speaking another protocol is named, on any op, not called malformed', () => {
-    // The version check rides every response now, so a standalone that speaks a
-    // version this client does not gets the actionable error on whatever op it
-    // answered — the old handshake-only check reported a later mismatch as a
-    // malformed envelope.
     plantServe(
       `cat <&3 >/dev/null; printf '%s' '{"v":2,"id":"x","ok":true,"result":{}}' >&4`,
     );
@@ -325,10 +269,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
-    // The mock never reads fd 3 either, so on a fast box the request write hits
-    // EPIPE; the client must still report what reached fd 4 (nothing), not the
-    // errno — the same outcome on either side of that race.
-    plantServe('exit 0'); // answers nothing
+    plantServe('exit 0');
     try {
       secretsRequestSync('handshake', []);
       throw new Error('expected a non-JSON failure');
@@ -353,7 +294,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
 
   it('a missing standalone fails loud immediately, never hanging', () => {
     delete process.env.SECRETS_BIN;
-    process.env.PATH = ''; // nothing to resolve `secrets` from
+    process.env.PATH = '';
     _resetSecretsClientForTest();
     const t0 = Date.now();
     try {
@@ -379,14 +320,10 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-client-'));
     process.env.SECRETS_BIN = REAL_BIN;
-    process.env.HOME = home; // the standalone file store lives under $HOME/.agents/.cache/secrets
+    process.env.HOME = home;
     process.env.SECRETS_HOME = path.join(home, '.agents');
-    // Set the OLD name on purpose: the client's buildServeEnv must bridge it onto
-    // the standalone's renamed SECRETS_PASSPHRASE, so this exercises that bridge
-    // end-to-end against the real store (a fresh key would still round-trip, so
-    // the bridge is pinned deterministically by the buildServeEnv unit tests too).
-    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase'; // file-backend encryption key
-    process.env.SECRETS_NO_AGENT = '1'; // no broker in the test env
+    process.env.AGENTS_SECRETS_PASSPHRASE = 'test-passphrase';
+    process.env.SECRETS_NO_AGENT = '1';
     _resetSecretsClientForTest();
   });
 
@@ -414,17 +351,10 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
 
   it('reports bundleExists=false on a fresh home', async () => {
     expect(await bundleExists('absent-bundle')).toBe(false);
-    expect(bundleExistsSync('absent-bundle')).toBe(false); // sync fd-3-over-stdin transport
+    expect(bundleExistsSync('absent-bundle')).toBe(false);
   });
 
   it('the synchronous handshake round-trips under the bound (no fd-3 EOF hang)', () => {
-    // Regression for the macOS sync-path hang: the standalone wraps fd 3 in a
-    // `net.Socket`, and a Socket over a NAMED FIFO reads the request but never
-    // fires EOF on macOS — so the old FIFO wiring left `for await (chunk of
-    // input)` blocked until SYNC_SERVE_TIMEOUT_MS fired (`ETIMEDOUT`). Feeding
-    // fd 3 the stdin pipe/socketpair (the async path's fd type) EOFs, so a real
-    // handshake completes as soon as the standalone has booted. A hang would
-    // consume the whole bound, so beating it is the assertion.
     const t0 = Date.now();
     const result = secretsRequestSync<{ protocol: number }>('handshake', []);
     expect(result.protocol).toBe(PROTOCOL_VERSION);
@@ -441,17 +371,11 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(resolved.bundle.backend).toBe('file');
     expect(resolved.env).toEqual({ MY_KEY: value });
 
-    // The same read on the synchronous path returns the same env.
     const sync = readAndResolveBundleEnvSync('round-trip');
     expect(sync.env).toEqual({ MY_KEY: value });
   });
 
   it('an arbitrarily large synchronous request completes — spawnSync services stdin and fd 4 concurrently, no deadlock', () => {
-    // The request rides spawnSync's stdin (dup'd onto fd 3), and the standalone
-    // drains fd 3 to EOF while spawnSync is still writing it, so there is no size
-    // at which the sync path deadlocks on a full pipe buffer. A name well past any
-    // pipe-buffer bound (~64 KiB on Linux) still round-trips: the server answers
-    // even when it rejects the oversized name, and nothing hangs.
     const bigName = 'x'.repeat(200_000);
     let answered = false;
     try {
@@ -459,7 +383,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
       answered = true;
     } catch (error) {
       expect(error).toBeInstanceOf(SecretsClientError);
-      answered = true; // a coded error is still a completed round-trip, not a hang
+      answered = true;
     }
     expect(answered).toBe(true);
   });
@@ -468,10 +392,8 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     const { bundle, items } = fileBundle('scoped');
     await writeBundleWithItems(bundle, items);
 
-    // In scope: allowed.
     expect(await bundleExists('scoped', { allowedBundles: ['scoped'], scope: 'claude' })).toBe(true);
 
-    // Out of scope: the server fails closed with ACCESS_DENIED.
     await expect(bundleExists('scoped', { allowedBundles: ['other'], scope: 'claude' })).rejects.toMatchObject({
       code: 'ACCESS_DENIED',
     });
@@ -479,7 +401,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
 
   it('reports the backend a bundle lives on and lists it', async () => {
     const { bundle, items } = fileBundle('where');
-    writeBundleWithItemsSync(bundle, items); // sync writer
+    writeBundleWithItemsSync(bundle, items);
     expect(await bundleBackend('where')).toBe('file');
     expect(bundleBackendSync('where')).toBe('file');
     expect(listBundlesSync().map((b) => b.name)).toEqual(['where']);
