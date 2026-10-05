@@ -111,7 +111,7 @@ export class RoutineAlreadyRunningError extends Error {
 const ROUTINE_LAUNCH_LOCK_STALE_MS = 30_000;
 const ROUTINE_LAUNCH_LOCK_WAIT_MS = 10_000;
 
-// Only status=running holds the active slot; every terminal record releases it.
+// Only a live, within-timeout running record holds the slot; dead/stale running and terminal records release it.
 function activeRoutineRun(config: Pick<JobConfig, 'name' | 'timeout'>): RunMeta | null {
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
   const now = Date.now();
@@ -394,7 +394,7 @@ async function runWithAttempt<T>(
   }
 }
 
-// Never signal this process; detached groups and pids are killed only for a birth-time-verified child.
+// Never signal this process; timeout callbacks own their child, while reconciliation birth-time-verifies recorded pids before calling here.
 function terminateRoutineTree(pid: number | null): void {
   if (!pid) return;
   if (pid === process.pid) return;
@@ -651,7 +651,7 @@ function buildShellCommand(command: string): string[] {
     : ['/bin/sh', '-c', command];
 }
 
-// Command routines intentionally keep real HOME/PATH; only agent routines receive overlay/version-home isolation.
+// Command routines inherit real HOME/base PATH then prepend this CLI's bin; only agent routines receive overlay/version-home isolation.
 function commandSpawnEnv(config: JobConfig): Record<string, string> {
   const env = { ...process.env } as Record<string, string>;
   if (config.timezone) env.TZ = config.timezone;

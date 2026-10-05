@@ -1,5 +1,6 @@
 /* Benchmarks the real filesystem, PATH, cache, built worker, and process-spawn paths without mocks. */
 /* The built auto-pull module is intentional: source resolution cannot find its emitted worker. */
+/* Keep this under src/lib: typecheck:bench only globs src/lib/**/*.bench.ts. */
 import { describe, bench, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';

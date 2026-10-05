@@ -111,6 +111,7 @@ if [ -f "$PRUNE_SCRIPT" ]; then
   node "$PRUNE_SCRIPT" >/dev/null 2>&1 || true
 fi
 
+# Persist mode/version/account only after the harness supplies its real session id, so native resume pins origin.
 HISTORY_DIR="${AGENTS_HISTORY_DIR:-}"
 RUN_MODE="${AGENTS_RUN_MODE:-}"
 RUN_VERSION="${AGENTS_RUN_VERSION:-}"
