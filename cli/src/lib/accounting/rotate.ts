@@ -537,7 +537,7 @@ export function formatNoHealthyHarnessError(
 
 export async function collectRunCandidates(agent: AgentId): Promise<RotateCandidate[]> {
   const versions = listInstalledVersions(agent);
-  // The hot path reads only this host's auth cache; it never probes credentials.
+  // Use this host's auth cache; never perform a live auth or keychain-validity probe.
   const authCache = readAuthHealthCache();
   const localHost = machineId();
   const meta = readMeta();
@@ -931,7 +931,7 @@ export interface PreflightHandoffContext {
 }
 
 export function preflightHandoffEligible(ctx: PreflightHandoffContext): boolean {
-  // Handoff is forbidden for interactive, ACP, loop, resume, and workflow runs.
+  // Handoff is forbidden for interactive, ACP, loop, resume, and workflow-scoped runs.
   return (
     ctx.hasPrompt &&
     !ctx.interactive &&
@@ -953,7 +953,7 @@ export function preflightFallbackHandoff(
   if (signInRecoverableCandidates(exhausted).length > 0) return null;
   const entries = spec.split(',').map((e) => e.trim()).filter(Boolean);
   if (entries.length === 0) return null;
-  // Validate the whole canonical spec before consuming its first fallback entry.
+  // Require exact non-primary agents; otherwise defer the whole spec to the canonical parser.
   const parsed = entries.map((entry) => entry.split('@'));
   if (parsed.some(([name]) => !isAgentId(name) || name === primary)) return null;
   const [name, version] = parsed[0];
