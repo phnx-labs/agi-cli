@@ -13,8 +13,6 @@ vi.spyOn(state, 'getCacheDir').mockImplementation(() => CACHE_ROOT);
 import { showHostTaskLog, hostTaskLogJson, tailLines } from './logs.js';
 import { saveTask, localLogPath, type HostTask } from './tasks.js';
 
-// Gate real-SSH tests on localhost being reachable so they pass on dev machines
-// and self-hosted runners, but skip cleanly in hosted CI without SSH access.
 const LOCALHOST_SSH = sshReachable('localhost', 5000);
 
 function makeTask(overrides: Partial<HostTask> = {}): HostTask {
@@ -38,9 +36,6 @@ let writeSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
   CACHE_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-hostlogs-'));
   mkdirSync(join(CACHE_ROOT, 'hosts'), { recursive: true });
-  // ssh's control-socket dir lives under getCacheDir(); ssh-exec only ensures it
-  // once (module-level flag), so with a fresh cache dir per test we must create
-  // it ourselves or multiplexed ssh can't open its socket and reports 255.
   mkdirSync(join(CACHE_ROOT, 'ssh'), { recursive: true, mode: 0o700 });
   out = '';
   writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
@@ -77,7 +72,6 @@ describe('showHostTaskLog', () => {
   it('found:true with a friendly note when the task exists but no log was captured', async () => {
     const task = makeTask({ id: 'nolog001' });
     saveTask(task);
-    // No log file written.
 
     const res = await showHostTaskLog(task.id, false);
 
@@ -86,7 +80,6 @@ describe('showHostTaskLog', () => {
   });
 
   it('does NOT follow (no SSH) a finished task even when follow is requested', async () => {
-    // status !== 'running' → the follow branch is skipped, so no sshExec fires.
     const task = makeTask({ id: 'done0001', status: 'completed' });
     saveTask(task);
     writeFileSync(localLogPath(task.id), 'final output\n');
@@ -99,15 +92,12 @@ describe('showHostTaskLog', () => {
   });
 });
 
-// Backs `agents logs <id> --json` for the host-task branch — the structured
-// { found, task, log } an agent parses instead of the text render.
 describe('hostTaskLogJson', () => {
   it('returns found:false for an unknown id (so callers fall through to sessions)', () => {
     const res = hostTaskLogJson('nope-not-a-task');
     expect(res.found).toBe(false);
     expect(res.task).toBeUndefined();
     expect(res.log).toBeUndefined();
-    // Pure data — nothing written to stdout, unlike the text path.
     expect(out).toBe('');
   });
 
@@ -122,14 +112,12 @@ describe('hostTaskLogJson', () => {
     expect(res.task?.id).toBe('json0001');
     expect(res.task?.agent).toBe('claude');
     expect(res.log).toBe('PONG\n');
-    // The record round-trips through JSON.stringify without throwing.
     expect(() => JSON.stringify({ kind: 'task', task: res.task, log: res.log })).not.toThrow();
   });
 
   it('returns log:null when the task exists but no log was captured', () => {
     const task = makeTask({ id: 'json0002' });
     saveTask(task);
-    // No log file written.
 
     const res = hostTaskLogJson(task.id);
 
@@ -144,14 +132,11 @@ describe('hostTaskLogJson', () => {
 // this task)".
 describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost)', () => {
   it('fetches and prints the remote log when no local log exists (detached dispatch)', async () => {
-    // Simulate a detached dispatch: task sidecar exists, local log does NOT, but
-    // the remote log (a real local file we point at via ssh localhost) has content.
     const remoteLogFile = join(CACHE_ROOT, 'remote-abc00001.log');
     writeFileSync(remoteLogFile, 'detached run output\n');
 
     const task = makeTask({ id: 'abc00001', target: 'localhost', remoteLog: remoteLogFile });
     saveTask(task);
-    // No writeFileSync(localLogPath(task.id), …) — intentionally absent.
 
     const res = await showHostTaskLog(task.id, false);
 
@@ -169,12 +154,10 @@ describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost
 
     await showHostTaskLog(task.id, false);
 
-    // After the first fetch the local mirror must exist.
     expect(existsSync(localLogPath(task.id))).toBe(true);
   });
 
   it('still shows the no-log note when the remote log is also absent', async () => {
-    // console.log routes through process.stdout.write, which writeSpy intercepts.
     const task = makeTask({
       id: 'abc00003',
       target: 'localhost',
@@ -194,7 +177,6 @@ describe.skipIf(!LOCALHOST_SSH)('detached-run log fetch over real ssh (localhost
 // gated on localhost SSH.
 describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run before emitting (real ssh)', () => {
   it('surfaces terminal status + exitCode for a running record whose remote .exit is now set', () => {
-    // A real local file the ssh-localhost `cat` reads as the remote `.exit`.
     const remoteExitFile = join(CACHE_ROOT, 'remote-recon01.exit');
     writeFileSync(remoteExitFile, '0\n');
 
@@ -210,8 +192,6 @@ describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run befor
     const res = hostTaskLogJson(task.id);
 
     expect(res.found).toBe(true);
-    // The bug this guards: emitting the pre-reconcile `task` reports 'running'
-    // with no exitCode even though the run just completed.
     expect(res.task?.status).toBe('completed');
     expect(res.task?.exitCode).toBe(0);
     expect(res.task?.finishedAt).toBeTruthy();
@@ -220,7 +200,7 @@ describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run befor
 
   it('leaves a still-running record running when its remote .exit is empty', () => {
     const remoteExitFile = join(CACHE_ROOT, 'remote-recon02.exit');
-    writeFileSync(remoteExitFile, ''); // no exit code yet — still running
+    writeFileSync(remoteExitFile, '');
 
     const task = makeTask({
       id: 'recon002',
@@ -238,10 +218,8 @@ describe.skipIf(!LOCALHOST_SSH)('hostTaskLogJson reconciles a finished run befor
   });
 });
 
-// tailLines is the concise-by-default view for host-task stdout: it must bound
-// the output and never silently drop lines without saying so.
 describe('tailLines', () => {
-  const strip = (s: string): string => s.replace(/\[[0-9;]*m/g, ''); // drop ANSI color
+  const strip = (s: string): string => s.replace(/\[[0-9;]*m/g, '');
 
   it('returns the whole text (with a trailing newline) when under the limit', () => {
     const out = strip(tailLines('a\nb\nc', 40));
@@ -250,7 +228,6 @@ describe('tailLines', () => {
   });
 
   it('does not count a trailing newline as an extra hidden line', () => {
-    // Exactly 40 real lines + a trailing "" must NOT trip the elision note.
     const text = Array.from({ length: 40 }, (_, i) => `L${i}`).join('\n') + '\n';
     const out = strip(tailLines(text, 40));
     expect(out).not.toContain('hidden');
@@ -262,9 +239,9 @@ describe('tailLines', () => {
     const out = strip(tailLines(text, 40));
     expect(out).toContain('60 earlier lines hidden');
     expect(out).toContain('--full');
-    expect(out).toContain('L99'); // last line kept
-    expect(out).toContain('L60'); // first kept line
-    expect(out).not.toContain('L59'); // the line just before the window is dropped
+    expect(out).toContain('L99');
+    expect(out).toContain('L60');
+    expect(out).not.toContain('L59');
   });
 
   it('uses the singular "line" when exactly one is hidden', () => {

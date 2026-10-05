@@ -4,11 +4,9 @@
 
 import { sshExec, shellQuote } from '../ssh-exec.js';
 
-/** Resolve on the execution owner through the canonical read-only CLI projection. */
 export function resolveRemoteSessionId(target: string, launchId: string, timeoutMs = 6000): string | undefined {
+  // Resolve on the execution owner; launch id is the durable join for opaque interactive streams.
   if (!launchId) return undefined;
-  // Let the owning CLI join its deployed hook and launch registry. A remote
-  // caller must not carry a second implementation of session identity rules.
   const cmd = `agents sessions --resolve-launch-id ${shellQuote(launchId)} --json --local`;
   const res = sshExec(target, cmd, { timeoutMs, multiplex: true });
   if (res.code !== 0) return undefined;

@@ -15,6 +15,7 @@ function sleep(ms: number): Promise<void> {
  * grow it forever, and the full log stays on the host. agents.ts readNewEvents truncates to the
  * trailing bytes after the parser has consumed them. */
 export const REMOTE_MIRROR_MAX_BYTES = 512 * 1024;
+// Consumers cap distributed local mirrors at this tail window; the complete log remains remote.
 
 /** Pull the new bytes of a remote log since `offset` in one ssh round-trip for the teams
  * monitor. Byte-exact (raw Buffer) so a multibyte char split at the `tail -c` boundary can't
@@ -28,22 +29,17 @@ export function pullRemoteLogDelta(
   // safe.
   const remote = `tail -c +${opts.offset + 1} ${opts.remoteLog} 2>/dev/null`;
   const res = sshExecRaw(target, remote, { timeoutMs: 20000, multiplex: true, extraSshArgs: opts.extraSshArgs });
-  if (res.code === null) return null; // ssh itself failed / timed out
+  if (res.code === null) return null;
   return { bytes: res.stdout, newOffset: opts.offset + res.stdout.length };
 }
 
 export interface FollowOptions {
   remoteLog: string;
   remoteExit: string;
-  /** Mirror remote output into this task's local log too. */
   taskId: string;
-  /** Print streamed output to stdout. */
   echo?: boolean;
-  /** Overall wall-clock cap; returns -1 on timeout. */
   timeoutMs?: number;
-  /** Fast poll interval while output is flowing (default 1500ms). */
   pollMs?: number;
-  /** Idle-backoff ceiling (default 4× the fast interval, min 4000ms). */
   maxPollMs?: number;
   extraSshArgs?: string[];
   remoteShell?: 'posix' | 'powershell';
@@ -65,7 +61,8 @@ export function splitProgressBytes(
   buf: Buffer,
   taskId: string,
 ): { logChunk: Buffer; exit: Buffer; consumed: number } | null {
-  const marker = Buffer.from(exitMarker(taskId), 'utf8'); // ASCII-only, unambiguous
+  const marker = Buffer.from(exitMarker(taskId), 'utf8');
+  // The last task-specific marker separates arbitrary log bytes from terminal state.
   const idx = buf.lastIndexOf(marker);
   if (idx === -1) return null;
   return {
@@ -143,7 +140,6 @@ export function buildStreamingFollowCommand(opts: {
   ].join('\n');
 }
 
-/** Extract the remote watcher frame from stderr, if the stream ended normally. */
 export function parseStreamingExitFrame(stderr: Buffer, taskId: string): Buffer | null {
   const marker = Buffer.from(exitMarker(taskId), 'utf8');
   const idx = stderr.lastIndexOf(marker);
@@ -169,7 +165,6 @@ export function mirrorAliasesSource(localId: string | null, remoteId: string | n
   return localId !== null && remoteId !== null && localId === remoteId;
 }
 
-/** Tail the remote log to stdout until the run finishes; return its exit code. */
 export async function followHostTask(target: string, opts: FollowOptions): Promise<number> {
   const fastMs = opts.pollMs ?? 1500;
   const maxMs = Math.max(opts.maxPollMs ?? fastMs * 4, 4000);
@@ -187,13 +182,13 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
     if (mirrorAliasesSource(`${s.dev}:${s.ino}`, readRemoteFileId(target, opts.remoteLog, opts.extraSshArgs))) {
       mirror = false;
     }
-  } catch { /* mirror absent or unstattable → distinct file, keep mirroring */ }
+  } catch {  }
 
   const flush = (logChunk: Buffer): boolean => {
     if (logChunk.length === 0) return false;
     if (opts.echo) process.stdout.write(logChunk);
-    if (mirror) { try { fs.appendFileSync(local, logChunk); } catch { /* best-effort */ } }
-    offset += logChunk.length; // exact wire bytes — no re-encode drift
+    if (mirror) { try { fs.appendFileSync(local, logChunk); } catch {  } }
+    offset += logChunk.length;
     return true;
   };
 
@@ -244,16 +239,11 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
       return Number.isFinite(code) ? code : 0;
     }
 
-    // SSH dropped before the remote watcher emitted the exit sentinel. Stdout
-    // chunks were flushed as they arrived, so reconnect from the advanced offset.
-    // If no bytes arrived, back off like the old idle poll.
     if (Date.now() > deadline) {
       process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents logs ' + opts.taskId + ' -f\n');
       return -1;
     }
 
-    // Reconnect quickly while output flows; ease toward maxMs when the stream
-    // drops without bytes so a flapping idle host does not spin ssh processes.
     waitMs = gotOutput ? fastMs : Math.min(maxMs, Math.round(waitMs * 1.5));
     await sleep(waitMs);
   }

@@ -3,7 +3,6 @@
  * assert on the script, so one shared decoder replaces four drifting copies. */
 import * as zlib from 'node:zlib';
 
-/** The script behind either render route. Throws if the command is neither. */
 export function decodeRenderedPowershell(command: string): string {
   const encoded = /-EncodedCommand (\S+)\s*$/.exec(command);
   if (encoded) return Buffer.from(encoded[1]!, 'base64').toString('utf16le');

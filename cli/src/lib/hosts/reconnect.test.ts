@@ -35,21 +35,14 @@ import {
 
 const HOST = { name: 'zion' } as Host;
 const SID = '94c75686-145c-465d-b3f8-a9c0d3a0387c';
-/** The ordinary case: an id known before the drop (Claude's forced id, or a resume). */
 const SESSION_TARGET: ReconnectTarget = { kind: 'session', id: SID };
-/** A launcher-minted AGENT_LAUNCH_ID — what every non-Claude harness reconnects by. */
 const LAUNCH_ID = 'dcf80180-4679-46ad-ba2f-8ebb83f5b2af';
 
-/** Reconnected, held the pane, then dropped — the one shape that refills the budget. */
 const heldThenDropped = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS });
-/** Never reached the host (the preflight probe failed): a sustained outage. */
 const unreachable = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: false, heldMs: 0 });
-/** Reached the host, then the attach died straight back — the flapping link / dead-at-
- *  TTY-negotiation case that used to refill the budget forever (agents-cli#1884). */
 const flapped = (): ReconnectOutcome => ({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS - 1 });
 
 describe('reconnectStep — the pure retry decision', () => {
-  /** A fresh streak. `unproductiveMs` is what the window bounds; `attempt` only shapes backoff. */
   const st = (attempt: number, unproductiveMs = 0): ReconnectState => ({ attempt, unproductiveMs });
 
   test('a clean detach (exit 0) stops and surfaces 0 — never reconnects', () => {
@@ -66,7 +59,6 @@ describe('reconnectStep — the pure retry decision', () => {
 
   test('a 255 drop from an attempt that reconnected AND HELD retries with backoff and resets the streak', () => {
     expect(reconnectStep(st(0), heldThenDropped())).toMatchObject({ action: 'retry', waitMs: 2_000, state: { attempt: 1, unproductiveMs: 2_000 } });
-    // Deep into a streak, a productive attach still puts us back at the start.
     expect(reconnectStep(st(9, 10 * 60_000), heldThenDropped())).toMatchObject({ action: 'retry', waitMs: 2_000, state: { attempt: 1, unproductiveMs: 2_000 } });
   });
 
@@ -77,20 +69,13 @@ describe('reconnectStep — the pure retry decision', () => {
   });
 
   test('the time each failed attach itself burned counts against the window, not just the waits', () => {
-    // A failed connect costs up to ConnectTimeout (10s) per attempt. Ignoring it
-    // would stretch a "15 minute" window well past fifteen real minutes.
     const slowFail: ReconnectOutcome = { code: SSH_CONN_FAILURE, connected: true, heldMs: 5_000 };
     expect(reconnectStep(st(1, 10_000), slowFail)).toMatchObject({ state: { unproductiveMs: 10_000 + 5_000 + 4_000 } });
   });
 
-  // RUSH-3125: this used to be MAX_ATTEMPTS = 6 over a 2/4/8/16/30/30 backoff —
-  // it gave up after ~90 seconds, shorter than a lid close, a Wi-Fi handoff, or
-  // a Tailscale re-auth. The bound is now wall-clock.
   test('the streak is bounded by RECONNECT_WINDOW_MS, and that window outlasts a lid close', () => {
     expect(reconnectStep(st(40, RECONNECT_WINDOW_MS), unreachable())).toEqual({ action: 'stop', code: SSH_CONN_FAILURE });
-    // Just inside the window still retries…
     expect(reconnectStep(st(40, RECONNECT_WINDOW_MS - 1), unreachable())).toMatchObject({ action: 'retry' });
-    // …and the window is minutes, not the old ~90 seconds.
     expect(RECONNECT_WINDOW_MS).toBeGreaterThan(10 * 60_000);
   });
 
@@ -103,8 +88,6 @@ describe('reconnectStep — the pure retry decision', () => {
   });
 
   test('a genuine reconnection refills even past the window — an all-day blinking session never gets stranded', () => {
-    // The property the file header insists on: the window bounds a STREAK, not a
-    // session. A hung/failed connect must NOT look like a live one.
     expect(reconnectStep(st(40, RECONNECT_WINDOW_MS * 3), heldThenDropped())).toMatchObject({
       action: 'retry',
       waitMs: backoffMs(0),
@@ -113,8 +96,6 @@ describe('reconnectStep — the pure retry decision', () => {
   });
 
   test('agents-cli#1884: an attach that CONNECTED but died inside MIN_HOLD_MS does NOT refill', () => {
-    // The bug: `connected` was set by the preflight probe alone, so a link that
-    // reconnected and dropped the user straight back out refilled forever.
     expect(refillsBudget(flapped())).toBe(false);
     expect(reconnectStep(st(1, 2_000), flapped())).toMatchObject({ action: 'retry', waitMs: 4_000, state: { attempt: 2 } });
     expect(reconnectStep(st(40, RECONNECT_WINDOW_MS), flapped())).toEqual({ action: 'stop', code: SSH_CONN_FAILURE });
@@ -123,8 +104,6 @@ describe('reconnectStep — the pure retry decision', () => {
   test('MIN_HOLD_MS is the boundary: exactly at the floor refills, one ms under does not', () => {
     expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS })).toBe(true);
     expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: true, heldMs: MIN_HOLD_MS - 1 })).toBe(false);
-    // A long hold on an attempt that never connected is not reachable in production
-    // (heldMs is 0 there) and must not refill on the duration alone either.
     expect(refillsBudget({ code: SSH_CONN_FAILURE, connected: false, heldMs: MIN_HOLD_MS * 10 })).toBe(false);
   });
 });
@@ -145,7 +124,7 @@ describe('backoffMs — capped exponential', () => {
     expect(backoffMs(1)).toBe(4_000);
     expect(backoffMs(2)).toBe(8_000);
     expect(backoffMs(3)).toBe(16_000);
-    expect(backoffMs(4)).toBe(30_000); // 32s clamped
+    expect(backoffMs(4)).toBe(30_000);
     expect(backoffMs(10)).toBe(30_000);
   });
 });
@@ -202,8 +181,6 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
 
   test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'session', id: INJECTION_SID })], { encoding: 'utf8' });
-    // No --attach-only: the peer's focus attaches a live pane or RESUMES a dead
-    // one (RUSH-2085), so a reattach after the pane died never dead-ends.
     expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--reconnect-reattach']);
   });
 
@@ -407,8 +384,6 @@ describe('notices — human readable', () => {
     expect(s).toContain('94c75686');
     expect(s).toContain('in 4s');
     expect(s).toContain('attempt 2');
-    // With a wall-clock budget the attempt number no longer says when this stops,
-    // so the notice counts the window down and advertises the safe way out.
     expect(s).toContain('14m51s left');
     expect(s).toContain('Ctrl-C to stop');
     expect(s).toContain('reconnecting to 94c75686');
@@ -416,8 +391,6 @@ describe('notices — human readable', () => {
   });
 
   test('exhausted notice hands back the manual reconnect command', () => {
-    // F7: this used to name `agents reconnect`, which is deprecated + hidden —
-    // stale advice printed at the exact moment the user needs a command that works.
     expect(exhaustedNotice(SESSION_TARGET, 'zion')).toContain(`agents sessions resume ${SID}`);
     expect(exhaustedNotice(SESSION_TARGET, 'zion')).not.toContain('agents reconnect');
   });
@@ -429,9 +402,6 @@ describe('notices — human readable', () => {
     expect(s).toContain(formatDuration(RECONNECT_WINDOW_MS));
     expect(s).toContain(`agents sessions resume ${SID}`);
     expect(s).not.toContain('agents reconnect');
-    // The distinction that makes it worth a second notice: it DID reconnect. It
-    // also claims no count of successful reconnections — the budget can be spent
-    // by unreachable attempts plus one that reconnected and dropped straight out.
     expect(s).not.toContain("Couldn't reconnect");
     expect(s).not.toMatch(/Reconnected to \w+ \d+ times/);
   });
@@ -441,7 +411,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
   const noWait = async (): Promise<'elapsed'> => 'elapsed';
 
   test('reattaches after a drop, then returns 0 when the user detaches cleanly', async () => {
-    const seq: ReconnectOutcome[] = [{ code: 0, connected: true, heldMs: MIN_HOLD_MS }]; // reattach → clean detach
+    const seq: ReconnectOutcome[] = [{ code: 0, connected: true, heldMs: MIN_HOLD_MS }];
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
       host: HOST,
@@ -454,14 +424,11 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(rc).toBe(0);
     expect(writes.some((w) => w.includes('attempt 1'))).toBe(true);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
-    // Clean detach after reattach still leaves the session id on the shell.
     expect(writes.some((w) => w.includes(`Session ${SID}`))).toBe(true);
     expect(writes.some((w) => w.includes('Connection to zion closed.'))).toBe(true);
   });
 
   test('a SUSTAINED outage (every reattach fails to connect) gives up after MAX_ATTEMPTS with the manual hint', async () => {
-    // This is the boundary prix flagged: failed connects (connected:false) must NOT
-    // refill the budget, so the loop terminates instead of retrying forever.
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
@@ -470,25 +437,19 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       initialExit: SSH_CONN_FAILURE,
       reattach: () => {
         calls++;
-        return unreachable(); // host unreachable every time
+        return unreachable();
       },
       wait: noWait,
       write: (s) => writes.push(s),
     });
     expect(rc).toBe(SSH_CONN_FAILURE);
-    // Bounded by the wall-clock window, not a fixed count: with a 2/4/8/16/30…
-    // backoff a 15-minute streak is ~33 attempts. The property under test is that
-    // it TERMINATES and does so having actually spent the window.
-    expect(calls).toBeGreaterThan(6); // the old ~90s budget would have stopped here
+    expect(calls).toBeGreaterThan(6);
     expect(calls).toBeLessThan(100);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(true);
     expect(writes.some((w) => w.includes(`agents sessions resume ${SID}`))).toBe(true);
   });
 
   test('agents-cli#1884: a link that reconnects and drops straight back out ALSO terminates', async () => {
-    // The reported spin. Every reattach reaches the host (so the old `connected`
-    // check refilled the budget) but the attach dies inside MIN_HOLD_MS, so the
-    // loop printed "attempt 1/6" forever. It must now spend the budget and stop.
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
@@ -503,11 +464,9 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       write: (s) => writes.push(s),
     });
     expect(rc).toBe(SSH_CONN_FAILURE);
-    expect(calls).toBeGreaterThan(6); // bounded — this looped forever before the fix
+    expect(calls).toBeGreaterThan(6);
     expect(calls).toBeLessThan(100);
-    // The attempt counter actually advances now instead of resetting to 1 each cycle.
     expect(writes.some((w) => w.includes('attempt 7'))).toBe(true);
-    // And the reason is reported truthfully: it reconnected, it could not stay.
     expect(writes.some((w) => w.includes('kept dropping again within'))).toBe(true);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
     expect(writes.some((w) => w.includes(`agents sessions resume ${SID}`))).toBe(true);
@@ -528,17 +487,16 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       write: (s) => writes.push(s),
     });
     expect(rc).toBe(SSH_CONN_FAILURE);
-    expect(calls).toBeGreaterThan(10); // it got past the unreachable stretch
+    expect(calls).toBeGreaterThan(10);
     expect(writes.some((w) => w.includes('kept dropping again within'))).toBe(true);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
     expect(writes.some((w) => /Reconnected to \w+ \d+ times/.test(w))).toBe(false);
   });
 
   test('a mid-run second drop after a genuine reconnection keeps reconnecting', async () => {
-    // drop → reattach connects and holds, then drops again → reattach → clean exit.
     const seq: ReconnectOutcome[] = [
-      heldThenDropped(), // reconnected, held, then dropped
-      { code: 0, connected: true, heldMs: MIN_HOLD_MS }, // reconnected, clean detach
+      heldThenDropped(),
+      { code: 0, connected: true, heldMs: MIN_HOLD_MS },
     ];
     const rc = await reconnectInteractiveSession({
       host: HOST,
@@ -552,8 +510,6 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
   });
 
   test('a few failed connects then a successful reconnection resets the budget', async () => {
-    // 3 unreachable attempts, then a connect that holds and cleanly exits — the
-    // failed attempts alone are under MAX_ATTEMPTS, and the connect refills anyway.
     const seq: ReconnectOutcome[] = [
       unreachable(),
       unreachable(),
@@ -585,14 +541,13 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       wait: async () => 'interrupted',
       write: (s) => writes.push(s),
     });
-    expect(rc).toBe(130); // 128 + SIGINT, not a crash and not a success
-    expect(calls).toBe(0); // interrupted during the FIRST wait — never reattached
+    expect(rc).toBe(130);
+    expect(calls).toBe(0);
     const notice = writes.join('');
     expect(notice).toContain('Stopped reconnecting');
     expect(notice).toContain('on zion. Recover it when the link is stable');
     expect(notice).not.toContain('still running');
     expect(notice).toContain(`agents sessions resume ${SID}`);
-    // It must not read as a failure: nothing was lost.
     expect(notice).not.toContain("Couldn't reconnect");
     expect(notice).not.toContain('Gave up');
   });
@@ -605,9 +560,6 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
   });
 
   test('the all-day-blinking session the feature exists for is still unbounded', async () => {
-    // The reason the fix is a hold FLOOR and not a flat total-attempt ceiling: a
-    // link that drops repeatedly but puts the user back into a working pane each
-    // time must keep reconnecting, well past any single window's worth of drops.
     const blinks = 40;
     let calls = 0;
     const rc = await reconnectInteractiveSession({

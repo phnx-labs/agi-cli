@@ -15,9 +15,6 @@ import {
   type StripSpec,
 } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-// Leaf import: `session/sync/config.js` re-exports machineId from machine-id.js
-// but pulling the re-export path drags secrets/bundles (~140ms cold). Same value,
-// 6–7× cheaper graph (RUSH-2374 proposal 2).
 import { machineId } from '../machine-id.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../smart-launch.js';
 import {
@@ -40,12 +37,9 @@ import {
 import { platformGroupLabel } from '../devices/health-report.js';
 import { isKnownTopLevelCommand } from '../startup/command-registry.js';
 
-/** Re-export for callers that historically imported flagValue from this module. */
 export { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 
-/** Per-command remote behaviour. Absence from this map = not host-routable here. */
 interface RemoteSpec {
-  /** Flags appended when running non-interactively (no local TTY / `--no-tty`). */
   nonInteractive?: string[];
   /** Pure read-only render command: forwarded over a plain pipe rather than `ssh -tt`, because
    * PTY teardown on a clean exit wipes the drawn output (PHNX-3583). Color and geometry are
@@ -60,12 +54,8 @@ interface RemoteSpec {
  * names and aliases. Every key must be a real top-level command (KNOWN_TOP_LEVEL_COMMANDS,
  * asserted in passthrough.test.ts); others are dead because maybeRunOnHost rejects them first. */
 export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
-  // inspect — pure read-only renders: forward over a pipe, never a forced PTY
-  // (PHNX-3583), so the drawn output persists instead of vanishing on exit.
   view: {
     render: true,
-    // Only `--prune` (without --yes/--dry-run) asks a confirm(); that one
-    // invocation needs the PTY. Every other `view` is a pure render.
     interactiveWhen: (f) =>
       f.includes('--prune') &&
       !f.includes('--dry-run') &&
@@ -78,7 +68,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   list: {},
   usage: {},
   insights: { render: true },
-  // config / resources
   config: {},
   sync: { nonInteractive: ['--yes'] },
   pull: {},
@@ -98,10 +87,7 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   workflows: {},
   models: {},
   defaults: {},
-  // Installations are per-machine, so updating one on a peer means running it
-  // there — the same local/remote shape `add` would need.
   update: {},
-  // lifecycle
   teams: {},
   message: {},
   // `send --channel session --to <id>` types into a session that runs on that box.
@@ -109,7 +95,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   routines: {},
   jobs: {},
   cron: {},
-  // misc remote-sensible
   prune: {},
   trash: {},
   restore: {},
@@ -124,29 +109,27 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
 /** Commands that register and interpret `--device` themselves; they fall through to local
  * commander. Do not add them to REMOTE_PASSTHROUGH. */
 export const OWN_HOST_COMMANDS = new Set([
+  // These commands interpret --device as their destination/owner, not generic CLI passthrough.
   'run',
-  'exec', // deprecated alias of run
-  'harness', // `--host <agent>` names the host CLI to run under (not a device routing flag)
+  'exec',
+  'harness',
   'harnesses',
   'sessions',
   'ps', // fans out to the named devices itself (old peers answer `sessions --active`)
   'feed',
   'computer',
-  'browser', // `--device` on start binds the task; later verbs resolve it from the task
+  'browser',
   'secrets',
-  'accounts', // `accounts sync --device` names the destination, not remote routing
+  'accounts',
   'logs',
   'hosts',
   'ssh',
   'devices',
-  'fleet', // alias of devices
-  'apply', // `--device` scopes the fleet reconcile to one device (it targets devices itself)
-  'monitors', // `--device` names the OWNER machine (pin-to-one), not a routing target
+  'fleet',
+  'apply',
+  'monitors',
 ]);
 
-/** `--no-tty` is stripped like the routing flags but carries no value. The plural
- * fleet flags are stripped only when we handle the `all` sentinel ourselves;
- * otherwise they fall through to command-level aggregators. */
 const STRIP_SPECS: StripSpec[] = [
   ...HOST_ROUTING_SPECS,
   { long: 'no-tty', takesValue: false },
@@ -154,7 +137,6 @@ const STRIP_SPECS: StripSpec[] = [
   { long: 'devices', takesValue: true },
 ];
 
-/** First non-flag token after `group` in argv (the subcommand, robust to leading flags). */
 function firstSubcommand(allArgs: string[], group: string): string | undefined {
   const idx = allArgs.indexOf(group);
   return idx >= 0 ? allArgs.slice(idx + 1).find((a) => !a.startsWith('-')) : undefined;
@@ -170,9 +152,7 @@ export function buildPassthroughForwardedArgs(
 ): string[] {
   const spec = REMOTE_PASSTHROUGH[command];
   let forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
-  // Detect the subcommand on the *stripped* argv. On the raw argv,
-  // `sync --device peer status` would treat `peer` as the first non-flag
-  // token and inherit umbrella `--yes` (RUSH-2864 review).
+  // Read-only sync status must not inherit the mutating non-interactive --yes flag.
   const skipInheritedYes = command === 'sync' && firstSubcommand(forwarded, 'sync') === 'status';
   if (!interactive && spec?.nonInteractive && !skipInheritedYes) {
     forwarded = [...forwarded, ...spec.nonInteractive];
@@ -190,6 +170,7 @@ export function renderForwardDecision(
 ): { noPty: boolean; env?: Record<string, string> } {
   const spec = REMOTE_PASSTHROUGH[command];
   const localTty = io.isTTY && !io.noTty;
+  // Pure renders use a pipe; interactive subpaths keep a PTY and JSON suppresses forced color.
   if (!spec?.render || !localTty) return { noPty: false };
   const forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
   if (spec.interactiveWhen?.(forwarded)) return { noPty: false };
@@ -200,40 +181,30 @@ export function renderForwardDecision(
   return { noPty: true, env: Object.keys(env).length ? env : undefined };
 }
 
-/** Synthesize a `Host` for a raw `user@host` / bare-alias target (not enrolled). */
 function syntheticHost(target: string): Host {
   const at = target.indexOf('@');
   if (at !== -1) {
     return { name: target, provider: 'local', source: 'inline', user: target.slice(0, at), address: target.slice(at + 1) };
   }
-  // Bare name: ssh resolves it from ~/.ssh/config, or connects to it as a hostname.
   return { name: target, provider: 'local', source: 'ssh-config' };
 }
 
-/** Resolve a `--device` value to a Host: enrolled name → capability tag → raw target. */
 async function resolveTargetHost(name: string, any: boolean): Promise<Host> {
   const enrolled = await resolveHost(name);
   if (enrolled) return enrolled;
   try {
     return await resolveHostByCap(name, any);
   } catch (e) {
-    // "Multiple hosts tagged …" is actionable — surface it. "No host tagged" falls
-    // through to treating the value as a literal ssh target.
     if (e instanceof Error && e.message.startsWith('Multiple hosts')) throw e;
   }
-  assertValidSshTarget(name); // rejects injection / flag-smuggling before it reaches ssh
+  assertValidSshTarget(name);
   return syntheticHost(name);
 }
 
-/** Injectable dependencies for {@link runFleetPassthrough} — used by tests. */
 interface FleetPassthroughOptions {
-  /** Override the device registry loader (tests). */
   loadDevices?: () => Promise<DeviceRegistry>;
-  /** Override the per-device runner (tests). Defaults to `runOnDevice`. */
   runner?: typeof runOnDevice;
-  /** Override the local runner for the self device (tests). Defaults to `runLocalCommand`. */
   localRunner?: typeof runLocalCommand;
-  /** Override this machine's id (tests). Defaults to `machineId()`. */
   self?: string;
 }
 
@@ -243,7 +214,6 @@ interface FleetTargetWithDevice {
   skip?: FleetSkipReason;
 }
 
-/** Detect the `all` sentinel on any routing flag. */
 function isFleetAllSentinel(
   hostFlag: string | undefined,
   deviceFlag: string | undefined,
@@ -258,31 +228,22 @@ function isFleetAllSentinel(
   );
 }
 
-/** Strip routing flags from the argv and ensure the per-device call emits JSON. */
 function buildFleetForwardedArgs(allArgs: string[]): string[] {
   const stripped = stripRoutingFlags(allArgs, STRIP_SPECS);
   if (!stripped.includes('--json')) stripped.push('--json');
   return stripped;
 }
 
-/** Parse stdout as JSON; on failure return an object describing the error. */
 function safeJsonParse(stdout: string): unknown {
   try {
-    // A Windows device relays its `--json` through PowerShell, which can prefix a
-    // CLIXML banner ahead of the payload — strip it before parsing (RUSH-2286).
     return JSON.parse(stripClixml(stdout));
   } catch {
     return { parseError: 'invalid JSON', snippet: stdout.trim().slice(0, 200) };
   }
 }
 
-/** One-line summary of a per-device `agents view [agent] --json` payload. */
 function summarizeViewResult(forwarded: string[], json: unknown): string {
-  // After routing flags are stripped, the agent argument is the first token that
-  // is not a flag (e.g. `kimi` in `agents view kimi --json`).
   const agentArg = forwarded.find((a, i) => i > 0 && !a.startsWith('-'));
-  // `agents view --json` returns an array; `agents view <agent> --json` returns
-  // a single object. Normalize to the per-agent shape.
   const agent = agentArg
     ? (Array.isArray(json) ? (json[0] as any) : (json as any))
     : undefined;
@@ -319,7 +280,6 @@ function formatCompactTokens(n: number): string {
   return String(n);
 }
 
-/** One-line summary of a per-device `agents insights output --json` payload. */
 function summarizeOutputResult(json: unknown): string {
   const p = json as any;
   const burn = p?.burn;
@@ -346,10 +306,8 @@ function summarizeSyncResult(json: unknown): string {
   return `${declined.length} not written`;
 }
 
-/** Best-effort summary of any per-device JSON payload. */
 function summarizeResult(command: string, forwarded: string[], json: unknown): string {
   if (command === 'view') return summarizeViewResult(forwarded, json);
-  // #2621 nested `output` under `insights`; main added a sync declined tally.
   if (command === 'insights' && forwarded[1] === 'output') return summarizeOutputResult(json);
   if (command === 'sync') return summarizeSyncResult(json);
   return 'ok';
@@ -357,7 +315,6 @@ function summarizeResult(command: string, forwarded: string[], json: unknown): s
 
 const GROUP_ORDER = ['macOS', 'Linux', 'Windows', 'Other'];
 
-/** Render the grouped-by-OS fleet roster from per-device results. */
 function renderFleetRoster(
   command: string,
   forwarded: string[],
@@ -419,7 +376,6 @@ function renderFleetRoster(
   }
 }
 
-/** Run `agents <command> …` across every registered device and render the roster. */
 export async function runFleetPassthrough(
   command: string,
   allArgs: string[],
@@ -459,7 +415,6 @@ export async function runFleetPassthrough(
     { perDeviceTimeoutMs: 120_000 },
   );
 
-  // Map fan-out results back to typed results with device attached for rendering.
   const typedResults: Array<FanOutDeviceResult<unknown> & { device: DeviceProfile }> = results.map((r, i) => ({
     ...r,
     device: targets[i].device,
@@ -493,19 +448,15 @@ export async function maybeRunOnHost(
   const devicesFlag = flagValue(allArgs, 'devices');
   let hostName = deviceFlag;
   const fleetAll = isFleetAllSentinel(undefined, deviceFlag, hostsFlag, devicesFlag);
-  // Proceed when any routing flag is present, including the plural fleet flags
-  // that may carry the `all` sentinel.
   if (!hostName && !hostsFlag && !devicesFlag) return false;
 
-  // Commands with their own richer --device semantics must reach local commander
-  // directly. sessions/feed handle multi-host lists themselves; fall through so
-  // those flags reach the local action.
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
   // Placement, not routing: `teams add`/`create` read `--device`/`--devices`/`--hosts` as where to
   // place a teammate and always run locally, so bail before the generic teams routing; other teams
   // subcommands keep `--device` routing.
   if (command === 'teams') {
+    // Team membership/creation and routine placement remain owned by the orchestrator.
     const teamsIdx = allArgs.indexOf('teams');
     const sub = teamsIdx >= 0 ? allArgs.slice(teamsIdx + 1).find((a) => !a.startsWith('-')) : undefined;
     if (sub === 'add' || sub === 'a' || sub === 'create' || sub === 'c' || sub === 'new') {
@@ -513,12 +464,9 @@ export async function maybeRunOnHost(
     }
   }
 
-  // `--hosts` / `--devices` are command-level fleet flags unless their value is
-  // the `all` sentinel, which this module fans out generically. On `routines`,
-  // a non-all `--devices` value is placement (which devices may run the routine).
-  if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false; // legacy plural sentinel; prefer --devices
+  if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false;
   if (allArgs.includes('--devices')) {
-    if (devicesFlag === undefined) return false; // malformed, let commander error
+    if (devicesFlag === undefined) return false;
     const isAll = devicesFlag.toLowerCase() === 'all';
     if (!isAll && command !== 'routines') return false;
   }
@@ -530,8 +478,6 @@ export async function maybeRunOnHost(
 
   const spec = REMOTE_PASSTHROUGH[command];
   if (!spec) {
-    // Flag was accepted (no raw commander "unknown option") but this group has
-    // no remote semantics — say so clearly instead of falling through.
     console.error(
       chalk.red(
         `\`agents ${command}\` does not support --device (no remote interpretation).`,
@@ -544,19 +490,11 @@ export async function maybeRunOnHost(
     return true;
   }
 
-  // Reject duplicate --device flags before either the fleet fan-out
-  // or single-target path runs. (Conflict detection: only --device exists now.)
-  // No conflict gate needed — a single canonical flag cannot conflict with itself.
 
-  // Generic fleet fan-out for the `all` sentinel — before single-host resolution
-  // so `all` is never treated as a literal hostname.
   if (fleetAll) {
     return runFleetPassthrough(command, allArgs, spec, opts);
   }
 
-  // After the bailouts and fleet fan-out above, the only remaining path is a
-  // single-target --device. Guard for the type checker: plural non-all
-  // flags and bare flags were already handled.
   if (!hostName) return false;
 
   // `auto` is the affinity sentinel from `run --device auto` (RUSH-2185): resolve it up front so
@@ -625,8 +563,6 @@ export async function maybeRunOnHost(
 
   const forwarded = buildPassthroughForwardedArgs(command, allArgs, interactive);
 
-  // The one long-running case: keep the remote team supervisor alive past a
-  // disconnect by dispatching it detached (nohup), still streaming live.
   const isWatchedTeamStart = command === 'teams' && forwarded[1] === 'start' && forwarded.includes('--watch');
   if (isWatchedTeamStart) {
     try {
@@ -648,8 +584,6 @@ export async function maybeRunOnHost(
   const doctorPath = isDoctorCommand && !/^win/i.test((remoteOs ?? '').trim())
     ? { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' }
     : undefined;
-  // Merge the doctor PATH bootstrap with the render color/geometry env (doctor is
-  // itself a render command, so both can apply). undefined when neither is needed.
   const extraEnv =
     doctorPath || renderForwardEnv ? { ...doctorPath, ...renderForwardEnv } : undefined;
   process.exitCode = streamAgentsOnHost(host, forwarded, {
@@ -670,13 +604,8 @@ export async function maybeRunStandaloneOnHost(
   opts?: FleetPassthroughOptions,
 ): Promise<boolean> {
   const rawArgs = process.argv.slice(2);
-  // No routing flag → nothing to route or strip. Leave argv alone so a purely
-  // local run keeps every flag it passed.
   if (!hasHostRoutingFlag(rawArgs)) return false;
 
-  // Commands that interpret `--device` themselves (browser start binds the
-  // task→device index; later browser verbs reject the flag) must see it.
-  // Help/version still strip so `browser --device x --help` parses.
   if (OWN_HOST_COMMANDS.has(command)) {
     const helpOrVersion = rawArgs.some(
       (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
@@ -687,9 +616,6 @@ export async function maybeRunStandaloneOnHost(
     return false;
   }
 
-  // Keep --help/--version local (docs must work without a reachable host), mirroring
-  // index.ts's `helpOrVersionRequested` guard, but still strip the routing flags
-  // below so commander doesn't choke on them.
   const helpOrVersion = rawArgs.some(
     (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
   );
@@ -697,9 +623,6 @@ export async function maybeRunStandaloneOnHost(
     return true;
   }
 
-  // Local / self-host fall-through (maybeRunOnHost may have rewritten process.argv
-  // with the synthetic command token). Rebuild argv from the original args minus
-  // the routing flags so the standalone program parses cleanly.
   process.argv = [process.argv[0], process.argv[1], ...stripRoutingFlags(rawArgs, STRIP_SPECS)];
   return false;
 }

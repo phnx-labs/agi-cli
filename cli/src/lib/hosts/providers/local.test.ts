@@ -4,8 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import type { LocalHostProvider as LHP } from './local.js';
 
-// state.ts captures HOME at module-load, so isolate by setting HOME to a temp
-// dir and re-importing the module graph fresh for each test (vi.resetModules).
 let home: string;
 let provider: LHP;
 const originalHome = process.env.HOME;
@@ -20,8 +18,6 @@ async function freshProvider(): Promise<LHP> {
 beforeEach(async () => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosts-test-'));
   process.env.HOME = home;
-  // ssh-config reader resolves via os.homedir(), which reads USERPROFILE (not
-  // HOME) on Windows — set both so the temp home takes effect cross-platform.
   process.env.USERPROFILE = home;
   fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
   provider = await freshProvider();
@@ -76,11 +72,10 @@ describe('LocalHostProvider ssh-config union + resolution order', () => {
     const inline = list.find((h) => h.name === 'inline-box');
     expect(cfg).toBeDefined();
     expect(cfg!.source).toBe('ssh-config');
-    expect(cfg!.enrolled).toBe(false); // dispatchable but not enrolled
-    expect(cfg!.address).toBeUndefined(); // connection details stay in ssh config
+    expect(cfg!.enrolled).toBe(false);
+    expect(cfg!.address).toBeUndefined();
     expect(inline!.enrolled).toBe(true);
 
-    // ssh-config host resolves without registration
     expect((await provider.resolve('cfg-box'))?.source).toBe('ssh-config');
   });
 
@@ -94,7 +89,6 @@ describe('LocalHostProvider ssh-config union + resolution order', () => {
     expect(resolved?.source).toBe('inline');
     expect(resolved?.address).toBe('2.2.2.2');
     expect(resolved?.caps).toEqual(['gpu']);
-    // not duplicated in the list
     expect((await provider.list()).filter((h) => h.name === 'dup')).toHaveLength(1);
   });
 });
@@ -123,31 +117,27 @@ describe('LocalHostProvider device-scoping (PHNX-3315)', () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'boxa';
     const p = await freshProvider();
     await p.register!({ name: 'mine', provider: 'local', source: 'inline', address: 'a' });
-    // A peer box's device doc, written directly (as a repo sync would deliver it).
     const peer = path.join(home, '.agents', 'devices', 'boxb', 'agents.yaml');
     fs.mkdirSync(path.dirname(peer), { recursive: true });
     fs.writeFileSync(peer, 'hosts:\n  theirs:\n    source: inline\n    address: b\n');
 
     const names = (await p.list()).map((h) => h.name).sort();
     expect(names).toContain('mine');
-    expect(names).toContain('theirs'); // the union surfaces the peer's host
+    expect(names).toContain('theirs');
 
-    // Removing on boxA drops only boxA's own entry; the peer's doc is untouched.
-    await p.remove!('theirs'); // not ours — a no-op on our doc
+    await p.remove!('theirs');
     await p.remove!('mine');
     expect((await p.list()).map((h) => h.name)).toContain('theirs');
     expect((await p.list()).map((h) => h.name)).not.toContain('mine');
-    expect(fs.readFileSync(peer, 'utf-8')).toContain('theirs'); // peer doc never rewritten
+    expect(fs.readFileSync(peer, 'utf-8')).toContain('theirs');
   });
 
   it("throws on a malformed hosts block in this box's own device doc rather than silently dropping it", async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'boxa';
     const doc = path.join(home, '.agents', 'devices', 'boxa', 'agents.yaml');
     fs.mkdirSync(path.dirname(doc), { recursive: true });
-    fs.writeFileSync(doc, 'hosts:\n  - 1\n  - 2\n'); // a list, not a map — corruption
+    fs.writeFileSync(doc, 'hosts:\n  - 1\n  - 2\n');
     const p = await freshProvider();
-    // A silent drop would let the next register() overwrite the block with only
-    // the new host; instead the read fails loudly (PHNX-3315).
     await expect(p.list()).rejects.toThrow(/corrupted/);
   });
 });

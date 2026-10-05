@@ -11,13 +11,10 @@ import { maybeRunOnHost, flagValue } from './passthrough.js';
 import { hasHostRoutingFlag } from './routing-flag.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// src/lib/hosts -> cli
 const cliRoot = path.resolve(here, '../../..');
 const distPassthrough = path.join(cliRoot, 'dist/lib/hosts/passthrough.js');
 const distRoutingFlag = path.join(cliRoot, 'dist/lib/hosts/routing-flag.js');
 
-// Fail loud rather than silently skipping: a cold-import number measured
-// against a missing artifact would be meaningless.
 if (!fs.existsSync(distPassthrough)) {
   throw new Error(
     `passthrough.bench.ts needs the built artifact at ${distPassthrough}. ` +
@@ -31,7 +28,6 @@ if (!fs.existsSync(distRoutingFlag)) {
   );
 }
 
-/** Spawn a fresh node and return only after it exits — one full cold start. */
 function coldNode(source: string): void {
   execFileSync(process.execPath, ['--input-type=module', '-e', source], {
     stdio: 'ignore',
@@ -124,12 +120,10 @@ describe('maybeRunOnHost — no routing flag (warm graph)', () => {
 });
 
 describe('maybeRunOnHost — routing flag present, side-effect-free returns', () => {
-  // OWN_HOST_COMMANDS member -> returns false at passthrough.ts early exit.
   bench('agents sessions --device box (own-host early return)', async () => {
     await maybeRunOnHost('sessions', ['sessions', '--device', 'box']);
   });
 
-  // Not a known top-level command -> returns false at unknown-command gate.
   bench('agents sessoins --device box (unknown-command return)', async () => {
     await maybeRunOnHost('sessoins', ['sessoins', '--device', 'box']);
   });

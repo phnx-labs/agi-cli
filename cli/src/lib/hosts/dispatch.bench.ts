@@ -13,7 +13,7 @@ const BENCH_DEVICES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-hosts-be
 process.env.AGENTS_DEVICES_DIR = BENCH_DEVICES_DIR;
 
 const PLATFORMS = ['macos', 'linux', 'windows'] as const;
-const DEVICE_COUNT = 14; // matches this machine's real fleet size, measured 2026-08-06
+const DEVICE_COUNT = 14;
 const seededRegistry: Record<string, unknown> = {};
 for (let i = 0; i < DEVICE_COUNT; i++) {
   const name = `bench-device-${i}`;

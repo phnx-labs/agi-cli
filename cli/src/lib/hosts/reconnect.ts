@@ -5,19 +5,18 @@ import { sshExec, sshStream, shellQuote, SSH_CONN_FAILURE_CODE } from '../ssh-ex
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
 import { RUN_AUTO_KEYWORD } from '../types.js';
 
-/** ssh's connection-layer failure code — re-exported from ssh-exec.ts. */
 export const SSH_CONN_FAILURE = SSH_CONN_FAILURE_CODE;
 
 /** ssh returns 255 for both "couldn't connect" and "connected then dropped", so a remote-origin
  * 255 is remapped to 254 before the reconnect loop; inside the loop 255 always means a network
  * drop. */
 export const REMOTE_EXIT_255_REMAPPED = 254;
+// 255 is reserved for SSH connection failure, so a remote process exit 255 must be remapped.
 
 /** Wall-clock window bounding unproductive reconnect streaks, not the whole session; a reattach
  * that reaches the host and holds resets it. */
 export const RECONNECT_WINDOW_MS = 15 * 60_000;
 
-/** Backoff curve: 2s, 4s, 8s, 16s, 30s, then 30s until the window closes. */
 const BASE_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -27,18 +26,13 @@ const MAX_BACKOFF_MS = 30_000;
 export const MIN_HOLD_MS = 10_000;
 
 export interface ReconnectState {
-  /** Consecutive unproductive reattaches since the last genuine reconnection. */
   attempt: number;
-  /** Ms burned on the current unproductive streak; compared to the window. */
   unproductiveMs: number;
 }
 
 export interface ReconnectOutcome {
-  /** Exit code of the run or last re-attach. */
   code: number;
-  /** Whether the ssh handshake completed (preflight probe succeeded). */
   connected: boolean;
-  /** How long the interactive attach held after the probe returned. */
   heldMs: number;
 }
 
@@ -50,13 +44,12 @@ export function initialReconnectState(): ReconnectState {
   return { attempt: 0, unproductiveMs: 0 };
 }
 
-/** Exponential backoff capped at {@link MAX_BACKOFF_MS}: 2s, 4s, 8s, 16s, 30s… */
 export function backoffMs(attempt: number): number {
   return Math.min(BASE_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
 }
 
-/** True when the attempt both connected and held long enough to refill the budget. */
 export function refillsBudget(outcome: ReconnectOutcome): boolean {
+  // A brief reconnect does not reset the retry window; only a stable hold earns a fresh budget.
   return outcome.connected && outcome.heldMs >= MIN_HOLD_MS;
 }
 
@@ -66,7 +59,6 @@ export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome):
   if (outcome.code !== SSH_CONN_FAILURE) return { action: 'stop', code: outcome.code };
   const productive = refillsBudget(outcome);
   const attempts = productive ? 0 : state.attempt;
-  // The attach's own duration counts against the window.
   const burned = productive ? 0 : state.unproductiveMs + outcome.heldMs;
   if (burned >= RECONNECT_WINDOW_MS) return { action: 'stop', code: SSH_CONN_FAILURE };
   const waitMs = backoffMs(attempts);
@@ -78,7 +70,6 @@ export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome):
   };
 }
 
-/** "14m51s", "51s" — a duration a waiting human can read at a glance. */
 export function formatDuration(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(total / 60);
@@ -86,33 +77,26 @@ export function formatDuration(ms: number): string {
   return m > 0 ? `${m}m${String(sec).padStart(2, '0')}s` : `${sec}s`;
 }
 
-/** Notice shown before each reconnect wait. */
 export function reconnectNotice(target: ReconnectTarget, host: string, attempt: number, waitMs: number, remainingMs: number): string {
   const secs = Math.round(waitMs / 1000);
   const when = secs <= 1 ? 'now' : `in ${secs}s`;
-  // A tmux-wrapped run is still live; a bare run was SIGHUPed and focus will
-  // resume it from disk. This wording is truthful for either peer configuration.
   return `\nConnection to ${host} dropped — reconnecting to ${targetLabel(target)}.`
     + `\n  Reconnecting ${when} · ${formatDuration(remainingMs)} left · attempt ${attempt} · Ctrl-C to stop\n`;
 }
 
-/** Notice shown once the retry budget is spent on an unreachable host. */
 export function exhaustedNotice(target: ReconnectTarget, host: string): string {
   return `\nCouldn't reconnect to ${host} after ${formatDuration(RECONNECT_WINDOW_MS)}. The agent may still be running — get back in when the network is back:\n${recoveryHint(target, host)}`;
 }
 
-/** Notice shown when the host reconnects but drops again within {@link MIN_HOLD_MS}. */
 export function unstableNotice(target: ReconnectTarget, host: string): string {
   const secs = Math.round(MIN_HOLD_MS / 1000);
   return `\nGave up reconnecting to ${host} after ${formatDuration(RECONNECT_WINDOW_MS)} — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n${recoveryHint(target, host)}`;
 }
 
-/** Notice shown when a reattach ends with a remapped remote-side exit. */
 export function remoteExitNotice(target: ReconnectTarget, host: string): string {
   return `\nReattach to ${targetLabel(target)} on ${host} ended (not a network drop) — get back in, or check whether it's still live:\n${recoveryHint(target, host)}`;
 }
 
-/** Notice shown when the user stops the wait with Ctrl-C. */
 export function interruptedNotice(target: ReconnectTarget, host: string): string {
   return `\nStopped reconnecting to ${targetLabel(target)} on ${host}. Recover it when the link is stable:\n${recoveryHint(target, host)}`;
 }
@@ -130,7 +114,6 @@ export type ReconnectTarget =
   | { kind: 'session'; id: string }
   | { kind: 'launch'; id: string };
 
-/** The short form shown to a human. Both kinds are uuid-shaped, so 8 chars reads the same. */
 function targetLabel(target: ReconnectTarget): string {
   return target.id.slice(0, 8);
 }
@@ -181,7 +164,6 @@ export function afterInteractiveRemoteExit(opts: {
   target?: ReconnectTarget;
   host: string;
   exitCode: number;
-  /** True when auto-reconnect will take over (tmux-hosted, not `--raw`). */
   willReconnect: boolean;
 }): { reconnect: boolean; notice: string | undefined } {
   if (!opts.target) return { reconnect: false, notice: undefined };
@@ -194,7 +176,6 @@ export function afterInteractiveRemoteExit(opts: {
   };
 }
 
-/** Inputs the launcher has once its interactive stream has returned. */
 interface ReconnectTargetInputs {
   agent: string;
   sessionId?: string;
@@ -206,6 +187,7 @@ interface ReconnectTargetInputs {
 /** Choose how to name the dropped run; `launchId` goes last because it is minted locally before
  * the connection exists, so it survives the drop. */
 export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTarget | undefined {
+  // Auto prefers the peer-resolved id; opaque TTY runs fall back to the launch-id join.
   const { agent, sessionId, resolvedId, resumeId, launchId } = inputs;
   const preferred = agent === RUN_AUTO_KEYWORD
     ? resolvedId ?? sessionId
@@ -233,11 +215,8 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
 function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
   const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
-  // Fresh (non-multiplexed) reachability probe: only a completed handshake is
-  // counted as connected.
   const probe = sshExec(sshTarget, 'true', { multiplex: false, extraSshArgs });
   if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false, heldMs: 0 };
-  // Timed from after the probe returns, so this measures only the attach itself.
   const startedAt = Date.now();
   const code = sshStream(sshTarget, reattachRemoteCommand(target), { tty: true, extraSshArgs });
   return { code, connected: true, heldMs: Date.now() - startedAt };
@@ -265,27 +244,22 @@ async function waitOrInterrupt(ms: number): Promise<'elapsed' | 'interrupted'> {
 interface ReconnectLoopOpts {
   host: Host;
   target: ReconnectTarget;
-  /** Exit code from the initial interactive run (treated as connected). */
   initialExit: number;
-  /** Test seams for the re-attach and wait. */
   reattach?: (host: Host, target: ReconnectTarget) => ReconnectOutcome;
   wait?: (ms: number) => Promise<'elapsed' | 'interrupted'>;
   write?: (s: string) => void;
 }
 
-/** Drive the reconnect loop from the initial run's outcome to a terminal code. */
 export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Promise<number> {
   const write = opts.write ?? ((s: string) => process.stderr.write(s));
   const wait = opts.wait ?? waitOrInterrupt;
   const reattach = opts.reattach ?? reattachRemoteSession;
 
   let state = initialReconnectState();
-  // The initial run connected; its hold duration doesn't matter at attempt 0.
   let outcome: ReconnectOutcome = { code: opts.initialExit, connected: true, heldMs: 0 };
   for (;;) {
     const decision = reconnectStep(state, outcome);
     if (decision.action === 'stop') {
-      // Spent budget: unreachable host vs. unstable link need different messages.
       if (decision.code === SSH_CONN_FAILURE) {
         write(outcome.connected
           ? unstableNotice(opts.target, opts.host.name)
@@ -293,14 +267,12 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
       } else if (decision.code === REMOTE_EXIT_255_REMAPPED) {
         write(remoteExitNotice(opts.target, opts.host.name));
       } else {
-        // Clean detach / agent exit: still print the session handle.
         write(connectionEndedNotice(opts.target, opts.host.name));
       }
       return decision.code;
     }
     write(reconnectNotice(opts.target, opts.host.name, decision.state.attempt, decision.waitMs, decision.remainingMs));
     if (await wait(decision.waitMs) === 'interrupted') {
-      // User interrupted; the agent is still running on the peer.
       write(interruptedNotice(opts.target, opts.host.name));
       return 130;
     }

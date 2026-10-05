@@ -2,8 +2,8 @@
  * gates the ~187 ms passthrough import on hasHostRoutingFlag, so the gate must not pull in
  * passthrough, remote-cmd, ssh-exec or the registry (RUSH-2374). */
 
-/** Pull the value of `--device`/`-D`/`--remote-cwd` (any form) out of an argv. */
 export function flagValue(args: string[], long: string, short?: string): string | undefined {
+  // Keep this probe import-free: it runs before ordinary commands may load the SSH graph.
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === `--${long}` || (short && a === `-${short}`)) return args[i + 1];

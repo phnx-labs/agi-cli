@@ -9,18 +9,14 @@ import {
 import { LEASE_RUNTIMES, type DetectedRuntime } from '../crabbox/runtimes.js';
 import type { AgentId } from '../types.js';
 
-/** A signed-in native runtime, with a plausible on-disk credential path. */
 function detected(id: AgentId): DetectedRuntime {
   return { id, label: id, email: `${id}@example.com`, signedIn: true, credPath: `/tmp/${id}-cred.json` };
 }
 
-// The exact OAuth blob a --copy-creds run used to ship; it must never surface.
 const OAUTH_BLOB = '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-SECRET","refreshToken":"rt-SECRET"}}';
 
 describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1b)', () => {
   it('every runtime --copy-creds handles is classified native OAuth', () => {
-    // The refusal is only complete if the classifier covers the whole set the
-    // path ever transferred — else a runtime could slip through unguarded.
     for (const cred of LEASE_RUNTIMES) {
       expect(isNativeOAuthRuntime(cred.id)).toBe(true);
     }
@@ -36,7 +32,6 @@ describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1
       }),
     ).toThrow(/Refusing to copy native OAuth/i);
 
-    // The steer names the portable, non-rotating path.
     try {
       buildHostCredentialScript({ runtimes: ['claude'], detected: [detected('claude')], claudeCredentialsJson: OAUTH_BLOB });
       throw new Error('expected a refusal');
@@ -44,7 +39,6 @@ describe('buildHostCredentialScript — native OAuth transfer is refused (SING-1
       const msg = (e as Error).message;
       expect(msg).toContain('agents accounts sync');
       expect(msg).toContain('SING-1b');
-      // Proof the credential is never echoed, even into the refusal itself.
       expect(msg).not.toContain('sk-ant-oat01-SECRET');
       expect(msg).not.toContain('rt-SECRET');
     }
@@ -90,8 +84,6 @@ describe('wrapHostCommandWithCredentials — the native OAuth never reaches the 
     } catch (e) {
       expect((e as Error).message).toMatch(/Refusing to copy native OAuth/i);
     }
-    // No script was ever built, so the OAuth blob and the credential-file writes
-    // it used to emit can never have been serialized or sent.
     expect(produced).toBeNull();
   });
 
@@ -100,7 +92,6 @@ describe('wrapHostCommandWithCredentials — the native OAuth never reaches the 
     expect(wrapped).toContain('set -uo pipefail');
     expect(wrapped).toContain('echo hi');
     expect(wrapped).toContain('exit $rc');
-    // No credential file write and no OAuth blob anywhere.
     expect(wrapped).not.toContain('.credentials.json');
     expect(wrapped).not.toContain('claudeAiOauth');
   });

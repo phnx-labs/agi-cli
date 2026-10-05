@@ -7,14 +7,15 @@ import { updateTask, terminalPatch, type HostTask } from './tasks.js';
 import { encodePowershell } from './remote-cmd.js';
 
 type RemoteExitState =
-  | { state: 'running' } //     .exit absent, or present-but-empty (mid-write) → not finished
-  | { state: 'done'; code: number } // .exit holds an exit code → finished
-  | { state: 'unreachable' }; //  ssh itself failed → can't tell, don't touch the record
+  | { state: 'running' }
+  | { state: 'done'; code: number }
+  | { state: 'unreachable' };
 
 /** Classify a `cat <remoteExit>` result into a remote run state (pure). ssh failure is code 255
  * and spawn error/timeout is `code === null`, both meaning unreachable; an empty read is still
  * running (`.exit` is written only after the run ends). */
 export function classifyExit(res: Pick<SshExecResult, 'code' | 'stdout' | 'timedOut'>): RemoteExitState {
+  // Unreachable, absent, or empty exit state is still running; only a confirmed code is terminal.
   if (res.timedOut || res.code === null || res.code === 255) return { state: 'unreachable' };
   const out = res.stdout.trim();
   if (out === '') return { state: 'running' };
@@ -46,6 +47,7 @@ export function readRemoteExit(target: string, remoteExit: string, timeoutMs = 6
  * loop, so it must not use a synchronous `spawnSync('ssh', …)` (PHNX-3695); `sshExecAsync`
  * applies the same timeout bound. */
 async function readRemoteExitAsync(target: string, remoteExit: string, timeoutMs = 6000, identityFile?: string, remoteShell: 'posix' | 'powershell' = 'posix'): Promise<RemoteExitState> {
+  // Daemon callers use async SSH so a dead host cannot block the event loop.
   return classifyExit(await sshExecAsync(target, remoteExitCommand(remoteExit, remoteShell), remoteExitSshOpts(timeoutMs, identityFile)));
 }
 
@@ -85,7 +87,7 @@ export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
       });
       reachable.set(t.target, probe.code === 0);
     }
-    if (!reachable.get(t.target)) continue; // host down → leave running
+    if (!reachable.get(t.target)) continue;
     const st = readRemoteExit(t.target, t.remoteExit, 6000, t.identityFile, t.remoteShell);
     if (st.state === 'done') {
       const updated = updateTask(t.id, terminalPatch(st.code));

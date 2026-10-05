@@ -20,7 +20,6 @@ import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 const MARK = '@@AGENTS_READY@@';
 
-/** Decode the PowerShell script off a `-EncodedCommand` remote command. */
 const decodeWindows = decodeRenderedPowershell;
 
 describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
@@ -31,7 +30,6 @@ describe('ReadyProbe.timedOut — timeout vs unreachable distinction', () => {
   });
 
   it('timedOut is absent on a probe that got a non-timeout empty response', () => {
-    // ssh connected but the sentinel never came (auth failure, wrong command, etc.)
     const p: ReadyProbe = parseReadyProbe('');
     expect(p.timedOut).toBeUndefined();
     expect(p.reachable).toBe(false);
@@ -118,9 +116,6 @@ describe('viewAgentAccountEligibility / viewAgentSignedIn — one readiness gate
   });
 });
 
-// One-release fallback: an older remote CLI emits no `runReady`. signedIn = any
-// launchable version (`isLaunchableSignedIn`, PHNX-3466); pickerEligible is
-// permissive — the remote's own run path makes the finer call.
 describe('viewAgentAccountEligibility — older-CLI fallback without runReady (PHNX-4116)', () => {
   it('signedIn = any launchable version; pickerEligible = true', () => {
     const launchable = JSON.stringify([{ agent: 'claude', versions: [{ signedIn: true, launchable: true }] }]);
@@ -159,11 +154,9 @@ describe('viewAgentAccountEligibility — older-CLI fallback without runReady (P
       signedIn: true,
       launchable: true,
       usageStatus: 'rate_limited',
-      usageCapturedAt: new Date(now - 60_000).toISOString(), // 1 min old — fresh
+      usageCapturedAt: new Date(now - 60_000).toISOString(),
     }] }]);
     expect(viewAgentAccountEligibility(view, 'claude', now)).toEqual({ signedIn: false, pickerEligible: false });
-    // The default-`now` entry point (`viewAgentSignedIn`) agrees — a fresh
-    // reading is fresh under Date.now() too.
     expect(viewAgentSignedIn(view, 'claude')).toBe(false);
   });
 
@@ -173,7 +166,7 @@ describe('viewAgentAccountEligibility — older-CLI fallback without runReady (P
       signedIn: true,
       launchable: true,
       usageStatus: 'rate_limited',
-      usageCapturedAt: new Date(now - 60 * 60_000).toISOString(), // 1 h old — stale
+      usageCapturedAt: new Date(now - 60 * 60_000).toISOString(),
     }] }]);
     expect(viewAgentAccountEligibility(view, 'claude', now)).toEqual({ signedIn: true, pickerEligible: true });
     expect(viewAgentSignedIn(view, 'claude')).toBe(true);
@@ -194,8 +187,6 @@ describe('parseReadyProbe', () => {
   });
 
   it('reports reachable-but-not-installed when the version half is empty', () => {
-    // agents-cli missing: `agents --version` printed nothing, but the login
-    // shell still ran our printf so the marker (and thus reachability) is intact.
     const p = parseReadyProbe(`\n${MARK}\n`);
     expect(p.reachable).toBe(true);
     expect(p.version).toBeNull();
@@ -292,8 +283,6 @@ describe('evaluateHostAgentInstall — fail-loud pin (RUSH-2313)', () => {
   });
 
   it('does not preflight-check version aliases — remote resolves them', () => {
-    // @latest on a box with no gemini would still warn about the agent, but
-    // must not invent a "pinned gemini@latest is not installed" error.
     expect(() => evaluateHostAgentInstall(view, { agent: 'codex', version: 'latest' }, 'box'))
       .not.toThrow();
   });
@@ -314,8 +303,6 @@ describe('ready commands — POSIX branch unchanged', () => {
     expect(buildReadyProbeCommand()).toBe(
       `bash -lc 'agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view --json 2>/dev/null || agents list 2>/dev/null'`,
     );
-    // With the dispatcher's usage envelope on stdin, the silent ingest runs FIRST
-    // (PHNX-4116) and the version/marker/listing shape after it is unchanged.
     expect(buildReadyProbeCommand(undefined, { ingestUsage: true })).toBe(
       `bash -lc 'agents __usage-ingest 2>/dev/null; agents --version 2>/dev/null; printf '\\''\\n${MARK}\\n'\\''; agents view --json 2>/dev/null || agents list 2>/dev/null'`,
     );
@@ -335,24 +322,18 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
 
   it('version probe runs `agents --version` via PowerShell', () => {
     const script = decodeWindows(buildRemoteVersionCommand('windows'));
-    // The npm `agents.ps1` shim is bypassed — it splats `$args` into native
-    // node.exe, which is where PowerShell 5.1 loses arguments.
     expect(script).not.toContain("& 'agents'");
     expect(script).toMatch(/\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'--version'/);
     expect(script).toContain('exit $zq');
   });
 
   it('readyProbe emits the sentinel with Write-Output and branches on $LASTEXITCODE', () => {
-    // Parser keys off the sentinel substring — this output must still parse.
     const script = decodeWindows(buildReadyProbeCommand('windows'));
     expect(script).toBe(
       `$ProgressPreference = 'SilentlyContinue'; agents --version 2>$null; Write-Output "${MARK}"; agents view --json 2>$null; if ($LASTEXITCODE -ne 0) { agents list 2>$null }`,
     );
-    // The agents.ps1 shim drops ssh-piped stdin, so the ingest arm reads the
-    // payload into a temp file and hands the verb `--from <path>` (PHNX-4116).
     const ingesting = decodeWindows(buildReadyProbeCommand('windows', { ingestUsage: true }));
     expect(ingesting.startsWith(`$ProgressPreference = 'SilentlyContinue'; $in = [Console]::In.ReadToEnd(); $tmp = $null; try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); agents __usage-ingest --from $tmp 2>$null } finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }; agents --version 2>$null; Write-Output "${MARK}"`)).toBe(true);
-    // The script's stdout shape (marker on its own line) round-trips through parseReadyProbe.
     const p = parseReadyProbe(`2.1.170\n${MARK}\nClaude (balanced)\n`);
     expect(p.reachable).toBe(true);
     expect(p.version).toBe('2.1.170');

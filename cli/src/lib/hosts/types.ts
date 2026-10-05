@@ -8,11 +8,9 @@ export type HostProviderId = 'local' | 'devices';
 
 export type HostStatus = 'online' | 'offline' | 'unknown';
 
-/** A host as seen at runtime: its persisted entry plus name/provider/status. */
 export interface Host extends HostEntry {
   name: string;
   provider: HostProviderId;
-  /** True when the host has an explicit overlay/inline entry in the registry. */
   enrolled?: boolean;
   status?: HostStatus;
   /** False when the host is listed but can't carry a `--device` run (today: password-auth
@@ -36,30 +34,20 @@ export class DeviceOffloadUnsupportedError extends Error {
 }
 
 export interface HostProviderCapabilities {
-  /** Can list/track hosts. */
   directory: boolean;
-  /** Can add/remove hosts. */
   mutate: boolean;
-  /** Reports online/offline without an explicit probe. */
   presence: boolean;
-  /** Can dispatch a command without an SSH address (its own relay). */
   relay: boolean;
-  /** Can provision new hosts. */
   lease: boolean;
 }
 
 export interface HostProvider {
   id: HostProviderId;
   capabilities(): HostProviderCapabilities;
-  /** Every host this provider knows about. */
   list(): Promise<Host[]>;
-  /** Resolve one host by name, or null if unknown to this provider. */
   resolve(name: string): Promise<Host | null>;
-  /** Persist a host (mutate-capable providers only). */
   register?(spec: Host): Promise<Host>;
-  /** Remove a host (mutate-capable providers only). */
   remove?(name: string): Promise<void>;
-  /** Presence without an explicit probe (presence-capable providers only). */
   presence?(name: string): Promise<HostStatus>;
 }
 

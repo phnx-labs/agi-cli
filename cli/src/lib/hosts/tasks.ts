@@ -12,7 +12,6 @@ export interface HostTask {
   id: string;
   host: string;
   target: string;
-  /** OpenSSH private-key path retained for follow/reconcile/stop calls. */
   identityFile?: string;
   remoteShell?: 'posix' | 'powershell';
   agent: string;
@@ -26,7 +25,6 @@ export interface HostTask {
    * for Claude, else the id the remote coined (captured from the `--emit-session-id` sentinel,
    * session-marker.ts). Absent until captured, e.g. an unfollowed non-Claude run. */
   sessionId?: string;
-  /** Remote paths (under the host's ~/.agents/.cache/hosts/). */
   remoteLog: string;
   remoteExit: string;
   status: HostTaskStatus;
@@ -43,7 +41,6 @@ function taskFile(id: string): string {
   return path.join(hostsCacheDir(), `${id}.json`);
 }
 
-/** Local path we mirror a task's remote log into while following. */
 export function localLogPath(id: string): string {
   return path.join(hostsCacheDir(), `${id}.log`);
 }
@@ -73,6 +70,7 @@ export function updateTask(id: string, patch: Partial<HostTask>): HostTask | nul
  * so dispatch, reconcile and log-follow agree. A real exit code is never -1 (that means follow
  * window closed, run continues), so callers must not pass it. */
 export function terminalPatch(code: number): Partial<HostTask> {
+  // Persist terminal truth only from a confirmed remote exit code.
   return {
     status: code === 0 ? 'completed' : 'failed',
     exitCode: code,

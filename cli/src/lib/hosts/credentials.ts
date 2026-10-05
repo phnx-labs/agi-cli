@@ -6,9 +6,6 @@ import type { AgentId } from '../types.js';
 import type { DetectedRuntime } from '../crabbox/runtimes.js';
 import { isNativeOAuthRuntime, nativeOAuthTransferRefusal } from '../crabbox/runtimes.js';
 
-// The native-OAuth predicate + refusal are canonical in `crabbox/runtimes.ts`
-// (next to `LEASE_RUNTIMES`), so `--copy-creds` here and `--lease` there refuse
-// against exactly the same set. Re-export for this module's existing consumers.
 export { isNativeOAuthRuntime, nativeOAuthTransferRefusal } from '../crabbox/runtimes.js';
 
 export interface HostCredentials {
@@ -21,6 +18,7 @@ export interface HostCredentials {
  * login, so this throws with the `agents accounts` steer before serializing anything (SING-1b);
  * an empty set is a no-op. */
 export function buildHostCredentialScript(opts: HostCredentials): { setup: string; teardown: string } {
+  // Native OAuth/session state is device-bound; portable account sync is the supported transfer path.
   const native = opts.runtimes.filter(isNativeOAuthRuntime);
   if (native.length > 0) {
     throw new Error(nativeOAuthTransferRefusal(native));

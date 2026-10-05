@@ -6,11 +6,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-provider-test-'));
 process.env.HOME = TEST_HOME;
-// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
-// call time, so it survives the module-cache race a plain HOME override loses.
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 
 const { DevicesHostProvider } = await import('./devices.js');
@@ -98,8 +95,6 @@ describe('devices in the unified pool', () => {
     const all = await listAllHosts();
     const rows = all.filter((h) => h.name === 'shared-name');
     expect(rows).toHaveLength(1);
-    // `local` registers first, so the enrolled overlay is still the BASE row —
-    // it keeps provider/source/caps/addedAt.
     expect(rows[0].provider).toBe('local');
     // The device owns the connection fields (RUSH-1967). The old assertion expected the overlay's
     // '10.0.0.9', encoding the frozen-route bug: a stale enrolled address won after `devices sync`
@@ -115,8 +110,6 @@ describe('devices in the unified pool', () => {
       address: { via: 'tailscale', dnsName: 'gpu-dev.tail.ts.net' },
       auth: { method: 'key' },
     });
-    // An enrolled inline overlay entry for gpu-dev (--cap gpu) sources the target
-    // from the device profile — emulate the entry it writes.
     updateMeta((meta) => ({
       ...meta,
       hosts: {

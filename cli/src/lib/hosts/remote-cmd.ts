@@ -8,13 +8,9 @@ import { quoteWin32ExecArg } from '../platform/exec.js';
 import { homeRemainder } from '../project-root.js';
 import * as zlib from 'node:zlib';
 
-/** A flag to strip from a forwarded argv, with whether it consumes a value. */
 export interface StripSpec {
-  /** Long form without leading dashes, e.g. `host`, `remote-cwd`. */
   long: string;
-  /** Optional single-letter short form without the dash, e.g. `H`. */
   short?: string;
-  /** True when the flag takes a following value token (`--device <name>`). */
   takesValue: boolean;
 }
 
@@ -34,7 +30,6 @@ export function stripRoutingFlags(args: string[], specs: StripSpec[]): string[] 
       out.push(a);
       continue;
     }
-    // Consume a separate value token only for the exact-match (space-separated) forms.
     const isExact = a === `--${spec.long}` || (spec.short && a === `-${spec.short}`);
     if (spec.takesValue && isExact && i + 1 < args.length) i++;
   }
@@ -50,27 +45,22 @@ export const HOST_ROUTING_SPECS: StripSpec[] = [
   { long: 'remote-cwd', takesValue: true },
 ];
 
-/** How one `agents run` option behaves when the run is offloaded with `--device`. */
 type RunOptionForwarding =
-  /** Appended to the remote `agents run` argv — same behavior local or remote. */
   | 'forward'
-  /** Refused with an actionable error BEFORE dispatch — never silently dropped. */
   | 'reject'
-  /** Consumed by the dispatching side (routing, follow rendering, cwd portability). */
   | 'local-only';
 
 /** The forwarding contract for `agents run … --device`: every `run` option is classified by
  * commander attribute name, and a commander-introspection test (run-forwarding.test.ts) fails
  * on a missing one, so none silently drops at the SSH boundary. */
 export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
-  // forwarded — the remote run behaves exactly like a local one
   mode: 'forward',
   effort: 'forward',
   model: 'forward',
   env: 'forward',
   addDir: 'forward',
   name: 'forward',
-  resume: 'forward', // concrete id only — bare `--resume` rejects (picker can't cross SSH)
+  resume: 'forward',
   sessionId: 'forward',
   timeout: 'forward',
   fallback: 'forward',
@@ -82,33 +72,31 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   budget: 'forward',
   until: 'forward',
   interval: 'forward',
-  json: 'forward', // remote emits ndjson into its log; the local follow streams it verbatim
+  json: 'forward',
   verbose: 'forward',
-  yes: 'forward', // a detached remote run can't answer the budget-confirm prompt
-  acp: 'forward', // the remote CLI routes through ACP on ITS side of the wire
-  autoSecrets: 'forward', // workflow frontmatter secrets resolve on the REMOTE keychain
-  emitSessionId: 'forward', // remote prints its session id as a stdout sentinel the launcher captures (session-marker.ts)
+  yes: 'forward',
+  acp: 'forward',
+  autoSecrets: 'forward',
+  emitSessionId: 'forward',
 
-  // rejected — cannot cross the SSH boundary; fail loud, never degrade
-  terminal: 'reject', // opens a tab on THIS machine's desktop; a remote tab is a different request
+  terminal: 'reject',
   secrets: 'reject',
   secretsKeys: 'reject',
   allowExpired: 'reject',
   resumeCheckpoint: 'reject',
 
-  // local-only — routing, dispatch-path choice, and follow rendering
-  quiet: 'local-only', // the remote argv always carries --quiet
+  quiet: 'local-only',
   headless: 'local-only',
-  interactive: 'local-only', // the interactive path forwards --interactive itself
-  cwd: 'local-only', // made portable into remoteCwd
+  interactive: 'local-only',
+  cwd: 'local-only',
   project: 'local-only',
   remoteCwd: 'local-only',
-  raw: 'local-only', // interactive builder forwards --raw itself
+  raw: 'local-only',
   tmux: 'local-only',
   disableTmux: 'local-only',
   device: 'local-only',
-  where: 'local-only', // expands into host/lease before dispatch; never re-forwarded
-  local: 'local-only', // this machine by definition — a local run never reaches the SSH boundary
+  where: 'local-only',
+  local: 'local-only',
   on: 'local-only',
   computer: 'local-only',
   any: 'local-only',
@@ -116,14 +104,11 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   lease: 'local-only',
   box: 'local-only',
   keepBox: 'local-only',
-  fresh: 'local-only', // skips the warm-pool reuse for --lease; the lease path is always local
-  reuse: 'local-only', // reuse-picker choice for --lease; the lease path is always local
-  bare: 'local-only', // skips the local setup-copy push; lease-only concern
-  tailscale: 'local-only', // --tailscale/--no-tailscale gate the lease net mode; never forwarded
-  copyCreds: 'local-only', // copies creds TO the host before dispatch — local concern only
-  // Cloud placement: chosen and dispatched from THIS machine via the provider
-  // registry; mutually exclusive with --device (placement conflict dies before
-  // dispatch), so these never have a remote argv to ride.
+  fresh: 'local-only',
+  reuse: 'local-only',
+  bare: 'local-only',
+  tailscale: 'local-only',
+  copyCreds: 'local-only',
   cloud: 'local-only',
   provider: 'local-only',
   repo: 'local-only',
@@ -136,9 +121,6 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   // --no-trace-sync gates the local run-exit trace auto-sync, which exec.ts skips for
   // --device/--lease; the remote box runs its own, so this local-exit toggle is never forwarded.
   traceSync: 'local-only',
-  // Broadcast mode (agents run --broadcast) is its own fan-out dispatch — mutually
-  // exclusive with --host. All broadcast options are local-only; exec.ts handles them
-  // before any SSH dispatch path is reached.
   broadcast: 'local-only',
   task: 'local-only',
   listTasks: 'local-only',
@@ -146,7 +128,6 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   concurrency: 'local-only',
 };
 
-/** Actionable messages for value-aware rejections, keyed by attribute name. */
 export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
   terminal:
     '--terminal opens a tab on THIS machine; it cannot be combined with --device. ' +
@@ -176,8 +157,6 @@ export function buildRemoteAgentsInvocation(
   }
   const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
   const withCwd = remoteCwd ? `cd ${shellQuote(remoteCwd)} && ${inner}` : inner;
-  // Prepend env exports so the remote command sees the shims dir even when the
-  // login shell hasn't sourced the interactive rc files that usually add it.
   const exports = posixEnvExports(env);
   if (!exports) {
     return `bash -lc ${shellQuote(withCwd)}`;
@@ -194,6 +173,7 @@ const EXPAND_KEYS = new Set(['PATH']);
  * (shellQuote) so `$(...)` or backticks never execute remotely; only EXPAND_KEYS (`PATH`) keep
  * the expanding form. Shared with dispatch.ts so every remote path exports identically. */
 export function posixEnvExports(env?: Record<string, string>): string {
+  // Only trusted-static PATH may expand remotely; provenance and every other value are literals.
   if (!env || Object.keys(env).length === 0) return '';
   return Object.entries(env)
     .map(([k, v]) =>
@@ -204,7 +184,6 @@ export function posixEnvExports(env?: Record<string, string>): string {
     .join('; ');
 }
 
-/** The two remote shell dialects we build commands for. */
 type RemoteShell = 'posix' | 'powershell';
 
 /** Pick the remote shell dialect from a recorded OS/platform string: Windows
@@ -226,19 +205,13 @@ export function encodePowershell(script: string): string {
   return Buffer.from(script, 'utf16le').toString('base64');
 }
 
-/** Inverse of {@link encodePowershell} — decode an `-EncodedCommand` payload
- * back to its script. Used by tests to assert on the built command. */
 export function decodePowershell(encoded: string): string {
   return Buffer.from(encoded, 'base64').toString('utf16le');
 }
 
-/** A single `agents …` invocation to run on a Windows remote. */
 interface WindowsAgentsCommand {
-  /** `agents` argv (command name NOT included; `agents` is prepended). */
   args: string[];
-  /** Env vars scoped to this invocation (POSIX `VAR=val` ↔ PS `$env:VAR=…`). */
   env?: Record<string, string>;
-  /** Directory to enter before running (`--remote-cwd`). */
   cwd?: string;
   /** `cwd` was derived from the local cwd, not named by the user (see `deriveMirroredCwd`): a
    * directory the peer lacks falls back to `$HOME` instead of failing the run, like
@@ -248,7 +221,6 @@ interface WindowsAgentsCommand {
    * `powershell.exe` (which otherwise exits 0). Default true; pass false for probes keyed off a
    * sentinel. */
   propagateExit?: boolean;
-  /** Remap a reached peer command's 255 to 254 so SSH's own 255 stays unambiguous. */
   remapExit255?: boolean;
 }
 
@@ -277,10 +249,9 @@ export function stripClixml(stdout: string): string {
  * quotes (the npm `agents.ps1` shim splats `$args` into a native program), so resolve node and
  * the `bin` entry on the peer and run via .NET. If neither resolves, fail loud; never `& agents`. */
 export function windowsAgentsInvocation(args: string[], binName: 'agents' | 'ag' = 'agents'): string {
+  // PowerShell 5.1 loses native argv through npm shims; resolve the declared JS bin and fail loud.
   const escaped = pwshLiteral(args.map(quoteWin32ExecArg).join(' '));
   return [
-    // Set before any resolution: a non-terminating failure below would otherwise
-    // leave the exit code null, and `exit $null` reports 0.
     `$ErrorActionPreference = 'Stop'`,
     `$zc = Get-Command ${powershellQuote(binName)} -ErrorAction Stop`,
     `$ze = $zc.Source`,
@@ -291,28 +262,17 @@ export function windowsAgentsInvocation(args: string[], binName: 'agents' | 'ag'
     `if ($zc.CommandType -ne 'Application' -or $ze -match '\\.(cmd|bat)$') {`,
     `  $zb = Split-Path $ze`,
     `  $zk = Join-Path $zb 'node_modules\\@phnx-labs\\agents-cli'`,
-    // The package's DECLARED bin, so the entry follows the package rather than a
-    // hand-synced `dist/index.js` literal that would rot on upgrade. One check
-    // covers a missing bin AND the single-string `bin` form (which yields $null).
     `  $zl = (Get-Content -Raw (Join-Path $zk 'package.json') | ConvertFrom-Json).bin.${binName}`,
     `  if (-not $zl) { throw "agents package at $zk declares no bin.${binName}" }`,
     `  $zt = Join-Path $zk $zl`,
     `  if (-not [IO.File]::Exists($zt)) { throw "agents CLI entry not found at $zt" }`,
-    // The npm shim prefers a node.exe beside itself before PATH; match that.
     `  $zd = Join-Path $zb 'node.exe'`,
     `  $ze = if ([IO.File]::Exists($zd)) { $zd } else { 'node' }`,
-    // A Windows path cannot contain `"`, so wrapping is sufficient escaping here.
     `  $zr = '--no-warnings=ExperimentalWarning "' + $zt + '" '`,
     `}`,
     ...pwshNativeExecStatements('$ze', `$zr + ${escaped}`),
-    // Reported through a plain variable rather than by assigning the automatic
-    // $LASTEXITCODE, which nothing set here since no PowerShell command ran.
     `$zq = $zp.ExitCode`,
-    // Never let an unknown outcome read as success.
     `if ($null -eq $zq) { $zq = 1 }`,
-  // NEWLINE-joined, and that is required rather than stylistic: the caller joins
-  // its parts with `'; '`, which between a closing `}` and `else`/an indented block
-  // would produce invalid PowerShell.
   ].join('\n');
 }
 
@@ -335,9 +295,6 @@ export function windowsSetLocation(cwd: string, mirror = false): string {
 
 export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
   const { args, env, cwd, mirrorCwd = false, propagateExit = true, remapExit255 = false } = cmd;
-  // `Stop` FIRST, before the env assignments and the Set-Location: a failing
-  // `Set-Location` (a cwd that does not exist on the peer) must abort rather than
-  // continue into the launcher and run the command in the wrong directory.
   const parts: string[] = [POWERSHELL_PROGRESS_SILENCE, `$ErrorActionPreference = 'Stop'`];
   if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
   if (cwd) parts.push(windowsSetLocation(cwd, mirrorCwd));
@@ -356,9 +313,8 @@ export function windowsAgentsScript(cmd: WindowsAgentsCommand): string {
  * shorter. `-EncodedCommand` inflates ~2.67x and OpenSSH-for-Windows caps the command far below
  * 8191 (2934 pass, 3102 fail), so a bootstrap inflating a deflated payload (~1.33x) is used. */
 export function renderPowershellCommand(script: string): string {
+  // The variable-free bootstrap survives cmd or PowerShell as OpenSSH's shell; compress only if shorter.
   const plain = `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
-  // Raw DEFLATE (RFC 1951) — what .NET's `DeflateStream` reads. `deflateSync`
-  // would prepend a zlib header that `DeflateStream` rejects.
   const packed = zlib.deflateRawSync(Buffer.from(script, 'utf-8'), { level: 9 }).toString('base64');
   // The blob goes in a `-Command` string, not a second `-EncodedCommand` (another 2.67x). The
   // bootstrap is variable-free (no `$`, `%`, backtick or cmd metacharacter): with PowerShell as
@@ -367,8 +323,6 @@ export function renderPowershellCommand(script: string): string {
     + `[IO.MemoryStream]::new([Convert]::FromBase64String('${packed}')),`
     + '[IO.Compression.CompressionMode]::Decompress),[Text.Encoding]::UTF8).ReadToEnd())';
   const compressed = `powershell -NoProfile -Command "${bootstrap}"`;
-  // Only when genuinely shorter: for a small script the fixed bootstrap costs more
-  // than it saves, so this keeps the plain form in play for every small caller.
   return compressed.length < plain.length ? compressed : plain;
 }
 
@@ -383,6 +337,7 @@ export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
  * file since the `agents.ps1` shim drops it. Generic sibling of buildWindowsStdinImportCommand;
  * the verb must accept `--from <path>` (see `usage-ingest.ts`). */
 export function buildWindowsStdinAgentsCommand(args: string[]): string {
+  // Create stdin payloads inside try and always remove the possibly secret-bearing file in finally.
   const forwarded = args.map(powershellQuote).join(' ');
   const script = [
     POWERSHELL_PROGRESS_SILENCE,
@@ -404,8 +359,6 @@ export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: b
   // failure after GetTempFileName would leave the secret-bearing file behind (RUSH-1764). $tmp
   // starts null so a throwing GetTempFileName leaves nothing to remove.
   const script = [
-    // Same CLIXML guard as windowsAgentsScript — this builder also runs `& agents …`
-    // and its raw stderr is printed to the user on failure (secrets export --device <win>).
     POWERSHELL_PROGRESS_SILENCE,
     '$in = [Console]::In.ReadToEnd()',
     '$tmp = $null',

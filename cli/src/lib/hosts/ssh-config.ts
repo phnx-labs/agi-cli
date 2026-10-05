@@ -40,9 +40,8 @@ export function parseKnownHosts(content: string): string[] {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
     const first = line.split(/\s+/)[0];
-    if (!first || first.startsWith('|')) continue; // hashed
+    if (!first || first.startsWith('|')) continue;
     for (const entry of first.split(',')) {
-      // strip [host]:port → host
       const host = entry.replace(/^\[/, '').replace(/\](:\d+)?$/, '');
       if (!host || /[*?]/.test(host) || seen.has(host)) continue;
       seen.add(host);
@@ -52,7 +51,6 @@ export function parseKnownHosts(content: string): string[] {
   return names;
 }
 
-/** `Host` names from ~/.ssh/config, following `Include` globs (best-effort). */
 export function listSshConfigHosts(): string[] {
   const names = new Set<string>();
   const visit = (file: string, depth: number): void => {
@@ -64,7 +62,6 @@ export function listSshConfigHosts(): string[] {
       return;
     }
     for (const name of parseSshConfigHosts(content)) names.add(name);
-    // Follow Include directives (best-effort, relative to ~/.ssh).
     for (const rawLine of content.split('\n')) {
       const m = /^\s*Include\s+(.+)$/i.exec(rawLine);
       if (!m) continue;
@@ -78,7 +75,6 @@ export function listSshConfigHosts(): string[] {
   return [...names];
 }
 
-/** Minimal glob: expand a single trailing `*` in the basename, else literal. */
 function globMaybe(pattern: string): string[] {
   if (!pattern.includes('*')) {
     return fs.existsSync(pattern) ? [pattern] : [];
@@ -93,7 +89,6 @@ function globMaybe(pattern: string): string[] {
   }
 }
 
-/** True if `name` is a concrete `Host` stanza in ssh config. */
 export function isSshConfigHost(name: string): boolean {
   return listSshConfigHosts().includes(name);
 }
@@ -108,9 +103,7 @@ interface SshGResult {
  * Match/Include); undefined if `ssh` is unavailable. It returns defaults even for unknown
  * names, so pair with `isSshConfigHost` to tell whether a name is configured. */
 export function sshResolve(name: string): SshGResult | undefined {
-  // Same target-injection guard as sshExec: a name starting with `-` (or
-  // carrying shell metacharacters) must never reach `ssh` as a bare argv where
-  // it could be parsed as a flag (e.g. `-oProxyCommand=…`).
+  // Validate before `ssh -G`; an option-shaped target must never reach OpenSSH.
   try {
     assertValidSshTarget(name);
   } catch {

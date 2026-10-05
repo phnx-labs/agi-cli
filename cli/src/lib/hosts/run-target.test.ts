@@ -6,12 +6,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Set HOME before state.ts loads so its module-level root picks up the override
-// (both the devices registry and the hosts providers resolve paths from it).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-target-test-'));
 process.env.HOME = TEST_HOME;
-// Redirect the device registry dir too (RUSH-2042): getDevicesDir() reads this at
-// call time, so it survives the module-cache race a plain HOME override loses.
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');
 
 const { resolveHostRunTarget, resolveHostSessionId, HostResolutionError } = await import('./run-target.js');
@@ -135,9 +131,6 @@ describe('resolveHostSessionId', () => {
 
 describe('resolveHostSessionId — run auto session-id forwarding (RUSH-2132)', () => {
   it('forwards an explicit id for a remote claude pick, but never mints one', () => {
-    // The harness is picked on the REMOTE — an explicit --session-id must cross
-    // so a claude pick adopts it, while a non-claude pick ignores it (and the
-    // dispatch keeps --emit-session-id armed because nothing was minted).
     expect(resolveHostSessionId('auto', undefined, 'fixed-id')).toBe('fixed-id');
     expect(resolveHostSessionId('auto')).toBeUndefined();
     expect(resolveHostSessionId('auto', 'resume-id', 'fixed-id')).toBeUndefined();

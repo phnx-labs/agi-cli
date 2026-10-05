@@ -30,7 +30,7 @@ describe('parseSshConfigHosts', () => {
 describe('parseKnownHosts', () => {
   it('extracts hostnames, skips hashed entries, strips [host]:port and comma lists', () => {
     const kh = [
-      '|1|abc123hashed=|def= ssh-ed25519 AAAA', // hashed → skipped
+      '|1|abc123hashed=|def= ssh-ed25519 AAAA',
       'yosemite-s1 ssh-ed25519 AAAA',
       '[mac-mini.local]:2222 ssh-rsa BBBB',
       'gh.example.com,140.82.1.2 ssh-ed25519 CCCC',
@@ -43,7 +43,6 @@ describe('parseKnownHosts', () => {
 
 describe('sshResolve target-injection guard', () => {
   it('refuses a dash-led name instead of passing it to `ssh -G` as a flag', () => {
-    // Must never spawn `ssh -G -oProxyCommand=…` — the guard short-circuits to undefined.
     expect(sshResolve('-oProxyCommand=evil')).toBeUndefined();
     expect(sshResolve('a;rm -rf /')).toBeUndefined();
   });

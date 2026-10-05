@@ -23,8 +23,6 @@ import {
 } from '../devices/interactive-host.js';
 import { localMachineId } from '../session/origin-machine.js';
 
-// Re-export so existing importers (tests, commands) keep their path; the class
-// itself lives in types.ts so providers can throw it without a circular import.
 export { DeviceOffloadUnsupportedError };
 
 const providers: Map<HostProviderId, HostProvider> = new Map();
@@ -59,7 +57,6 @@ interface ResolvedHost extends Host {
   adhoc?: boolean;
 }
 
-/** Split a `user@host` / `host` token into its login user (if any) and host part. */
 export function splitUserHost(token: string): { user?: string; host: string } {
   const at = token.indexOf('@');
   return at === -1 ? { host: token } : { user: token.slice(0, at), host: token.slice(at + 1) };
@@ -79,7 +76,6 @@ function matchDevice(host: string, reg: DeviceRegistry): DeviceProfile | undefin
   return reg[host] ?? Object.values(reg).find((d) => normalizeHost(d.name) === normalizeHost(host));
 }
 
-/** Tailscale's own presence bit for a device, when the sync captured one. */
 function deviceStatus(device: DeviceProfile): Host['status'] {
   if (!device.tailscale) return 'unknown';
   return device.tailscale.online ? 'online' : 'offline';
@@ -89,9 +85,7 @@ function deviceStatus(device: DeviceProfile): Host['status'] {
  * owns address, OS and presence so an enrolled route can't freeze; the overlay adds caps and an
  * OS hint. `dispatchable` follows the device's auth. */
 function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: HostEntry): ResolvedHost {
-  // Effective profile: the central config's ssh.*/platform keys overlay the
-  // discovery record, so an operator edit via `agents devices config` is
-  // honored at dispatch time.
+  // Live device identity owns address/auth/presence; overlays add capabilities and unknown-platform OS.
   const resolved = resolveDeviceProfile(device);
   const address = resolved.address.dnsName ?? resolved.address.ip;
   return {
@@ -110,9 +104,6 @@ function deviceHost(device: DeviceProfile, user: string | undefined, overlay?: H
   };
 }
 
-/** Build a Host from a bare overlay entry (inline or ssh-config), applying any
- * `user@` override. Inline/ssh-config hosts authenticate over key / ssh-config,
- * so they are dispatchable; presence is unknown without an explicit probe. */
 function overlayHost(name: string, entry: HostEntry, user?: string): ResolvedHost {
   return {
     name,
@@ -129,8 +120,6 @@ function overlayHost(name: string, entry: HostEntry, user?: string): ResolvedHos
   };
 }
 
-/** Synthesize an ad-hoc inline Host for a `user@host` / `host` literal so a box
- * that was never registered still dials. sshTargetFor emits `user@address`. */
 function literalHost(token: string, host: string, user?: string): ResolvedHost {
   return {
     name: token,
@@ -144,14 +133,11 @@ function literalHost(token: string, host: string, user?: string): ResolvedHost {
   };
 }
 
-/** Literal-fallback policy for {@link matchHost}. */
 export interface MatchHostOptions {
   /** Also treat an unmatched dotted/colon literal (raw IP or FQDN, no `user@`) as ad-hoc;
    * `agents ssh 1.2.3.4` sets this, dispatch and fan-out do not, so a bare unknown stays a miss
    * and cap routing and "Unknown device" remain reachable. */
   allowBareLiteral?: boolean;
-  /** Override the affinity pick for generic `auto` host resolution in tests.
-   * Harness-aware run/team placement resolves `auto` before reaching this core. */
   resolveAuto?: () => DeviceAffinityPlan;
 }
 
@@ -187,26 +173,17 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
   } catch {
     reg = {};
   }
-  // The effective host overlay is the cross-box union of every device doc's
-  // `hosts:` block (PHNX-3315), plus any lingering central-legacy entry.
   const overlay = { ...readMeta().hosts, ...unionDeviceHosts() }[host];
 
-  // 1. A registered device (normalized match) — its live address/OS/presence win.
   const device = matchDevice(host, reg);
   if (device) return deviceHost(device, user, overlay);
 
-  // 2. An agents.yaml overlay entry keyed by the host part (inline or ssh-config).
   if (overlay) return overlayHost(host, overlay, user);
 
-  // 3. A bare ssh_config alias Tailscale has never seen — dial by name (ssh
-  //    applies the stanza). A `user@alias` is handled as a literal below so the
-  //    `user@` reaches ssh, which overrides the stanza's User.
   if (!user && isSshConfigHost(host)) {
     return { name: host, provider: 'local', source: 'ssh-config', os: resolveRemoteOsSync(host), status: 'unknown', dispatchable: true };
   }
 
-  // 4. An ad-hoc literal target. `user@host` always; a bare IP/FQDN only when the
-  //    caller opted in (`agents ssh`). A bare unknown word is a miss (null).
   if (name.includes('@') || (opts.allowBareLiteral && looksLikeHostLiteral(name))) {
     assertValidSshTarget(name);
     return literalHost(name, host, user);
@@ -218,6 +195,7 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
  * and an overlay's caps coexist on one row (RUSH-1967: first-wins dedup dropped the device
  * row). Provider order still decides the base row (`local` first). */
 export async function listAllHosts(): Promise<Host[]> {
+  // Provider precedence preserves live device dispatchability when registrations collide.
   const byName = new Map<string, Host>();
   for (const provider of getAllProviders()) {
     for (const host of await provider.list()) {
@@ -262,8 +240,6 @@ export async function resolveHost(name: string): Promise<Host | null> {
 /** Resolve a host by capability tag (e.g. `--device gpu`): the single match, or throws on 0 or
  * >1 unless `any` is set (then the first). */
 export async function resolveHostByCap(cap: string, any = false): Promise<Host> {
-  // Non-dispatchable hosts (password-auth devices) are listed for honesty but
-  // must never be picked as a run target.
   const matches = (await listAllHosts()).filter((h) => h.caps?.includes(cap) && h.dispatchable !== false);
   if (matches.length === 0) throw new Error(`No host tagged "${cap}". See registered devices: agents devices list`);
   if (matches.length > 1 && !any) {

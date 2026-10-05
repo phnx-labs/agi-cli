@@ -12,15 +12,14 @@ import { deriveShortId } from '../text/short-id.js';
 import { normalizeHost } from '../machine-id.js';
 
 interface HostSessionContext {
-  /** Local directory the `agents run --device` was invoked from. */
   cwd: string;
-  /** Prompt the run was launched with, used for the session topic. */
   prompt: string;
 }
 
 /** Build the SessionMeta for a host-dispatched run; null when no session id was captured or the
  * agent isn't a known session agent. Pure, so it is unit-testable. */
 export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): SessionMeta | null {
+  // Synthetic rows have no local transcript path and stamp the remote execution owner as machine.
   const id = task.sessionId;
   if (!id) return null;
   if (!isSessionTrackedAgent(task.agent)) return null;
@@ -31,14 +30,9 @@ export function hostSessionMeta(task: HostTask, ctx: HostSessionContext): Sessio
     agent: task.agent as SessionAgentId,
     timestamp: task.createdAt,
     cwd: ctx.cwd,
-    // Remote transcript — no local file. Empty file_path is the sentinel the DB
-    // stale-filter treats as "always live" (see module doc).
     filePath: '',
     machine: normalizeHost(task.host),
     topic: ctx.prompt.split('\n')[0]?.slice(0, 120) || undefined,
-    // The run's `--name` seeds the label (resolves `agents sessions <name>` and
-    // `agents logs <name>`); an unnamed host run falls back to the
-    // `[host/<name>]` indicator, mirroring the cloud path's `[cloud/<status>]`.
     label: task.name || `[host/${task.host}]`,
   };
 }
@@ -51,7 +45,6 @@ export function registerHostSession(task: HostTask, ctx: HostSessionContext): vo
   try {
     upsertSession(meta, '');
   } catch {
-    /* index write is best-effort; the run is already live on the host */
   }
 }
 
@@ -64,7 +57,7 @@ export function captureRemoteSessionId(task: HostTask): HostTask | null {
   try {
     text = fs.readFileSync(localLogPath(task.id), 'utf8');
   } catch {
-    return null; // no local mirror (unfollowed run, or read raced the follow)
+    return null;
   }
   const captured = parseSessionIdMarker(text);
   if (!captured) return null;
@@ -84,6 +77,7 @@ interface InteractiveHostSessionContext {
  * remote log, exit file or HostTask; only the session id is needed so `agents sessions` can
  * show and resume it. */
 export function registerInteractiveHostSession(ctx: InteractiveHostSessionContext): void {
+  // Interactive TTY streams cannot be tapped; their identity is recovered through the launch-id join.
   if (!isSessionTrackedAgent(ctx.agent)) return;
   try {
     upsertSession(
@@ -100,6 +94,5 @@ export function registerInteractiveHostSession(ctx: InteractiveHostSessionContex
       '',
     );
   } catch {
-    /* index write is best-effort; the run is already live on the host */
   }
 }

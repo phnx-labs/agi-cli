@@ -51,15 +51,13 @@ function logForwardedArgs(
   );
 }
 
-// Use $HOME (not ~) so the path is correct whether or not it's quoted and
-// regardless of the run's cwd. Task ids are 8 hex chars, so these paths are
-// injection-safe to interpolate unquoted into remote commands.
 const REMOTE_DIR = '$HOME/.agents/.cache/hosts';
 
 /** Merge the actor's provenance env under a caller-supplied env so `AGENTS_ACTOR*` / `GIT_*`
  * cross the SSH hop; without it the remote mis-credits the run from the wrong SSH_CONNECTION
  * (RUSH-2028). Caller values win. */
 export function withActorEnv(env?: Record<string, string>): Record<string, string> {
+  // Provenance crosses the hop, with explicit caller overrides winning.
   return { ...actorEnv(resolveActor()), ...launchIdentityEnv(), ...(env ?? {}) };
 }
 
@@ -74,6 +72,7 @@ export function remoteRunShellPrelude(agent: string, extra: Record<string, strin
 /** The env every remote `agents run` carries across the SSH hop; rendered as POSIX exports, or
  * as `$env:` assignments for a Windows peer. */
 export function remoteRunEnv(agent: string, extra: Record<string, string> = {}): Record<string, string> {
+  // The remote CLI process receives the run-auto chain-hop guard before it launches an agent.
   const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
   return withActorEnv({ ...guard, ...extra });
 }
@@ -82,6 +81,7 @@ export function remoteRunEnv(agent: string, extra: Record<string, string> = {}):
  * (setsid), unlike `nohup … &`, so the group leader PID makes `kill(-pid)` reliably stop the
  * whole tree. */
 export function buildDetachedLaunchCommand(inner: string): string {
+  // The detached process-group leader is the stable handle used to stop the whole tree.
   const nodeScript = [
     "const { spawn } = require('node:child_process');",
     `const child = spawn('/bin/bash', ['-lc', ${JSON.stringify(inner)}], { detached: true, stdio: 'ignore' });`,
@@ -91,7 +91,6 @@ export function buildDetachedLaunchCommand(inner: string): string {
   return `bash -lc ${shellQuote(`node -e ${shellQuote(nodeScript)}`)}`;
 }
 
-/** Build the detached PowerShell launch protocol used by Windows SSH hosts. */
 export function buildWindowsDetachedLaunchCommand(opts: {
   forwardedArgs: string[];
   remoteCwd?: string;
@@ -128,7 +127,6 @@ export function buildWindowsDetachedLaunchCommand(opts: {
 
 export interface DispatchResult {
   task: HostTask;
-  /** Exit code when followed; undefined when detached (--no-follow). */
   exitCode?: number;
 }
 
@@ -150,7 +148,6 @@ function terminateRemoteLaunch(task: HostTask): void {
   }
 }
 
-/** Terminate a detached dispatch that its caller could not persist locally. */
 export function terminateDispatchedTask(task: HostTask): void {
   terminateRemoteLaunch(task);
   updateTask(task.id, terminalPatch(143));
@@ -160,11 +157,10 @@ export function terminateDispatchedTask(task: HostTask): void {
  * It prints SIGNALED (applied TERM/KILL, wrote 143), ALREADY + code (adopted existing `.exit`)
  * or GONE (wrote 143), and exits 1 if the group survives. */
 export function buildStopRemoteCommand(pid: number, remoteExit: string): string {
+  // Preserve an existing real exit code; write 143 only when the run has no terminal result.
   if (!Number.isInteger(pid) || pid <= 0) {
     throw new Error(`Invalid remote task pid: ${pid}`);
   }
-  // Only force-write 143 when we actually signaled a live group (or nothing
-  // left a code). Never `echo 143` over a real completed-run exit code.
   return (
     `if kill -TERM -- -${pid} 2>/dev/null; then ` +
       `sleep 1; kill -KILL -- -${pid} 2>/dev/null || true; ` +
@@ -217,28 +213,19 @@ export function stopDispatchedTask(task: HostTask): HostTask {
     const parsed = parseInt(line.slice('ALREADY '.length), 10);
     if (Number.isFinite(parsed)) code = parsed;
   }
-  // SIGNALED / GONE / ALREADY all end with a terminal local record.
   return updateTask(task.id, terminalPatch(code)) ?? { ...task, ...terminalPatch(code) };
 }
 
-/** Options shared by every detached dispatch. */
 interface LaunchOptions {
-  /** `agents …` args (command name first), each already un-quoted (we quote them). */
   forwardedArgs: string[];
   remoteCwd?: string;
-  /** `remoteCwd` was derived from the local cwd — mirror it, don't fail on it. */
   mirrorCwd?: boolean;
-  /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
-  /** Task-record labels for `agents devices ps`. */
   agentLabel: string;
   promptLabel: string;
-  /** Session id the run was launched with, persisted on the task record. */
   sessionId?: string;
-  /** Durable `--name` handle, persisted on the task record for name resolution. */
   name?: string;
-  /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
 }
 
@@ -265,8 +252,6 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   // a fresh connection; reusing an accept-new control socket would bypass the check (RUSH-1767).
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
 
-  // Outer: ensure dir, launch the login-shell wrapper as a new process-group
-  // leader, and print that leader PID.
   const launch = remoteShell === 'powershell'
     ? buildWindowsDetachedLaunchCommand({
         forwardedArgs: opts.forwardedArgs,
@@ -307,6 +292,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
   try {
     saveTask(task);
   } catch (err) {
+    // A remote launch without its local task record is unmanageable, so roll it back immediately.
     try {
       terminateRemoteLaunch(task);
     } catch (cleanupErr) {
@@ -331,9 +317,7 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
     extraSshArgs: hostIdentityArgs(host),
     remoteShell,
   });
-  // -1 = the follow window closed while the run continues on the host. Leave the
-  // record 'running' (do NOT freeze it terminal) so a later `agents devices ps` / `agents logs`
-  // reconcile against the remote `.exit` resolves the true final status.
+  // -1 means only that the follow window closed; the detached run remains active.
   const finished = exitCode === -1 ? task : (updateTask(id, terminalPatch(exitCode)) ?? task);
   return { task: finished, exitCode };
 }
@@ -341,43 +325,29 @@ async function launchDetached(host: Host, target: string, opts: LaunchOptions): 
 export interface DispatchOptions {
   agent: string;
   prompt: string;
-  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
-  /** Run strategy (e.g. "balanced") — the remote picks among ITS signed-in accounts. */
   strategy?: string;
-  /** Named provider account — the remote resolves it against ITS signed-in versions. */
   account?: string;
   balanced?: boolean;
   fallback?: string;
   mode?: string;
   model?: string;
-  /** Reasoning effort — forwarded unless 'auto' (the remote default). */
   effort?: string;
-  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
   env?: string[];
-  /** `--add-dir` grants, already made remote-portable. */
   addDir?: string[];
-  /** Agent wall-clock cap, forwarded as `--timeout <duration>` for the REMOTE to enforce. */
   timeout?: string;
-  /** Loop family — the loop driver runs on the host. */
   loop?: boolean;
   maxIterations?: string;
   budget?: string;
   until?: string;
   interval?: string;
-  /** Remote emits ndjson into its log; the local follow streams it verbatim. */
   json?: boolean;
   verbose?: boolean;
-  /** Skip the budget-confirm prompt — a detached remote run can't answer one. */
   yes?: boolean;
-  /** Route through the Agent Client Protocol. */
   acp?: boolean;
-  /** False forwards --no-auto-secrets (workflow secrets resolve on the REMOTE keychain). */
   autoSecrets?: boolean;
-  /** Native-CLI passthrough (everything after `--`), appended last. */
   passthroughArgs?: string[];
   remoteCwd?: string;
-  /** `remoteCwd` was derived from the local cwd — mirror it, don't fail on it. */
   mirrorCwd?: boolean;
   /** Force the remote run's new session to use this id (Claude only, via `--session-id`) so it
    * is resumable; exclusive with `resume`. */
@@ -385,16 +355,13 @@ export interface DispatchOptions {
   /** Durable `--name <slug>` handle, forwarded to the remote run and recorded locally for
    * `agents logs <name>` and `devices ps`. */
   name?: string;
-  /** Resume an existing session on the host by id (via `agents run --resume`). */
   resume?: string;
   /** Forward `--emit-session-id` so the remote prints its session id as a stdout sentinel the
    * launcher stamps on the task, mapping a remote-created session home for agents without
    * `--session-id`. */
   emitSessionId?: boolean;
-  /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
-  /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
 }
 
@@ -420,7 +387,6 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
   const args = ['run', agentArg, opts.prompt, '--quiet'];
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  // 'auto' is the remote default — forwarding it would only add noise.
   if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
   for (const kv of opts.env ?? []) args.push('--env', kv);
   for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
@@ -450,47 +416,31 @@ export function buildRunForwardedArgs(opts: DispatchOptions): string[] {
 
 export interface InteractiveDispatchOptions {
   agent: string;
-  /** Explicit agent version pin (e.g. "2.1.207") to forward as `agent@version`. */
   version?: string;
-  /** Preserve the trailing-# account picker so selection happens on the execution host. */
   accountPicker?: boolean;
-  /** Explicit run strategy (e.g. "balanced") to forward as `--strategy <strategy>`. */
   strategy?: string;
-  /** Named provider account to resolve on the remote host. */
   account?: string;
-  /** Optional prompt — forwarded only when the caller explicitly forced interactive mode. */
   prompt?: string;
   mode?: string;
   model?: string;
-  /** Reasoning effort to forward as `--effort <effort>`. */
   effort?: string;
-  /** Additional directories to grant, already made remote-portable. */
   addDir?: string[];
-  /** Stream events as JSON lines. */
   json?: boolean;
-  /** Show detailed execution logs. */
   verbose?: boolean;
-  /** Kill the agent after this duration, forwarded as `--timeout <duration>`. */
   timeout?: string;
-  /** Skip the interactive budget-confirm prompt. */
   yes?: boolean;
-  /** Route through the Agent Client Protocol. */
   acp?: boolean;
   remoteCwd?: string;
-  /** `remoteCwd` was derived from the local cwd — mirror it, don't fail on it. */
   mirrorCwd?: boolean;
   sessionId?: string;
   name?: string;
   resume?: string;
   passthroughArgs?: string[];
   raw?: boolean;
-  /** Forward `--interactive` to the remote so a prompt-bearing run still starts the TUI. */
   forceInteractive?: boolean;
-  /** `--env k=v` pairs, forwarded verbatim (the remote CLI parses them). */
   env?: string[];
   balanced?: boolean;
   fallback?: string;
-  /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
 }
 
@@ -506,7 +456,6 @@ export function buildInteractiveRunForwardedArgs(opts: InteractiveDispatchOption
   if (opts.forceInteractive) args.push('--interactive');
   if (opts.mode) args.push('--mode', opts.mode);
   if (opts.model) args.push('--model', opts.model);
-  // 'auto' is the remote default — forwarding it would only add noise.
   if (opts.effort && opts.effort !== 'auto') args.push('--effort', opts.effort);
   for (const kv of opts.env ?? []) args.push('--env', kv);
   for (const dir of opts.addDir ?? []) args.push('--add-dir', dir);
@@ -559,15 +508,11 @@ export function buildInteractiveRemoteCommand(remoteShell: ReturnType<typeof rem
  * transport. */
 export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatchOptions): Promise<number> {
   const target = sshTargetFor(host);
-  // Concrete version pins fail loud here (RUSH-2313) so we never open a TTY
-  // to a box that cannot run the pin.
   const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
   const remoteCmd = buildInteractiveRemoteCommand(remoteShellFor(host.os ?? resolveRemoteOsSync(host.name)), opts);
-  // Credentials ride this stream when --copy-creds is set: verify the host key
-  // strictly against the managed pin and force a fresh connection so a stale
-  // accept-new control socket can't bypass the check (RUSH-1767).
+  // Never reuse a multiplexed connection for a credential-carrying interactive hop.
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
   return sshStream(target, remoteCmd, {
     tty: process.stdin.isTTY,
@@ -580,11 +525,8 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   });
 }
 
-/** Dispatch an `agents run <agent> "<prompt>"` onto a host (the `run --device` path). */
 export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise<DispatchResult> {
   const target = sshTargetFor(host);
-  // Concrete agent@version pins fail loud before we print "Dispatched" and
-  // leave a dead remote log (RUSH-2313). Aliases stay remote-resolved.
   const { warnings } = ensureHostReady(host, { agent: opts.agent, version: opts.version });
   for (const w of warnings) process.stderr.write(`[hosts] warning: ${w}\n`);
 
@@ -597,15 +539,12 @@ export async function dispatchToHost(host: Host, opts: DispatchOptions): Promise
     agentLabel: opts.agent,
     promptLabel: opts.prompt,
     name: opts.name,
-    // On resume the remote session keeps its existing id; record that id so the
-    // task stays mapped to the same session.
     sessionId: opts.resume ?? opts.sessionId,
     copyCreds: opts.copyCreds,
   });
 }
 
 interface CommandDispatchOptions {
-  /** `agents …` args (command name first), already stripped of routing flags. */
   forwardedArgs: string[];
   remoteCwd?: string;
   follow?: boolean;

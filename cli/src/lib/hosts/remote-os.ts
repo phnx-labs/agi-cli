@@ -7,7 +7,6 @@ import { readDeviceConfigValues } from '../device-config.js';
 import { readMeta } from '../state.js';
 import { unionDeviceHosts } from '../devices/device-docs.js';
 
-/** Resolve the OS/platform string for a host name, or undefined if unknown. */
 export function resolveRemoteOsSync(name: string): string | undefined {
   try {
     const configured = readDeviceConfigValues(name).platform;
@@ -15,9 +14,6 @@ export function resolveRemoteOsSync(name: string): string | undefined {
     const platform = loadDevicesSync()[name]?.platform;
     if (platform && platform !== 'unknown') return platform;
   } catch {
-    // A corrupt/unreadable device registry must never break command building —
-    // fall through to the host overlay and ultimately the POSIX default.
   }
-  // Cross-box union of the device-scoped host overlays, central legacy as base.
   return ({ ...readMeta().hosts, ...unionDeviceHosts() }[name])?.os;
 }

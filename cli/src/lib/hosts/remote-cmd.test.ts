@@ -4,8 +4,6 @@ import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsComma
 import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 describe('stripClixml', () => {
-  // The exact banner + progress element a live win-mini (PowerShell 5.1) emits
-  // ahead of relayed output — the RUSH-2286 reproduction.
   const CLIXML_BANNER =
     '#< CLIXML\n' +
     '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
@@ -57,9 +55,6 @@ describe('stripClixml', () => {
   });
 });
 
-/** Decode the PowerShell script a Windows `--device` invocation ships, by pulling
- * the base64 payload off `powershell -NoProfile -EncodedCommand <b64>` and
- * reversing the UTF-16LE encoding — the exact bytes the remote PowerShell runs. */
 const decodeWindows = decodeRenderedPowershell;
 
 const SPECS: StripSpec[] = [...HOST_ROUTING_SPECS, { long: 'no-tty', takesValue: false }];
@@ -99,8 +94,6 @@ describe('stripRoutingFlags', () => {
   });
 
   it('drops --device and its value so it never leaks to the remote binary', () => {
-    // --device forwarded to the remote would re-trigger routing there.
-    // Both space and =value forms are stripped.
     expect(stripRoutingFlags(['message', 'abc', 'hi', '--device', 'yosemite-s0'], SPECS)).toEqual([
       'message',
       'abc',
@@ -157,7 +150,6 @@ describe('buildRemoteAgentsInvocation (two-layer quoting is injection-safe)', ()
   });
 
   it('prefixes a cd for --remote-cwd without leaking it into argv', () => {
-    // The shim's cwd change is observable only via the cd prefix; argv stays clean.
     expect(decodeRemoteArgv(['view'], '/tmp')).toEqual(['view']);
   });
 });
@@ -169,7 +161,6 @@ describe('secrets export --device push command (cross-platform)', () => {
   const importArgs = ['secrets', 'import', 'mybundle', '--from', '-'];
 
   it('POSIX target: bash -lc agents secrets import --from - (no /dev/stdin, no || true)', () => {
-    // The remote actually receives these exact argv entries (shim round-trip).
     expect(decodeRemoteArgv(importArgs)).toEqual(['secrets', 'import', 'mybundle', '--from', '-']);
     const cmd = buildRemoteAgentsInvocation(importArgs, undefined, 'linux');
     expect(cmd).toBe(`bash -lc 'agents secrets import mybundle --from -'`);
@@ -207,7 +198,6 @@ describe('powershellQuote', () => {
   it('wraps in single quotes and doubles embedded single quotes', () => {
     expect(powershellQuote('agents')).toBe("'agents'");
     expect(powershellQuote("it's")).toBe("'it''s'");
-    // `$()`, `;`, and spaces are all literal inside a single-quoted PS string.
     expect(powershellQuote('$(whoami); rm')).toBe("'$(whoami); rm'");
   });
 });
@@ -248,7 +238,6 @@ describe('buildRemoteAgentsInvocation — POSIX targets stay byte-identical', ()
  * script, which is multi-statement because the launcher resolves the peer's package entry at
  * runtime; pinning it verbatim would test prose, not the argv the parser receives. */
 function launcherArgs(script: string): string {
-  // Match the single-quoted literal, allowing PowerShell's doubled `''` escape.
   const m = /\$zi\.Arguments\s*=\s*\$zr\s*\+\s*'((?:[^']|'')*)'/.exec(script);
   if (!m) throw new Error(`no launcher Arguments in: ${script}`);
   return m[1]!.replace(/''/g, "'");
@@ -257,21 +246,15 @@ function launcherArgs(script: string): string {
 describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () => {
   it('emits powershell -EncodedCommand instead of bash -lc', () => {
     const cmd = buildRemoteAgentsInvocation(['view', 'claude'], undefined, 'windows');
-    // Either render route is a PowerShell command; `renderPowershellCommand` picks
-    // the shorter of `-EncodedCommand` and the deflated `-Command` bootstrap.
     expect(cmd.startsWith('powershell -NoProfile -')).toBe(true);
     expect(cmd).not.toContain('bash -lc');
     const script = decodeWindows(cmd);
     expect(launcherArgs(script)).toBe('view claude');
     expect(script.endsWith('exit $zq')).toBe(true);
-    // The npm `agents.ps1` shim is bypassed: it splats `$args` into native
-    // node.exe, which is where PowerShell 5.1 drops empty args and eats quotes.
     expect(script).not.toContain("& 'agents'");
   });
 
   it('suppresses CLIXML by silencing the progress stream (PowerShell 5.1 serializes it on a redirected pipe)', () => {
-    // Without this, a remote agents failure comes back as a raw `#< CLIXML <Objs …>`
-    // blob instead of a readable message — verified against a live win-mini.
     const script = decodeWindows(buildWindowsAgentsCommand({ args: ['doctor', '--json'] }));
     expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
   });
@@ -280,9 +263,6 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
     const cmd = buildRemoteAgentsInvocation(['view'], 'C:\\srv\\app', 'windows');
     const script = decodeWindows(cmd);
     expect(script).toContain("Set-Location -LiteralPath 'C:\\srv\\app'");
-    // `Set-Location` moves the SHELL's location without updating the .NET
-    // process's OS working directory, so the child needs it passed explicitly or
-    // `--remote-cwd` is silently ignored.
     expect(script).toMatch(/\$zi\.WorkingDirectory\s*=\s*\(Get-Location\)\.ProviderPath/);
     expect(launcherArgs(script)).toBe('view');
   });
@@ -290,8 +270,6 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
   it('neutralizes injection — metacharacters are literal inside single quotes', () => {
     const cmd = buildRemoteAgentsInvocation(['view', '$(whoami); rm -rf /', '--json'], undefined, 'windows');
     const script = decodeWindows(cmd);
-    // One Win32-quoted token, so the peer's argv parse yields it whole; nothing
-    // reaches a shell that could interpret `$(…)` or `;`.
     expect(launcherArgs(script)).toBe('view "$(whoami); rm -rf /" --json');
     expect(script).not.toContain('Invoke-Expression');
   });
@@ -323,7 +301,6 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
     const cmd = buildWindowsAgentsCommand({ args: ['--version'], propagateExit: false });
     const script = decodeWindows(cmd);
     expect(launcherArgs(script)).toBe('--version');
-    // No propagation appended, so a sentinel-based probe reads the output not the code.
     expect(script).not.toContain('exit $zq');
   });
 
@@ -338,16 +315,11 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
 describe('buildWindowsStdinImportCommand', () => {
   it('bridges ssh stdin through a temp file (never a hanging --from -)', () => {
     const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { force: true }));
-    // Silences the progress stream first, same CLIXML guard as windowsAgentsScript —
-    // this builder also runs `& agents …` and its stderr is shown to the user on failure.
     expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
-    // Reads the piped .env in PowerShell (the shim can't forward stdin to node).
     expect(script).toContain('[Console]::In.ReadToEnd()');
     expect(script).toContain('[System.IO.Path]::GetTempFileName()');
-    // Imports from the temp FILE, not stdin — a plain file read the shim handles.
     expect(script).toContain('agents secrets import \'linear.app\' --from $tmp --force');
     expect(script).not.toContain('--from -');
-    // Temp file is always cleaned up, and the import's exit code propagates.
     expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
     expect(script).toContain('exit $code');
   });
@@ -363,7 +335,6 @@ describe('buildWindowsStdinImportCommand', () => {
     expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
     expect(script).toContain('[Console]::In.ReadToEnd()');
     expect(script).toContain('[System.IO.Path]::GetTempFileName()');
-    // Runs the verb against the temp FILE, never a hanging `--from -`.
     expect(script).toContain('agents \'__usage-ingest\' --from $tmp');
     expect(script).not.toContain('--from -');
     expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
@@ -378,9 +349,6 @@ describe('buildWindowsStdinImportCommand', () => {
 
   it('creates + writes the temp file INSIDE the try so a crash still cleans it up (RUSH-1764)', () => {
     const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
-    // GetTempFileName + WriteAllText must sit after `try {`, so the finally's
-    // Remove-Item runs even if WriteAllText throws. The old code created the
-    // secret-bearing temp file BEFORE the try, leaking it on a mid-write crash.
     const tryIdx = script.indexOf('try {');
     const tmpIdx = script.indexOf('[System.IO.Path]::GetTempFileName()');
     const writeIdx = script.indexOf('[System.IO.File]::WriteAllText($tmp, $in)');
@@ -389,7 +357,6 @@ describe('buildWindowsStdinImportCommand', () => {
     expect(tmpIdx).toBeGreaterThan(tryIdx);
     expect(writeIdx).toBeGreaterThan(tmpIdx);
     expect(finallyIdx).toBeGreaterThan(writeIdx);
-    // The finally guards on $tmp so a GetTempFileName that itself throws is safe.
     expect(script).toContain('if ($tmp) { Remove-Item -LiteralPath $tmp -Force');
   });
 });
@@ -407,7 +374,6 @@ describe('posixEnvExports — actor values are shell-literal, PATH still expands
       { AGENTS_ACTOR_NAME: `$(touch ${marker})`, AGENTS_ACTOR_EMAIL: 'x@y.z' },
       'printf %s "$AGENTS_ACTOR_NAME"',
     );
-    // The payload survives verbatim as data, and the file was never created.
     expect(res.stdout).toBe(`$(touch ${marker})`);
     expect(spawnSync('test', ['-e', marker]).status).not.toBe(0);
   });
@@ -421,7 +387,6 @@ describe('posixEnvExports — actor values are shell-literal, PATH still expands
 
   it('still expands $HOME/$PATH for the PATH key so `agents` resolves on the remote', () => {
     const res = runExports({ PATH: '$HOME/.agents/.cache/shims:$PATH' }, 'printf %s "$PATH"');
-    // $HOME expanded (no literal "$HOME" left) and the shim dir is present.
     expect(res.stdout).toContain('/.agents/.cache/shims:');
     expect(res.stdout).not.toContain('$HOME');
   });
@@ -429,8 +394,6 @@ describe('posixEnvExports — actor values are shell-literal, PATH still expands
 
 describe('the Windows remote command stays well inside the peer length limit', () => {
   it('leaves real call-site payloads comfortably inside the ceiling', () => {
-    // These are the shapes the ten `buildWindowsAgentsCommand` callers actually
-    // emit; a regression that inflates the fixed script would show up here first.
     const sizes = [
       buildWindowsAgentsCommand({ args: ['feed', '--json'], env: { AGENTS_NO_FANOUT: '1' } }),
       buildWindowsAgentsCommand({ args: ['sessions', '--active', '--json'], env: { AGENTS_SESSIONS_LOCAL: '1', COLUMNS: '120' } }),
@@ -439,11 +402,7 @@ describe('the Windows remote command stays well inside the peer length limit', (
       buildWindowsAgentsCommand({ args: ['sessions', 'resume', '1234abcd-5678-90ef-1234-567890abcdef'], cwd: 'C:\\Users\\me\\src\\some\\deep\\project' }),
       buildWindowsAgentsCommand({ args: ['sessions', 'resume', 'x'.repeat(500)] }),
     ].map((c) => c.length);
-    // Bisected on a live peer: 2934 characters succeed, 3102 fail. Compression is
-    // what buys the headroom back — before it the heavy case was 3314 and failed
-    // with the peer's opaque `The command line is too long.`
     for (const size of sizes) expect(size).toBeLessThan(2934);
-    // A real margin, so a future addition cannot quietly exhaust it.
     expect(Math.max(...sizes)).toBeLessThan(2000);
   });
 });

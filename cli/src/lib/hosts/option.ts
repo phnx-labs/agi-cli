@@ -4,7 +4,6 @@
 
 import type { Command } from 'commander';
 
-/** Attach the standard `--device` flag family to a command and return it (chainable). */
 export function addHostOption(cmd: Command): Command {
   return cmd
     .option(

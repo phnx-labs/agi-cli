@@ -6,13 +6,12 @@ import { resolveHost } from './registry.js';
 import { sshTargetFor } from './types.js';
 import { isHostPinned } from '../devices/known-hosts.js';
 
-/** The host part of an ssh target (`user@host` -> `host`) for known_hosts matching. */
 function hostKeyLookupName(target: string): string {
   return target.split('@').pop() ?? target;
 }
 
-/** Refuse durable credential transfer until the destination SSH key is pinned. */
 export function assertCredentialTransportHostPinned(target: string, pinned = isHostPinned(hostKeyLookupName(target))): void {
+  // Durable credentials may cross the fleet boundary only after the destination key is pinned.
   if (pinned) return;
   throw new Error(
     `Refusing to transfer provider credentials to '${target}' before its SSH host key is pinned. ` +
@@ -23,6 +22,7 @@ export function assertCredentialTransportHostPinned(target: string, pinned = isH
 /** Resolve a `--device` value to an ssh target for a credential-carrying operation; a miss is
  * validated as a raw target. */
 export async function resolveHostSshTarget(nameOrAlias: string): Promise<string> {
+  // Resolve policy-owned device identity before accepting a literal SSH destination.
   const host = await resolveHost(nameOrAlias);
   if (host) return sshTargetFor(host);
   assertValidSshTarget(nameOrAlias);

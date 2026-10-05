@@ -30,8 +30,6 @@ export async function resolveHostRunTarget(name: string, opts: { any?: boolean }
       host = await resolveHostByCap(name, opts.any);
     } catch (e) {
       const msg = (e as Error).message ?? '';
-      // Ambiguity is a verdict, not a miss — surface it. "No host tagged"
-      // falls through to the generic unknown-host error below.
       if (msg.startsWith('Multiple hosts')) throw new HostResolutionError(msg);
     }
   }
@@ -42,26 +40,17 @@ export async function resolveHostRunTarget(name: string, opts: { any?: boolean }
 export interface HostPromptRun {
   agent: string;
   prompt: string;
-  /** Explicit agent version pin, forwarded as `agent@version`. */
   version?: string;
   mode?: string;
   model?: string;
-  /** Durable `--name <slug>` handle recorded on the task. */
   name?: string;
-  /** Resume an existing session on the host by concrete id. */
   resume?: string;
-  /** Explicit id for a new Claude session. */
   sessionId?: string;
-  /** Working directory on the host, already made remote-portable by the caller. */
   remoteCwd?: string;
-  /** `remoteCwd` was derived from the local cwd — mirror it, don't fail on it. */
   mirrorCwd?: boolean;
-  /** Stream progress and block until completion (default true). */
   follow?: boolean;
   timeoutMs?: number;
-  /** Local directory to record in the session index (defaults to process.cwd()). */
   cwd?: string;
-  /** Forwarded run options — see RUN_OPTION_FORWARDING in remote-cmd.ts. */
   effort?: string;
   env?: string[];
   addDir?: string[];
@@ -81,17 +70,13 @@ export interface HostPromptRun {
   acp?: boolean;
   autoSecrets?: boolean;
   passthroughArgs?: string[];
-  /** Copy runtime credentials to the host before the run and shred them after. */
   copyCreds?: HostCredentials;
 }
 
-/** Resolve the id the remote host will adopt for a fresh Claude session. */
 export function resolveHostSessionId(agent: string, resume?: string, sessionId?: string): string | undefined {
+  // Claude may adopt a forced id; other harnesses report the id coined by the remote runtime.
   if (resume) return undefined;
   if (agent === 'claude') return sessionId ?? randomUUID();
-  // `run auto`: the harness is picked on the REMOTE. Forward an explicit id so
-  // a claude pick adopts it — but never mint one: minting would suppress the
-  // --emit-session-id marker a non-claude pick needs to register its session.
   if (agent === 'auto') return sessionId;
   return undefined;
 }
@@ -140,8 +125,7 @@ export async function dispatchPromptToHost(host: Host, opts: HostPromptRun): Pro
     passthroughArgs: opts.passthroughArgs,
     copyCreds: opts.copyCreds,
   });
-  // Capture the remote-coined id from the followed log (non-Claude); harmlessly a
-  // no-op when the task already carries a forced/resumed id or no marker landed.
+  // Auto retains a supplied id; without one it captures the peer-emitted runtime id.
   const task = emitSessionId ? captureRemoteSessionId(result.task) ?? result.task : result.task;
   registerHostSession(task, { cwd: opts.cwd ?? process.cwd(), prompt: opts.prompt });
   return { ...result, task };
