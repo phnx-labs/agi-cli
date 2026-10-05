@@ -1,3 +1,4 @@
+// PATH opener stubs plus the local tripwire prevent launching the developer's desktop handler; absolute opener paths remain a separate class.
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 

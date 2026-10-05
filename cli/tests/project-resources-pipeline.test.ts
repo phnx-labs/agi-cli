@@ -1,3 +1,4 @@
+// Project resources remain listable but never enter prompt or execution surfaces without confirmation; project MCP/plugins are excluded from launch auto-enable.
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

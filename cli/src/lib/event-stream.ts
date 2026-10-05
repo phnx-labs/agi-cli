@@ -1,3 +1,4 @@
+// Unified reads merge operational and per-session activity stores; push bundle/activity filters before limits so rare matches are not truncated.
 import { query, type EventRecord, type EventType, type EventLevel, levelFor } from './feed/events.js';
 import { readActivityAsEventRecords } from './feed/activity.js';
 import { applyFamilies, type EventFamily } from './event-families.js';

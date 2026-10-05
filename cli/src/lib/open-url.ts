@@ -1,3 +1,4 @@
+// Opening follows configured viewer policy; detached spawn races spawn/error, and browser failure falls back visibly to the OS.
 import { spawn } from 'child_process';
 import * as path from 'path';
 import { pathToFileURL } from 'url';

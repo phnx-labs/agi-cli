@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Stay silent because stdout enters model context; read only non-TTY stdin, reject unparseable payloads and path-bearing session ids.
+# Atomically replace state/by-session metadata; persist mode/version only after the harness supplies its real id so native resume pins origin.
 
 set -euo pipefail
 

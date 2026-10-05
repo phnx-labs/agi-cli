@@ -1,3 +1,4 @@
+// Show only after successful interactive runs, never quiet/JSON/CI/opt-out; claim once with O_EXCL and never fail the completed run.
 
 import * as fs from 'fs';
 import * as path from 'path';

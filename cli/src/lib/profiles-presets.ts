@@ -1,3 +1,4 @@
+// OpenRouter reasoning presets can emit empty Claude headless output; headless-safe presets intentionally use non-reasoning variants.
 
 import type { AgentId } from './types.js';
 

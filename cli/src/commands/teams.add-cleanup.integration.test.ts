@@ -1,3 +1,5 @@
+// Failures occur after real worktree creation; same-name retry proves cleanup, while precondition rejection precedes creation.
+// Cleanup is gated by pre-existence so terminal teammates' retained dirty worktrees are never force-removed.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';

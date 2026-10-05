@@ -1,3 +1,4 @@
+// Hermes installation preserves sibling YAML keys; hook support is compile-time complete and requires both a native event and parser branch, with explicit unsupported reasons.
 
 import * as fs from 'fs';
 import * as os from 'os';

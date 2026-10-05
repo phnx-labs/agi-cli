@@ -1,3 +1,4 @@
+// Host-key overrides precede accept-new; timeouts bypass mux, escalate TERM→KILL without blocking, and terminal restoration opts into destructive stdin draining.
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';

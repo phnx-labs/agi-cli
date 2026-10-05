@@ -1,3 +1,4 @@
+// Session identity pins the first init id; command-shape assertions protect inherited agents-cli configuration.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'child_process';
 

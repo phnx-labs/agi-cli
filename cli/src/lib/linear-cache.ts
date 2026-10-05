@@ -1,3 +1,4 @@
+// Linear cache uses atomic filename-encoded per-key files; stale data survives request failure, and recorded rate-limit expiry is always future.
 
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';

@@ -1,3 +1,4 @@
+// Catalog scraping rejects bare cloud/prefix fragments, token matching cannot backtrack into shorter ids, and equal-priced distinct models remain separate.
 import { describe, it, expect } from 'vitest';
 import { isTierToken, tierizeModels, resolveTierMap, resolveTier, MODEL_TIERS, applyTierOverrides, type TierResolution } from './model-tiers.js';
 import { getModelCatalog, dropBareLegacyIds, scanClaudeCatalogIds, type ModelInfo } from './models.js';
