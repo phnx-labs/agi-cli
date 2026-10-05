@@ -287,7 +287,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   try {
     await sweepStaleInstallStaging(packageRoot);
     if (detectPackageManager(packageRoot) === 'bun') {
-      await installPackageWithBun(tarball);
+      await installPackageWithBun(tarball, deriveGlobalPrefix(packageRoot));
     } else {
       await installPackageIntoPrefix(tarball, deriveGlobalPrefix(packageRoot));
     }
