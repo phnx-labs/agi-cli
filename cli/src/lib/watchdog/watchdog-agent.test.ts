@@ -1,10 +1,3 @@
-/**
- * The watchdog agent decider — one call per tick over the whole idle set.
- *
- * The injectable `run` seam stands in for the `agents run --mode plan` subprocess,
- * so these assert the batching + parsing + safe-skip-on-failure contract without
- * shelling out.
- */
 import { describe, it, expect } from 'vitest';
 import { makeWatchdogAgentDecider } from './watchdog-agent.js';
 import type { WatchdogCandidate } from './watchdog.js';
@@ -27,7 +20,6 @@ describe('makeWatchdogAgentDecider', () => {
       );
     };
     const out = await makeWatchdogAgentDecider('claude', { run })([cand('A'), cand('B')]);
-    // ONE subprocess for the whole idle set, not one per candidate.
     expect(calls).toHaveLength(1);
     expect(calls[0].prompt).toContain('terminal A');
     expect(calls[0].prompt).toContain('terminal B');

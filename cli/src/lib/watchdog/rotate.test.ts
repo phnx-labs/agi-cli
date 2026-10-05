@@ -1,14 +1,3 @@
-/**
- * Tests for the watchdog rotate path (one-watchdog) — in-place rotation of a
- * rate-limited session onto a healthy account/harness in the SAME tab.
- *
- * Pure pieces (limit detection, reset parsing, exit-sequence table, launch
- * command, replay text) are asserted directly. The state machine is driven
- * through runWatchdogTick with real synthetic ActiveSession inputs and the
- * runner's injectable seams (rotateGate / tuiLiveFor / newSessionIdFor /
- * injectFn), per runner.test.ts's established pattern — no live terminal, no
- * real account probe.
- */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -38,20 +27,17 @@ import {
   type RotateState,
 } from './rotate.js';
 
-const NOW = 1_700_000_000_000; // 2023-11-14
-const STALE_AGO = NOW - 6 * 60_000; // 6m ago: past the 5m stall, before the 1h dormant window.
+const NOW = 1_700_000_000_000;
+const STALE_AGO = NOW - 6 * 60_000;
 
-/** Claude's weekly-limit line — the canonical hard-limit tail. */
 const LIMIT_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You\'ve hit your weekly limit · resets 7am"}]}}',
 ];
-/** A hard limit with an ISO reset the parser can pin exactly. */
 const LIMIT_TAIL_ISO = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"You\'ve hit your weekly limit · resets 2026-08-10T14:00:00.000Z"}]}}',
 ];
 const ISO_RESET_MS = Date.parse('2026-08-10T14:00:00.000Z');
 
-/** A tmux-addressable session (highest-precedence rail) whose activity is stale. */
 function tmuxSession(over: Partial<ActiveSession> = {}): ActiveSession {
   const provenance: SessionProvenance = {
     host: 'zion',
@@ -71,7 +57,6 @@ function tmuxSession(over: Partial<ActiveSession> = {}): ActiveSession {
   };
 }
 
-/** A Ghostty session with NO tmux — the resolver reports it un-addressable. */
 function ghosttySession(): ActiveSession {
   return {
     context: 'terminal',
@@ -91,12 +76,11 @@ beforeEach(() => {
   logPath = path.join(stateDir, 'watchdog.log');
 });
 afterEach(() => {
-  try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(stateDir, { recursive: true, force: true }); } catch {  }
 });
 
 interface InjectCall { target: InjectTarget; text: string; opts: { dryRun?: boolean; enter?: boolean } }
 
-/** A tick with the rotate seams wired: injects captured, decider tracked. */
 function rig(over: Partial<WatchdogTickOptions> = {}) {
   const calls: InjectCall[] = [];
   let deciderCalled = false;
@@ -144,7 +128,6 @@ function readSkipLedger(): Record<string, number> {
   try { return JSON.parse(fs.readFileSync(path.join(stateDir, 'rotate-skips.json'), 'utf8')); } catch { return {}; }
 }
 
-// --- pure: detection ----------------------------------------------------------
 
 describe('classifyTailForRotate', () => {
   it('detects claude\'s weekly-limit form and parses the time-of-day reset', () => {
@@ -190,7 +173,6 @@ describe('parseRotateResetMs', () => {
   });
 });
 
-// --- pure: exit sequence table (ported from factory prewarm.ts PREWARM_CONFIGS) ---
 
 describe('exitSequenceFor (per-harness table)', () => {
   it('claude: Esc, Ctrl+C, Ctrl+C', () => {
@@ -207,7 +189,6 @@ describe('exitSequenceFor (per-harness table)', () => {
   });
 });
 
-// --- pure: launch command + replay text ---------------------------------------
 
 describe('buildRotateLaunchCommand', () => {
   it('local terminal: run auto + session id, no --device', () => {
@@ -231,7 +212,6 @@ describe('buildRotateReplayText', () => {
   });
 });
 
-// --- runner: limit tail routes to ROTATE, not nudge -----------------------------
 
 describe('runWatchdogTick — limit tail rotates instead of nudging', () => {
   it('injects the exit sequence + run auto relaunch into the resolved rail; never nudges, never consults the brain', async () => {
@@ -247,10 +227,8 @@ describe('runWatchdogTick — limit tail rotates instead of nudging', () => {
     expect(o.rail).toBe('tmux');
     expect(o.addressable).toBe(true);
     expect(result.counts.rotating).toBe(1);
-    // The brain and the nudge ledger are untouched.
     expect(wasDeciderCalled()).toBe(false);
     expect(readNudgeLedger()['sess-tmux']).toBeUndefined();
-    // claude exit sequence as RAW BYTES (enter: false), then the relaunch.
     expect(calls.map((c) => c.text)).toEqual([
       '\x1b', '\x03', '\x03',
       'agents run auto --interactive --session-id new-sess-1',
@@ -258,12 +236,10 @@ describe('runWatchdogTick — limit tail rotates instead of nudging', () => {
     expect(calls[0].opts.enter).toBe(false);
     expect(calls[3].opts.enter).toBeUndefined();
     expect(calls.every((c) => (c.target as { backend: string }).backend === 'tmux')).toBe(true);
-    // State machine persisted at rotate/<sessionId>.json.
     const state = readRotateState(stateDir, 'sess-tmux');
     expect(state?.phase).toBe('awaiting-tui');
     expect(state?.newSessionId).toBe('new-sess-1');
     expect(state?.deadlineMs).toBe(NOW + 60_000);
-    // A rotate start event hit the shared log.
     expect(readLogEvents().some((e) => e.kind === 'rotate' && e.message.includes('rotating sess-tmux'))).toBe(true);
   });
 
@@ -298,7 +274,6 @@ describe('runWatchdogTick — limit tail rotates instead of nudging', () => {
   });
 });
 
-// --- runner: zero-healthy gate --------------------------------------------------
 
 describe('runWatchdogTick — zero healthy accounts', () => {
   const zeroHealthy = { healthy: false as const, detail: "agents: no healthy harness for 'run auto'" };
@@ -312,14 +287,12 @@ describe('runWatchdogTick — zero healthy accounts', () => {
     const first = await run();
     expect(first.outcomes[0].decision).toBe('skip');
     expect(first.outcomes[0].reason).toMatch(/no healthy/i);
-    expect(calls).toHaveLength(0); // terminal untouched
+    expect(calls).toHaveLength(0);
     expect(readRotateState(stateDir, 'sess-tmux')).toBeNull();
-    // Cooldown came from the gate's earliestResetAcross.
     expect(readSkipLedger()['sess-tmux']).toBe(NOW + 3_600_000);
     const skipsAfterFirst = readLogEvents().filter((e) => e.kind === 'rotate' && e.message.includes('rotate skipped'));
     expect(skipsAfterFirst).toHaveLength(1);
 
-    // A second tick inside the window: suppressed — no new event, still untouched.
     const second = await run();
     expect(second.outcomes[0].decision).toBe('skip');
     const skipsAfterSecond = readLogEvents().filter((e) => e.kind === 'rotate' && e.message.includes('rotate skipped'));
@@ -331,12 +304,11 @@ describe('runWatchdogTick — zero healthy accounts', () => {
     const { run } = rig({
       sessions: [tmuxSession()],
       tailFor: () => LIMIT_TAIL_ISO,
-      rotateGate: async () => zeroHealthy, // no resetsAtMs
+      rotateGate: async () => zeroHealthy,
     });
     await run();
     expect(readSkipLedger()['sess-tmux']).toBe(ISO_RESET_MS);
 
-    // No reset anywhere → 30m default.
     const { run: run2 } = rig({
       sessions: [tmuxSession({ sessionId: 'sess-b' })],
       tailFor: () => ['usage limit reached'],
@@ -347,7 +319,6 @@ describe('runWatchdogTick — zero healthy accounts', () => {
   });
 });
 
-// --- runner: the state machine across ticks --------------------------------------
 
 describe('runWatchdogTick — rotate state machine', () => {
   it('happy path: begin → (old session drops out) → sweep replays → done', async () => {
@@ -355,13 +326,11 @@ describe('runWatchdogTick — rotate state machine', () => {
       sessions: [tmuxSession()],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // tick 1: exiting → launching → awaiting-tui
+    await run();
     expect(calls).toHaveLength(4);
 
-    // Tick 2: the old session is GONE from the active list (the exit sequence
-    // killed it); the sweep advances the persisted machine. The new TUI is live.
     const result2 = await run({ sessions: [], tuiLiveFor: () => true });
-    expect(result2.outcomes).toHaveLength(0); // sweep-advanced sessions carry no outcome row
+    expect(result2.outcomes).toHaveLength(0);
     expect(calls).toHaveLength(5);
     const replay = calls[4];
     expect(replay.text).toContain('Resume previous work by loading session sess-tmux');
@@ -377,17 +346,14 @@ describe('runWatchdogTick — rotate state machine', () => {
       sessions: [tmuxSession()],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // begin — 4 calls (exit trio + launch)
+    await run();
     const callsAfterBegin = calls.length;
 
-    // Tick 2 past the 60s readiness deadline, TUI never came live.
     await run({ sessions: [], nowMs: NOW + 61_000, tuiLiveFor: () => false });
-    expect(calls).toHaveLength(callsAfterBegin); // NO blind replay
+    expect(calls).toHaveLength(callsAfterBegin);
     const state = readRotateState(stateDir, 'sess-tmux');
     expect(state?.phase).toBe('failed');
     expect(state?.error).toMatch(/not live within the readiness budget/i);
-    // The flag tells the user the terminal may sit at a BARE SHELL and names
-    // the manual recovery — nothing recovers it automatically.
     const flag = readFlags()['sess-tmux'];
     expect(flag.reason).toMatch(/rotate failed/i);
     expect(flag.reason).toMatch(/bare shell/i);
@@ -401,15 +367,13 @@ describe('runWatchdogTick — rotate state machine', () => {
       sessions: [tmuxSession()],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // begin
-    // Tick 2: old session somehow still listed (and stalled) — the machine
-    // advances in-loop rather than falling through to the nudge path.
+    await run();
     const result2 = await run({ sessions: [tmuxSession()], tuiLiveFor: () => true });
     const o = result2.outcomes[0];
     expect(o.decision).toBe('rotate');
     expect(o.rotatePhase).toBe('done');
     expect(wasDeciderCalled()).toBe(false);
-    expect(calls).toHaveLength(5); // the replay
+    expect(calls).toHaveLength(5);
   });
 
   it('a dry tick never delivers the replay (machine holds, no inject)', async () => {
@@ -417,11 +381,10 @@ describe('runWatchdogTick — rotate state machine', () => {
       sessions: [tmuxSession()],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // begin (nudge: true via rig default)
+    await run();
     const callsAfterBegin = calls.length;
     await run({ sessions: [], nudge: false, tuiLiveFor: () => true });
     expect(calls).toHaveLength(callsAfterBegin);
-    // Held at replaying — ready, but the dry tick may not inject.
     expect(readRotateState(stateDir, 'sess-tmux')?.phase).toBe('replaying');
   });
 
@@ -444,7 +407,6 @@ describe('runWatchdogTick — rotate state machine', () => {
   });
 });
 
-// --- runner: config off ----------------------------------------------------------
 
 describe('runWatchdogTick — watchdog.rotate: off', () => {
   it('a limit tail falls through to the normal nudge path; the gate is never consulted', async () => {
@@ -458,19 +420,13 @@ describe('runWatchdogTick — watchdog.rotate: off', () => {
     const result = await run();
     expect(gateCalled).toBe(false);
     expect(readRotateState(stateDir, 'sess-tmux')).toBeNull();
-    // The brain decided skip (synthetic decider) — crucially NOT a rotate outcome.
     expect(result.outcomes[0].decision).toBe('skip');
     expect(result.outcomes[0].reason).toBe('synthetic decider');
-    // The synthetic decider returns nudge:false → needsHuman. The session is
-    // tmux-addressable, so the ONE inject is the self-file reminder (NOT a rotate
-    // keystroke sequence). That the single call is the reminder — not the two-write
-    // rotate exit+relaunch — is the "not a rotate outcome" proof this test cares about.
     expect(calls).toHaveLength(1);
     expect(calls[0].text).toMatch(/agents feed post/i);
   });
 });
 
-// --- state file round-trip --------------------------------------------------------
 
 describe('rotate state persistence', () => {
   it('writeRotateState → readRotateState round-trips (target survives JSON)', () => {
@@ -491,7 +447,6 @@ describe('rotate state persistence', () => {
   });
 });
 
-// --- readiness fallback correlation (review: never trip on an unrelated fresh session) ---
 
 function freshState(over: Partial<RotateState> = {}): RotateState {
   return {
@@ -509,7 +464,6 @@ function freshState(over: Partial<RotateState> = {}): RotateState {
   };
 }
 
-/** A fresh active session (started after the rotate began). */
 function freshSession(over: Partial<ActiveSession> = {}): ActiveSession {
   return {
     context: 'terminal',
@@ -563,8 +517,6 @@ describe('isCorrelatedRelaunch — the readiness fallback is correlated', () => 
 
 describe('defaultTuiLiveFor — transcript probe primary, correlated fallback', () => {
   it('an unrelated fresh session (other cwd) with no transcript does NOT trip readiness', () => {
-    // No transcript for new-sess-1 exists on disk, so only the fallback could
-    // fire — and it must not, for an uncorrelated session.
     expect(defaultTuiLiveFor(freshState(), [freshSession({ cwd: '/repo/b' })])).toBe(false);
   });
 
@@ -575,24 +527,21 @@ describe('defaultTuiLiveFor — transcript probe primary, correlated fallback', 
 
 describe('runWatchdogTick — readiness correlation through the sweep (default probe)', () => {
   it('an unrelated fresh session on another cwd does NOT trip readiness; the rotate deadline-fails without typing', async () => {
-    // NOTE: no tuiLiveFor seam — the tick runs the REAL default probe.
     const { run, calls } = rig({
       sessions: [tmuxSession({ cwd: '/repo/a' })],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // tick 1: begin (stores cwd /repo/a + host zion)
+    await run();
     expect(calls).toHaveLength(4);
 
-    // Tick 2: an UNRELATED fresh session (other cwd) appeared — readiness holds.
     const r2 = await run({
       sessions: [tmuxSession({ sessionId: 'sess-other', cwd: '/repo/b', startedAtMs: NOW + 5_000 })],
       nowMs: NOW + 10_000,
     });
     expect(readRotateState(stateDir, 'sess-tmux')?.phase).toBe('awaiting-tui');
-    expect(calls).toHaveLength(4); // no replay typed
+    expect(calls).toHaveLength(4);
     expect(r2.outcomes.every((o) => o.decision !== 'rotate' || o.sessionId !== 'sess-tmux')).toBe(true);
 
-    // Tick 3 past the deadline: failed — the unrelated session never satisfied readiness.
     await run({
       sessions: [tmuxSession({ sessionId: 'sess-other', cwd: '/repo/b', startedAtMs: NOW + 5_000 })],
       nowMs: NOW + 61_000,
@@ -606,10 +555,9 @@ describe('runWatchdogTick — readiness correlation through the sweep (default p
       sessions: [tmuxSession({ cwd: '/repo/a' })],
       tailFor: () => LIMIT_TAIL,
     });
-    await run(); // begin
+    await run();
     expect(calls).toHaveLength(4);
 
-    // Tick 2: the relaunch shows up as a fresh session in the same cwd + host.
     await run({
       sessions: [tmuxSession({ sessionId: 'sess-new', cwd: '/repo/a', startedAtMs: NOW + 5_000 })],
       nowMs: NOW + 10_000,
@@ -620,7 +568,6 @@ describe('runWatchdogTick — readiness correlation through the sweep (default p
   });
 });
 
-// --- runner: gate throw degrades to skip + error event ---------------------------
 
 describe('runWatchdogTick — rotate gate throw', () => {
   it('a throwing gate skips the session, records an error event, and the tick completes', async () => {
@@ -637,13 +584,11 @@ describe('runWatchdogTick — rotate gate throw', () => {
     expect(calls).toHaveLength(0);
     expect(readRotateState(stateDir, 'sess-tmux')).toBeNull();
     expect(readLogEvents().some((e) => e.kind === 'error' && e.message.includes('rotate gate failed: usage cache blew up'))).toBe(true);
-    // The tick completed: last-tick.json was persisted (a throw here would skip it).
     const lastTick = JSON.parse(fs.readFileSync(path.join(stateDir, 'last-tick.json'), 'utf8'));
     expect(lastTick.counts.total).toBe(1);
   });
 });
 
-// --- runner: failed-rotate retry cooldown ----------------------------------------
 
 describe('runWatchdogTick — failed rotate is suppressed, then retried', () => {
   it('a failed rotate suppresses re-begin for 15m and retries after', async () => {
@@ -653,17 +598,15 @@ describe('runWatchdogTick — failed rotate is suppressed, then retried', () => 
       tailFor: () => LIMIT_TAIL,
       rotateGate: async () => { gateCalls++; return { healthy: true, detail: 'picked claude' }; },
     });
-    await run(); // tick 1: begin (4 injects)
+    await run();
     expect(calls).toHaveLength(4);
 
-    // Tick 2 past the readiness deadline → failed, suppression recorded.
     const failedAt = NOW + 61_000;
     await run({ sessions: [], nowMs: failedAt, tuiLiveFor: () => false });
     const failed = readRotateState(stateDir, 'sess-tmux');
     expect(failed?.phase).toBe('failed');
     expect(failed?.suppressUntilMs).toBe(failedAt + DEFAULT_ROTATE_FAILED_COOLDOWN_MS);
 
-    // Tick 3 inside the cooldown: suppressed — no gate call, no injects, no churn.
     const r3 = await run({ sessions: [tmuxSession()], nowMs: failedAt + 60_000, tuiLiveFor: () => false });
     expect(r3.outcomes[0].decision).toBe('skip');
     expect(r3.outcomes[0].rotatePhase).toBe('failed');
@@ -671,7 +614,6 @@ describe('runWatchdogTick — failed rotate is suppressed, then retried', () => 
     expect(gateCalls).toBe(1);
     expect(calls).toHaveLength(4);
 
-    // Tick 4 after the cooldown: the rotate re-begins (gate + exit sequence again).
     const r4 = await run({ sessions: [tmuxSession()], nowMs: failedAt + 16 * 60_000, tuiLiveFor: () => false });
     expect(r4.outcomes[0].decision).toBe('rotate');
     expect(gateCalls).toBe(2);
@@ -679,13 +621,9 @@ describe('runWatchdogTick — failed rotate is suppressed, then retried', () => 
   });
 });
 
-// --- command: agents watchdog rotate on|off ----------------------------------------
 
 describe('agents watchdog rotate on|off (subcommand)', () => {
   it('persists watchdog.rotate to agents.yaml via the real meta writer', async () => {
-    // state.ts resolves HOME at import time, so point it at a tmpdir and
-    // re-import the command + lib modules fresh (the state.test.ts pattern) —
-    // the real readMeta/writeMeta partition runs against real files.
     const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-rotate-cmd-'));
     const oldHome = process.env.HOME;
     const oldExitCode = process.exitCode;

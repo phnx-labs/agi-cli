@@ -1,18 +1,10 @@
-// Watchdog: pure logic for detecting stalled agent terminals and rendering the
-// prompt that the watchdog AGENT reads to decide idle-vs-unfinished and craft a
-// nudge. There is deliberately no heuristic decider here (no regex over the tail
-// guessing "done" vs "stuck") — that judgment is the agent's job. This module
-// only classifies idleness by timestamp and renders/parses the agent's I/O, so
-// it reads no files and touches no host APIs and can be unit-tested in isolation.
 
 export interface WatchdogCandidate {
   terminalId: string;
   agentType: 'claude' | 'codex';
   tailLines: string[];
   stalledForMs: number;
-  /** The originating task / first prompt / topic — so the agent can judge "was given a task but hasn't finished it". */
   task?: string;
-  /** Working directory of the session, for context. */
   cwd?: string;
 }
 
@@ -21,11 +13,6 @@ export interface Decision {
   action: 'nudge' | 'skip';
   text: string;
   reason: string;
-  /**
-   * Set by the agent on a SKIP to distinguish "genuinely needs the human"
-   * (true → surface it) from "the task is actually done" (false/absent → leave
-   * it alone, do not poke). `done` is a distinct terminal state from `idle`.
-   */
   needsHuman?: boolean;
 }
 
@@ -104,9 +91,6 @@ Respond with ONLY a JSON array (no prose, no code fence). Include "needsHuman" o
 skip:
 [{"terminalId":"<id>","action":"nudge"|"skip","text":"<message or empty>","reason":"<brief>","needsHuman":true|false}]`;
 
-// User-editable playbook appended below the built-in prompt. The user maintains
-// the source at ~/.agents/playbooks/watchdog.md (read by the delivery layer);
-// this function is pure so it can be tested without filesystem access.
 export function composePromptWithPlaybook(basePrompt: string, playbook: string): string {
   const trimmed = playbook.trim();
   if (!trimmed) return basePrompt;
@@ -153,7 +137,6 @@ export function parseWatchdogResponse(stdout: string): Decision[] {
     const text = typeof obj.text === 'string' ? obj.text : '';
     const reason = typeof obj.reason === 'string' ? obj.reason : '';
     if (!terminalId || !action) continue;
-    // needsHuman only meaningful on a skip; a nudge is never "needs human".
     const needsHuman = action === 'skip' && obj.needsHuman === true ? true
       : action === 'skip' && obj.needsHuman === false ? false
       : undefined;

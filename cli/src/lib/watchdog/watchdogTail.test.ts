@@ -63,7 +63,6 @@ describe('summarizeWatchdogTail (resilience)', () => {
       JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: '<local-command-stdout>blah</local-command-stdout>' }] } }),
       JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: '<system-reminder>noise</system-reminder>' }] } }),
     ];
-    // Walks from the end; the synthetic ones should be skipped so the human prompt surfaces.
     expect(summarizeWatchdogTail(tail, 'claude').lastUserMessage).toBe('real human prompt');
   });
 

@@ -19,7 +19,6 @@ interface WatchdogHistoryOptions {
   nowMs?: number;
 }
 
-/** Select newest history and deliberately remove raw transcript tailLines. */
 export function selectWatchdogHistory(
   events: WatchdogEvent[],
   options: WatchdogHistoryOptions = {},
@@ -59,8 +58,6 @@ export function selectWatchdogHistory(
     .sort((a, b) => b.ts - a.ts);
   if (matching.length <= limit) return matching;
 
-  // A busy tick can contain more inspections than the display limit. Keep the
-  // newest timeline, but reserve one row for the newest real action.
   const newest = matching.slice(0, limit);
   if (newest.some((entry) => entry.kind !== 'inspection')) return newest;
   const newestAction = matching.find((entry) => entry.kind !== 'inspection');

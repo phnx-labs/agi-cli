@@ -11,9 +11,7 @@ describe('readTailLines', () => {
   it('returns the last N non-empty JSONL lines of a real transcript', () => {
     const lines = readTailLines(FIXTURE, 2);
     expect(lines).toHaveLength(2);
-    // Last line of the fixture is the assistant promise.
     expect(lines[1]).toContain('I will write the module and run the tests next.');
-    // Second-to-last is the tool_result user turn.
     expect(lines[0]).toContain('tool_result');
   });
 
@@ -31,7 +29,7 @@ describe('readTailLines', () => {
     let dir: string;
     let empty: string;
     let big: string;
-    const BIG_LINES = 5000; // guarantees the read spans multiple 64KB chunks
+    const BIG_LINES = 5000;
 
     beforeAll(() => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-read-'));
@@ -56,7 +54,6 @@ describe('readTailLines', () => {
     it('reads the true tail across chunk boundaries, not a mid-chunk slice', () => {
       const lines = readTailLines(big, 20);
       expect(lines).toHaveLength(20);
-      // The very last row must be present and parseable (no partial-line corruption).
       const last = JSON.parse(lines[lines.length - 1]);
       expect(last.seq).toBe(BIG_LINES - 1);
       const first = JSON.parse(lines[0]);
@@ -71,7 +68,6 @@ describe('findSessionJsonlIn', () => {
 
   beforeAll(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-resolve-'));
-    // Mimic the Claude layout: projects/<enc>/<sessionId>.jsonl
     const proj = path.join(root, 'projects', '-home-user-repo');
     fs.mkdirSync(proj, { recursive: true });
     fs.writeFileSync(path.join(proj, `${sessionId}.jsonl`), '{}\n');
@@ -99,9 +95,6 @@ describe('findSessionJsonlIn', () => {
   });
 
   it('finds a Codex rollout in a DEEP date partition (sessions/YYYY/MM/DD/)', () => {
-    // Real Codex layout is 3 levels deep — the sessions root is passed, not the
-    // leaf. A one-level scan (the pre-fix bug) descends into `2026/` and stops,
-    // never reaching the `.jsonl`, so this fixture returns [] against the old code.
     const deepSid = 'deadbeef-1111-2222-3333-444455556666';
     const sessionsRoot = path.join(root, 'sessions-deep');
     const partition = path.join(sessionsRoot, '2026', '05', '27');
