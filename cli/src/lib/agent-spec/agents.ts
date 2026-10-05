@@ -1393,46 +1393,16 @@ function museAuthEmail(value: unknown, depth = 0): string | null {
   return null;
 }
 
-/**
- * Whether a Claude version home's credential file is present but carries no
- * token — the "must have a real credential" floor (see
- * `isValidOpenCodeCredential`) applied to claude.
- *
- * A FAILED OAuth refresh leaves exactly this state behind: Claude Code rewrites
- * `.claude/.credentials.json` with `accessToken: ""`, `refreshToken: ""` and
- * `expiresAt: 0`, keeping only the descriptive fields (`subscriptionType`,
- * `rateLimitTier`, `refreshTokenExpiresAt`). Everything we derive from
- * `.claude.json` — email, plan — still looks healthy, so the install reported
- * `signedIn: true`, `agents view` drew usage bars for it, and balanced rotation
- * (whose `authValid` is just "email present") kept picking it — every pick dying
- * at spawn on "OAuth session expired and could not be refreshed".
- *
- * Only decidable off macOS: there the login Keychain is the canonical store and
- * this file is not authoritative, and probing the Keychain would raise an
- * authorization sheet per installed version on every `agents run` — the reason
- * rotation stopped calling `isClaudeAuthValid` at all. Off macOS the file IS the
- * only store, so a missing or token-less file is proof of signed-out — unless a
- * Linux setup-token (`.claude/.oauth_token`) is present, which the shim exports
- * as `CLAUDE_CODE_OAUTH_TOKEN` and can authenticate the run without
- * `.credentials.json`. `platform` is a parameter so both branches are testable
- * on any host.
- *
- * Sync, no Keychain, no network — safe on the `agents run` hot path.
- */
 export function isClaudeCredentialFileBlank(
   base: string,
   platform: NodeJS.Platform = process.platform
 ): boolean {
+  // macOS uses Keychain; on Linux absence means logged out while corrupt data fails open.
   if (platform === 'darwin') return false;
-  // A per-version setup-token is a real credential on Linux even when
-  // `.credentials.json` was never written (the shim's `$CLAUDE_CONFIG_DIR/.oauth_token`
-  // fallback). Treat it as signed-in so rotation does not skip a worker that
-  // authenticates from an attached setup-token.
   try {
     const token = fs.readFileSync(path.join(base, '.claude', '.oauth_token'), 'utf-8').trim();
     if (token.length > 0) return false;
   } catch {
-    /* absent — fall through to the credentials.json floor */
   }
   try {
     const raw = fs.readFileSync(path.join(base, '.claude', '.credentials.json'), 'utf-8');
@@ -1443,11 +1413,6 @@ export function isClaudeCredentialFileBlank(
     const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
     return !nonEmpty(oauth.accessToken) && !nonEmpty(oauth.refreshToken);
   } catch (err) {
-    // Off macOS the file IS the store. Missing it means this home cannot
-    // authenticate (a newly installed default with leftover `.claude.json`
-    // oauthAccount is the PHNX-2685 false-healthy case). A corrupt file is
-    // not positive evidence of a blank credential — leave the existing
-    // signal alone rather than declaring a working install signed out.
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true;
     return false;
   }
@@ -1470,38 +1435,20 @@ export interface ClaudeHomeIdentity {
   organizationId: string | null;
   organizationName: string | null;
   organizationType: string | null;
-  /**
-   * Org-scoped identity — the rate-limit bucket, and the correct key to group by.
-   * Two orgs under one email (a Team seat and a personal Max plan) are separate
-   * buckets and MUST stay distinct; see `candidateIdentity` in lib/rotate.ts.
-   */
   usageKey: string | null;
-  /** Account+org identity, narrower than `usageKey`. */
   accountKey: string | null;
 }
 
-/** A version home's `.claude.json` plus the identity derived from it. */
 interface ClaudeHomeConfig {
-  /** The config file actually read. */
   path: string;
   config: Record<string, any>;
   identity: ClaudeHomeIdentity;
 }
 
-/**
- * Read a Claude home's config and account identity. Returns null when the home has
- * no readable `.claude.json`, or has one with no `oauthAccount` (never signed in).
- *
- * Sync because the session scanner calls it once per home on a hot path, and the
- * file is a few KB of local JSON. No Keychain access — see `getAccountInfo`.
- */
 export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
-  // Claude reads/writes config at $CLAUDE_CONFIG_DIR/.claude.json when set, falling
-  // back to $HOME/.claude.json. Our shim sets CLAUDE_CONFIG_DIR to the per-version
-  // .claude dir, so prefer that file; fall back to home-level for versions ever
-  // launched without the shim (IDE extension, direct binary).
   const configDirFile = path.join(base, '.claude', '.claude.json');
   const homeLevelFile = path.join(base, '.claude.json');
+  // Version-home config takes precedence over the legacy home-level file.
   const activeFile = fs.existsSync(configDirFile) ? configDirFile : homeLevelFile;
 
   let config: Record<string, any>;
@@ -1518,15 +1465,8 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
   let accountId = normalizeIdentityPart(oa.accountUuid);
   let organizationId = normalizeIdentityPart(oa.organizationUuid);
 
-  // Worker slot provisioned from a durable setup-token: only the email was
-  // seeded on disk (seedClaudeWorkerHomeIdentity), so accountUuid/organizationUuid
-  // are absent and both accountKey and usageKey would be null — the row reads
-  // "not connected here" (PHNX-3940, sibling worker-identity diagnosis). Complete
-  // the identity from the fleet-synced registry row for this email, keyed exactly
-  // as a headed login's home carries it. Guarded on email-only so a headed home
-  // (uuids on disk) never pays the readMeta() read, and fails CLOSED to email-only
-  // when zero or several rows match (registeredNativeAccountForEmail never guesses).
   if (email && !accountId && !organizationId) {
+    // Email-only worker homes accept one exact registry match; ambiguity fails closed.
     const registered = registeredNativeAccountForEmail(readMeta(), 'claude', email);
     const parts = registered ? parseNativeIdentityKey('claude', registered.identityKey) : null;
     if (parts) {
@@ -1544,6 +1484,7 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
       organizationId,
       organizationName: oa.organizationName ?? null,
       organizationType: oa.organizationType ?? null,
+      // Usage is org-scoped; account routing is account+org scoped.
       usageKey: buildIdentityKey('claude', [['org', organizationId]]),
       accountKey: buildIdentityKey('claude', [
         ['account', accountId],
@@ -1557,6 +1498,7 @@ export async function getAccountInfo(
   agentId: AgentId,
   home?: string
 ): Promise<AccountInfo> {
+  // Group accounts by stable provider/org identity, never display text or stale metadata.
   const base = home || os.homedir();
   const empty: AccountInfo = {
     accountKey: null,
@@ -1575,10 +1517,7 @@ export async function getAccountInfo(
   const configFiles: Partial<Record<AgentId, string>> = {
     claude: path.join(base, '.claude.json'),
     codex: path.join(base, '.codex', 'auth.json'),
-    // OpenCode keeps every session in ONE sqlite file rather than a directory of
-    // per-session transcripts, so the session-file walk resolveLastActive runs
-    // for other agents finds nothing. Its mtime fallback is the right read here:
-    // opencode.db is written on every turn, so it tracks real activity.
+    // OpenCode's sqlite mtime is its activity source even though credentials live elsewhere.
     opencode: resolveOpenCodeXdgPath(base, 'data', 'opencode.db') ?? undefined,
   };
   const lastActive = resolveLastActive(agentId, base, configFiles[agentId]);
@@ -1586,33 +1525,17 @@ export async function getAccountInfo(
   try {
     switch (agentId) {
       case 'claude': {
-        // Identity extraction is shared with the session scanner's account
-        // attribution — see readClaudeHomeConfig. A home with no readable config or
-        // no oauthAccount is signed out, which is what the pre-refactor code
-        // produced when JSON.parse threw or oauthAccount was absent.
         const claudeHome = readClaudeHomeConfig(base);
         if (!claudeHome) return { ...empty, lastActive };
         const { config: data, identity } = claudeHome;
         const oa = data.oauthAccount;
         const { accountId, organizationId, email, accountKey, usageKey } = identity;
 
-        // Credential floor: a blanked credential file means this home cannot
-        // authenticate, whatever `.claude.json` still says. Report it signed out
-        // so `agents view` prompts a re-login and rotation routes around it,
-        // instead of handing runs to an install that dies at spawn.
         if (email && isClaudeCredentialFileBlank(base)) {
           return { ...empty, lastActive };
         }
 
-        // Plan tier is derived from .claude.json's organizationType, which carries
-        // the TRUE tier (claude_max → "Max", claude_pro → "Pro", claude_team →
-        // "Team") and is already in-hand from the config we just read — no Keychain
-        // prompt. billingType only distinguishes "has a Stripe subscription" and so
-        // mislabels every Max account as "Pro"; keep it as a fallback for older
-        // configs predating organizationType. (Reading subscriptionType from the
-        // keychain item would force a macOS Keychain ACL prompt on every `agents
-        // run`, so we deliberately avoid it — organizationType gives us the tier
-        // without that cost.)
+        // Prefer organizationType; billingType is a compatibility fallback, not throttling state.
         let plan: string | null = formatClaudeOrgLabel(oa?.organizationType);
         if (!plan) {
           if (oa?.billingType === 'stripe_subscription') {
@@ -1622,17 +1545,9 @@ export async function getAccountInfo(
           }
         }
 
-        // usageStatus is NOT derived from cachedExtraUsageDisabledReason. That
-        // field reports why pay-as-you-go overage is off (out_of_credits = no
-        // overage credits purchased; org_level_disabled = admin turned overage
-        // off), which says nothing about whether the account is throttled — a
-        // Pro account at 5% weekly usage with overage disabled is fully usable.
-        // Real throttle state comes from the live usage windows; callers derive
-        // it via deriveUsageStatusFromSnapshot(). Here we only report whether
-        // the account is signed in at all. Overage state stays visible through
-        // overageCredits below.
         const usageStatus: AccountInfo['usageStatus'] = email ? 'available' : null;
 
+        // Overage credit display is independent of the subscription throttle status.
         let overageCredits: AccountInfo['overageCredits'] = null;
         const orgId = oa?.organizationUuid;
         const creditCache = orgId && data.overageCreditGrantCache?.[orgId];
@@ -1667,7 +1582,6 @@ export async function getAccountInfo(
         if (!decoded) return { ...empty, lastActive };
         const email = decoded.email || null;
 
-        // Plan and subscription from OpenAI auth claim
         const authClaim = decoded['https://api.openai.com/auth'] || {};
         const accountId = normalizeIdentityPart(authClaim.chatgpt_account_id);
         const userId = normalizeIdentityPart(authClaim.chatgpt_user_id || authClaim.user_id);
@@ -1680,7 +1594,6 @@ export async function getAccountInfo(
         const rawPlan = authClaim.chatgpt_plan_type;
         const plan = rawPlan ? rawPlan.charAt(0).toUpperCase() + rawPlan.slice(1) : null;
 
-        // Subscription status: expired = out_of_credits
         let usageStatus: AccountInfo['usageStatus'] = null;
         const activeUntil = authClaim.chatgpt_subscription_active_until;
         if (activeUntil) {
@@ -1703,12 +1616,7 @@ export async function getAccountInfo(
         };
       }
       case 'cursor': {
-        // Cursor CLI keeps account metadata in ~/.cursor/cli-config.json
-        // (authInfo: { email, userId, authId }) and its OAuth tokens SEPARATELY
-        // in ~/.cursor/auth.json ({ accessToken, refreshToken }). Presence
-        // of an access token is the signed-in signal; email/ids come from
-        // cli-config. authId is the OAuth subject (e.g. "google-oauth2|<n>") — the
-        // same value the usage endpoint keys on (see getCursorUsageInfo).
+        // Identity metadata alone is insufficient: a nonempty access token is the credential floor.
         const cfgPath = resolveAccountCredentialPath(base, '.cursor', 'cli-config.json');
         if (!cfgPath) return { ...empty, lastActive };
         try {
@@ -1723,11 +1631,8 @@ export async function getAccountInfo(
             try {
               const tok = JSON.parse(fs.readFileSync(authPath, 'utf-8'));
               hasToken = typeof tok?.accessToken === 'string' && tok.accessToken.length > 0;
-            } catch { /* unreadable token file */ }
+            } catch {  }
           }
-          // cli-config survives logout and may describe a different keychain
-          // account. Without this version's file token, its identity is stale
-          // metadata rather than a usable managed login.
           if (!hasToken) return { ...empty, lastActive };
           const accountKey = buildIdentityKey(agentId, [['user', accountId]]);
           return { ...empty, email, accountId, accountKey, signedIn: true, lastActive };
@@ -1735,13 +1640,7 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'grok': {
-        // Grok stores auth in ~/.grok/auth.json as a map keyed by
-        // "<oidc_issuer>::<client_id>" -> { email, user_id, refresh_token,
-        // create_time, expires_at, team_id, ... }. (Older builds wrote a flat
-        // object with a top-level email.) The old code only read a TOP-LEVEL
-        // `email`, so the current nested format always looked signed-out even
-        // when logged in. Read the newest account record: a refresh token means
-        // signed in, and we surface the email/ids like claude/codex.
+        // Accept current nested and legacy flat records, choosing the newest credential record.
         const authPath = resolveAccountCredentialPath(base, '.grok', 'auth.json');
         if (!authPath) return { ...empty, lastActive };
         try {
@@ -1762,40 +1661,22 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'antigravity': {
-        // Antigravity (`agy`) stores a consumer Google OAuth grant (access +
-        // refresh token, no id_token) — presence of a refresh token is the only
-        // signed-in signal we can derive without a network call. Storage is
-        // platform-split via go-keyring:
-        //   - file ~/.gemini/antigravity-cli/antigravity-oauth-token (Linux
-        //     fallback when no Secret Service is available)
-        //   - macOS keychain / Linux libsecret (service gemini + user
-        //     antigravity) when a keyring daemon is present
-        // Check the file first, then the OS keyring probe.
+        // Antigravity may authenticate from its token file or the platform keyring.
         const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
           if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
-            // A stable account/usage key (derived from the refresh token — see
-            // readAuthAccountIdentity) lets `agents view` dedupe and cache the
-            // per-model quota bars for this login.
             const identity = readAuthAccountIdentity('antigravity', path.dirname(tokenPath));
             return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
           }
         }
         if (await antigravityKeychainSignedIn()) {
-          // Keyring-only login (the macOS case): the OS keyring holds exactly
-          // ONE antigravity credential, so a stable singleton key identifies it
-          // for usage-cache dedup without reading the secret value here.
           const identity = buildIdentityKey('antigravity', [['sub', 'keychain']]);
           return { ...empty, signedIn: true, lastActive, accountKey: identity, usageKey: identity };
         }
         return { ...empty, lastActive };
       }
       case 'kimi': {
-        // Kimi Code stores OAuth credentials at
-        // ~/.kimi-code/credentials/kimi-code.json. The access token is a JWT
-        // whose payload carries an opaque user_id (no email), so we report
-        // signed-in state plus a stable account key for usage dedup.
         const credPath = resolveAccountCredentialPath(base, '.kimi-code', 'credentials', 'kimi-code.json');
         if (!credPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(credPath, 'utf-8'));
@@ -1807,15 +1688,6 @@ export async function getAccountInfo(
         return { ...empty, signedIn: true, accountId: userId, accountKey, lastActive };
       }
       case 'droid': {
-        // Factory Droid stores auth at ~/.factory/auth.v2.file (AES-256-GCM,
-        // decrypted with the on-disk ~/.factory/auth.v2.key). We decrypt locally
-        // — no network — and surface the email/org/role from the WorkOS
-        // access-token JWT, same as claude/codex/grok. If the credential can't be
-        // decrypted (a keyring-v2/legacy login with no on-disk key, or a decrypt
-        // failure) we fall back to the file-presence signed-in signal so the row
-        // still reads as logged in — the conservative floor antigravity/kimi use.
-        // `.factory` is the config dir on every platform (macOS/Linux
-        // ~/.factory, Windows %USERPROFILE%\.factory).
         const decoded = decryptDroidCredential(base);
         if (decoded?.email) {
           const organizationId = decoded.orgId;
@@ -1830,22 +1702,14 @@ export async function getAccountInfo(
             lastActive,
           };
         }
+        // An unreadable encrypted payload still counts conservatively when its auth file exists.
         const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
       }
       case 'opencode': {
-        // OpenCode's auth.json is a record keyed by provider id ->
-        // { type: 'oauth'|'api'|'wellknown', ...secret fields }. The provider
-        // join is the identity key (see resolveOpenCodeIdentity), and an OAuth
-        // provider's token additionally carries the real account email and plan
-        // — so the row shows who is signed in rather than only a bare `id:` key.
-        // Secrets are never read out; only JWT claims are.
         const identity = resolveOpenCodeIdentity(base);
         if (!identity) return { ...empty, lastActive };
-        // Keyed on providers, not email: OpenCode bills through whichever
-        // provider credentials are configured, so two installs sharing one
-        // email but different provider sets are genuinely different accounts.
         const accountKey = buildIdentityKey(agentId, [['providers', identity.providers]]);
         return {
           ...empty,
@@ -1858,9 +1722,6 @@ export async function getAccountInfo(
         };
       }
       case 'muse': {
-        // Muse Code authenticates with META_API_KEY (env, highest priority) or
-        // a stored OAuth/API credential at ~/.config/muse/auth.json. Live file
-        // shape nests under providers.meta (access_token + optional user_email).
         if (process.env.META_API_KEY?.trim() || process.env.MODEL_API_KEY?.trim()) {
           const accountKey = buildIdentityKey(agentId, [['auth', 'env']]);
           return { ...empty, signedIn: true, accountId: 'env', accountKey, lastActive };
@@ -1888,34 +1749,20 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
     }
   } catch {
-    /* auth/config file missing or unreadable */
     return { ...empty, lastActive };
   }
 }
 
-// Fresh window for the cached session walk. Matches USAGE_CACHE_FRESH_MS in
-// usage.ts (5 minutes) so a launch storm reuses both probes for the same period.
+// Short-lived launch-path cache: never serve stale entries; no-session falls back to config mtime.
 const LAST_ACTIVE_CACHE_FRESH_MS = 5 * 60 * 1000;
 
 const getLastActiveCachePath = () => path.join(getCacheDir(), 'last-active.json');
 
 interface LastActiveCacheEntry {
-  /** Newest session-file mtime (ms), or null when the home had no sessions. */
   mtimeMs: number | null;
-  /** When the walk that produced this entry ran (ms since epoch). */
   computedAt: number;
 }
 
-/**
- * Determine when the agent was last used by checking session file mtimes,
- * falling back to config mtime.
- *
- * The session walk stats every transcript under the home's session dir —
- * thousands of files on long-lived installs — and `agents run` rotation calls
- * this once per installed version on every launch. The walk result is cached
- * on disk for a short window so back-to-back launches skip it entirely.
- * Cache read/write is best-effort: any failure falls back to walking.
- */
 export function resolveLastActive(
   agentId: AgentId,
   base: string,
@@ -1937,13 +1784,10 @@ export function resolveLastActive(
 
     if (fresh) {
       if (entry.mtimeMs !== null) return new Date(entry.mtimeMs);
-      // Fresh entry with no sessions: fall through to the config mtime below.
     } else {
       const mtimeMs = latestFileMtimeMs(sessionDir, sessionExt);
       cache[key] = { mtimeMs, computedAt: now.getTime() };
-      // Stale entries are never served, so drop them on write — keeps homes
-      // that no longer exist (removed versions, test temp dirs) from
-      // accumulating in the file.
+      // Prune obsolete homes on each best-effort cache write.
       for (const [k, v] of Object.entries(cache)) {
         if (k !== key && !(typeof v?.computedAt === 'number' && now.getTime() - v.computedAt < LAST_ACTIVE_CACHE_FRESH_MS)) {
           delete cache[k];
@@ -1962,7 +1806,6 @@ export function resolveLastActive(
   }
 }
 
-/** Read the entire last-active cache file. Missing or corrupt file reads as empty. */
 function readLastActiveCacheFile(cachePath: string): Record<string, LastActiveCacheEntry> {
   if (!fs.existsSync(cachePath)) return {};
   try {
@@ -1973,31 +1816,23 @@ function readLastActiveCacheFile(cachePath: string): Record<string, LastActiveCa
   }
 }
 
-/** Write the entire last-active cache. Best-effort; a failed write just means the next call walks again. */
 function writeLastActiveCacheFile(cache: Record<string, LastActiveCacheEntry>, cachePath: string): void {
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     fs.writeFileSync(cachePath, JSON.stringify(cache), 'utf-8');
   } catch {
-    /* best-effort */
   }
 }
 
-/** Return the root directory where the agent stores session files, or null if unknown. */
 function getSessionDir(agentId: AgentId, base: string): string | null {
   const rel = AGENTS[agentId].sessionDir;
   return rel ? path.join(base, ...rel) : null;
 }
 
-/** Return the file extension used for session files by the given agent. */
 function getSessionExtension(agentId: AgentId): string | null {
   return AGENTS[agentId].sessionFileExt;
 }
 
-/**
- * Quick count of session files for an agent (without full DB scan).
- * Used during init to show approximate session count to user.
- */
 export function countSessionFiles(agentId: AgentId): number {
   const sessionDir = getSessionDir(agentId, HOME);
   const ext = getSessionExtension(agentId);
@@ -2015,14 +1850,12 @@ export function countSessionFiles(agentId: AgentId): number {
         }
       }
     } catch {
-      // Permission denied or other error
     }
   };
   walk(sessionDir);
   return count;
 }
 
-/** Decode the payload section of a JWT token without verifying its signature. */
 export function decodeJwtPayload(token: string): Record<string, any> | null {
   const payload = token.split('.')[1];
   if (!payload) return null;
@@ -2033,7 +1866,6 @@ export function decodeJwtPayload(token: string): Record<string, any> | null {
   }
 }
 
-/** Extract the default organization ID from a Codex/OpenAI auth claim. */
 function getCodexDefaultOrgId(authClaim: any): string | null {
   const organizations = authClaim?.organizations;
   if (!Array.isArray(organizations)) return null;
@@ -2041,14 +1873,12 @@ function getCodexDefaultOrgId(authClaim: any): string | null {
   return typeof first?.id === 'string' ? first.id : null;
 }
 
-/** Trim and normalize an identity string, returning null for empty or non-string values. */
 function normalizeIdentityPart(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed || null;
 }
 
-/** Build a composite identity key like "claude:account=abc:org=xyz" from labeled parts. */
 function buildIdentityKey(
   agentId: AgentId,
   parts: Array<[label: string, value: string | null]>
@@ -2060,7 +1890,6 @@ function buildIdentityKey(
   return `${agentId}:${encoded.join(':')}`;
 }
 
-/** Register an MCP server with an agent's CLI via `mcp add`. */
 export async function registerMcp(
   agentId: AgentId,
   name: string,
@@ -2092,7 +1921,6 @@ export async function registerMcp(
   }
 
   try {
-    // Use explicit binary path when provided (bypasses shim for version-managed agents)
     const bin = options?.binary || agent.cliCommand;
     let args: string[];
     if (transport === 'http') {
