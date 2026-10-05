@@ -51,27 +51,14 @@ describe('droid (Factory AI)', () => {
     expect(capableAgents('mcp')).toContain('droid');
     expect(capableAgents('commands')).toContain('droid');
     expect(capableAgents('subagents')).toContain('droid');
-    // Factory CLI (droid) supports Claude-shaped hooks in .factory/settings.json
-    // (RUSH-1327) and plugins via the marketplace + installed_plugins.json model
-    // (RUSH-1340). Both route through supports() like every other capability.
     expect(capableAgents('hooks')).toContain('droid');
     expect(capableAgents('plugins')).toContain('droid');
     expect(capableAgents('skills')).toContain('droid');
-    // RUSH-1864: Factory Missions (`/missions`, `droid exec --mission`) are a
-    // real multi-step orchestrator, but they are invoke-only. There is no
-    // auto-discovered install dir for named mission templates (cold install has
-    // no ~/.factory/missions/; that path is per-session runtime state only).
-    // Keep workflows:false so the registry never demands a writer we can't
-    // provide — do not fabricate a discovery dir.
     expect(capableAgents('workflows')).not.toContain('droid');
     expect(AGENTS.droid.capabilities.workflows).toBe(false);
   });
 
   it('resolves MCP config to ~/.factory/mcp.json and parses the written shape back', () => {
-    // Guards the writer/reader contract: installMcpToFactoryConfig writes
-    // `mcpServers` JSON to <home>/.factory/mcp.json; the detector reads via
-    // getMcpConfigPathForHome + parseMcpConfig. A path or format drift (e.g.
-    // defaulting to settings.json or a TOML parser) would break sync silently.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-droid-mcp-'));
     try {
       const configPath = getMcpConfigPathForHome('droid', home);
@@ -91,8 +78,6 @@ describe('droid (Factory AI)', () => {
   });
 
   it('transformSubagentForDroid keeps name/description/model and drops color', () => {
-    // Factory custom droids support name/description/model but have no `color`
-    // field. Emitting it risks the droid being rejected, so it must be stripped.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-droid-sub-'));
     try {
       fs.writeFileSync(
@@ -115,16 +100,10 @@ describe('droid (Factory AI)', () => {
 describe('warp (Warp Agent CLI)', () => {
   it('is registered with a truthful capability set', () => {
     expect(ALL_AGENT_IDS).toContain('warp');
-    // MCP + skills are the surfaces Warp actually exposes to agents-cli.
     expect(capableAgents('mcp')).toContain('warp');
     expect(capableAgents('skills')).toContain('warp');
-    // Warp reads the Claude .mcp.json schema (url + headers).
     expect(capableAgents('mcpHttp')).toContain('warp');
     expect(capableAgents('mcpHeaders')).toContain('warp');
-    // No matching install surface for these: hooks (no event->shell registration),
-    // allowlist (profile-based permissions, not a tool allow/deny list), commands
-    // (native/server slash-commands), plugins (no Claude marketplace manifest),
-    // subagents (server-side cloud agents), workflows, memory.
     expect(capableAgents('hooks')).not.toContain('warp');
     expect(capableAgents('allowlist')).not.toContain('warp');
     expect(capableAgents('commands')).not.toContain('warp');
@@ -136,8 +115,6 @@ describe('warp (Warp Agent CLI)', () => {
     expect(AGENTS.warp.supportsHooks).toBe(false);
     expect(AGENTS.warp.instructionsFile).toBe('AGENTS.md');
     expect(AGENTS.warp.capabilities.rules).toEqual({ file: 'AGENTS.md' });
-    // Autonomy is a single `--auto-approve` toggle, not a per-run permission
-    // flag, so a single mode maps to no flags (mirrors hermes).
     expect(AGENTS.warp.capabilities.modes).toEqual(['edit']);
   });
 
@@ -153,8 +130,6 @@ describe('warp (Warp Agent CLI)', () => {
       const configPath = getMcpConfigPathForHome('warp', home);
       expect(configPath).toBe(path.join(home, '.warp', '.mcp.json'));
 
-      // Oz reads the Claude schema — write an http server WITH headers and
-      // read it back to prove the transport + headers survive the round-trip.
       fs.mkdirSync(path.dirname(configPath), { recursive: true });
       writeMcpConfig('warp', configPath, [
         { name: 'ctx', command: 'ctx-server', args: ['--stdio'], env: {}, transport: 'stdio', scope: 'user' },
@@ -180,10 +155,8 @@ describe('Muse Code install targets', () => {
     expect(capableAgents('memory')).toContain('muse');
     expect(capableAgents('hooks')).toContain('muse');
     expect(capableAgents('plugins')).toContain('muse');
-    // Muse uses approval-mode + sandbox, not Claude-style tool allowlists.
     expect(capableAgents('allowlist')).not.toContain('muse');
     expect(capableAgents('commands')).not.toContain('muse');
-    // Runtime multi-agent exists, but agents-cli has no installable subagent target.
     expect(capableAgents('subagents')).not.toContain('muse');
     expect(AGENTS.muse.cliCommand).toBe('muse');
     expect(AGENTS.muse.supportsHooks).toBe(true);
@@ -316,14 +289,6 @@ describe('codex subagents (TOML custom agents)', () => {
 });
 
 describe('kimi subagents (Claude-shaped agent markdown)', () => {
-  /**
-   * kimi-code discovers agent FILES from its brand home's `agents/` dir and
-   * parses them as markdown with YAML frontmatter. It has no loader for the
-   * `version: 1` / `agent:` YAML agentspec (that schema belongs to the older,
-   * separate `kimi-cli` product), so a `.yaml` written here is read by nothing.
-   * Discovery landed in kimi-code 0.29.0 — before that, the four agent profiles
-   * are compiled into the bundle with no filesystem loader at all.
-   */
   it('is capable of subagents only from 0.29.0', () => {
     expect(capableAgents('subagents')).toContain('kimi');
     expect(supports('kimi', 'subagents', '0.29.0').ok).toBe(true);
@@ -357,7 +322,6 @@ describe('kimi subagents (Claude-shaped agent markdown)', () => {
       expect(body).toContain('name: explorer');
       expect(body).toContain('description: Explores code');
       expect(body).toContain('Explore.');
-      // The dead agentspec keys must never come back.
       expect(body).not.toContain('system_prompt_path');
       expect(body).not.toContain('extend: default');
     } finally {
@@ -589,9 +553,6 @@ describe('getAccountEmail', () => {
       path.join(versionHome, '.claude.json'),
       JSON.stringify({ oauthAccount: { emailAddress: 'version@example.com' } })
     );
-    // Off macOS, getAccountInfo requires a real credential file or it reports
-    // signed-out regardless of oauthAccount (PHNX-2685's credential floor) —
-    // this fixture describes a genuinely signed-in version home, so plant one.
     fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
     fs.writeFileSync(
       path.join(versionHome, '.claude', '.credentials.json'),

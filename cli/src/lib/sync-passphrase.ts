@@ -24,24 +24,17 @@
  */
 import chalk from 'chalk';
 
-/** The current variable for transport/sync passphrases. */
 export const SYNC_PASSPHRASE_ENV = 'AGENTS_SYNC_PASSPHRASE';
-/** The file-store master key, honoured for sync only as a deprecated fallback. */
 export const LEGACY_PASSPHRASE_ENV = 'AGENTS_SECRETS_PASSPHRASE';
 
-/** Warn at most once per process: a `--all` push over many bundles must not
- *  flood stderr with the same notice. */
 let deprecatedVarWarned = false;
-/** Same, for the "this came from an env var at all" readability notice. */
 let envPassphraseWarned = false;
 
-/** Reset the one-shot warning latches. Tests only — production never re-warns. */
 export function resetSyncPassphraseWarnings(): void {
   deprecatedVarWarned = false;
   envPassphraseWarned = false;
 }
 
-/** Where a resolved sync passphrase came from, so callers can report honestly. */
 type SyncPassphraseSource = 'sync-env' | 'legacy-env' | null;
 
 interface ResolvedSyncPassphrase {
@@ -49,12 +42,6 @@ interface ResolvedSyncPassphrase {
   source: SyncPassphraseSource;
 }
 
-/**
- * Read the transport passphrase from the environment, preferring the current
- * variable and falling back to the deprecated one with a single warning.
- * Returns `{ value: null }` when neither is set — the caller decides whether to
- * prompt (TTY) or fail (headless). Never prompts, never throws.
- */
 export function resolveSyncPassphraseFromEnv(): ResolvedSyncPassphrase {
   const current = process.env[SYNC_PASSPHRASE_ENV];
   if (current) return { value: current, source: 'sync-env' };
@@ -75,11 +62,6 @@ export function resolveSyncPassphraseFromEnv(): ResolvedSyncPassphrase {
   return { value: null, source: null };
 }
 
-/**
- * The one-shot reminder that an env-sourced passphrase is readable by other
- * same-user processes. Separate from the deprecation notice above so a caller
- * using the CURRENT variable still gets the readability warning exactly once.
- */
 export function warnEnvPassphraseReadableOnce(): void {
   if (envPassphraseWarned) return;
   envPassphraseWarned = true;
@@ -89,7 +71,6 @@ export function warnEnvPassphraseReadableOnce(): void {
   ));
 }
 
-/** The message a headless caller shows when no passphrase is available. */
 export function missingSyncPassphraseMessage(): string {
   return `A sync passphrase is required. Run from a TTY, or set ${SYNC_PASSPHRASE_ENV}.`;
 }

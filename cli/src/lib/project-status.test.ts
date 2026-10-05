@@ -27,7 +27,6 @@ const defs: ProjectDef[] = [
   { name: 'other', root: '~/src/other' },
 ];
 
-/** Minimal ActiveSession carrying only the fields the rollup reads. */
 function s(partial: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...partial } as unknown as ActiveSession;
 }
@@ -46,12 +45,12 @@ describe('rollupSessionsByProject', () => {
       s({
         cwd: path.join(HOME, 'src/rush/apps/api'),
         status: 'input_required',
-        pr: { url: 'https://github.com/o/r/pull/9', number: 9 } as never, // dup PR
+        pr: { url: 'https://github.com/o/r/pull/9', number: 9 } as never,
         ticket: { id: 'RUSH-1' } as never,
-        createdTickets: ['RUSH-2', 'RUSH-1'], // RUSH-1 dup
+        createdTickets: ['RUSH-2', 'RUSH-1'],
       }),
-      s({ cwd: path.join(HOME, 'src/other'), status: 'running' }), // different project
-      s({ cwd: path.join(HOME, 'src/unrelated'), status: 'running' }), // no project
+      s({ cwd: path.join(HOME, 'src/other'), status: 'running' }),
+      s({ cwd: path.join(HOME, 'src/unrelated'), status: 'running' }),
     ];
     const map = rollupSessionsByProject(defs, sessions);
 
@@ -59,8 +58,8 @@ describe('rollupSessionsByProject', () => {
     expect(rush.agents).toBe(3);
     expect(rush.byStatus).toEqual({ running: 1, idle: 1, input_required: 1 });
     expect(rush.plan).toEqual({ done: 5, total: 7 });
-    expect(rush.openPrs).toEqual([{ url: 'https://github.com/o/r/pull/9', number: 9 }]); // deduped
-    expect(rush.tickets.sort()).toEqual(['RUSH-1', 'RUSH-2']); // deduped across worked+created
+    expect(rush.openPrs).toEqual([{ url: 'https://github.com/o/r/pull/9', number: 9 }]);
+    expect(rush.tickets.sort()).toEqual(['RUSH-1', 'RUSH-2']);
     expect(rush.worktrees).toBe(1);
 
     expect(map.get('other')!.agents).toBe(1);
@@ -77,7 +76,7 @@ describe('rollupSessionsByProject', () => {
         machine: 'zion',
       }),
       s({ cwd: path.join(HOME, 'src/rush/apps/api'), kind: 'codex', status: 'idle', machine: 'mac-mini' }),
-      s({ cwd: path.join(HOME, 'src/rush'), kind: 'gemini', status: 'queued' }), // no ticket, no host
+      s({ cwd: path.join(HOME, 'src/rush'), kind: 'gemini', status: 'queued' }),
     ];
     const rush = rollupSessionsByProject(defs, sessions).get('rush')!;
     expect(rush.members).toEqual([
@@ -85,7 +84,6 @@ describe('rollupSessionsByProject', () => {
       { agent: 'codex', status: 'idle', host: 'mac-mini' },
       { agent: 'gemini', status: 'queued' },
     ]);
-    // the raw plan sums are untouched by the members extension
     expect(rush.plan).toEqual({ done: 0, total: 0 });
   });
 
@@ -97,8 +95,6 @@ describe('rollupSessionsByProject', () => {
 
 describe('liveDeadSplit', () => {
   it('counts orphaned as LIVE — it is an agent that outlived its window', () => {
-    // session/active.ts: "Alive, but no client is attached". The repo's dead
-    // rule (commands/sessions.ts) is closed + crashed only.
     const s = liveDeadSplit({ running: 13, idle: 2, orphaned: 5, crashed: 19 });
     expect(s.live).toBe(20);
     expect(s.dead).toBe(19);
@@ -113,9 +109,6 @@ describe('liveDeadSplit', () => {
   });
 
   it('classifies every ActiveStatus, not just the common ones', () => {
-    // abandoned fires on transcript staleness before the liveness check, so it
-    // covers the live-but-forgotten session; unknown cannot be PROVEN dead, and
-    // claiming so would overstate the wreckage row.
     const s = liveDeadSplit({
       running: 1, idle: 1, queued: 1, input_required: 1, orphaned: 1, abandoned: 1, unknown: 1,
       closed: 1, crashed: 1,
@@ -150,10 +143,6 @@ describe('formatDeadSummary', () => {
 });
 
 describe('isDeadStatus — keeps the agents roster consistent with the headline', () => {
-  // The card prints `N live`, a `dead` row, then the agents roster. The roster
-  // used to list every matched session, so a card headed `23 live` went on to
-  // show `crashed x25` — the same corpses the dead row reports, contradicting
-  // the headline. The roster filter and the headline split must never disagree.
   const EVERY_STATUS = [
     'running', 'idle', 'queued', 'input_required',
     'orphaned', 'abandoned', 'unknown',
@@ -169,7 +158,6 @@ describe('isDeadStatus — keeps the agents roster consistent with the headline'
   it('drops exactly the statuses the dead row already accounts for', () => {
     expect(isDeadStatus('crashed')).toBe(true);
     expect(isDeadStatus('closed')).toBe(true);
-    // orphaned is alive — an agent that outlived its window, still working.
     expect(isDeadStatus('orphaned')).toBe(false);
     expect(isDeadStatus('running')).toBe(false);
   });
@@ -187,12 +175,12 @@ describe('sortProjectMembers', () => {
       { agent: 'droid', status: 'abandoned' },
     ];
     expect(sortProjectMembers(members).map((m) => m.agent)).toEqual([
-      'claude', // running first; agent asc within a state (claude < codex)
+      'claude',
       'codex',
-      'zed', // idle
-      'gemini', // input_required
-      'amp', // queued
-      'droid', // rest: status asc (abandoned < unknown)
+      'zed',
+      'gemini',
+      'amp',
+      'droid',
       'grok',
     ]);
   });
@@ -224,7 +212,7 @@ describe('formatProjectMembers', () => {
       status: i === MEMBERS_LINE_LIMIT + 1 ? 'running' : 'idle',
     }));
     const line = stripAnsi(formatProjectMembers(members));
-    expect(line.startsWith(`agent${MEMBERS_LINE_LIMIT + 1} · running`)).toBe(true); // running sorts first
+    expect(line.startsWith(`agent${MEMBERS_LINE_LIMIT + 1} · running`)).toBe(true);
     expect(line.endsWith('+2 more')).toBe(true);
     expect(line.split('·').length).toBeGreaterThan(2);
   });
@@ -248,15 +236,14 @@ describe('formatProjectMembers', () => {
       ...Array.from({ length: 30 }, () => ({ agent: 'claude', status: 'running' })),
       ...Array.from({ length: MEMBERS_LINE_LIMIT }, (_, i) => ({ agent: `agent${i}`, status: 'idle' })),
     ];
-    // 6 cells cap: [claude ×30, agent0..agent4] = 35 members shown, 1 left over.
     expect(stripAnsi(formatProjectMembers(members)).endsWith('+1 more')).toBe(true);
   });
 });
 
 describe('enrichProjectSignals — artifact counting from the activity log', () => {
   let actDir: string;
-  const NOW = 1_754_000_000_000; // fixed epoch so window math is deterministic
-  const def: ProjectDef = { name: 'rush', root: '~/src/rush' }; // no repo → gh skipped
+  const NOW = 1_754_000_000_000;
+  const def: ProjectDef = { name: 'rush', root: '~/src/rush' };
 
   beforeEach(() => {
     actDir = fs.mkdtempSync(path.join(os.tmpdir(), 'act-'));
@@ -275,24 +262,24 @@ describe('enrichProjectSignals — artifact counting from the activity log', () 
     });
 
   it('counts only this project’s in-window artifacts, newest detail surfaced', async () => {
-    const inWin = NOW - 2 * 86_400_000; // 2 days ago
-    const newest = NOW - 3600_000; // 1h ago
-    const outWin = NOW - 30 * 86_400_000; // 30 days ago
+    const inWin = NOW - 2 * 86_400_000;
+    const newest = NOW - 3600_000;
+    const outWin = NOW - 30 * 86_400_000;
     const rushCwd = path.join(HOME, 'src/rush/apps/web');
     fs.writeFileSync(
       path.join(actDir, 's1.jsonl'),
       [
         ev(inWin, rushCwd, 'a.html'),
         ev(newest, rushCwd, 'newest.html'),
-        ev(outWin, rushCwd, 'old.html'), // outside 7d window
-        ev(inWin, path.join(HOME, 'src/other'), 'other.html'), // different project
+        ev(outWin, rushCwd, 'old.html'),
+        ev(inWin, path.join(HOME, 'src/other'), 'other.html'),
       ].join('\n') + '\n',
     );
 
     const sig = await enrichProjectSignals(def, 7, NOW, { activityRoot: actDir, skipRemote: true });
-    expect(sig.artifacts).toBe(2); // a.html + newest.html; old.html and other.html excluded
+    expect(sig.artifacts).toBe(2);
     expect(sig.lastArtifact).toBe('newest.html');
-    expect(sig.mergedPrs).toBe(0); // no repo / skipRemote
+    expect(sig.mergedPrs).toBe(0);
     expect(sig.windowDays).toBe(7);
   });
 
@@ -376,7 +363,6 @@ describe('withDefaultMachine', () => {
       ],
       'zion',
     );
-    // Simulate rollup member mapping
     const members = sessions.map((s) => ({
       agent: s.kind,
       status: s.status,

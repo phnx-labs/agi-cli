@@ -1,19 +1,3 @@
-/**
- * The ONE place agents-cli talks to its account backend (Phoenix ID).
- *
- * Why a seam at all: the removed Prix-coupled layer (RUSH-2581) had no single
- * entry point — the backend URL was hardcoded in five files and the session
- * token was re-read from `~/.rush/user.yaml` by seven separate functions, so
- * re-pointing identity meant editing a dozen call sites and rewriting error
- * strings scattered through the tree. This module is the correction: one base
- * URL, one token reader, one HTTP funnel, one error type. Commands import from
- * here and nothing else.
- *
- * The shape mirrors the seams this repo already proved elsewhere —
- * the bounded secrets process client (`lib/secrets-client.ts`) and
- * `CloudProvider` (`lib/cloud/types.ts`) — so a second identity backend, if
- * one is ever needed, is a swap here rather than a sweep across commands.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,18 +5,9 @@ import * as path from 'path';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { getRuntimeStateDir } from '../state.js';
 
-/**
- * Where the account backend lives. Config, never a literal at a call site.
- *
- * The default is Phoenix ID's branded custom domain. The legacy workers.dev
- * hostname remains live for already-released clients, but new clients and
- * managed Workers must share this canonical base so token verification cannot
- * drift across the release boundary.
- */
 export const DEFAULT_PHOENIX_ID_BASE = 'https://id.byphoenix.com';
 export const PHOENIX_ID_BASE = process.env.PHOENIX_ID_BASE ?? DEFAULT_PHOENIX_ID_BASE;
 
-/** Our own session file. agents-cli never reads another product's credentials. */
 export function sessionFilePath(): string {
   return path.join(getRuntimeStateDir(), 'phoenix-session.json');
 }
@@ -41,15 +16,8 @@ export interface PhoenixSession {
   access_token: string;
   email?: string;
   userId?: string;
-  /**
-   * Hosted OAuth profile image (https URL), when Phoenix ID exposes one. Wins
-   * over the email-Gravatar fallback in share attribution. Optional forever —
-   * a missing value just means the Gravatar/initials fallback.
-   */
   avatarUrl?: string;
-  /** Display name from `/api/v1/auth/me`, persisted by `refreshSessionProfile`. */
   name?: string;
-  /** Unix ms; absent means the server did not scope the token's lifetime. */
   expires_at?: number;
 }
 
@@ -63,11 +31,6 @@ export function readSession(): PhoenixSession | null {
   }
 }
 
-/**
- * Replace the session file whole: a temp file renamed over it, so a crash
- * mid-write never leaves a truncated bearer, and an explicit 0600 because
- * `writeFile`'s `mode` only applies to a file it creates.
- */
 export function writeSession(session: PhoenixSession): void {
   const file = sessionFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -79,11 +42,9 @@ export function clearSession(): void {
   try {
     fs.rmSync(sessionFilePath(), { force: true });
   } catch {
-    // Already gone: logging out twice is not an error.
   }
 }
 
-/** An error carrying the server's status and message, so callers can branch on it. */
 export class PhoenixApiError extends Error {
   constructor(
     message: string,
@@ -96,14 +57,11 @@ export class PhoenixApiError extends Error {
 
 interface RequestOptions {
   body?: unknown;
-  /** Send the stored session token. Default true; the device-flow start does not. */
   auth?: boolean;
-  /** Use this token instead of the stored one (mid-login, before the write). */
   token?: string;
   timeoutMs?: number;
 }
 
-/** The single HTTP funnel. Every request to the account backend goes through here. */
 export async function phoenixRequest<T>(
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   route: string,

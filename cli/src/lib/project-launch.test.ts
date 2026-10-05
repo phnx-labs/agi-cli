@@ -9,10 +9,6 @@ let SYSTEM_DIR: string;
 let PROJECT_DIR: string;
 let VERSION_HOME: string;
 
-// state.ts derives paths from $HOME captured at module load. Mock the
-// path-providing getters per-test to point at TMP_HOME; getVersionsDir feeds
-// versions.ts:getVersionHomePath transitively. Real fs writes/reads under
-// the temp dir — no business logic mocked.
 vi.mock('./state.js', () => ({
   get getPluginsDir() { return () => path.join(USER_DIR, 'plugins'); },
   get getSystemPluginsDir() { return () => path.join(SYSTEM_DIR, 'plugins'); },
@@ -27,16 +23,9 @@ vi.mock('./state.js', () => ({
   }; },
   get getEnabledExtraRepos() { return () => []; },
   get getVersionsDir() { return () => path.join(USER_DIR, '.history', 'versions'); },
-  // agents.ts calls getCliVersionCachePath() at module-load (not lazily) to
-  // build a const. Return an os.tmpdir()-based path because USER_DIR isn't
-  // initialized until beforeEach; runLaunchSync doesn't touch this file.
   get getCliVersionCachePath() { return () => path.join(os.tmpdir(), 'agents-cli-version.json'); },
-  // rules/compose.ts calls these to discover user + system rule layers.
-  // Point at directories that won't exist so only the project layer is active.
   get getUserRulesDir() { return () => path.join(USER_DIR, 'rules'); },
   get getResolvedRulesDir() { return () => path.join(SYSTEM_DIR, 'rules'); },
-  // rules/compile.ts refuses reserved roots (RUSH-2725). Mirror the real
-  // exclusion against this test's fake user/system layers.
   get isReservedAgentsDir() { return (agentsPath: string) =>
     path.resolve(agentsPath) === path.resolve(USER_DIR)
     || path.resolve(agentsPath) === path.resolve(SYSTEM_DIR); },
@@ -79,14 +68,10 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  try { fs.rmSync(TMP_HOME, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(TMP_HOME, { recursive: true, force: true }); } catch {  }
 });
 
 describe('runLaunchSync — workspace resource mirror', () => {
-  // #281: the real subagent source shape is a DIRECTORY containing AGENT.md
-  // (NOT a flat .md file). It must be flattened and WRITTEN to
-  // cwd/.claude/agents/<name>.md as a regular file — symlinking can't work
-  // because a subagent is N source files collapsed into one.
   it('writes .agents/subagents/<name>/AGENT.md -> cwd/.claude/agents/<name>.md (flattened, regular file)', () => {
     writeFile(
       path.join(PROJECT_DIR, '.agents', 'subagents', 'probe-agent', 'AGENT.md'),
@@ -97,11 +82,9 @@ describe('runLaunchSync — workspace resource mirror', () => {
 
     expect(result.workspaceLinks).toBeGreaterThanOrEqual(1);
     const dest = path.join(PROJECT_DIR, '.claude', 'agents', 'probe-agent.md');
-    // Regular file, NOT a symlink — the bug was a silent zero-delivery drop.
     expect(fs.lstatSync(dest).isFile()).toBe(true);
     expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false);
     const written = fs.readFileSync(dest, 'utf-8');
-    // Clean flattened frontmatter + body.
     expect(written).toMatch(/^---\nname: probe-agent\ndescription: Probes things\nmodel: sonnet\n---/);
     expect(written).toContain('Probe the codebase carefully.');
   });
@@ -132,7 +115,6 @@ describe('runLaunchSync — workspace resource mirror', () => {
     const dest = path.join(PROJECT_DIR, '.claude', 'agents', 'probe-agent.md');
     expect(fs.readFileSync(dest, 'utf-8')).toContain('Version one.');
 
-    // Edit the source; the generated file (carries our marker) must refresh.
     writeFile(agentMd, '---\nname: probe-agent\ndescription: v2\n---\n\nVersion two.');
     const result = runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
@@ -151,7 +133,6 @@ describe('runLaunchSync — workspace resource mirror', () => {
 
     expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'commands', 'deploy.md')).isFile()).toBe(true);
     expect(fs.lstatSync(path.join(PROJECT_DIR, '.claude', 'skills', 'auditor')).isDirectory()).toBe(true);
-    // Critical: cwd/.mcp.json must NOT be auto-linked from the launch path.
     expect(fs.existsSync(path.join(PROJECT_DIR, '.mcp.json'))).toBe(false);
     const manifest = readJson(path.join(PROJECT_DIR, '.claude', '.agents-managed.json')) as { paths: string[] };
     expect(manifest.paths.sort()).toEqual(['commands/deploy.md', 'skills/auditor'].sort());
@@ -166,7 +147,6 @@ describe('runLaunchSync — workspace resource mirror', () => {
     expect(result.workspaceSkipped).toContain(path.join('.claude', 'agents', 'foo.md'));
     const dest = path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md');
     expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false);
-    // Hand-authored file (no generated marker) survives untouched.
     expect(fs.readFileSync(dest, 'utf-8')).toBe('# hand-authored — keep me');
   });
 
@@ -179,10 +159,9 @@ describe('runLaunchSync — workspace resource mirror', () => {
     const result = runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
     expect(result.workspaceSkipped).toContain(path.join('.claude', 'agents', 'foo.md'));
-    // The dangling symlink must survive — it's in-progress user state.
     const dest = path.join(PROJECT_DIR, '.claude', 'agents', 'foo.md');
-    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);  // still a symlink, not clobbered
-    expect(fs.existsSync(dest)).toBe(false);                 // still dangling (target absent)
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true);
+    expect(fs.existsSync(dest)).toBe(false);
   });
 
   it('syncs project resources to Codex project-local directories', () => {
@@ -241,16 +220,11 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
 
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
-    // The plugin gets installed into the marketplace (visible in /plugins) but
-    // is NOT enabled. enablePluginInSettings is a no-op for exec-surface
-    // plugins when allowExecSurfaces=false, so settings.json may not exist at
-    // all in this scenario — either way is acceptable.
     const settingsPath = path.join(VERSION_HOME, '.claude', 'settings.json');
     const settings = fs.existsSync(settingsPath)
       ? readJson(settingsPath) as { enabledPlugins?: Record<string, boolean> }
       : { enabledPlugins: undefined };
     expect(settings.enabledPlugins?.[`evil@${PROJECT_MARKETPLACE_NAME}`]).toBeUndefined();
-    // But the marketplace install dir should exist — user can still `/plugin enable` it.
     expect(fs.existsSync(path.join(marketplaceRoot(PROJECT_MARKETPLACE_NAME, 'claude', VERSION_HOME), 'plugins', 'evil'))).toBe(true);
   });
 
@@ -278,11 +252,9 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
   });
 
   it('prunes stale enabledPlugins for a plugin that moved from user to project scope', () => {
-    // Simulate prior state: user-scope plugin was enabled in a previous launch.
     writeFile(path.join(VERSION_HOME, '.claude', 'settings.json'), JSON.stringify({
       enabledPlugins: { [`foo@${MARKETPLACE_NAME}`]: true },
     }));
-    // Now the plugin only lives at project scope.
     writePluginManifest(path.join(PROJECT_DIR, '.agents', 'plugins', 'foo'), 'foo');
 
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
@@ -321,9 +293,8 @@ describe('runLaunchSync — scoped plugin marketplaces', () => {
     const manifestPath = marketplaceManifestPath(MARKETPLACE_NAME, 'claude', VERSION_HOME);
     const mtime1 = fs.statSync(manifestPath).mtimeMs;
 
-    // Sleep enough to make a rewrite detectable, then re-run.
     const target = Date.now() + 25;
-    while (Date.now() < target) { /* spin */ }
+    while (Date.now() < target) {  }
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
     const mtime2 = fs.statSync(manifestPath).mtimeMs;
 
@@ -353,10 +324,6 @@ describe('runLaunchSync — project rules compile', () => {
 });
 
 describe('runLaunchSync — shim skip-fast sentinel', () => {
-  // Local-scope $HOME override: touchLaunchSentinel reads process.env.HOME
-  // directly (matches the bash shim's $HOME expansion). Scoping the override
-  // to this describe block keeps the other tests' mocked state.js paths
-  // intact — globally overriding HOME breaks their settings.json fixtures.
   let originalHome: string | undefined;
   beforeEach(() => {
     originalHome = process.env.HOME;
@@ -370,8 +337,6 @@ describe('runLaunchSync — shim skip-fast sentinel', () => {
   it('writes the bash skip-fast sentinel at the shim-expected path', () => {
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
 
-    // Slug derivation must match shims.ts / launchSentinelPath: the canonical
-    // toPortableKey mapping (drop drive colon, fold `\` `/` ` ` → `_`).
     const slug = toPortableKey(PROJECT_DIR);
     const sentinel = path.join(USER_DIR, '.cache', 'launch-sync', `claude@1.0.0@${slug}`);
     expect(fs.existsSync(sentinel)).toBe(true);
@@ -383,7 +348,7 @@ describe('runLaunchSync — shim skip-fast sentinel', () => {
     const sentinel = path.join(USER_DIR, '.cache', 'launch-sync', `claude@1.0.0@${slug}`);
     const t1 = fs.statSync(sentinel).mtimeMs;
     const target = Date.now() + 25;
-    while (Date.now() < target) { /* spin */ }
+    while (Date.now() < target) {  }
     runLaunchSync({ agent: 'claude', version: '1.0.0', cwd: PROJECT_DIR });
     const t2 = fs.statSync(sentinel).mtimeMs;
     expect(t2).toBeGreaterThan(t1);

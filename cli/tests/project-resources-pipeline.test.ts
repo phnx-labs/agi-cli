@@ -1,15 +1,3 @@
-/**
- * Project-resource pipeline integration tests.
- *
- * Drives compileRulesForProject + resolveResource + listMcpServerConfigs
- * against the checked-in fixture at tests/fixtures/project-resources/.
- * No agent CLI invocations, no LLM calls — pure filesystem assertions.
- *
- * Mock strategy: redirect getUserAgentsDir/getSystemAgentsDir/etc. to empty
- * temp dirs so the project layer is the only one with content. The real
- * getProjectAgentsDir walk-up is preserved (project discovery is what we're
- * actually testing).
- */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,9 +24,6 @@ vi.mock('../src/lib/state.js', async () => {
     getEnabledExtraRepos: () => [],
     getMcpDir: () => path.join(SYSTEM_DIR, 'mcp'),
     getUserMcpDir: () => path.join(USER_DIR, 'mcp'),
-    // Additional getters used by syncResourcesToVersion. Each points at the
-    // empty system root so no central resources resolve — the project layer
-    // is the sole source.
     getVersionsDir: () => VERSIONS_DIR,
     getCommandsDir: () => path.join(SYSTEM_DIR, 'commands'),
     getSkillsDir: () => path.join(SYSTEM_DIR, 'skills'),
@@ -50,9 +35,6 @@ vi.mock('../src/lib/state.js', async () => {
     getTrashVersionsDir: () => path.join(VERSIONS_DIR, '.trash'),
     getActivePermissionPresetName: () => null,
     getActiveRulesPreset: () => null,
-    // Keep syncClaudeProjectMemoryDir's canonical-dir writes inside the
-    // sandbox — `...actual` would otherwise resolve the real user's
-    // ~/.agents/.cache/state (PHNX-2817).
     getRuntimeStateDir: () => path.join(TEMP_ROOT, '_state'),
   };
 });
@@ -68,10 +50,6 @@ interface FixtureLayout {
 function setupFixture(): FixtureLayout {
   TEMP_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-res-'));
   fs.mkdirSync(path.join(TEMP_ROOT, '.git'), { recursive: true });
-  // Recursive copy that preserves symlinks/empty dirs and hidden .agents/.
-  // fs.cpSync is cross-platform — the old `cp -R` spawn assumed a POSIX `cp`
-  // on PATH, which the windows-latest runner does not provide. Default
-  // dereference:false copies symlinks as links, matching `cp -R`.
   fs.cpSync(FIXTURE_SRC, TEMP_ROOT, { recursive: true });
   USER_DIR = path.join(TEMP_ROOT, '_user_empty');
   SYSTEM_DIR = path.join(TEMP_ROOT, '_system_empty');
@@ -129,7 +107,6 @@ describe('project-resources: compileRulesForProject', () => {
     const compiled = fs.readFileSync(path.join(repoRoot, 'AGENTS.md'), 'utf-8');
     expect(compiled).toContain('RULE_TOKEN_PROJECT_LEVEL_RULE_LOADED');
     expect(compiled).toContain('SECRET_TOKEN_FRAGMENT_INLINED');
-    // Compiled header marks ownership for idempotency / clobber-guard.
     expect(compiled.startsWith('<!-- Auto-compiled by agents-cli')).toBe(true);
   });
 
@@ -146,8 +123,6 @@ describe('project-resources: compileRulesForProject', () => {
       expect(st.isSymbolicLink()).toBe(true);
       expect(fs.readlinkSync(p)).toBe('AGENTS.md');
     }
-    // Gemini is hard-deprecated (Google retired the CLI) — its GEMINI.md alias
-    // must never be created.
     expect(fs.existsSync(path.join(repoRoot, 'GEMINI.md'))).toBe(false);
   });
 
@@ -204,7 +179,6 @@ describe('project-resources: resolveResource project precedence', () => {
 
   it('project command beats user/system on name collision', async () => {
     const { repoRoot, nestedCwd } = setupFixture();
-    // Plant a same-named command in the (mocked) user dir — project should still win.
     const userCmdDir = path.join(USER_DIR, 'commands');
     fs.mkdirSync(userCmdDir, { recursive: true });
     fs.writeFileSync(path.join(userCmdDir, 'myproj.md'), '# user command — should NOT win\nUSER_TOKEN\n');
@@ -243,28 +217,14 @@ describe('project-resources: resolveResource project precedence', () => {
 });
 
 describe('project-resources: syncResourcesToVersion security defense', () => {
-  // Commit 1cc35b14 (fix(security): project-resource defense) closed a
-  // threat-class: a cloned public repo could ship .agents/commands/foo.md
-  // with a harmful body, and the next `agents run` would materialize that
-  // file under the agent's prompt surface. The fix unconditionally excludes
-  // the project layer from sync for commands/skills/MCP/subagents/permissions.
-  // resolveResource still surfaces project entries for listing/inspection;
-  // only the materializing pipeline is locked down.
-  //
-  // These tests pin the defense at the sync layer. If a future change re-adds
-  // project-layer materialization without a confirm step, these assertions
-  // flip and the threat returns.
   it('does NOT materialize a project command into version home, regardless of cwd', async () => {
     const { repoRoot } = setupFixture();
     const { syncResourcesToVersion } = await import('../src/lib/installations/versions.js');
     const { resolveResource } = await import('../src/lib/resources.js');
 
-    // Sanity: the fixture's project command resolves, so the resolver still
-    // sees it. This is the "list / inspect" path that must keep working.
     const resolved = resolveResource('commands', 'myproj', repoRoot);
     expect(resolved?.source).toBe('project');
 
-    // But sync must NOT plant it under the agent's prompt surface.
     syncResourcesToVersion('claude', '99.99.99', undefined, { cwd: repoRoot, force: true });
 
     const versionCmd = path.join(VERSIONS_DIR, 'claude', '99.99.99', 'home', '.claude', 'commands', 'myproj.md');

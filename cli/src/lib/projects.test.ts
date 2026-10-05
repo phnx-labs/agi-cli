@@ -51,11 +51,9 @@ describe('validateProjectDef', () => {
   });
 
   it('throws when the in-file name disagrees with the filename', () => {
-    // The filename is the stable id — a def that names itself otherwise would
-    // resolve under one name and list under another.
     expect(() => validateProjectDef({ name: 'other' }, 'rush')).toThrow(/must match the filename/);
     expect(validateProjectDef({ name: 'rush' }, 'rush').name).toBe('rush');
-    expect(validateProjectDef({ root: '~/x' }, 'rush').name).toBe('rush'); // no name field → filename wins
+    expect(validateProjectDef({ root: '~/x' }, 'rush').name).toBe('rush');
   });
 
   it('keeps well-formed nested fields and drops malformed list entries', () => {
@@ -193,9 +191,7 @@ describe('listProjectDefs', () => {
   it('ignores a .yml file so list and load agree on .yaml (no silent-drop)', () => {
     writeProjectDef({ name: 'real' });
     fs.writeFileSync(path.join(dir, 'ghost.yml'), 'name: ghost\n', 'utf8');
-    // listed set is exactly the .yaml files...
     expect(listProjectDefs().map((d) => d.name)).toEqual(['real']);
-    // ...and loadProjectDef agrees: the .yml is not loadable, so it's not "there".
     expect(loadProjectDef('ghost')).toBeUndefined();
   });
 
@@ -252,7 +248,7 @@ describe('resolveDefinedProjectPath', () => {
 describe('projectNameForCwd', () => {
   const defs: ProjectDef[] = [
     { name: 'rush', root: '~/src/rush' },
-    { name: 'rush-web', root: '~/src/rush/apps/web' }, // nested — must win over rush
+    { name: 'rush-web', root: '~/src/rush/apps/web' },
     { name: 'other', root: '~/src/other' },
   ];
   it('matches a cwd inside a project root, longest (nested) wins', () => {
@@ -265,18 +261,11 @@ describe('projectNameForCwd', () => {
   });
   it('undefined for a cwd outside every project, or a sibling-prefix false match', () => {
     expect(projectNameForCwd(path.join(HOME, 'src/unrelated'), defs)).toBeUndefined();
-    // ~/src/rush-extra must NOT match ~/src/rush (segment-aware, not string prefix)
     expect(projectNameForCwd(path.join(HOME, 'src/rush-extra/x'), defs)).toBeUndefined();
     expect(projectNameForCwd(undefined, defs)).toBeUndefined();
   });
 });
 
-/**
- * PHNX-3999 F08/F09 — what counts as a CONFIRMED project association, and what
- * must stay Uncategorized. The owner's recording (01:30–01:56) shows sessions
- * filed under groups nobody created, because the old answer was the basename of
- * the working directory, which always answers something.
- */
 describe('confirmedProjectForCwd', () => {
   it('confirms a registered definition, including a nested one and a worktree', () => {
     const defs: ProjectDef[] = [
@@ -292,8 +281,6 @@ describe('confirmedProjectForCwd', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'unregistered-repo-'));
     try {
       fs.mkdirSync(path.join(repo, '.git'));
-      // resolveProjectNameForCwd answers with the folder name; the confirmed
-      // association deliberately does not.
       expect(resolveProjectNameForCwd(repo, [])).toBe(path.basename(repo));
       expect(confirmedProjectForCwd(repo, [])).toBeUndefined();
     } finally {
@@ -304,7 +291,6 @@ describe('confirmedProjectForCwd', () => {
   it('leaves a loose directory and a spoofed worktree-shaped path unconfirmed', () => {
     const defs: ProjectDef[] = [{ name: 'rush', root: '~/src/rush' }];
     expect(confirmedProjectForCwd('/tmp/some-loose-dir', defs)).toBeUndefined();
-    // A path that merely LOOKS like a worktree of a project is not membership.
     expect(confirmedProjectForCwd('/tmp/fake/.agents/worktrees/rush', defs)).toBeUndefined();
     expect(confirmedProjectForCwd(undefined, defs)).toBeUndefined();
   });
@@ -312,9 +298,6 @@ describe('confirmedProjectForCwd', () => {
 
 describe('listProjectDefsCached', () => {
   it('picks up an IN-PLACE edit of a definition, not only an add or a remove', () => {
-    // The stamp is per FILE (mtime + size): retargeting a project's root rewrites
-    // the file without touching the directory's mtime, and that is exactly the
-    // edit that changes which sessions belong to the project.
     resetProjectDefsCache();
     writeProjectDef({ name: 'rush', root: '~/src/rush' });
     expect(confirmedProjectForCwd(path.join(HOME, 'src/rush/pkg'), listProjectDefsCached())).toBe('rush');
@@ -349,14 +332,13 @@ describe('resolveProjectNameForCwd', () => {
       const sub = path.join(repo, 'apps', 'web');
       fs.mkdirSync(sub, { recursive: true });
       const defs: ProjectDef[] = [{ name: 'rush', root: repo }];
-      expect(resolveProjectNameForCwd(sub, defs)).toBe('rush'); // def name, not the repo basename
+      expect(resolveProjectNameForCwd(sub, defs)).toBe('rush');
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
   });
 
   it('falls back to the repository key for a cwd no definition contains — and with no defs at all', () => {
-    // Real temp repo: the fallback does the fs walk and names the repo dir.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'proj-fallback-'));
     try {
       fs.mkdirSync(path.join(repo, '.git'));
@@ -364,7 +346,7 @@ describe('resolveProjectNameForCwd', () => {
       fs.mkdirSync(sub, { recursive: true });
       const elsewhere: ProjectDef[] = [{ name: 'rush', root: path.join(repo, 'elsewhere-def-root') }];
       expect(resolveProjectNameForCwd(sub, elsewhere)).toBe(path.basename(repo));
-      expect(resolveProjectNameForCwd(sub, [])).toBe(path.basename(repo)); // == today's behavior
+      expect(resolveProjectNameForCwd(sub, [])).toBe(path.basename(repo));
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
@@ -379,16 +361,12 @@ describe('resolveProjectNameForCwd', () => {
 describe('projectNameForCwd — monorepo subprojects', () => {
   const HOME_ = process.env.HOME ?? os.homedir();
   const mono = path.join(HOME_, 'src', 'rush');
-  // Two projects sharing ONE checkout: the umbrella and a subdir project.
   const defs: ProjectDef[] = [
     { name: 'rush', root: '~/src/rush' },
     { name: 'rush-cli', root: '~/src/rush', defaultPath: '~/src/rush/apps/cli' },
   ];
 
   it('attributes work in the subdir to the SUBPROJECT, not the umbrella', () => {
-    // `root ?? defaultPath` gave both defs the same anchor (~/src/rush), so the
-    // longest-match tiebreak had nothing to separate them and the first listed
-    // def won regardless of where the session actually was.
     expect(projectNameForCwd(path.join(mono, 'apps', 'cli', 'src'), defs)).toBe('rush-cli');
     expect(projectNameForCwd(path.join(mono, 'apps', 'cli'), defs)).toBe('rush-cli');
   });
@@ -419,21 +397,15 @@ describe('projectNameForCwd — monorepo subprojects', () => {
   });
 
   it('a lone narrowed project still owns the rest of its own checkout', () => {
-    // The subdir claim must not shrink a project that has no umbrella beside it:
-    // `--path` picks where an agent starts, not which work counts. Narrowing to
-    // the subdir alone silently orphaned every session in the repo root and in
-    // sibling subdirs.
     const solo: ProjectDef[] = [{ name: 'foo', root: '~/src/foo', defaultPath: '~/src/foo/apps/web' }];
     const repo = path.join(HOME_, 'src', 'foo');
     expect(projectNameForCwd(path.join(repo, 'apps', 'web'), solo)).toBe('foo');
     expect(projectNameForCwd(repo, solo)).toBe('foo');
     expect(projectNameForCwd(path.join(repo, 'apps', 'api'), solo)).toBe('foo');
-    // Still bounded by the root.
     expect(projectNameForCwd(path.join(HOME_, 'src', 'bar'), solo)).toBeUndefined();
   });
 
   it('the umbrella outranks a subproject root even when listed second', () => {
-    // The fallback must lose to any outright claim, in either definition order.
     const reversed = [...defs].reverse();
     expect(projectNameForCwd(path.join(mono, 'apps', 'web'), defs)).toBe('rush');
     expect(projectNameForCwd(path.join(mono, 'apps', 'web'), reversed)).toBe('rush');
@@ -443,8 +415,6 @@ describe('projectNameForCwd — monorepo subprojects', () => {
 });
 
 describe('projectDirsAbs', () => {
-  // Real directories on disk: the local branch filters by existence, so a
-  // fixture that only pretends to exist would test nothing.
   let realA: string;
   let realB: string;
 
@@ -467,8 +437,6 @@ describe('projectDirsAbs', () => {
   });
 
   it('collapses a repo row that points back at the primary', () => {
-    // The natural way to declare a project is to list every directory including
-    // the main one; that must not produce a duplicate grant.
     const def: ProjectDef = {
       name: 'dup',
       root: realA,
@@ -484,10 +452,7 @@ describe('projectDirsAbs', () => {
       root: realA,
       repos: [{ slug: 'o/gone', path: missing }],
     };
-    // Local: a grant for a path that is not here is noise.
     expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA]);
-    // Remote: the target host has its own checkouts — this box's filesystem
-    // must not decide what exists there.
     expect(projectDirsAbs(def, { forRemote: true })).toContain(missing);
   });
 
@@ -515,8 +480,6 @@ describe('projectDirsAbs', () => {
   });
 
   it('honors an explicit primary so a worktree run still grants the siblings', () => {
-    // `--project slug@worktree` lands in the worktree, not in `root`; the
-    // sibling repos must still come along.
     const wt = path.join(realA, '.agents', 'worktrees', 'feature');
     fs.mkdirSync(wt, { recursive: true });
     const def: ProjectDef = {
@@ -532,8 +495,6 @@ describe('projectDirsAbs', () => {
   });
 
   it('ignores a repo row that carries only a slug', () => {
-    // `repos[].path` is the opt-in; a slug-only row is PR/CI metadata and names
-    // nothing on disk to grant.
     const def: ProjectDef = {
       name: 'slugonly',
       root: realA,

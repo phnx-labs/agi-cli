@@ -1,28 +1,15 @@
-/**
- * Built-in profile presets for popular model providers.
- *
- * Each preset bundles a host CLI, API base URL, default model, and provider
- * name so users can `agents harness add kimi` without manual configuration.
- */
 
 import type { AgentId } from './types.js';
 
 export interface PresetVar {
-  /** Env var name to set in the resulting profile. */
   envVar: string;
-  /** User-facing prompt text. */
   prompt: string;
-  /** True for secrets — wizard will mask input and store in keychain. */
   secret?: boolean;
-  /** Default value (shown in prompt). */
   default?: string;
-  /** Optional regex pattern — input validated against it. */
   pattern?: string;
-  /** Optional hint text shown beside the prompt. */
   hint?: string;
 }
 
-/** A pre-configured profile template for a model provider. */
 export interface Preset {
   name: string;
   description: string;
@@ -31,29 +18,11 @@ export interface Preset {
   env: Record<string, string>;
   vars?: PresetVar[];
   authEnvVar: string;
-  /** True if the provider can function without a keychain token (e.g. Bedrock with SSO). */
   authOptional?: boolean;
   signupUrl?: string;
   docPath?: string;
 }
 
-// Model IDs verified against openrouter.ai/api/v1/models on 2026-07-31
-// (spark presets corrected from the never-served meta/claude-spark-1.1 to the
-// live meta/muse-spark-1.1, confirmed on both OpenRouter and OpenCode id:meta).
-// Presets target the top-ranked open-source model per provider based on
-// SWE-bench Verified, LiveCodeBench, HumanEval, and Chatbot Arena rankings.
-//
-// Important limitation of Claude Code + non-Anthropic models via OpenRouter:
-// Claude Code sends `thinking:{type:"enabled"}` in its Anthropic payload by
-// default, and its headless output consolidation returns empty text when a
-// response contains thinking/redacted_thinking blocks — even when the model
-// *also* emits a text block. This means reasoning models work fine in
-// interactive `claude` mode (same env vars) but headless invocations
-// (`agents run <profile> "<prompt>"`) see empty stdout.
-//
-// Presets flagged "headless-safe" use non-reasoning variants that ignore
-// thinking:enabled. Presets flagged "reasoning" are the leaderboard leaders
-// but are best invoked interactively.
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api';
 const OPENROUTER_AUTH: Pick<Preset, 'provider' | 'host' | 'authEnvVar' | 'signupUrl'> = {
@@ -64,7 +33,6 @@ const OPENROUTER_AUTH: Pick<Preset, 'provider' | 'host' | 'authEnvVar' | 'signup
 };
 
 export const PRESETS: Preset[] = [
-  // ----- Top coding (via OpenRouter) -----
   {
     name: 'kimi',
     description: 'Kimi K2.5 via OpenRouter (262K ctx, $0.38/$1.72 per 1M). Top Kimi: 99% HumanEval, 76.8% SWE-bench. REASONING — works interactively, but `agents run kimi "<prompt>"` (headless) returns empty stdout. Use `kimi-chat` preset for scripting.',
@@ -145,7 +113,6 @@ export const PRESETS: Preset[] = [
       ANTHROPIC_SMALL_FAST_MODEL: 'meta/muse-spark-1.1',
     },
   },
-  // ----- OpenCode CLI (open-claude harness) -----
   {
     name: 'opencode',
     description: 'OpenCode default — uses your configured model via opencode auth. Run `opencode auth` to login, then `agents run opencode --model meta/muse-spark-1.1 "prompt"` for spark usage.',
@@ -177,7 +144,6 @@ export const PRESETS: Preset[] = [
       OPENCODE_MODEL: 'qwen/qwen3-coder-next',
     },
   },
-  // ----- xAI Grok Build CLI (native host) -----
   {
     name: 'grok-fast',
     description: 'xAI Grok Build CLI — fast tier. Optimized for speed and low-latency coding tasks.',
@@ -200,7 +166,6 @@ export const PRESETS: Preset[] = [
       GROK_MODEL: 'grok-4.3',
     },
   },
-  // ----- Google Antigravity CLI (native host) -----
   {
     name: 'agy',
     description: 'Google Antigravity CLI default (gemini-3.5-flash). Optimized for speed and large context.',
@@ -209,10 +174,8 @@ export const PRESETS: Preset[] = [
     authEnvVar: 'ANTIGRAVITY_API_KEY',
     signupUrl: 'https://antigravity.google',
     env: {
-      // Antigravity defaults to gemini-3.5-flash as of June 2026
     },
   },
-  // ----- Direct Providers -----
   {
     name: 'anthropic',
     description: 'Anthropic direct API — standard Claude Code experience with your own API key.',
@@ -238,7 +201,6 @@ export const PRESETS: Preset[] = [
       OPENAI_MODEL: 'deepseek-ai/DeepSeek-V3',
     },
   },
-  // ----- Gateway / enterprise / self-hosted -----
   {
     name: 'proxy',
     description: 'Generic local proxy / gateway — points at a local router (CCR, LiteLLM) or internal corporate inference endpoint.',
@@ -405,28 +367,22 @@ export const PRESETS: Preset[] = [
 ];
 
 interface ResolvedPresetEnv {
-  /** Env vars from preset.env — always set, no user input. */
   static: Record<string, string>;
-  /** Vars the wizard needs to prompt for. */
   prompts: PresetVar[];
 }
 
-/** Split a preset into static env vars and prompts needed from the user. */
 export function expandPreset(p: Preset): ResolvedPresetEnv {
   return { static: { ...p.env }, prompts: p.vars ?? [] };
 }
 
-/** Look up a preset by name (case-sensitive). */
 export function getPreset(name: string): Preset | undefined {
   return PRESETS.find((p) => p.name === name);
 }
 
-/** Return a copy of all available presets. */
 export function listPresets(): Preset[] {
   return [...PRESETS];
 }
 
-/** Return the unique set of provider names across all presets. */
 export function listProviders(): string[] {
   return [...new Set(PRESETS.map((p) => p.provider))];
 }

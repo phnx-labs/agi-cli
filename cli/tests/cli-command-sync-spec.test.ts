@@ -1,27 +1,3 @@
-/**
- * cli-command-sync-spec.test.ts
- *
- * Doc-anchored conformance test for custom-slash-command sync across every
- * agent CLI. Each expectation is sourced from the vendor's OFFICIAL docs
- * (URLs + verbatim quotes in tests/fixtures/cli-command-spec.json). This
- * fixture is the source of truth — not the AGENTS registry in src/lib/agents.ts.
- *
- * The test crosswalks the spec against the registry and the sync writers,
- * surfacing places where agents-cli's internal model disagrees with what the
- * vendor documents. Each disagreement is a bug — usually a wrong path, a
- * wrong format, or a wrong capability flag.
- *
- * Two layers run by default:
- *   1) "Registry vs docs" — pure static check; no agent CLIs need to be
- *      installed; runs everywhere. Catches: wrong commandsSubdir, wrong
- *      format, wrong capability claim.
- *   2) "Skill writer output" — exercises the actual commands-as-skills
- *      writer against a tmp version-home and asserts the emitted SKILL.md
- *      lands at the doc-expected path with the doc-expected frontmatter.
- *
- * Disk-level "did this real CLI version actually find it" can be added as
- * a separate opt-in layer (AGENTS_E2E_PROBE=1).
- */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -105,11 +81,6 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
     describe(id, () => {
       const reg = AGENTS[id];
       const banner = cli.registry_divergence ? `  [known divergence: ${cli.registry_divergence}]` : '';
-      // A CLI with a documented registry_divergence is a KNOWN mismatch between
-      // the registry and the vendor docs. We keep its conformance assertions in
-      // the suite (visible as skipped, with the divergence text) rather than
-      // letting them hard-fail CI. Fixing the underlying registry bug = delete
-      // the `registry_divergence` field, and these assertions go live again.
       const itc = cli.registry_divergence ? it.skip : it;
 
       it('agent is present in AGENTS registry', () => {
@@ -128,7 +99,6 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
 
       if (!cli.supported) return;
 
-      // For CLIs with version-gated formats (e.g. codex), test BOTH formats.
       const formatsToCheck = cli.formats.length > 1 ? cli.formats : [cli.formats[0]];
 
       for (const fmt of formatsToCheck) {
@@ -155,17 +125,11 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
           if (fmt.kind === 'skill-dir') {
             const skillsDir = reg.skillsDir ?? '';
             const docDirPrefix = expectedPath.replace(/\/[^/]+\/SKILL\.md$/, '');
-            // Registry paths use path.join (backslash on Windows); doc templates
-            // use forward slashes. Compare separator-agnostically.
             expect(
               toPosix(skillsDir),
               `Docs say ${id}${tag} skills live at ${docDirPrefix}/<name>/SKILL.md; registry has skillsDir=${skillsDir}.${banner}`,
             ).toBe(toPosix(docDirPrefix));
           } else if (fmt.kind === 'markdown-flat' || fmt.kind === 'toml-flat') {
-            // Use the registry's real configDir as the write base — NOT a
-            // hardcoded `.${id}`, which is wrong for agents whose config dir is
-            // nested or under ~/.config (amp -> ~/.config/amp). Hardcoding
-            // produced a false positive for amp whose registry path is correct.
             const agentDir = reg.configDir;
             const regPath = path.join(agentDir, reg.commandsSubdir ?? '', `name.${fmt.kind === 'toml-flat' ? 'toml' : 'md'}`);
             const docPathPattern = expectedPath.replace('{name}', 'name');
@@ -177,14 +141,6 @@ describe('CLI command sync: registry-vs-docs conformance', () => {
         });
       }
 
-      // Skill-dir-only CLIs (cursor-agent, Antigravity) must reach the
-      // skill writer. Most declare commands unsupported. Cursor is the one
-      // dual-surface exception: its IDE reads command files while its CLI reads
-      // generated skills, so the dual-write registry makes both claims true.
-      // Skills-only: every documented format is a skill-dir, and no format
-      // is version-gated to a markdown-flat predecessor. Codex is excluded
-      // because it has BOTH a pre-0.117 markdown-flat and a post-0.117
-      // skill-dir, which is a legitimate version split.
       const isSkillsOnly =
         cli.formats.length > 0 &&
         cli.formats.every((f) => f.kind === 'skill-dir' && !f.applies_when);
@@ -222,8 +178,6 @@ describe('CLI command sync: skill-dir writer output', () => {
         fs.mkdirSync(path.dirname(sourceMd), { recursive: true });
         fs.writeFileSync(sourceMd, sourceFm);
 
-        // Use a per-CLI agentDir mirroring what the writer would produce in
-        // a real version home.
         const agentDir = path.join(SANDBOX, id, `.${id}`);
         fs.mkdirSync(agentDir, { recursive: true });
         const installed = installCommandSkillToVersion(agentDir, cmd, sourceMd, []);
@@ -253,15 +207,10 @@ describe('CLI command sync: sync-pipeline invariants', () => {
   it('shouldInstallCommandAsSkill agrees with spec version_split for codex', () => {
     const codexSpec = SPEC.codex as CliSpec;
     expect(codexSpec.version_split).toBe('0.117.0');
-    // pre-split: native commands path
     expect(shouldInstallCommandAsSkill('codex', '0.116.0')).toBe(false);
-    // post-split: skills path
     expect(shouldInstallCommandAsSkill('codex', '0.134.0')).toBe(true);
   });
 
-  // Same known copilot divergence as the registry-vs-docs block: registry has
-  // copilot commands cap on, docs say none. Skipped (tracked) until the registry
-  // is corrected, at which point the copilot `registry_divergence` flag is removed.
   const copilotIt = (SPEC.copilot as CliSpec).registry_divergence ? it.skip : it;
   copilotIt('copilot is not eligible for commands-as-skills (per docs: no custom commands at all)', () => {
     const copilotSpec = SPEC.copilot as CliSpec;

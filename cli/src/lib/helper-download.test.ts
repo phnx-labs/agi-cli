@@ -24,8 +24,6 @@ import {
 } from './menubar/download-menubar.js';
 import { getCacheDir } from './state.js';
 
-// A stand-in for either real helper spec; the shared URL/cache primitives are
-// spec-driven, so this proves them without pulling in a network call.
 const SAMPLE_SPEC: HelperSpec = {
   helper: 'menubar',
   assetName: 'MenubarHelper.app.zip',
@@ -38,21 +36,15 @@ const SAMPLE_SPEC: HelperSpec = {
 
 describe('menu-bar helper release-asset URLs', () => {
   it("builds asset URLs pinned to the HELPER's own tag, not the CLI's", () => {
-    // The version here is a HELPER version. Keying these URLs to the CLI tag is
-    // what forced every CLI release to re-stage every helper asset, and made a
-    // helper fix unreachable without one — see lib/helper-versions.ts.
     const u = menubarHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
       'https://github.com/phnx-labs/agi-cli/releases/download/menubar/v1.0.0/MenubarHelper.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
-    // A bare `v<n>` tag here would be the old coupling coming back.
     expect(u.zip).not.toMatch(/download\/v\d/);
   });
 
   it('names the asset + bundle exactly what release upload + download expect (drift guard)', () => {
-    // release.sh stages MenubarHelper.app.zip from bin/MenubarHelper.app; the
-    // client URL and extracted dir must match those names byte-for-byte.
     expect(MENUBAR_HELPER_ASSET).toBe('MenubarHelper.app.zip');
     expect(MENUBAR_HELPER_APP_NAME).toBe('MenubarHelper.app');
     expect(MENUBAR_HELPER_ASSET).toBe(`${MENUBAR_HELPER_APP_NAME}.zip`);
@@ -71,22 +63,11 @@ describe('menu-bar helper release-asset URLs', () => {
   });
 });
 
-// cli/ — this file lives at cli/src/lib/, so two levels up. Resolved from
-// import.meta.url, not __dirname: the package is "type": "module", so __dirname
-// exists only because vite injects it, and every other test file here uses the
-// ESM form.
 const REPO_ROOT_FOR_PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('the release repo slug is the GitHub repo, not the npm package', () => {
-  // These are two different names and conflating them breaks something either
-  // way. The repository was renamed agents-cli -> agi-cli; the published npm
-  // package is still @phnx-labs/agents-cli. Renaming the package to match would
-  // orphan every existing install, and leaving the slug on the old name means
-  // signed-binary downloads resolve only through GitHub's rename redirect --
-  // one re-created repo away from pointing elsewhere.
   it('uses the renamed repository, not the redirect', () => {
     expect(HELPER_RELEASE_REPO).toBe('phnx-labs/agi-cli');
-    // Guard the specific regression: the pre-rename slug must not come back.
     expect(HELPER_RELEASE_REPO).not.toBe('phnx-labs/agents-cli');
   });
 
@@ -99,13 +80,10 @@ describe('the release repo slug is the GitHub repo, not the npm package', () => 
   });
 
   it('does not rename the npm package along with the repo', () => {
-    // The package name lives in package.json and is load-bearing for every
-    // installed CLI; it must NOT track the repository rename.
     const pkg = JSON.parse(
       fs.readFileSync(path.join(REPO_ROOT_FOR_PKG, 'package.json'), 'utf-8'),
     ) as { name: string; repository?: { url?: string } };
     expect(pkg.name).toBe('@phnx-labs/agents-cli');
-    // ...while the repository metadata SHOULD track it.
     expect(pkg.repository?.url ?? '').toContain('phnx-labs/agi-cli');
   });
 });
@@ -120,8 +98,6 @@ describe('helper spec verification policy', () => {
 });
 
 describe('checkDesignatedRequirement (the menu-bar DR pin)', () => {
-  // A real Developer-ID designated requirement as `codesign -d --requirements -`
-  // emits it — the same string shape scripts/verify-menubar-helper.sh greps.
   const validReq =
     'designated => identifier "com.phnx-labs.agents-menubar" and anchor apple generic ' +
     'and certificate leaf[subject.OU] = "2HTP252L87"';
@@ -172,11 +148,9 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
     fs.writeFileSync(file, 'not the signed bundle');
     try {
       const actual = await sha256File(file);
-      // The exact comparison downloadHelperApp makes: expected (from the .sha256
-      // asset) vs actual (streamed hash of the downloaded bytes).
       const bogusPublished = `${'0'.repeat(64)}  MenubarHelper.app.zip`;
       const expected = parseSha256Asset(bogusPublished);
-      expect(actual).not.toBe(expected); // -> "sha256 mismatch" throw, before extraction
+      expect(actual).not.toBe(expected);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -187,19 +161,6 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
   });
 });
 
-// RUSH-3113 regression. `helper-download.ts` must be importable as the FIRST
-// local module in a fresh process. It used to reach the computer subsystem's
-// ssh-tunnel module (since extracted, PHNX-4075)
-// for two sha256 helpers, and that graph ran through the (now-removed, PHNX-3989)
-// in-repo secrets engine's own keychain-helper downloader, which imported back
-// into this module while it was still evaluating — before `EXPECTED_TEAM_ID`
-// (line 30) is bound. Every entry point that reached helper-download first died
-// with `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization`,
-// taking drift-sync and self-heal's real-subprocess tests down with it.
-//
-// A SUBPROCESS is the only faithful reproduction: inside vitest the module
-// registry is usually already warm, so the cycle does not re-trigger. Fails on
-// the parent commit, passes here.
 describe('module-init cycle (RUSH-3113)', () => {
   it('imports standalone in a fresh process without a TDZ error', () => {
     const mod = path.resolve(process.cwd(), 'src/lib/helper-download.ts');

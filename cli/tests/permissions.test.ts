@@ -221,9 +221,6 @@ describe('convertToOpenCodeFormat', () => {
   });
 
   it('maps the bare blanket form "Bash" to an allow-all bash pattern', () => {
-    // Shared permission groups use plain "Bash" (no parens) as the blanket
-    // rule. Without this mapping it would silently drop on the OpenCode
-    // side and the agent would end up with no bash permissions at all.
     const set: PermissionSet = {
       name: 'test',
       allow: ['Bash'],
@@ -247,9 +244,6 @@ describe('convertToCodexFormat', () => {
   });
 
   it('treats the bare blanket form "Bash" as broad bash (auto-approve)', () => {
-    // Permission groups often ship plain "Bash" as the blanket rule.
-    // Without this, pods got approval_policy='on-request' and would stall
-    // on ambiguous commands with no human to confirm.
     const set: PermissionSet = {
       name: 'test',
       allow: ['Bash'],
@@ -282,9 +276,6 @@ describe('convertToCodexFormat', () => {
   });
 
   it('grants the baseline cache writable_roots even with no permissions', () => {
-    // No perms → no approval_policy/sandbox_mode, but the build/test/install
-    // cache roots are an unconditional baseline so a workspace-write run can
-    // still build without escalating to danger-full-access.
     const set: PermissionSet = {
       name: 'test',
       allow: [],
@@ -447,12 +438,9 @@ describe('applyClaudePermissions', () => {
       deny: ['Bash(rm *)'],
     };
 
-    // Mock the scope to use our test directory
     const claudeDir = join(testDir, '.claude');
     mkdirSync(claudeDir, { recursive: true });
 
-    // We can't easily test with scope='user' as it writes to real HOME
-    // So we test the underlying conversion + JSON writing manually
     const converted = convertToClaudeFormat(set);
     const settingsPath = join(claudeDir, 'settings.json');
     writeFileSync(settingsPath, JSON.stringify(converted, null, 2));
@@ -466,7 +454,6 @@ describe('applyClaudePermissions', () => {
     const claudeDir = join(testDir, '.claude');
     mkdirSync(claudeDir, { recursive: true });
 
-    // Write existing permissions
     const existing = {
       permissions: {
         allow: ['Bash(npm *)'],
@@ -477,14 +464,12 @@ describe('applyClaudePermissions', () => {
     const settingsPath = join(claudeDir, 'settings.json');
     writeFileSync(settingsPath, JSON.stringify(existing, null, 2));
 
-    // New permissions to merge
     const newSet: PermissionSet = {
       name: 'test',
       allow: ['Bash(git *)'],
       deny: ['Bash(rm *)'],
     };
 
-    // Read existing, merge, write
     const existingConfig = JSON.parse(readFileSync(settingsPath, 'utf-8'));
     const newConverted = convertToClaudeFormat(newSet);
 
@@ -508,7 +493,7 @@ describe('applyClaudePermissions', () => {
     expect(result.permissions.allow).toContain('Bash(npm *)');
     expect(result.permissions.allow).toContain('Bash(git *)');
     expect(result.permissions.deny).toContain('Bash(rm *)');
-    expect(result.otherSetting).toBe(true); // preserved
+    expect(result.otherSetting).toBe(true);
   });
 });
 
@@ -547,7 +532,6 @@ describe('applyOpenCodePermissions', () => {
     const opencodeDir = join(testDir, '.opencode');
     mkdirSync(opencodeDir, { recursive: true });
 
-    // Write existing config
     const existing = {
       permission: {
         bash: {
@@ -559,13 +543,11 @@ describe('applyOpenCodePermissions', () => {
     const configPath = join(opencodeDir, 'opencode.jsonc');
     writeFileSync(configPath, JSON.stringify(existing, null, 2));
 
-    // New permissions
     const newSet: PermissionSet = {
       name: 'test',
       allow: ['Bash(git *)'],
     };
 
-    // Read, merge, write
     const existingConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
     const newConverted = convertToOpenCodeFormat(newSet);
 
@@ -580,9 +562,9 @@ describe('applyOpenCodePermissions', () => {
     writeFileSync(configPath, JSON.stringify(existingConfig, null, 2));
 
     const result = JSON.parse(readFileSync(configPath, 'utf-8'));
-    expect(result.permission.bash['bun *']).toBe('allow'); // preserved
-    expect(result.permission.bash['git *']).toBe('allow'); // added
-    expect(result.mcp).toBeDefined(); // other config preserved
+    expect(result.permission.bash['bun *']).toBe('allow');
+    expect(result.permission.bash['git *']).toBe('allow');
+    expect(result.mcp).toBeDefined();
   });
 });
 
@@ -622,7 +604,6 @@ describe('applyCodexPermissions', () => {
     const codexDir = join(testDir, '.codex');
     mkdirSync(codexDir, { recursive: true });
 
-    // Write existing config
     const existing = {
       model: 'gpt-4',
       personality: 'pragmatic',
@@ -630,13 +611,11 @@ describe('applyCodexPermissions', () => {
     const configPath = join(codexDir, 'config.toml');
     writeFileSync(configPath, TOML.stringify(existing));
 
-    // New permissions
     const newSet: PermissionSet = {
       name: 'test',
       allow: ['WebSearch(*)'],
     };
 
-    // Read, merge, write
     const existingConfig = TOML.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
     const newConverted = convertToCodexFormat(newSet);
 
@@ -645,9 +624,9 @@ describe('applyCodexPermissions', () => {
     writeFileSync(configPath, TOML.stringify(existingConfig as any));
 
     const result = TOML.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
-    expect(result.model).toBe('gpt-4'); // preserved
-    expect(result.personality).toBe('pragmatic'); // preserved
-    expect((result.sandbox_workspace_write as any)?.network_access).toBe(true); // added
+    expect(result.model).toBe('gpt-4');
+    expect(result.personality).toBe('pragmatic');
+    expect((result.sandbox_workspace_write as any)?.network_access).toBe(true);
   });
 });
 
@@ -688,7 +667,6 @@ describe('applyPermissionsToVersion', () => {
     const claudeDir = join(versionHome, '.claude');
     mkdirSync(claudeDir, { recursive: true });
 
-    // Write existing permissions
     const existing = {
       permissions: {
         allow: ['Bash(npm *)'],
@@ -708,8 +686,8 @@ describe('applyPermissionsToVersion', () => {
     expect(result.success).toBe(true);
 
     const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
-    expect(settings.permissions.allow).toContain('Bash(npm *)'); // existing
-    expect(settings.permissions.allow).toContain('Bash(git *)'); // new
+    expect(settings.permissions.allow).toContain('Bash(npm *)');
+    expect(settings.permissions.allow).toContain('Bash(git *)');
     expect(settings.permissions.deny).toContain('Bash(rm *)');
     expect(settings.otherSetting).toBe('preserved');
   });
@@ -863,7 +841,6 @@ describe('applyPermissionsToVersion', () => {
       allow: ['Bash(git *)'],
     };
 
-    // amp has no allowlist writer path
     const result = applyPermissionsToVersion('amp' as any, set, versionHome, true);
     expect(result.success).toBe(false);
     expect(result.error).toContain('does not support permissions');
@@ -1020,7 +997,6 @@ describe('applyPermissionsToVersion', () => {
     expect(settings.permissions.allow).toContain('command(npm test)');
     expect(settings.permissions.allow).toContain('command(git *)');
     expect(settings.permissions.allow).toContain('command(yarn *)');
-    // No duplicate of "command(git *)"
     expect(settings.permissions.allow.filter((e: string) => e === 'command(git *)')).toHaveLength(1);
   });
 
@@ -1042,8 +1018,6 @@ describe('applyPermissionsToVersion', () => {
     const config = TOML.parse(readFileSync(configPath, 'utf-8')) as any;
     const rules = config.permission.rules as Array<{ action: string; tool: string; pattern?: string }>;
     expect(rules).toContainEqual({ action: 'allow', tool: 'bash', pattern: 'git *' });
-    // Blanket Bash(*) -> a pattern-LESS bash rule (grok's allow-all-shell idiom;
-    // its `*` is only a single-level wildcard). PHNX-3294.
     expect(rules).toContainEqual({ action: 'allow', tool: 'bash' });
     expect(rules).not.toContainEqual({ action: 'allow', tool: 'bash', pattern: '*' });
     expect(rules).toContainEqual({ action: 'allow', tool: 'read', pattern: '/Users/me' });
@@ -1216,14 +1190,12 @@ describe('applyPermissionsToVersion codex deny rules', () => {
       const result = applyPermissionsToVersion('codex', set, versionHome);
       expect(result.success).toBe(true);
 
-      // config.toml should have approval_policy from allow rules
       const configPath = join(codexDir, 'config.toml');
       expect(existsSync(configPath)).toBe(true);
       const config = TOML.parse(readFileSync(configPath, 'utf-8'));
       expect(config.approval_policy).toBe('never');
       expect(config.sandbox_mode).toBe('workspace-write');
 
-      // .rules file should have deny rules
       const rulesPath = join(codexDir, 'rules', CODEX_RULES_FILENAME);
       expect(existsSync(rulesPath)).toBe(true);
       const rulesContent = readFileSync(rulesPath, 'utf-8');
@@ -1241,8 +1213,6 @@ describe('applyPermissionsToVersion codex deny rules', () => {
     const codexDir = join(versionHome, '.codex');
 
     try {
-      // Inline set keeps this test hermetic — the system 99-deny.yaml is not
-      // present on CI runners and we'd hit "set.deny is undefined" otherwise.
       const set = {
         name: '99-deny',
         allow: [],
@@ -1252,7 +1222,6 @@ describe('applyPermissionsToVersion codex deny rules', () => {
       const result = applyPermissionsToVersion('codex', set, versionHome);
       expect(result.success).toBe(true);
 
-      // .rules file should exist with deny rules
       const rulesPath = join(codexDir, 'rules', CODEX_RULES_FILENAME);
       expect(existsSync(rulesPath)).toBe(true);
       const rulesContent = readFileSync(rulesPath, 'utf-8');

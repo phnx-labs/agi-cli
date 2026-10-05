@@ -1,28 +1,15 @@
-/**
- * One-time "star us on GitHub" nudge.
- *
- * Printed a single time, ever, after a user's first *successful* headline run
- * (`agents run` / `agents teams`). Modelled on the existing warn-once sentinel
- * pattern (see maybeWarnMultiInstall in src/index.ts): a marker under the
- * regenerable runtime-state dir records that the hint was shown so it never
- * repeats. It is a plain inline line — not a toast, not a nag — and stays out
- * of the way of non-interactive, CI, quiet, and JSON output.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { getRuntimeStateDir } from './state.js';
 
-/** Canonical GitHub repo the nudge points at (renamed from agents-cli). */
 export const REPO_URL = 'https://github.com/phnx-labs/agi-cli';
 
-/** Sentinel written the first (and only) time the nudge is shown. */
 function nudgeSentinelPath(): string {
   return path.join(getRuntimeStateDir(), 'star-nudge-shown');
 }
 
-/** Has the star nudge already been shown on this machine? */
 export function hasShownStarNudge(): boolean {
   try {
     return fs.existsSync(nudgeSentinelPath());
@@ -31,25 +18,14 @@ export function hasShownStarNudge(): boolean {
   }
 }
 
-/** Inputs to the pure show/skip decision (kept side-effect free for testing). */
 export interface StarNudgeContext {
-  /** Caller asked for quiet / JSON output. */
   quiet?: boolean;
-  /** stdout is attached to an interactive terminal. */
   isTTY: boolean;
-  /** CI is set in the environment. */
   ci: boolean;
-  /** User opted out via AGENTS_NO_NUDGE=1. */
   optedOut: boolean;
-  /** The one-time sentinel already exists. */
   alreadyShown: boolean;
 }
 
-/**
- * Pure decision: should the one-time star nudge be shown? Skipped for
- * quiet/JSON output, non-interactive terminals (pipes, redirects), CI, an
- * explicit opt-out, or once it has already been shown.
- */
 export function shouldShowStarNudge(ctx: StarNudgeContext): boolean {
   if (ctx.quiet) return false;
   if (!ctx.isTTY) return false;
@@ -59,15 +35,6 @@ export function shouldShowStarNudge(ctx: StarNudgeContext): boolean {
   return true;
 }
 
-/**
- * Show the one-time star nudge if it hasn't been shown yet and the context is
- * appropriate. Best-effort by contract: never throws, never blocks the run it
- * follows.
- *
- * Skipped when: the caller asked for quiet/JSON output, stdout is not an
- * interactive terminal (pipes, redirects), CI is set, or the user opted out
- * with AGENTS_NO_NUDGE=1.
- */
 export function maybeShowStarNudge(opts: { quiet?: boolean } = {}): void {
   try {
     const show = shouldShowStarNudge({
@@ -79,19 +46,13 @@ export function maybeShowStarNudge(opts: { quiet?: boolean } = {}): void {
     });
     if (!show) return;
 
-    // Claim the one-time slot with an ATOMIC exclusive create (O_EXCL). The
-    // hasShownStarNudge() check above is only a cheap fast-path; the existsSync
-    // + write pair is a TOCTOU race across processes, and `agents teams` spawns
-    // many at once. The `wx` flag makes the create itself the arbiter: exactly
-    // one process succeeds, every other gets EEXIST and stays silent — so the
-    // hint prints at most once even under concurrent completions.
     const sentinel = nudgeSentinelPath();
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
     try {
       fs.writeFileSync(sentinel, new Date().toISOString(), { flag: 'wx' });
     } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return; // another process won the race
-      throw e; // real write failure -> caught by the outer best-effort guard
+      if ((e as NodeJS.ErrnoException).code === 'EEXIST') return;
+      throw e;
     }
 
     console.log(
@@ -100,6 +61,5 @@ export function maybeShowStarNudge(opts: { quiet?: boolean } = {}): void {
         chalk.cyan(REPO_URL),
     );
   } catch {
-    /* best-effort: a nudge must never break a successful run */
   }
 }

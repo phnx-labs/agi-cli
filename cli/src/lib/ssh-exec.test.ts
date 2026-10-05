@@ -34,10 +34,9 @@ describe('assertValidSshTarget', () => {
   });
 
   it('rejects a leading dash so a target cannot be smuggled as an ssh flag', () => {
-    // This is the bug the bare regex misses — guarded explicitly in ssh-exec.
     expect(() => assertValidSshTarget('-oProxyCommand=evil')).toThrow();
     expect(() => assertValidSshTarget('-l')).toThrow();
-    expect(SSH_TARGET_RE.test('-l')).toBe(true); // the bare regex matches '-l' — the leading-dash guard is what blocks it
+    expect(SSH_TARGET_RE.test('-l')).toBe(true);
   });
 });
 
@@ -53,7 +52,6 @@ describe('shellQuote', () => {
   });
 
   it('escapes embedded single quotes correctly', () => {
-    // it's -> 'it'\''s'  (close, escaped quote, reopen)
     expect(shellQuote("it's")).toBe("'it'\\''s'");
   });
 });
@@ -66,8 +64,6 @@ describe('SSH_OPTS (hardened baseline)', () => {
   });
 
   it('adds keepalive so a dropped link exits instead of zombying', () => {
-    // ServerAliveInterval * ServerAliveCountMax bounds how long a dead
-    // connection can hang before ssh gives up (~45s here).
     expect(SSH_OPTS).toContain('ServerAliveInterval=15');
     expect(SSH_OPTS).toContain('ServerAliveCountMax=3');
   });
@@ -86,8 +82,6 @@ describe('sshConnectOpts (host-key override ordering)', () => {
     const args = sshConnectOpts([], override);
     const firstStrict = args.indexOf('StrictHostKeyChecking=yes');
     const baselineAcceptNew = args.indexOf('StrictHostKeyChecking=accept-new');
-    // The strict override must appear before the baseline accept-new, or ssh
-    // would silently keep accept-new and ship creds over an unverified connect.
     expect(firstStrict).toBeGreaterThanOrEqual(0);
     expect(baselineAcceptNew).toBeGreaterThan(firstStrict);
   });
@@ -95,37 +89,29 @@ describe('sshConnectOpts (host-key override ordering)', () => {
 
 describe('controlOpts (connection multiplexing)', () => {
   it('is empty on Windows (OpenSSH there has no ControlMaster support)', () => {
-    if (process.platform !== 'win32') return; // asserted on the other branch below
+    if (process.platform !== 'win32') return;
     expect(controlOpts()).toEqual([]);
   });
 
   it('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
-    if (process.platform === 'win32') return; // multiplexing skipped on Windows
+    if (process.platform === 'win32') return;
     const opts = controlOpts();
     expect(opts).toContain('ControlMaster=auto');
     expect(opts).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
     const cp = opts.find((o) => o.startsWith('ControlPath='));
     expect(cp).toBeDefined();
-    // %C keeps the socket path short (macOS sun_path limit) and the dir must exist.
     expect(cp).toContain('%C');
     const dir = path.dirname(cp!.replace('ControlPath=', ''));
     expect(fs.existsSync(dir)).toBe(true);
   });
 
   it('keeps a multi-minute burst of same-host touches warm — well above the old 60s (PHNX-2582)', () => {
-    // The master only survives while idle < ControlPersist, so the window has to
-    // span the gap between repeated ad-hoc --device / fan-out touches of one box,
-    // which arrive in bursts over minutes. At the old 60s any two more than a
-    // minute apart were both cold. Guard that the window stays several minutes so
-    // a future edit can't silently drop it back toward that cold-every-touch 60s.
     const OLD_COLD_WINDOW_SECONDS = 60;
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThanOrEqual(5 * 60);
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(OLD_COLD_WINDOW_SECONDS);
   });
 });
 
-// POSIX-only: the stub is a `#!/bin/sh` script, which Windows cannot exec.
-// Same skip rationale as the sshExecAsync suite below.
 describe.skipIf(process.platform === 'win32')('sshExec timedOut detection (PATH ssh stub)', () => {
   function withStubSshSync<T>(script: string, fn: () => T): T {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
@@ -141,8 +127,6 @@ describe.skipIf(process.platform === 'win32')('sshExec timedOut detection (PATH 
   }
 
   it('flags timedOut when spawnSync kills the ssh process after timeoutMs', () => {
-    // Before the fix, spawnSync set res.signal = 'SIGTERM' on timeout but NOT
-    // res.error.code = 'ETIMEDOUT', so the old detection always returned false.
     const res = withStubSshSync(
       '#!/bin/sh\nexec sleep 30\n',
       () => sshExec('testhost', 'slow', { multiplex: false, timeoutMs: 150 }),
@@ -161,16 +145,7 @@ describe.skipIf(process.platform === 'win32')('sshExec timedOut detection (PATH 
   });
 });
 
-// POSIX-only: the stub is a `#!/bin/sh` script, which Windows cannot exec (the
-// spawn produces no output — `expected '' to contain 'OUT_OK'`). The product code
-// (sshExecAsync) is cross-platform; only this shell-stub harness is not, so the
-// whole suite is skipped on Windows. The full Windows matrix runs only on release
-// PRs, so this surfaced there rather than on a normal PR to main.
 describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PATH ssh stub — no mocks)', () => {
-  // Put a genuine executable named `ssh` first on PATH so sshExecAsync's spawn('ssh')
-  // runs it: a real subprocess round-trip that exercises stdout/stderr capture,
-  // exit-code propagation, and the timeout -> SIGTERM path — the primitive the fleet
-  // fan-out is built on — without needing a reachable host.
   function withStubSsh<T>(script: string, fn: () => Promise<T>): Promise<T> {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
     fs.writeFileSync(path.join(dir, 'ssh'), script, { mode: 0o755 });
@@ -195,13 +170,11 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
 
   it('kills the child and flags timedOut when it exceeds timeoutMs', async () => {
     const res = await withStubSsh(
-      // exec so the killed pid IS the sleep (its stdio pipes close on death, firing
-      // 'close'); a plain `sleep` child would orphan and hold the pipes open.
       '#!/bin/sh\nexec sleep 30\n',
       () => sshExecAsync('testhost', 'slow', { multiplex: false, timeoutMs: 150 }),
     );
     expect(res.timedOut).toBe(true);
-    expect(res.code).toBeNull(); // SIGTERM-terminated child closes with a null exit code
+    expect(res.code).toBeNull();
   });
 
   it('hard-kills an ssh child that ignores SIGTERM without freezing the event loop', async () => {
@@ -210,16 +183,12 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
     const startedAt = Date.now();
     try {
       const res = await withStubSsh(
-        // A real child process that deliberately ignores the soft timeout. The
-        // busy loop avoids an orphaned grandchild holding stdout/stderr open.
         '#!/bin/sh\ntrap "" TERM\nwhile :; do :; done\n',
         () => sshExecAsync('testhost', 'wedged', { multiplex: false, timeoutMs: 500 }),
       );
       expect(res.timedOut).toBe(true);
       expect(res.code).toBeNull();
       const elapsed = Date.now() - startedAt;
-      // If SIGTERM killed the child, this would resolve around 500ms. Waiting
-      // through the grace proves the SIGKILL branch handled the ignored signal.
       expect(elapsed).toBeGreaterThanOrEqual(500 + SSH_TIMEOUT_KILL_GRACE_MS - 50);
       expect(elapsed).toBeLessThan(500 + SSH_TIMEOUT_KILL_GRACE_MS + 1_500);
       expect(heartbeats).toBeGreaterThanOrEqual(20);
@@ -233,16 +202,10 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
       '#!/bin/sh\nprintf "%s" "$*"\nexit 0\n',
       () => sshExecAsync('testhost', 'cmd', { timeoutMs: 1000 }),
     );
-    // If multiplexing were honoured, ControlMaster=auto would appear in the argv
-    // we forwarded to ssh. With a timeout we must use a direct connection so the
-    // local timeout actually stops the remote command (RUSH-2114).
     expect(res.stdout).not.toContain('ControlMaster');
   });
 
   it('does not crash on EPIPE when input is piped to a child that exits before reading it', async () => {
-    // Stub exits immediately without reading stdin; end(bigInput) would emit EPIPE
-    // on child.stdin. Without the stream 'error' guard that is an uncaught exception
-    // that kills the process — with it, this resolves to a normal result.
     const bigInput = 'x'.repeat(2 * 1024 * 1024);
     const res = await withStubSsh(
       '#!/bin/sh\nexit 0\n',
@@ -271,10 +234,6 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
 
 
 describe('local terminal restore after an interactive stream (RUSH-3125)', () => {
-  // A remote agent TUI killed by a dropped link never sends its own exit
-  // sequences, so these modes stay armed on the LOCAL terminal and it starts
-  // answering back at a shell that is not expecting it — the
-  // `^[[?997;1n ^[[I ^[[O` litter in the reported capture.
   it('disables every DEC mode a full-screen TUI arms, and re-shows the cursor', () => {
     for (const mode of ['1004', '996', '997', '2004', '1049', '1000', '1002', '1003', '1006']) {
       expect(TERMINAL_MODE_RESET).toContain(`\x1b[?${mode}l`);
@@ -287,43 +246,32 @@ describe('local terminal restore after an interactive stream (RUSH-3125)', () =>
     expect(set).toEqual(['\x1b[?25h']);
   });
 
-  // The suite's stdin is a pipe, so this is the real non-TTY branch, not a mock.
   it('snapshots nothing when stdin is not a TTY', () => {
     expect(process.stdin.isTTY).toBeFalsy();
     expect(saveLocalTerminal()).toBeUndefined();
   });
 
-  // Restore runs while recovering from a dropped link. If it could throw it
-  // would turn a recoverable blink into a crash, so every branch is guarded.
   it('is a safe no-op with no snapshot and no TTY — recovery must never throw', () => {
     expect(() => restoreLocalTerminal(undefined, { drainStdin: true })).not.toThrow();
     expect(() => restoreLocalTerminal(undefined, { drainStdin: false })).not.toThrow();
     expect(() => restoreLocalTerminal('garbage-not-a-stty-string', { drainStdin: true })).not.toThrow();
   });
 
-  // Review finding on PR #3006. Resetting termios/DEC modes is idempotent, so
-  // doing it on a clean exit costs nothing. Draining stdin is DESTRUCTIVE: on a
-  // successful interactive session those queued bytes are the user's legitimate
-  // type-ahead, and eating them would be a new bug in every sshStream(tty) caller
-  // rather than a fix. Only an abnormal exit produces the answerback storm the
-  // drain exists to clear.
   it('only drains stdin when asked — the destructive step is opt-in', () => {
     const reads: unknown[] = [];
     const stdin = process.stdin as unknown as { isTTY?: boolean; read?: () => unknown };
     const realIsTTY = stdin.isTTY;
     const realRead = stdin.read;
-    // Present a real readable-shaped stdin with a byte queued, then assert the
-    // drain is what consumes it — no mocking of the function under test.
     stdin.isTTY = true;
     let queued: unknown[] = ['typed-ahead'];
     stdin.read = () => { const v = queued.shift() ?? null; reads.push(v); return v; };
     try {
       restoreLocalTerminal(undefined, { drainStdin: false });
-      expect(queued).toEqual(['typed-ahead']); // a clean exit leaves type-ahead alone
+      expect(queued).toEqual(['typed-ahead']);
 
       queued = ['typed-ahead'];
       restoreLocalTerminal(undefined, { drainStdin: true });
-      expect(queued).toEqual([]); // an abnormal exit clears the answerback burst
+      expect(queued).toEqual([]);
     } finally {
       stdin.isTTY = realIsTTY;
       stdin.read = realRead;

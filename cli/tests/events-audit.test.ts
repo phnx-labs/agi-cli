@@ -1,14 +1,3 @@
-/**
- * End-to-end audit-log tests. Drive the REAL CLI entry (via tsx) with a temp
- * HOME so the event log lands under the temp dir, then assert the structured
- * records. Covers the three things the audit backbone must guarantee:
- *   1. Every command fires a `command.start` with module + full command path.
- *   2. Every record carries who ran it (osUser) and from where (transport).
- *   3. SSH origin is attributed — "started on the host by a remote user".
- *   4. `agents events --module` filters the trail back out.
- *
- * No mocking — the same code path a real invocation takes.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -38,9 +27,6 @@ function makeTempHome(): string {
 function runCli(home: string, args: string[], extraEnv: Record<string, string> = {}) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,
-    // AGENTS_EVENTS_PATH is inherited from the hermetic fork default
-    // (tests/setup.ts); blank it so the child resolves the canonical
-    // HOME-derived log this suite asserts on ('' is falsy in the resolver).
     env: { ...process.env, HOME: home, SHELL: '/bin/zsh', AGENTS_EVENTS_PATH: '', ...extraEnv },
     encoding: 'utf-8',
   });
@@ -52,7 +38,6 @@ function currentEventsPath(home: string): string {
   return path.join(home, '.agents', '.history', 'events', day, 'events.jsonl');
 }
 
-/** Read every event record written to the canonical log under a temp HOME. */
 function readEvents(home: string): Array<Record<string, unknown>> {
   const eventsPath = currentEventsPath(home);
   if (!fs.existsSync(eventsPath)) return [];
@@ -61,7 +46,6 @@ function readEvents(home: string): Array<Record<string, unknown>> {
     try {
       out.push(JSON.parse(line));
     } catch {
-      /* skip */
     }
   }
   return out;
@@ -72,7 +56,6 @@ afterEach(() => {
     try {
       fs.rmSync(h, { recursive: true, force: true });
     } catch {
-      /* best-effort */
     }
   }
 });
@@ -80,13 +63,6 @@ afterEach(() => {
 describe('audit event log', () => {
   it('records a command.start with module, command path, and local-user attribution', () => {
     const home = makeTempHome();
-    // `config list` exercises a two-level command path (module=config,
-    // command="config list"). `secrets` is now a passthrough to the standalone
-    // (records a one-level `secrets`), so a genuinely-registered two-level group
-    // is used to prove the full command path is recorded. The preAction hook
-    // fires before the action, so the audit record lands even if the action
-    // itself no-ops. Clear SSH_CONNECTION so the local case is exercised even
-    // when the test runner itself is on an SSH session.
     runCli(home, ['config', 'list'], { SSH_CONNECTION: '' });
 
     const events = readEvents(home);
@@ -116,32 +92,27 @@ describe('audit event log', () => {
   it('reads the trail back out and filters by module', () => {
     const home = makeTempHome();
     runCli(home, ['secrets', 'list']);
-    runCli(home, ['events', '--json']); // a second, different module
+    runCli(home, ['events', '--json']);
 
     const res = runCli(home, ['events', '--module', 'secrets', '--json']);
     expect(res.status).toBe(0);
     const records = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
     expect(records.length).toBeGreaterThan(0);
-    // Every returned record is from the secrets module, none from events.
     expect(records.every((r) => r.module === 'secrets')).toBe(true);
   });
 
   it('--command matches a command path by prefix', () => {
     const home = makeTempHome();
-    runCli(home, ['config', 'list']); // command path: "config list"
+    runCli(home, ['config', 'list']);
 
-    // A coarse "config" must catch the "config list" record...
     const coarse = JSON.parse(runCli(home, ['events', '--command', 'config', '--json']).stdout) as Array<Record<string, unknown>>;
     expect(coarse.some((r) => r.command === 'config list')).toBe(true);
-    // ...while a non-matching prefix returns nothing.
     const none = JSON.parse(runCli(home, ['events', '--command', 'teams', '--json']).stdout) as Array<Record<string, unknown>>;
     expect(none.length).toBe(0);
   });
 
   it('redacts a token-like positional arg before it hits the log', () => {
     const home = makeTempHome();
-    // `secrets get <name>` no-ops (rc!=0) but the preAction hook still records
-    // the invocation; the token-shaped positional must be masked, not stored.
     runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
 
     const raw = fs.readFileSync(currentEventsPath(home), 'utf-8');
@@ -153,7 +124,6 @@ describe('audit event log', () => {
     const home = makeTempHome();
     runCli(home, ['secrets', 'list']);
 
-    // Regression: a sub-day query must filter records by timestamp.
     const res = runCli(home, ['events', '--since', '2h', '--json']);
     expect(res.status).toBe(0);
     const records = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
@@ -171,17 +141,10 @@ describe('audit event log', () => {
   });
 
   it('the generic perf-warehouse sample for command.end carries sessionId + agent, not just cwd/duration', () => {
-    // Regression: the postAction hook's disposable perf-spool write (index.ts)
-    // only ever set kind/label/durationMs/cwd, so every command.end sample was
-    // anonymous even though the command.start/command.end audit records right
-    // next to it carry full session/agent provenance via emit()'s floor.
     const home = makeTempHome();
     const spoolPath = path.join(home, 'perf-spool.ndjson');
     runCli(home, ['config', 'list'], {
       AGENTS_PERF_SPOOL: spoolPath,
-      // AGENT_SESSION_ID (singular) wins over AGENTS_SESSION_ID in
-      // resolveProvenance()'s precedence — set both so this is deterministic
-      // even when the OUTER test-runner session already has one set.
       AGENT_SESSION_ID: 'sess-perf-test-1',
       AGENTS_SESSION_ID: 'sess-perf-test-1',
       AGENTS_AGENT_NAME: 'claude',

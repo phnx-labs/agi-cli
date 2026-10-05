@@ -71,7 +71,6 @@ beforeAll(() => {
   // HOME pinned so checkpointPath() (via getRunsDir) resolves into a temp tree.
   process.env.HOME = home;
 });
-
 afterAll(() => {
   if (origPath !== undefined) process.env.PATH = origPath;
   if (origHome !== undefined) process.env.HOME = origHome;

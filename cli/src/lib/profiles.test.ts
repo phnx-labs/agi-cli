@@ -32,11 +32,6 @@ import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../tests
 let TEST_ROOT: string;
 let USER_DIR: string;
 
-// Profile tokens (`agents-cli.<provider>.token`) and account bundles are
-// keychain items, so on a headed macOS box the real standalone would reach
-// the operator's login keychain; the describes that read or seed one run
-// where keychain items are file-backed (headless Linux/Windows, CI). The
-// pure profile-file suites below need no gate.
 const fileBacked = await standaloneKeychainIsFileBacked();
 
 beforeEach(() => {
@@ -142,7 +137,6 @@ describe('profileFromHostModel (custom harness from host + model)', () => {
     const spark = profileFromHostModel('spark', 'opencode', 'meta/muse-spark-1.1');
     expect(spark.host.agent).toBe('opencode');
     expect(spark.env.OPENCODE_MODEL).toBe('meta/muse-spark-1.1');
-    // No provider/authEnvVar → no auth block; the host uses its own login.
     expect(spark.auth).toBeUndefined();
   });
 
@@ -192,11 +186,6 @@ describe.skipIf(!fileBacked)('resolveProfileEnv reads the stored token through t
   });
 
   it('STILL throws for REQUIRED auth with a missing token (the load-bearing safety property)', () => {
-    // authOptional omitted (required). A missing keychain item must hard-fail —
-    // the authOptional skip must never leak into the required-auth path. The
-    // standalone reports the miss only as a NOT_FOUND code (its message is
-    // deliberately opaque, protocol-server.ts), so resolveProfileEnv names the
-    // harness, the item, and the repair itself.
     const p: Profile = {
       name: 'corp',
       host: { agent: 'claude' },
@@ -211,15 +200,9 @@ describe.skipIf(!fileBacked)('resolveProfileEnv reads the stored token through t
 });
 
 describe.skipIf(!fileBacked)('resolveProfileEnv names the harness on a dangling account ref', () => {
-  // findAccount lists the (keychain-backed) account bundles, so this needs an
-  // empty standalone store of its own.
   useFreshSecretsHome();
 
   it('tells the user which harness points at the missing account and how to repoint it', () => {
-    // The fleet-sync trap (RUSH-2930): profiles travel via `agents repo push`
-    // but accounts are per-device, so a synced profile can reference an account
-    // this machine has never seen. The bare registry "Unknown account" gave the
-    // user nothing to act on.
     const p: Profile = {
       name: 'deepseek',
       host: { agent: 'claude' },
@@ -249,8 +232,6 @@ describe('resolveProfileForRun surfaces fallback_model as an env-swap', () => {
       envKey: 'ANTHROPIC_MODEL',
       model: 'moonshotai/kimi-k2-0905',
     });
-    // Primary env still points at the primary model — the swap only applies
-    // on retry via the runWithFallback envOverride.
     expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
   });
 
@@ -298,8 +279,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       name: 'deepseek-flash',
       host: { agent: 'claude' },
       env: { ANTHROPIC_MODEL: 'deepseek/deepseek-v4-flash-0731' },
-      // default and ultra are unset: ultra clamps down to best, default
-      // clamps down to cheap.
       models: {
         cheap: 'deepseek/deepseek-chat-v3',
         best: 'deepseek/deepseek-r1',
@@ -309,8 +288,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
     const ultra = resolveProfileForRun('deepseek-flash', 'ultra');
     expect(ultra.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
     expect(ultra.resolvedModel).toBe('deepseek/deepseek-r1');
-    // A clamp is never silent -- mirrors the native-harness tier block, which
-    // always announces when it substitutes a cheaper rung.
     expect(ultra.tierNote).toBe(
       `no "ultra" model configured on profile 'deepseek-flash'; using its "best" tier (deepseek/deepseek-r1)`,
     );
@@ -330,11 +307,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       env: { ANTHROPIC_MODEL: 'moonshotai/kimi-k2.5' },
     });
 
-    // No `models:` opt-in at all: this function leaves the tier token and env
-    // untouched. It does NOT write its own "no model configured" note --
-    // cli/src/commands/exec.ts's profile-tier discard guard (merged
-    // separately, "cost tiers don't apply to profile ...") is the canonical
-    // message for this case, covered by its own test in exec.test.ts.
     const resolved = resolveProfileForRun('kimi', 'best');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
     expect(resolved.resolvedModel).toBeUndefined();
@@ -346,9 +318,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
       name: 'partial',
       host: { agent: 'claude' },
       env: { ANTHROPIC_MODEL: 'some/pinned-model' },
-      // Only `best` is configured; requesting `cheap` has nothing cheaper to
-      // clamp to -- same no-opt-in-for-this-tier outcome as having no
-      // `models:` block at all, deferring to exec.ts's discard guard.
       models: { best: 'deepseek/deepseek-r1' },
     });
 
@@ -359,12 +328,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
   });
 
   it('regression: tier resolution is NOT affected by the HOST agent\'s own catalog (the collision this fix closes)', () => {
-    // The host is claude, but this profile pins its own deepseek models per
-    // tier. Before this fix, resolveProfileForRun ignored the requested
-    // model entirely and exec.ts's native tier block resolved "best" by
-    // calling resolveTier(options.agent, ...) with options.agent already
-    // overwritten to the HOST id ('claude') -- so a real claude-* id landing
-    // in ANTHROPIC_MODEL here would reproduce that exact collision.
     writeProfile({
       name: 'deepseek-flash',
       host: { agent: 'claude', version: '2.1.219' },
@@ -378,9 +341,6 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
 
     const resolved = resolveProfileForRun('deepseek-flash', 'best');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('deepseek/deepseek-r1');
-    // Never a native Claude catalog id -- proves the substitution came from
-    // the profile's own `models:` map, not from resolving "best" against
-    // claude's catalog.
     expect(resolved.env.ANTHROPIC_MODEL.startsWith('claude')).toBe(false);
   });
 
@@ -508,20 +468,15 @@ describe('forkProfile — copy an existing harness under a new name', () => {
   });
 
   it('a stored label field is never read for display — display derives from name always', () => {
-    // Even if the source YAML carries a label key, profileLabel ignores it.
     const labelled: Profile = { ...source, label: 'DeepSeek Flash' };
     const forked = forkProfile(labelled, 'deepseek-chat', { model: 'deepseek/deepseek-chat-v3' });
-    // 'deepseek-chat' → tokens ['deepseek','chat'] → 'DeepSeek Chat'
     expect(profileSummary(forked).label).toBe('DeepSeek Chat');
-    // Plain copy: 'twin' → 'Twin'
     expect(profileSummary(forkProfile(labelled, 'twin')).label).toBe('Twin');
   });
 
   it('an inherited label field in YAML is not read for display after a fork', () => {
-    // A profile whose YAML carries a 'label' key (old format) — profileLabel ignores it.
     const withStoredLabel: Profile = { ...source, label: 'Some Label' };
     const forked = forkProfile(withStoredLabel, 'chat');
-    // name 'chat' has no vendor-table match → 'Chat'
     expect(profileSummary(forked).label).toBe('Chat');
   });
 
@@ -583,10 +538,8 @@ describe('profileLabel — vendor/brand table + fallback', () => {
   });
 
   it('is case-insensitive on vendor table lookups; fallback preserves rest-of-token case', () => {
-    // vendor table matches are case-insensitive; unmatched tokens only capitalize the first char
     expect(profileLabel(p('DeepSeek-Flash'))).toBe('DeepSeek Flash');
     expect(profileLabel(p('GROK-beta'))).toBe('Grok Beta');
-    // 'BETA' matches no table entry → first char already uppercase, rest preserved → 'BETA'
     expect(profileLabel(p('GROK-BETA'))).toBe('Grok BETA');
   });
 
@@ -620,7 +573,6 @@ describe('editProfile — in-place edit preserving lineage', () => {
   });
 
   it('restores forkedFrom to the original — does not self-reference', () => {
-    // forkProfile would set forkedFrom = 'deepseek-flash'; editProfile must undo that.
     const edited = editProfile(source, { model: 'deepseek/deepseek-chat-v3' });
     expect(edited.forkedFrom).toBe('openrouter');
   });
@@ -671,7 +623,6 @@ describe('renameProfile — rename + forkedFrom cascade', () => {
 
     expect(readProfile('child-a').forkedFrom).toBe('parent-v2');
     expect(readProfile('child-b').forkedFrom).toBe('parent-v2');
-    // Unrelated profile's forkedFrom is untouched.
     expect(readProfile('unrelated').forkedFrom).toBe('other-source');
   });
 
@@ -682,16 +633,13 @@ describe('renameProfile — rename + forkedFrom cascade', () => {
 
     renameProfile('parent', 'parent-v2');
 
-    // parent-v2's forkedFrom was 'grandparent' — must not be changed.
     expect(readProfile('parent-v2').forkedFrom).toBe('grandparent');
-    // child's forkedFrom pointed at 'parent' → updated to 'parent-v2'.
     expect(readProfile('child').forkedFrom).toBe('parent-v2');
   });
 
   it('rejects an invalid new name before doing anything', () => {
     writeTestProfile('existing');
     expect(() => renameProfile('existing', 'bad name!')).toThrow(/invalid profile name/i);
-    // existing profile must still be there
     expect(readProfile('existing').name).toBe('existing');
   });
 });
@@ -700,13 +648,12 @@ describe('profileSummary — first-class harness fields', () => {
   it('surfaces the host version, description and fork lineage; label derives from name', () => {
     const summary = profileSummary({
       name: 'spark',
-      label: 'Muse Spark',  // stored in YAML but not read for display
+      label: 'Muse Spark',
       host: { agent: 'opencode', version: '1.16.0' },
       env: { OPENCODE_MODEL: 'meta/muse-spark-1.1' },
       description: 'Muse Spark through OpenCode',
       forkedFrom: 'opencode',
     });
-    // label derived from name 'spark' → 'Spark', not from the stored 'Muse Spark'
     expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBe('1.16.0');
     expect(summary.description).toBe('Muse Spark through OpenCode');
@@ -716,7 +663,6 @@ describe('profileSummary — first-class harness fields', () => {
 
   it('label derives from name even when no label field is present', () => {
     const summary = profileSummary({ name: 'spark', host: { agent: 'opencode' }, env: {} });
-    // 'spark' → no vendor match → 'Spark'
     expect(summary.label).toBe('Spark');
     expect(summary.hostVersion).toBeNull();
     expect(summary.forkedFrom).toBeNull();
@@ -738,10 +684,8 @@ describe('profileAuthLabel tolerates an unreachable standalone (status row)', ()
   });
 
   it.skipIf(process.platform === 'win32')('renders "<provider> unavailable" instead of aborting the whole view', () => {
-    // A wedged standalone used to throw straight out of `agents view`'s harness
-    // rows while the provider-account rows degraded; the label now degrades too.
     const bin = path.join(dir, 'mock-secrets');
-    fs.writeFileSync(bin, '#!/bin/sh\nsleep 30\n'); // never answers on fd 4
+    fs.writeFileSync(bin, '#!/bin/sh\nsleep 30\n');
     fs.chmodSync(bin, 0o755);
     process.env.SECRETS_BIN = bin;
     _resetSecretsClientForTest();
