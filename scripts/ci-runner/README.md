@@ -78,7 +78,6 @@ Supervisor and janitor still cover the **trusted** org-runner pool on
 `provision-phnx-runners.sh`). The untrusted executor is a separate
 standing Crabbox: no tailnet, no durable credentials, no host sockets.
 
-
 ## Files
 
 | File | Purpose |
