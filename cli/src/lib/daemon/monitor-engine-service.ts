@@ -2,11 +2,13 @@
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { MONITOR_ENGINE_TICK_MS, MonitorEngine } from '../monitors/engine.js';
+import { POLL_TIMEOUT_MS } from '../monitors/sources/command.js';
 
 export class MonitorEngineService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'monitors';
   readonly intervalMs = MONITOR_ENGINE_TICK_MS;
-  readonly deadlineMs = 2 * 60_000;
+  /** Polls launch in the first third, finish by the end of the second, and the third covers their fires. */
+  readonly deadlineMs = 3 * POLL_TIMEOUT_MS;
 
   private engine: MonitorEngine | null = null;
 
@@ -26,6 +28,6 @@ export class MonitorEngineService extends BasePeriodicService {
 
   protected async onTick(_ctx: DaemonContext): Promise<void> {
     if (!this.engine) throw new Error('monitor engine tick requested before start');
-    await this.engine.tick();
+    await this.engine.tick(POLL_TIMEOUT_MS);
   }
 }

@@ -185,6 +185,17 @@ record of `null` for it.
   persists the attempt time (`self-heal-last-attempt` in the daemon dir) before
   spawning and skips a tick inside the interval, so a restart cannot re-run it.
 
+  **A slow tick breaches too, even on a live loop.** The monitors tick ran every
+  due poll one after another. With 26 monitors, a dozen of them
+  `agents devices ps | grep` at about 30 s each, the first tick after boot ran past
+  its 2-minute deadline, the supervisor exited, and the restart found every
+  monitor due again: an exit every two minutes. The engine
+  (`../monitors/engine.ts`) now runs at most four polls at once, launches new
+  ones only in the first `POLL_TIMEOUT_MS` (60 s) of a tick, and leaves the rest
+  due, longest-waiting first, for the next tick; the service deadline is three
+  poll timeouts. A command poll runs through `execFileBounded`, so its timeout
+  kills the whole pipeline rather than only the shell.
+
   **The worst tick-path halt was the event-log LOCK, and it is reached far more
   broadly than one service.** `emit()`/`emitRoutineEnd()` (`feed/events.ts`)
   acquire the log lock with `withFileLock` → `lockfile.lockSync` + `sleepSync`

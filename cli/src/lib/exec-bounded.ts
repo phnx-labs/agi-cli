@@ -8,6 +8,8 @@ interface ExecFileBoundedOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   input?: string;
+  /** Per-stream cap on captured output, like `execFile`'s; past it the group is killed and the output truncated. */
+  maxBuffer?: number;
 }
 
 interface BoundedExecResult {
@@ -67,8 +69,14 @@ export function execFileBounded(
 
     child.stdout?.setEncoding('utf-8');
     child.stderr?.setEncoding('utf-8');
-    child.stdout?.on('data', (chunk) => { stdout += chunk; });
-    child.stderr?.on('data', (chunk) => { stderr += chunk; });
+    const capture = (text: string, chunk: string): string => {
+      const next = text + chunk;
+      if (opts.maxBuffer === undefined || next.length <= opts.maxBuffer) return next;
+      killGroup('SIGKILL');
+      return next.slice(0, opts.maxBuffer);
+    };
+    child.stdout?.on('data', (chunk) => { stdout = capture(stdout, chunk); });
+    child.stderr?.on('data', (chunk) => { stderr = capture(stderr, chunk); });
 
     child.stdin?.on('error', () => {});
     if (opts.input !== undefined) child.stdin?.end(opts.input);
