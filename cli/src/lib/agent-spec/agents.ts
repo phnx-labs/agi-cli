@@ -1076,29 +1076,16 @@ export function isAccountSlotDir(dir: string): boolean {
 
 function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
   const perVersion = path.join(base, ...segments);
-  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
-  // A slot is the account's own HOME (PHNX-3940 T5). Never inherit another
-  // account's adopted ~/.<config> — that is the cross-account leak.
+  try { if (fs.existsSync(perVersion)) return perVersion; } catch {  }
+  // An account slot is its own HOME and must not inherit another active account's config.
   if (isAccountSlotDir(base)) return null;
   const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
   if (active !== perVersion) {
-    try { if (fs.existsSync(active)) return active; } catch { /* unreadable */ }
+    try { if (fs.existsSync(active)) return active; } catch {  }
   }
   return null;
 }
 
-/**
- * The on-disk credential file(s) each account-inspectable agent authenticates
- * from, expressed as path segments under a home. Mirrors the exact files
- * {@link getAccountInfo} reads, so a presence check here matches what a real
- * launch would find. Each entry is a list of alternatives — the FIRST that
- * exists counts as present (claude writes either `.claude/.claude.json` under
- * the shimmed config dir or a home-level `.claude.json`). Agents whose login is
- * stored only in the OS keychain on some platforms (antigravity, and claude's
- * token) still expose a credential FILE — the presence of that file is the
- * signal we key off; its absence on BOTH the per-version home and the active
- * home is what makes a logged-out claim provable.
- */
 const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   claude: [['.claude', '.claude.json'], ['.claude.json']],
   codex: [['.codex', 'auth.json']],
@@ -1107,15 +1094,10 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   droid: [['.factory', 'auth.v2.file']],
   antigravity: [['.gemini', 'antigravity-cli', 'antigravity-oauth-token']],
   opencode: [['.local', 'share', 'opencode', 'auth.json']],
-  // Muse Code stores OAuth / API credentials at ~/.config/muse/auth.json
-  // (or META_API_KEY in the environment, which is not a file).
   muse: [['.config', 'muse', 'auth.json']],
-  // With AGENT_CLI_CREDENTIAL_STORE=file, Cursor stores both OAuth tokens at
-  // ~/.cursor/auth.json. cli-config.json holds account metadata only.
   cursor: [['.cursor', 'auth.json']],
 };
 
-/** Whether an agent's credential file exists under a given home. */
 function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
   const alternatives = CREDENTIAL_FILE_SEGMENTS[agentId];
   if (!alternatives) return false;
@@ -1124,51 +1106,19 @@ function credentialFileExistsUnder(agentId: AgentId, home: string): boolean {
     try { return fs.existsSync(p); } catch { return false; }
   });
   if (!hasSegment) return false;
-  // Claude's `.claude.json` is account METADATA Claude Code writes on any
-  // launch, not the credential itself — a version can carry stale identity
-  // there (e.g. install-time carry-forward) with no usable credential behind
-  // it: a failed OAuth refresh blanks `.credentials.json`, and a Linux worker
-  // can be missing BOTH `.credentials.json` and the `.oauth_token` setup-token
-  // file entirely (PHNX-3502). `credentialPresence` promises to mirror what a
-  // real launch would find, so it must fail whenever `isClaudeCredentialFileBlank`
-  // — the SAME floor `getAccountInfo` applies — would. On macOS that floor is a
-  // no-op (Keychain-only, always "not blank"), so this reduces to the identity
-  // check above, unchanged.
+  // Claude metadata alone is not a credential on platforms with file-backed auth.
   if (agentId === 'claude') return !isClaudeCredentialFileBlank(home);
   return true;
 }
 
-/** Where an agent's credential file lives, split into the per-version copy and
- *  the active/global copy under the real HOME. */
 export interface CredentialPresence {
-  /** The credential file exists inside the passed version home. */
   perVersion: boolean;
-  /** The credential file exists under the active/global HOME (the one the login
-   *  symlink actually targets), independent of the version home. */
   active: boolean;
-  /** Whether agents-cli knows WHERE this agent's credential lives at all — i.e.
-   *  the agent has an entry in {@link CREDENTIAL_FILE_SEGMENTS}. When false both
-   *  probes are trivially false because there is nothing to look for, so absence
-   *  is NOT evidence of a logout and no caller may treat it as provable.
-   *
-   *  This is deliberately separate from `supportsAccountInspection`: the two
-   *  registries move independently, and an agent has already been added to the
-   *  inspection set without a credential path (cursor), which without this flag
-   *  produced a false "logged out" critical for every installed version. */
   knownLocation: boolean;
 }
 
-/**
- * File-presence probe for an agent's credential, split by location: whether it
- * exists in a SPECIFIC version home (`perVersion`) and whether it exists under
- * the active/global HOME (`active`). A logged-out claim is only *provable* when
- * BOTH are absent — a version that merely lacks its own copy but shares the
- * global login is signed in, not logged out. Pure file existence; no decrypt,
- * no network, no keychain prompt. Agents with no inspectable identity return
- * `{ perVersion: false, active: false }` and must NEVER yield a provable-logout
- * claim (the caller gates on {@link supportsAccountInspection}).
- */
 export function credentialPresence(agentId: AgentId, versionHome: string): CredentialPresence {
+  // Logout is provable only for a known location when both isolated and active copies are absent.
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   const perVersion = credentialFileExistsUnder(agentId, versionHome);
   const active = credentialFileExistsUnder(agentId, realHome);
@@ -1176,22 +1126,11 @@ export function credentialPresence(agentId: AgentId, versionHome: string): Crede
   return { perVersion, active, knownLocation };
 }
 
-/** Decrypted contents of Droid's auth.v2.file (subset we consume). */
 interface DroidAuthPayload {
   access_token?: string;
   active_organization_id?: string | null;
 }
 
-/**
- * Factory Droid stores its OAuth credential encrypted at ~/.factory/auth.v2.file
- * (AES-256-GCM, format `ivB64:tagB64:ctB64`) with the 32-byte key base64-stored
- * in ~/.factory/auth.v2.key. On the keyfile-v2 source there is no OS-keychain /
- * device binding — the key is on disk — so we can decrypt locally with no
- * network call. Every failure (missing key file — e.g. a keyring-v2/legacy
- * login with no on-disk key, a bad GCM tag, or malformed JSON) returns null.
- * Never throws. Shared by account identity below and the Droid usage fetcher
- * in usage.ts.
- */
 export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
   const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
   const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
@@ -1199,16 +1138,8 @@ export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
   return decryptDroidAuthFile(filePath, keyPath);
 }
 
-/**
- * Decrypt a Droid `auth.v2.file` (AES-256-GCM `ivB64:tagB64:ctB64`) using the
- * raw 32-byte key stored base64 in `auth.v2.key`, given the EXACT paths to both.
- * Same crypto as decryptDroidAuthPayload but without the account-global HOME
- * fallback, so the identity of a SPECIFIC version home resolves against only
- * that home's files (carryForwardAuthFiles needs per-dir identity). Returns null
- * on any failure (missing file/key, wrong key length, bad GCM tag, malformed
- * JSON). Never throws.
- */
 function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPayload | null {
+  // Exact paths deliberately bypass active-HOME fallback for per-directory carry-forward identity.
   try {
     const blob = fs.readFileSync(filePath, 'utf-8').trim();
     const key = Buffer.from(fs.readFileSync(keyPath, 'utf-8').trim(), 'base64');
@@ -1228,26 +1159,8 @@ function decryptDroidAuthFile(filePath: string, keyPath: string): DroidAuthPaylo
   }
 }
 
-/**
- * Stable account identity for a *file-auth* agent's credential directory
- * (droid / kimi / antigravity), or null when the directory holds no decodable
- * account claim. Unlike a naive top-level JSON key-scan (which matched NO real
- * credential file), this decrypts / decodes each agent's REAL on-disk format so
- * the identity resolves against production credentials:
- *   - droid: AES-256-GCM auth.v2.file (+ auth.v2.key) -> WorkOS access-token JWT
- *     -> email / org_id / sub.
- *   - kimi: credentials/kimi-code.json -> access-token JWT -> user_id / sub.
- *   - antigravity: antigravity-oauth-token -> token.refresh_token -> JWT sub
- *     when the token is a JWT, else a SHA-256 hash of the raw refresh-token
- *     value (opaque Google consumer tokens are stable per login — hashed so
- *     the identity key, which is persisted as a usage-cache key, never carries
- *     a live credential).
- * Two directories for the SAME account compare equal; two DIFFERENT accounts
- * compare distinct. Used by carryForwardAuthFiles to refuse overwriting one
- * account's login with a credential that belongs to a DIFFERENT account
- * (RUSH-1764). Never throws.
- */
 export function readAuthAccountIdentity(agent: AgentId, configDir: string): string | null {
+  // Identity claims outlive JWT authorization; credential usability is decided elsewhere.
   try {
     switch (agent) {
       case 'droid': {
@@ -1282,9 +1195,7 @@ export function readAuthAccountIdentity(agent: AgentId, configDir: string): stri
         if (typeof refreshToken !== 'string' || !refreshToken) return null;
         const claims = decodeJwtPayload(refreshToken);
         const sub = normalizeIdentityPart(claims?.sub ?? claims?.user_id);
-        // An opaque (non-JWT) Google refresh token IS the credential — hash it
-        // so the identity key stays stable per login without embedding a live
-        // secret (the key is persisted as a usage-cache filename key).
+        // Opaque tokens are hashed because this identity key is persisted; never persist the secret.
         const fallback = crypto.createHash('sha256').update(refreshToken).digest('hex').slice(0, 16);
         return buildIdentityKey(agent, [['sub', sub ?? fallback]]);
       }
@@ -1296,15 +1207,6 @@ export function readAuthAccountIdentity(agent: AgentId, configDir: string): stri
   }
 }
 
-/**
- * Derive Droid account identity from the decrypted credential. The
- * `access_token` is a WorkOS JWT carrying an `email` claim (plus org_id /
- * role). We decode the claim WITHOUT verifying `exp`: the email is stable
- * identity for display, not an authorization decision, so an expired token
- * still yields the right address. Returns null when the credential can't be
- * decrypted or has no decodable claims, so the caller falls back to the
- * file-presence signed-in signal.
- */
 function decryptDroidCredential(
   base: string
 ): { email: string | null; orgId: string | null; role: string | null } | null {
@@ -1320,40 +1222,20 @@ function decryptDroidCredential(
 
 let cachedAgyKeychainSignedIn: boolean | undefined;
 
-/**
- * Antigravity (`agy`) stores its OAuth token via the Go keyring library
- * (zalando/go-keyring), which is platform-split:
- *
- *   - macOS: login keychain, service `gemini`, account `antigravity` — no file.
- *   - Linux with Secret Service (libsecret / gnome-keyring): attributes
- *     service=`gemini`, username=`antigravity` (go-keyring's Secret Service
- *     mapping of service+user). Prefer this over the file when a keyring
- *     daemon is running.
- *   - Linux without Secret Service: file fallback at
- *     `~/.gemini/antigravity-cli/antigravity-oauth-token`.
- *
- * Probe the OS keyring for existence after the file check. On macOS,
- * `security find-generic-password` without `-w` is metadata-only (never
- * prompts). On Linux, `secret-tool lookup` exit 0 means the item exists
- * (stdout is the secret — discarded, never logged). Cached per process —
- * the keyring is account-global, so one probe covers every installed version.
- * Returns false when the platform has no probe (Windows) or the tool is
- * missing. Guard with `AGENTS_NO_KEYCHAIN_PROBE=1` for hermetic tests.
- */
 export function antigravityOsKeyringProbe(
   platform: NodeJS.Platform = process.platform,
 ): { cmd: string; args: string[] } | null {
   if (platform === 'darwin') {
     return {
       cmd: 'security',
+      // Omitting -w makes this a metadata-only probe that never reads the secret.
       args: ['find-generic-password', '-s', 'gemini', '-a', 'antigravity'],
     };
   }
   if (platform === 'linux') {
-    // go-keyring secret_service attributes: "service" + "username" (not
-    // "account" — that flag is the macOS security(1) spelling of the same user).
     return {
       cmd: 'secret-tool',
+      // go-keyring maps the user to username, not the macOS account spelling.
       args: ['lookup', 'service', 'gemini', 'username', 'antigravity'],
     };
   }
@@ -1366,8 +1248,7 @@ export function __resetAntigravityKeychainCacheForTest(): void {
 }
 
 async function antigravityKeychainSignedIn(): Promise<boolean> {
-  // Test isolation first (before cache): real OS keyrings can't be sandboxed
-  // per-test. Same spirit as AGENTS_REAL_HOME. Not cached, so tests can toggle.
+  // Test isolation precedes the account-global cache; Linux secret stdout is discarded.
   if (process.env.AGENTS_NO_KEYCHAIN_PROBE === '1') return false;
   if (cachedAgyKeychainSignedIn !== undefined) return cachedAgyKeychainSignedIn;
 
@@ -1377,48 +1258,23 @@ async function antigravityKeychainSignedIn(): Promise<boolean> {
     return false;
   }
   try {
-    // Discard stdout: Linux secret-tool lookup prints the secret value.
     await execFileAsync(probe.cmd, probe.args, {
       timeout: 3000,
-      // encoding so stdout is a string we can drop without ever logging it
       encoding: 'utf8',
     });
     cachedAgyKeychainSignedIn = true;
   } catch {
-    // Missing tool (ENOENT), missing item, locked collection, timeout → signed out.
     cachedAgyKeychainSignedIn = false;
   }
   return cachedAgyKeychainSignedIn;
 }
 
-/** The XDG base dirs OpenCode reads, and the env var that overrides each. */
 const OPENCODE_XDG_DIRS = {
   data: { env: 'XDG_DATA_HOME', fallback: ['.local', 'share'] },
   state: { env: 'XDG_STATE_HOME', fallback: ['.local', 'state'] },
 } as const;
 
-/**
- * Resolve one of OpenCode's (sst/opencode) XDG-rooted files.
- *
- * OpenCode keeps provider credentials under `$XDG_DATA_HOME/opencode/` and TUI
- * state under `$XDG_STATE_HOME/opencode/`, defaulting to `~/.local/share` and
- * `~/.local/state` on EVERY platform — its `xdg-basedir` dependency does not
- * special-case macOS, so there is no `~/Library/Application Support` variant.
- * Both roots are account-global (not per-version), matching how
- * `session/discover.ts` already resolves `~/.local/share/opencode/opencode.db`.
- *
- * Resolution order, first existing wins:
- *   1. `<base>/<fallback>/opencode/<file>` — the passed per-version home. This is
- *      primarily a test hook (suites write a hermetic file under a temp home)
- *      but also covers any relocated install.
- *   2. `$XDG_<KIND>_HOME/opencode/<file>` — an explicit XDG override, exactly
- *      what OpenCode itself honours.
- *   3. `<realHome>/<fallback>/opencode/<file>` — the active default, under
- *      `AGENTS_REAL_HOME` or `os.homedir()`, so every installed version reflects
- *      the one account-global state (same fallback shape as
- *      resolveAccountCredentialPath).
- * Returns the first existing path, or null. Never throws.
- */
+// OpenCode uses XDG paths on every platform: version home, explicit override, then real HOME.
 export function resolveOpenCodeXdgPath(
   base: string,
   kind: keyof typeof OPENCODE_XDG_DIRS,
@@ -1431,7 +1287,7 @@ export function resolveOpenCodeXdgPath(
   const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
   candidates.push(path.join(realHome, ...fallback, 'opencode', file));
   for (const candidate of candidates) {
-    try { if (fs.existsSync(candidate)) return candidate; } catch { /* unreadable */ }
+    try { if (fs.existsSync(candidate)) return candidate; } catch {  }
   }
   return null;
 }
@@ -1440,16 +1296,8 @@ function resolveOpenCodeAuthPath(base: string): string | null {
   return resolveOpenCodeXdgPath(base, 'data', 'auth.json');
 }
 
-/**
- * Validate one OpenCode auth.json entry against its discriminated union
- * (`type: 'oauth' | 'api' | 'wellknown'`) and confirm the credential actually
- * carries its required secret field(s) non-empty. This guards against a
- * corrupt/half-written entry reading as signed-in — the same "must have a real
- * credential" floor grok/antigravity apply. We only INSPECT the shape here; the
- * secret values (`access`/`refresh`/`key`/`token`) are never read out or
- * surfaced anywhere.
- */
 function isValidOpenCodeCredential(value: unknown): boolean {
+  // Only complete auth.json discriminated-union credentials establish a login.
   if (!value || typeof value !== 'object') return false;
   const cred = value as Record<string, unknown>;
   const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
@@ -1461,19 +1309,6 @@ function isValidOpenCodeCredential(value: unknown): boolean {
   }
 }
 
-/**
- * The human identity an OpenCode `type: 'oauth'` credential carries in its
- * access token, when that token is a JWT. Provider-agnostic by shape: the
- * OpenAI-issued token OpenCode stores under its `openai` provider carries the
- * same namespaced claims Codex's own `auth.json` does (`…/profile.email`,
- * `…/auth.chatgpt_plan_type`), so the extraction is shared with `case 'codex'`
- * rather than reinvented. A plain `email` claim is accepted too, for providers
- * that issue an ordinary OIDC token.
- *
- * Only claims are read — the token itself is never returned or logged. A
- * non-JWT credential (Anthropic's `sk-ant-oat…` opaque token, any `type: 'api'`
- * key) simply yields nothing.
- */
 function openCodeOauthIdentity(cred: unknown): { email: string | null; plan: string | null } {
   const access = (cred as { type?: unknown; access?: unknown } | null)?.access;
   if (typeof access !== 'string' || access.length === 0) return { email: null, plan: null };
@@ -1491,39 +1326,14 @@ function openCodeOauthIdentity(cred: unknown): { email: string | null; plan: str
   return { email, plan };
 }
 
-/** OpenCode's signed-in identity, as far as `auth.json` can describe it. */
 export interface OpenCodeIdentity {
-  /** Sorted, "+"-joined provider ids holding a valid credential. */
   providers: string;
-  /** Account email, when some OAuth credential's token carries the claim. */
   email: string | null;
-  /** Plan tier from the same token (e.g. `Pro`), when present. */
   plan: string | null;
 }
 
-/**
- * OpenCode's account identity, read from `auth.json`.
- *
- * The provider join (`"meta+openai+opencode-go"`) is the stable key: OpenCode is
- * a multi-provider harness, so "which providers are configured" is what actually
- * identifies an install, and `session/discover.ts` indexes sessions by it.
- * Providers that sign in over OAuth additionally hand OpenCode a token with real
- * identity claims, so the email and plan are surfaced alongside it instead of
- * leaving `agents view` showing a bare `id:` key for a login that knows exactly
- * whose it is. Providers are walked in sorted order so a multi-OAuth install
- * resolves to the same email on every machine.
- *
- * This is the ONLY correct source for an OpenCode "account". OpenCode's SQLite
- * `opencode.db` also carries `account`/`account_state`/`control_account` tables,
- * but on a real, actively-used install (yosemite-s1, 1.16.0, 35 applied
- * migrations) all three are permanently empty — no migration ever populates
- * them, and no session has ever written a row. Reading from them instead of
- * `auth.json` always yields `undefined`, credential or not.
- *
- * Sync (`fs.readFileSync`), no network. Returns undefined when `auth.json` is
- * missing, unreadable, or carries no valid credential.
- */
 export function resolveOpenCodeIdentity(base: string): OpenCodeIdentity | undefined {
+  // auth.json, not empty SQLite account tables, is authoritative; sorted providers form the stable key.
   const authPath = resolveOpenCodeAuthPath(base);
   if (!authPath) return undefined;
   try {
@@ -1548,25 +1358,12 @@ export function resolveOpenCodeIdentity(base: string): OpenCodeIdentity | undefi
   }
 }
 
-/**
- * The provider join alone — the value `session/discover.ts` indexes sessions by,
- * kept as its own entry point so callers that only need the key do not have to
- * know about the OAuth claim walk.
- */
 export function resolveOpenCodeAccountId(base: string): string | undefined {
   return resolveOpenCodeIdentity(base)?.providers;
 }
 
-/**
- * Whether a Muse Code `~/.config/muse/auth.json` document holds any usable
- * access token. Live shape from `muse login` (device OAuth, Muse Code 0.1.0):
- *   { schema_version: 1, providers: { meta: { access_token, api_key, user_email, … } } }
- * Also accept top-level or one-level-nested tokens for older/alternate writers.
- * Recurses into objects so `providers.meta.access_token` is found — a flat
- * one-level walk only saw `providers` and reported signed-out after a successful
- * login (balanced then excluded the account). Never returns the secret itself.
- */
 function museAuthHasToken(value: unknown, depth = 0): boolean {
+  // Live auth nests under providers.meta; bounded recursion also accepts older nested writers.
   if (depth > 4) return false;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const root = value as Record<string, unknown>;
