@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Isolated installs never become normal defaults or credential homes.
+// An isolated default is a device-local fallback; it never becomes global default, bare shim, or adopted config.
 describe.skipIf(process.platform === 'win32')('isolated default', () => {
   let home: string;
   const A = '9.9.4';

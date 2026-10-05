@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Exercise opener logic against PATH stubs directly; never launch the operator's browser.
+// Use injected opener callbacks and inert/missing binaries; never launch the operator's real browser.
 
 let testHome = '';
 

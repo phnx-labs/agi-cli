@@ -8,7 +8,7 @@ import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token
 import { SECRETS_CLI_VERSION } from '../src/lib/secrets-cli.js';
 
 // Serialize the real pinned install across forks; POSIX returns its Node shebang shim, not raw dist JS.
-// Fresh SECRETS_HOME clears memoization; keychain coverage requires the isolated file fallback.
+// Fresh SECRETS_HOME clears memoization; keychain suites require isolated file fallback, never a real keychain.
 const STANDALONE_SECRETS_VERSION = SECRETS_CLI_VERSION;
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const LOCK_WAIT_MS = 5 * 60 * 1000;

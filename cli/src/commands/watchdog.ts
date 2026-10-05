@@ -26,7 +26,7 @@ function stateDir(): string {
 }
 
 async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
-  // Keep daemon dependencies off startup. Enable starts then reloads; disable reloads only if running.
+  // Keep daemon dependencies off startup. If running, reload it; enable additionally starts it when stopped.
   const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon/daemon.js');
   if (isDaemonRunning()) {
     signalDaemonReload();
