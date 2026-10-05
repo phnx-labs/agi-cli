@@ -21,7 +21,7 @@ function makeTempHistoryDir(): string {
 afterEach(() => {
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()!;
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
 });
 
@@ -107,15 +107,12 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
 
     migrateExtrasExtrasToAgentsExtras(historyDir);
 
-    // Dir renamed.
     expect(fs.existsSync(path.join(marketplacesDir, 'extras-extras'))).toBe(false);
     expect(fs.existsSync(path.join(marketplacesDir, 'agents-extras'))).toBe(true);
 
-    // marketplace.json name updated.
     const mj = JSON.parse(fs.readFileSync(path.join(marketplacesDir, 'agents-extras', '.claude-plugin', 'marketplace.json'), 'utf-8'));
     expect(mj.name).toBe('agents-extras');
 
-    // known_marketplaces.json key + paths renamed.
     const known = JSON.parse(fs.readFileSync(path.join(pluginsDir, 'known_marketplaces.json'), 'utf-8'));
     expect(Object.keys(known)).not.toContain('extras-extras');
     expect(known['agents-extras']).toBeDefined();
@@ -124,7 +121,6 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
     expect(toPosix(known['agents-extras'].installLocation)).toContain('/marketplaces/agents-extras');
     expect(known['agents-extras'].lastUpdated).toBe('2026-06-08T05:27:15.261Z');
 
-    // settings.json enabledPlugins keys renamed with values preserved.
     const settings = JSON.parse(fs.readFileSync(path.join(configDir, 'settings.json'), 'utf-8'));
     expect(settings.enabledPlugins['code@extras-extras']).toBeUndefined();
     expect(settings.enabledPlugins['creative@extras-extras']).toBeUndefined();
@@ -156,7 +152,6 @@ describe('migrateExtrasExtrasToAgentsExtras', () => {
     const { pluginsDir, marketplacesDir } = seedVersionHome(historyDir, 'claude', '2.1.143');
     seedExtrasExtras(marketplacesDir, pluginsDir, 'claude', '2.1.143', historyDir);
 
-    // Pre-populate agents-extras with the canonical content.
     const ae = path.join(marketplacesDir, 'agents-extras');
     fs.mkdirSync(path.join(ae, '.claude-plugin'), { recursive: true });
     fs.writeFileSync(
@@ -194,9 +189,6 @@ describe('repairSelfReferentialBinShims', () => {
     return dir;
   }
 
-  // Build a fixture: a versions tree whose node_modules/.bin/<cli> symlink
-  // points back into a fake shims dir (the self-referential loop), plus a
-  // fake dispatcher shim to be the loop target.
   function seedSelfRefLoop(root: string, agent: string, cli: string): {
     versionsRoot: string;
     shimsDir: string;
@@ -212,7 +204,7 @@ describe('repairSelfReferentialBinShims', () => {
     const binDir = path.join(versionsRoot, agent, 'latest', 'node_modules', '.bin');
     fs.mkdirSync(binDir, { recursive: true });
     const binLink = path.join(binDir, cli);
-    fs.symlinkSync(shim, binLink); // <-- the loop
+    fs.symlinkSync(shim, binLink);
     return { versionsRoot, shimsDir, binLink };
   }
 
@@ -228,27 +220,18 @@ describe('repairSelfReferentialBinShims', () => {
 
   it('re-points a self-referential .bin symlink at the real PATH binary', () => {
     const root = makeTempRoot();
-    // Use a real agent id ('droid' -> cliCommand 'droid') to exercise the
-    // AGENTS cliCommand lookup path.
     const { versionsRoot, shimsDir, binLink } = seedSelfRefLoop(root, 'droid', 'droid');
 
-    // A genuine binary on PATH, in a dir that is NOT the shims dir.
     const realBinDir = makeTempRoot();
     const exeExt = process.platform === 'win32' ? '.cmd' : '';
     const realBin = path.join(realBinDir, 'droid' + exeExt);
     fs.writeFileSync(realBin, process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n# real droid\n');
     fs.chmodSync(realBin, 0o755);
 
-    // Sanity: before repair the link resolves into the shims dir (the loop).
     expect(fs.realpathSync(binLink)).toBe(fs.realpathSync(path.join(shimsDir, 'droid')));
 
     withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
-    // After repair the loop is broken and the .bin entry yields the real binary.
-    // On Windows without the symlink privilege createLink copies (a copy's
-    // realpath is itself, not the target), so assert the functional contract —
-    // same bytes as the real binary, and no longer resolving back into the
-    // shims dir — rather than symlink-target identity.
     expect(fs.readFileSync(binLink)).toEqual(fs.readFileSync(realBin));
     expect(fs.realpathSync(binLink).startsWith(fs.realpathSync(shimsDir) + path.sep)).toBe(false);
   });
@@ -292,14 +275,12 @@ describe('repairSelfReferentialBinShims', () => {
 
   it('removes the self-referential symlink when no real binary is on PATH', () => {
     const root = makeTempRoot();
-    // Unknown agent id -> cli falls back to the dir name; guaranteed absent from PATH.
     const cli = 'zzz-no-such-cli';
     const { versionsRoot, shimsDir, binLink } = seedSelfRefLoop(root, cli, cli);
     const emptyDir = makeTempRoot();
 
     withPath([emptyDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
-    // No real binary to point at -> the loop link is removed entirely.
     let exists = true;
     try { fs.lstatSync(binLink); } catch { exists = false; }
     expect(exists).toBe(false);
@@ -320,11 +301,10 @@ describe('repairSelfReferentialBinShims', () => {
     const binDir = path.join(versionsRoot, 'droid', 'latest', 'node_modules', '.bin');
     fs.mkdirSync(binDir, { recursive: true });
     const binLink = path.join(binDir, 'droid');
-    fs.symlinkSync(realBin, binLink); // already correct — points at a real binary
+    fs.symlinkSync(realBin, binLink);
 
     withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
-    // Untouched: still the same symlink target.
     expect(fs.readlinkSync(binLink)).toBe(realBin);
   });
 });
@@ -464,8 +444,6 @@ describe('migrateRoutineDeviceToDevices', () => {
   });
 
   it('propagates a write failure (POSIX)', () => {
-    // Windows read-only directory semantics do not reliably block writes, so
-    // this test is scoped to POSIX platforms where chmod(0o555) is effective.
     if (process.platform === 'win32') {
       return;
     }
@@ -473,7 +451,6 @@ describe('migrateRoutineDeviceToDevices', () => {
     fs.writeFileSync(path.join(dir, 'g.yml'), yaml.stringify({
       name: 'g', schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', device: 'zion',
     }));
-    // Make the directory read-only so the atomic write (temp file + rename) fails.
     fs.chmodSync(dir, 0o555);
     try {
       expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
@@ -504,8 +481,6 @@ describe('migrateRoutineDeviceToDevices', () => {
 
   it('propagates a read error for a directory masquerading as a YAML file', () => {
     const dir = makeRoutinesDir();
-    // A directory named with a .yml suffix causes fs.readFileSync to throw
-    // (EISDIR / EACCES) on every platform — no permission-dependent chmod needed.
     fs.mkdirSync(path.join(dir, 'j.yml'), { recursive: true });
     expect(() => migrateRoutineDeviceToDevices(dir)).toThrow();
   });
@@ -559,7 +534,6 @@ describe('v12 device migration CLI startup failure (POSIX)', () => {
 
   it('fails closed: a stale routine with a legacy device key is absent/inert, never unrestricted', () => {
     if (process.platform === 'win32') {
-      // Windows read-only directory semantics do not reliably block writes.
       return;
     }
     const home = makeLegacyHome('0 3 * * *');
@@ -567,8 +541,6 @@ describe('v12 device migration CLI startup failure (POSIX)', () => {
     fs.chmodSync(routinesDir, 0o555);
     try {
       const res = run(home, ['list', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
-      // The stale routine must not surface as an unrestricted job. The safe
-      // fail-closed outcome is absence/inertness, not a process exit code.
       const parsed = res.status === 0 ? JSON.parse(res.stdout.trim()) : [];
       const found = parsed.find((j: Record<string, unknown>) => j.name === 'legacy');
       expect(found).toBeUndefined();
@@ -657,10 +629,10 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
     try {
       process.kill(-child.pid, 'SIGTERM');
     } catch {
-      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      try { child.kill('SIGTERM'); } catch {  }
     }
     const timer = setTimeout(() => {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
+      try { process.kill(-child.pid, 'SIGKILL'); } catch {  }
     }, 3_000);
     await closePromise;
     clearTimeout(timer);
@@ -668,7 +640,6 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
 
   it('creates no run directory when migration cannot write the legacy fixture', async () => {
     if (process.platform === 'win32') {
-      // chmod(0o555) is not a reliable write barrier on Windows.
       return;
     }
     const home = makeLegacyHome();
@@ -683,13 +654,9 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
       expect(pid).not.toBeNull();
       expect(isProcessAlive(pid!)).toBe(true);
 
-      // Wait long enough for an every-second schedule to fire if the stale job
-      // were mistakenly loaded as unrestricted.
       await new Promise((resolve) => { setTimeout(resolve, 2_500); });
 
       const runsDir = path.join(home, '.agents', '.history', 'runs');
-      // The top-level runs bucket is created by daemon startup; the critical
-      // failure mode is a job-specific run directory for the stale routine.
       const jobRunDirs = fs.existsSync(runsDir) ? fs.readdirSync(runsDir) : [];
       expect(jobRunDirs).not.toContain('legacy');
     } finally {
@@ -705,7 +672,7 @@ describe('v12 device migration scheduler startup failure (POSIX)', () => {
 describe('migrateWatchdogSentinelToConfig', () => {
   it('no sentinel on disk -> no-op (never sets the config)', () => {
     const dir = makeTempHistoryDir();
-    const sentinel = path.join(dir, 'enabled'); // deliberately not created
+    const sentinel = path.join(dir, 'enabled');
     let called = false;
     migrateWatchdogSentinelToConfig(sentinel, () => { called = true; });
     expect(called).toBe(false);
@@ -717,7 +684,6 @@ describe('migrateWatchdogSentinelToConfig', () => {
     fs.writeFileSync(sentinel, 'enabled\n');
     const calls: boolean[] = [];
     migrateWatchdogSentinelToConfig(sentinel, (enabled) => { calls.push(enabled); });
-    // Opted-in state is carried forward, and the one-shot marker is consumed.
     expect(calls).toEqual([true]);
     expect(fs.existsSync(sentinel)).toBe(false);
   });
@@ -727,7 +693,6 @@ describe('migrateWatchdogSentinelToConfig', () => {
     const sentinel = path.join(dir, 'enabled');
     fs.writeFileSync(sentinel, 'enabled\n');
     migrateWatchdogSentinelToConfig(sentinel, () => { throw new Error('config unwritable'); });
-    // Never silently lose the opt-in — the sentinel survives for a later attempt.
     expect(fs.existsSync(sentinel)).toBe(true);
   });
 });
@@ -768,7 +733,6 @@ describe('migrateCliDirToClis', () => {
     fs.mkdirSync(cliDir, { recursive: true });
 
     migrateCliDirToClis([agentsDir]);
-    // Second call: cli/ is gone, clis/ is present — should not throw.
     expect(() => migrateCliDirToClis([agentsDir])).not.toThrow();
   });
 
@@ -778,7 +742,6 @@ describe('migrateCliDirToClis', () => {
     fs.mkdirSync(path.join(agentsDir, 'clis'), { recursive: true });
 
     expect(() => migrateCliDirToClis([agentsDir])).toThrow('Migration conflict');
-    // Both dirs must still be present — no silent data loss.
     expect(fs.existsSync(path.join(agentsDir, 'cli'))).toBe(true);
     expect(fs.existsSync(path.join(agentsDir, 'clis'))).toBe(true);
   });
@@ -787,7 +750,6 @@ describe('migrateCliDirToClis', () => {
     const dir1 = makeTempAgentsDir();
     const dir2 = makeTempAgentsDir();
     fs.mkdirSync(path.join(dir1, 'cli'), { recursive: true });
-    // dir2 has no cli/ — should be a no-op
 
     migrateCliDirToClis([dir1, dir2]);
 
@@ -813,10 +775,8 @@ describe('seedActiveCursorLoginPerVersion', () => {
 
   it('copies the global Cursor token into the active version home, and is idempotent', () => {
     const home = fakeHome();
-    // Legacy global token, shared across homes.
     fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
     fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'global-tok' }));
-    // Active account's version home + the ~/.cursor symlink that points at it.
     const versionHome = path.join(home, '.agents', '.history', 'versions', 'cursor', '2026.08.04', 'home');
     fs.mkdirSync(path.join(versionHome, '.cursor'), { recursive: true });
     fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
@@ -827,7 +787,6 @@ describe('seedActiveCursorLoginPerVersion', () => {
     expect(fs.existsSync(seeded)).toBe(true);
     expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('global-tok');
 
-    // Idempotent: a home that already has its own token is never overwritten.
     fs.writeFileSync(seeded, JSON.stringify({ accessToken: 'own-tok' }));
     seedActiveCursorLoginPerVersion();
     expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('own-tok');
@@ -837,7 +796,7 @@ describe('seedActiveCursorLoginPerVersion', () => {
     const home = fakeHome();
     fs.mkdirSync(path.join(home, '.config', 'cursor'), { recursive: true });
     fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({ accessToken: 'tok' }));
-    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true }); // real dir, not a symlink
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
     process.env.AGENTS_REAL_HOME = home;
     expect(() => seedActiveCursorLoginPerVersion()).not.toThrow();
   });
@@ -854,9 +813,6 @@ describe('seedActiveCursorLoginPerVersion', () => {
 });
 
 describe('migrateKimiSubagentsToMarkdown', () => {
-  /**
-   * Seed a kimi version home's agents dir with `files` and return its path.
-   */
   function seedKimiHome(versionsDir: string, version: string, files: Record<string, string>): string {
     const dir = path.join(versionsDir, 'kimi', version, 'home', '.kimi-code', 'agents');
     fs.mkdirSync(dir, { recursive: true });
@@ -892,8 +848,6 @@ describe('migrateKimiSubagentsToMarkdown', () => {
 
     migrateKimiSubagentsToMarkdown(versions);
 
-    // `foo.system.md` has no `foo.yaml` beside it, so it is not a legacy pair;
-    // `keeper.yaml` has no sibling prompt, so it is not ours to delete either.
     expect(fs.readdirSync(dir).sort()).toEqual(['foo.system.md', 'keeper.yaml']);
   });
 
@@ -940,7 +894,6 @@ notify:
 
     const central = yaml.parse(fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8'));
     expect(central.browser.default).toBeUndefined();
-    // The user's named profile is fleet config and stays put.
     expect(central.browser['comet-local'].browser).toBe('comet');
     expect(central.notify.owner.channel).toBe('imessage');
 
@@ -955,8 +908,6 @@ notify:
 
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
 
-    // A plain re-stringify would drop these, rewriting the whole committed file
-    // and re-creating the churn this migration exists to stop.
     const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
     expect(raw).toContain('# hand-written comment that must survive');
     expect(raw).toContain('# a named profile the user created');
@@ -976,8 +927,6 @@ notify:
   });
 
   it('keeps a comment glued directly above browser: when the key itself is dropped', () => {
-    // No blank line before `browser:` — YAML attaches those lines to the Pair,
-    // so a bare doc.delete('browser') takes the header with them.
     const dir = userDirWith(`# agents-cli metadata
 # hand-written comment that must survive
 browser:
@@ -991,7 +940,6 @@ notify:
 
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
 
-    // Assert on RAW BYTES: yaml.parse() hides both this and the `{}` defect.
     const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
     expect(raw).toContain('# agents-cli metadata');
     expect(raw).toContain('# hand-written comment that must survive');
@@ -1009,18 +957,12 @@ notify:
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
 
     const raw = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
-    // A flow `{}` root is poison: a later parseDocument inherits flow and
-    // renders the whole rewritten file inline (see serializeCentral).
     expect(raw.trim()).not.toBe('{}');
     expect(raw).toContain('# agents-cli metadata');
     expect(yaml.parse(raw) ?? {}).toEqual({});
   });
 
   it('writes the device file with the canonical four-line META_HEADER', () => {
-    // The subtlest decision in the migration: migrate.ts's own local HEADER
-    // constants are THREE lines (no yaml-language-server hint), so writing one
-    // of those would leave a device file that state.ts's writeIfChanged rewrites
-    // on the very next meta write — reintroducing the churn this removes.
     const dir = userDirWith(CENTRAL_WITH_DEFAULT);
 
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
@@ -1040,8 +982,6 @@ notify:
     migrateMachineLocalBrowserProfileOutOfCentral(dir, 'zion');
     const afterSecond = fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8');
 
-    // Byte-identical: a rewrite on the second pass is exactly the dirty-file
-    // churn that wedges `agents repos pull user`.
     expect(afterSecond).toBe(afterFirst);
   });
 
@@ -1081,9 +1021,7 @@ describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
     const compiled = COMPILED_HEADER_PROJECT + '# Composed ruleset\n';
     fs.writeFileSync(path.join(home, 'AGENTS.md'), compiled);
     fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md'));
-    // Symlink-less-filesystem fallback: a copy of AGENTS.md, same header.
     fs.writeFileSync(path.join(home, '.cursorrules'), compiled);
-    // User-authored per-agent file: no compiled header, must survive.
     fs.writeFileSync(path.join(home, 'MEMORY.md'), '# my own notes\n');
 
     removeHomeCompiledProjectRules(home);
@@ -1109,7 +1047,7 @@ describe('removeHomeCompiledProjectRules (RUSH-2725)', () => {
   it('is a no-op when ~/AGENTS.md does not exist', async () => {
     const { removeHomeCompiledProjectRules } = await import('./migrate.js');
     const home = makeTempHistoryDir();
-    fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md')); // dangling — not ours to judge
+    fs.symlinkSync('AGENTS.md', path.join(home, 'CLAUDE.md'));
 
     removeHomeCompiledProjectRules(home);
 
@@ -1139,13 +1077,10 @@ describe('detrackUserChangelog', () => {
 
     detrackUserChangelog(userDir);
 
-    // No longer tracked, but the working file is kept.
     expect(() => git('ls-files', '--error-unmatch', '--', 'CHANGELOG.md')).toThrow();
     expect(fs.existsSync(path.join(userDir, 'CHANGELOG.md'))).toBe(true);
-    // Removal was committed (not left as a staged deletion) → tree clean at rest.
     expect(git('status', '--porcelain').trim()).toBe('');
     expect(git('log', '-1', '--pretty=%s').trim()).toBe('chore(config): stop tracking CHANGELOG.md');
-    // Ignored via .git/info/exclude (anchored), never a tracked .gitignore.
     expect(fs.readFileSync(path.join(userDir, '.git', 'info', 'exclude'), 'utf-8')).toContain('/CHANGELOG.md');
     expect(fs.existsSync(path.join(userDir, '.gitignore'))).toBe(false);
   });
@@ -1157,10 +1092,9 @@ describe('detrackUserChangelog', () => {
     git('commit', '-q', '-m', 'init');
     const before = git('rev-list', '--count', 'HEAD').trim();
 
-    detrackUserChangelog(userDir); // CHANGELOG.md not tracked → nothing to do
+    detrackUserChangelog(userDir);
     expect(git('rev-list', '--count', 'HEAD').trim()).toBe(before);
 
-    // Plain dir with no .git — must not throw.
     const plain = path.join(makeTempHistoryDir(), '.agents');
     fs.mkdirSync(plain, { recursive: true });
     expect(() => detrackUserChangelog(plain)).not.toThrow();
