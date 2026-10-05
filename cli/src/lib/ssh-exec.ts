@@ -9,6 +9,7 @@ export const SSH_CONN_FAILURE_CODE = 255;
 
 export const SSH_TARGET_RE = /^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/;
 
+// Validate at the SSH argv sink so metacharacters and leading-option injection never reach ssh.
 export function assertValidSshTarget(host: string): void {
   if (host.startsWith('-') || !SSH_TARGET_RE.test(host)) {
     throw new Error(
@@ -54,6 +55,7 @@ export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
 
 let controlDirEnsured = false;
 export function controlOpts(): string[] {
+  // %C keeps sockets below macOS path limits; Windows omits unsupported multiplexing.
   if (process.platform === 'win32') return [];
   const dir = path.join(getCacheDir(), 'ssh');
   if (!controlDirEnsured) {
@@ -71,6 +73,7 @@ export function controlOpts(): string[] {
 }
 
 export function sshConnectOpts(mux: string[], hostKeyOpts?: string[]): string[] {
+  // Host-key overrides precede SSH_OPTS because OpenSSH uses the first value.
   return [...(hostKeyOpts ?? []), ...SSH_OPTS, ...mux];
 }
 
@@ -115,6 +118,7 @@ export function sshExec(target: string, remoteCmd: string, opts: SshExecOptions 
 
 export function sshExecAsync(target: string, remoteCmd: string, opts: SshExecOptions = {}): Promise<SshExecResult> {
   assertValidSshTarget(target);
+  // Timeout-bearing calls disable ControlMaster; killing a mux client can leave remote work running.
   const mux = opts.multiplex === false || opts.timeoutMs ? [] : controlOpts();
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
   return new Promise((resolve) => {
@@ -312,6 +316,7 @@ export function sshExecRawStream(
   remoteCmd: string,
   opts: SshExecRawStreamOptions,
 ): Promise<Omit<SshExecRawResult, 'stdout'>> {
+  // Raw streaming preserves byte offsets across UTF-8 chunk boundaries.
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), target, remoteCmd];
@@ -377,6 +382,7 @@ export const TERMINAL_MODE_RESET =
   + '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h';
 
 export function restoreLocalTerminal(saved: string | undefined, opts: { drainStdin: boolean }): void {
+  // Drain only after abnormal SSH termination; draining a clean exit destroys user typeahead.
   try {
     if (saved) spawnSync('stty', [saved], { stdio: ['inherit', 'ignore', 'ignore'] });
   } catch {  }

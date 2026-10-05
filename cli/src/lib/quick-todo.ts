@@ -65,6 +65,7 @@ const TAG = /^#([\p{L}\p{N}_.-]+)$/u;
 const BANGS = /^!+$/;
 const clean = (token: string) => token.replace(/[,.;:]+$/, '');
 
+// Shared AGI Menu grammar: first #project anywhere; day/priority only in the trailing suffix.
 export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   let project: string | null = null;
   let due: string | null = null;
@@ -223,6 +224,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
+  // linear may report Error: on stderr despite exit zero; success requires a stdout issue ID.
   const id = out.stdout.match(/^Created ([A-Z][A-Z0-9]*-\d+):/m)?.[1];
   if (!id) {
     const error = out.stderr.split('\n').map((l) => l.trim()).reverse().find((l) => /^Error:/i.test(l));
@@ -262,6 +264,7 @@ async function readStates(linear: LinearExec): Promise<Array<{ name?: string; ty
 export async function completeTodo(id: string, linear: LinearExec = linearExec): Promise<TodoResult> {
   try {
     const update = await linear(['update', id, '--done', '--proof', DONE_PROOF]);
+    // Read back completion because queued/rate-limited updates may exit zero before state changes.
     const [raw, states] = await Promise.all([readIssue(id, linear), readStates(linear)]);
     const todo = toQuickTodo(raw);
     if (states.find((s) => s.name === todo.state)?.type === 'completed') return { ok: true, todo, message: `${id} marked Done` };
@@ -288,6 +291,7 @@ export async function undoTodo(id: string, now: Date, linear: LinearExec = linea
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
+  // Map state name to workflow type and allow bounded negative age for clock skew.
   const type = states.find((s) => s.name === issue.state)?.type;
   try {
     if (type === 'completed') {

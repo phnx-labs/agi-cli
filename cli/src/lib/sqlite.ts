@@ -5,6 +5,7 @@ const isBun = typeof (globalThis as { Bun?: unknown }).Bun !== 'undefined';
 const require = createRequire(import.meta.url);
 
 function loadNodeSqlite(): unknown {
+  // Suppress only node:sqlite's experimental warning; preserve every other process warning.
   const original = process.emitWarning;
   const filtered = ((warning: string | Error, ...rest: unknown[]): void => {
     const name = warning instanceof Error
@@ -24,6 +25,7 @@ function loadNodeSqlite(): unknown {
   }
 }
 
+// Keep bun:sqlite variable-bound so Node never statically resolves the Bun-only module.
 const BUN_SQLITE = 'bun:sqlite';
 const sqliteMod = isBun
   ? (require as (id: string) => unknown)(BUN_SQLITE)
@@ -53,6 +55,7 @@ export interface RunResult {
 }
 
 function bindArgs(params: unknown[]): unknown[] {
+  // Strict bare named binds accept one object intact; positional binds remain variadic.
   if (
     params.length === 1 &&
     params[0] !== null &&
@@ -102,6 +105,7 @@ class Database {
 
   transaction<Args extends unknown[], R>(fn: (...args: Args) => R): (...args: Args) => R {
     return (...args: Args): R => {
+      // IMMEDIATE serializes writers before the callback observes transaction state.
       this.inner.exec('BEGIN IMMEDIATE');
       try {
         const result = fn(...args);

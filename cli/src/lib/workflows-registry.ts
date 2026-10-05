@@ -60,6 +60,7 @@ function renderedFile(opts: {
   transform: (workflowPath: string, name: string) => string;
   marker: (filePath: string) => string | null;
 }): WorkflowTarget {
+  // Ownership markers keep sync and remove from clobbering user-authored collisions; matches rerenders current source.
   const file = (dir: string, name: string): string => path.join(dir, `${name}${opts.ext}`);
   return {
     label: opts.label,
@@ -183,6 +184,7 @@ const workflowBundle: WorkflowTarget = {
 };
 
 
+// Sole native-layout mapping; keep it aligned with capableAgents('workflows').
 export const WORKFLOW_TARGETS: Partial<Record<AgentId, WorkflowTarget>> = {
   claude: workflowBundle,
   kimi: kimiFlowSkill,
@@ -230,6 +232,7 @@ export function syncWorkflowToVersion(
   agent: AgentId,
   versionHome: string,
 ): { success: boolean; error?: string } {
+  // Refuse writes where ownership markers identify an unmanaged collision.
   const target = workflowTarget(agent);
   const dir = target.dir(versionHome);
   try {

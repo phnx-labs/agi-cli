@@ -22,6 +22,7 @@ import { AGENT_IDS, type AgentId } from './types.js';
 
 export const AUTH_STORE_ALIAS = 'auth';
 
+// Reserved auth is file-backed so headless workers can share it; fail loud on any other backend.
 export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
 
 export const RESERVED_BUNDLE_NAMES = new Set([AUTH_STORE_ALIAS]);
@@ -70,6 +71,7 @@ export function isReservedStoreName(name: string): boolean {
 }
 
 export type StorableCredentialKind = 'setup-token' | 'api-key';
+// Only durable setup tokens/API keys are portable; rotating OAuth and session credentials stay device-local.
 
 export function assertStorableCredentialKind(
   kind: string,
@@ -94,6 +96,7 @@ export function inspectReservedAuthBundle(): {
   backend: SecretsBackend | null;
   ok: boolean;
 } {
+  // An unreachable standalone secrets service is absent for inspection purposes.
   let exists: boolean;
   try {
     exists = bundleExistsSync(AUTH_STORE_ALIAS);

@@ -14,16 +14,19 @@ export function isolatedHomeSuffix(): string | null {
 }
 
 export function namespacedServiceLabel(base: string): string {
+  // Redirected homes namespace labels but still share the real per-user service manager.
   const suffix = isolatedHomeSuffix();
   return suffix ? `${base}.sandbox-${suffix}` : base;
 }
 
 export function serviceManifestHomeEnv(): { HOME: string; AGENTS_REAL_HOME: string } {
+  // Service managers do not inherit the writer's HOME; every manifest pins both homes.
   const home = process.env.HOME || os.homedir();
   return { HOME: home, AGENTS_REAL_HOME: process.env.AGENTS_REAL_HOME || home };
 }
 
 export function serviceManagerRegistrationAllowed(): { allowed: boolean; reason: string } {
+  // Registration under redirected HOME requires the explicit test seam.
   const suffix = isolatedHomeSuffix();
   if (!suffix) {
     return { allowed: true, reason: 'production HOME: service-manager registration allowed' };

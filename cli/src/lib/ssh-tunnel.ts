@@ -34,6 +34,7 @@ export function startSSHTunnel(
   opts: StartTunnelOptions = {},
 ): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
+    // Validate user@host at the spawn sink; reject asynchronously to preserve this Promise API.
     try {
       assertValidSshTarget(`${user}@${host}`);
     } catch (err) {
@@ -76,6 +77,7 @@ export async function resolveRemoteDevice(
   name: string,
   opts: { expectPlatform?: DeviceProfile['platform']; forWhat?: string } = {},
 ): Promise<ResolvedRemoteDevice> {
+  // Platform requirements belong to callers; shared tunnel plumbing remains fleet-generic.
   const device = await getDevice(name);
   if (!device) {
     throw new Error(`Unknown device '${name}'. Register it with \`agents devices add\` / \`agents devices sync\`, then retry.`);

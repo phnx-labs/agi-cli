@@ -11,6 +11,7 @@ interface OwnerMessageOptions {
 }
 
 function ownerMessageContext(rawText: string, opts: OwnerMessageOptions = {}): FeedBroadcastContext {
+  // Resolve a short session id and its identity once, then render that context for every destination.
   const identity = resolvePostIdentity({ sessionId: opts.sessionId });
   const session = resolveFullSessionId(identity?.sessionId);
   const ticket = session ? getSessionById(session)?.ticketId : undefined;
