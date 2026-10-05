@@ -14,22 +14,12 @@ function makeTempHome(): string {
   return dir;
 }
 
-/** Write a central subagent under `~/.agents/subagents/<name>/AGENT.md`. */
 function writeCentralSubagent(home: string, name: string, agentMd: string): void {
   const dir = path.join(home, '.agents', 'subagents', name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'AGENT.md'), agentMd, 'utf-8');
 }
 
-/**
- * Run the built subagents writer against `home` and return its WriteResult.
- *
- * Resolved through `getWriter` — the same accessor `syncResourcesToVersion`
- * uses — in a child with `HOME` pointed at the temp dir so `listInstalledSubagents`
- * reads the fixture's `~/.agents/subagents/` (the dir is resolved from HOME at
- * module init). Importing the writer module directly would trip the
- * pre-existing module-init cycle `lazy-map.ts` documents.
- */
 function write(home: string, agent: string, selection: string[]): { synced: string[]; paths: string[]; errors?: string[] } {
   const moduleUrl = pathToFileURL(path.resolve('dist/lib/staleness/registry.js')).href;
   const versionHome = path.join(home, '.agents', '.history', 'versions', agent, '1.0.0', 'home');
@@ -53,18 +43,9 @@ afterEach(() => {
   }
 });
 
-// PHNX-3187: the writer used to `continue` past any selection name it could not
-// resolve and swallow every per-item write failure behind a bare `catch`, so a
-// subagent whose AGENT.md failed to parse (the git-CRLF-on-Windows case) produced
-// `synced: []` — indistinguishable from "nothing selected" — and `agents doctor
-// --fix` reported an unactionable "hold" instead of the real reason. The writer
-// now surfaces those as `errors`; mirror mcp.test.ts's writer refusal test.
 describe('subagents writer surfaces a refusal instead of swallowing it', () => {
   it.skipIf(IS_WINDOWS)('reports the reason a requested subagent is not discoverable', () => {
     const home = makeTempHome();
-    // An AGENT.md with no frontmatter fence: parseSubagentFrontmatter returns
-    // null, so listInstalledSubagents drops it — the exact shape a CRLF-mangled
-    // fence produced on Windows before the parse fix.
     writeCentralSubagent(home, 'broken', 'no frontmatter here, just prose.\n');
 
     const result = write(home, 'claude', ['broken']);
