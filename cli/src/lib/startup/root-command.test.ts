@@ -6,7 +6,6 @@ import type { Command } from 'commander';
 import { normalizeResumeDeviceArgs } from './root-command.js';
 import { buildFullCommandTree } from '../../cli/command-registry.js';
 
-/** Find a (possibly nested) subcommand by name path, e.g. `find(program, 'sessions', 'backfill', 'tools')`. */
 function find(program: Command, ...path: string[]): Command {
   let cmd = program;
   for (const name of path) {

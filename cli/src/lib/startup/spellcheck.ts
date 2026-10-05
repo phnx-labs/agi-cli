@@ -2,7 +2,6 @@
  * KNOWN_TOP_LEVEL_COMMANDS, not the commander registry, so a typo avoids registerAllEagerCommands
  * (~250-330ms). */
 
-/** Calculate the Levenshtein edit distance between two strings. */
 export function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;

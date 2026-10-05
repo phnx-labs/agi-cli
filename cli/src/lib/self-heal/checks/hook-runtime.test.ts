@@ -12,9 +12,6 @@ describe('hookRuntimeCheck', () => {
   });
 
   it('returns a standard check result in dry-run mode', async () => {
-    // The Vitest process can share an installed-agent home with the developer,
-    // so do not assume it is empty. This still proves the check delegates to
-    // the bounded repair routine without writing in dry-run mode.
     const result = await hookRuntimeCheck.run({ mode: 'safe', dryRun: true });
     expect(Array.isArray(result.fixed)).toBe(true);
     expect(Array.isArray(result.needsAttention)).toBe(true);

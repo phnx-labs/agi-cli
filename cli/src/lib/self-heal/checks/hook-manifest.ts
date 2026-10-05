@@ -15,18 +15,15 @@ export const hookManifestCheck: HealCheck = {
 
     let manifest: Record<string, { script?: string; enabled?: boolean }>;
     try {
-      // warn:false — this check reports, it does not double-log.
       manifest = parseHookManifest({ warn: false }) as typeof manifest;
     } catch (err) {
       return resultOf([], [`hook manifest unreadable: ${(err as Error).message}`]);
     }
 
     for (const [name, def] of Object.entries(manifest)) {
+      // A registered critical hook can otherwise be silently omitted when its script vanishes.
       if (!def || typeof def.script !== 'string' || def.script.length === 0) continue;
       if (def.enabled === false) continue;
-      // An absolute script (a subrule-composed hook) is used as-is by the
-      // installer, so only relative manifest paths go through the hooks/ root
-      // resolver that can silently return null.
       if (def.script.startsWith('/')) continue;
       if (resolveHookScriptPath(def.script) === null) {
         needsAttention.push(
@@ -37,9 +34,6 @@ export const hookManifestCheck: HealCheck = {
       }
     }
 
-    // Report only. Repair would mean guessing where the author meant the script
-    // to live, and a wrong guess would wire the wrong file into a PreToolUse
-    // gate. Naming the broken entry is the fix that belongs here.
     return resultOf([], needsAttention);
   },
 };

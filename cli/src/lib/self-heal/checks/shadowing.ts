@@ -25,24 +25,24 @@ export const shadowingCheck: HealCheck = {
     // opposite of what `--isolated` promises. Gate on the installs themselves, not on the global
     // default, so no path that pins a default can re-arm adoption.
     for (const agent of listAgentsWithNonIsolatedInstalledVersions()) {
-      if (!getGlobalDefault(agent)) continue; // only default agents, like the interactive flow
+      if (!getGlobalDefault(agent)) continue;
       const cmd = AGENTS[agent].cliCommand;
       const shadowedBy = getPathShadowingExecutable(agent);
       if (!shadowedBy) continue;
 
       if (ctx.dryRun) {
-        // Classify without mutating: adoption only ever touches a symlink.
         let isSymlink = false;
         try {
           const fs = await import('node:fs');
           isSymlink = fs.lstatSync(shadowedBy).isSymbolicLink();
-        } catch { /* treat as real binary */ }
+        } catch {  }
         if (isSymlink) fixed.push(`${cmd} launcher (${shadowedBy})`);
         else needsAttention.push(`${cmd}: real binary shadows the shim (${shadowedBy})`);
         continue;
       }
 
       const res = adoptShadowingLauncher(agent);
+      // Adopt managed symlinks automatically, but surface real binaries for human resolution.
       if (res.adopted) fixed.push(`adopted ${cmd} launcher (${res.launcher})`);
       else if (res.reason === 'not-a-symlink') {
         needsAttention.push(`${cmd}: real binary shadows the shim (${shadowedBy})`);

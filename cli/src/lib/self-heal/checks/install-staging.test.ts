@@ -18,13 +18,11 @@ function makeTempDir(label: string): string {
   return dir;
 }
 
-/** touch mtime to `ageMs` in the past, matching how a real crash-orphaned dir ages. */
 function ageDir(dirPath: string, ageMs: number): void {
   const past = new Date(Date.now() - ageMs);
   fs.utimesSync(dirPath, past, past);
 }
 
-/** Point resolveRunningPackageRoot at a fixed root for the duration of one test. */
 function stubRunningPackageRoot(packageRoot: string): void {
   vi.spyOn(selfUpdate, 'resolveRunningPackageRoot').mockReturnValue(packageRoot);
 }
@@ -51,7 +49,6 @@ describe('install-staging check', () => {
     expect(r.fixed).toHaveLength(1);
     expect(r.fixed[0]).toContain(stagingPath);
     expect(fs.existsSync(stagingPath)).toBe(false);
-    // The live package itself is never touched.
     expect(fs.existsSync(packageRoot)).toBe(true);
   });
 
@@ -61,7 +58,6 @@ describe('install-staging check', () => {
     fs.mkdirSync(packageRoot);
     const stagingPath = path.join(scopeDir, '.agents-cli-deadbeef');
     fs.mkdirSync(stagingPath);
-    // Freshly created — well inside the age guard window.
     stubRunningPackageRoot(packageRoot);
 
     const r = await installStagingCheck.run(ctx);

@@ -29,6 +29,7 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * pruned surface misroutes to something the user never asked for. E.g. `set` (RUSH-2579),
  * `share`/`artifacts` (artifacts-cli, PHNX-3992), `usage` (RUSH-3079), `list` (PHNX-3391). */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
+  // Retired names stay reserved so typo correction cannot redirect them to a different live action.
   'webhook',
   'org',
   'serve',

@@ -38,8 +38,6 @@ describe('hook-manifest check', () => {
     expect(r.needsAttention).toHaveLength(1);
     expect(r.needsAttention[0]).toContain('main-branch-guard');
     expect(r.needsAttention[0]).toContain('silently never installed');
-    // Detect-only: guessing a destination could wire the wrong file into a
-    // PreToolUse gate.
     expect(r.fixed).toEqual([]);
   });
 

@@ -29,7 +29,7 @@ describe('detectDevBuild', () => {
     // from <prefix>/bin into the installed package under <prefix>/lib/node_modules. The naive
     // dirname(dirname(symlink)) reached <prefix>, saw .git, and false-positived as a dev build.
     const prefix = mkTmp();
-    fs.mkdirSync(path.join(prefix, '.git')); // Homebrew's own repo
+    fs.mkdirSync(path.join(prefix, '.git'));
     const pkgDir = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
     writeFile(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@phnx-labs/agents-cli' }));
     const entry = path.join(pkgDir, 'dist', 'index.js');
@@ -52,7 +52,6 @@ describe('detectDevBuild', () => {
   });
 
   it('an unrelated ancestor git repo does not count as a dev build', () => {
-    // A git repo whose root is NOT the agents-cli package (no/foreign package.json).
     const root = mkTmp();
     fs.mkdirSync(path.join(root, '.git'));
     writeFile(path.join(root, 'package.json'), JSON.stringify({ name: 'some-other-thing' }));
@@ -88,9 +87,6 @@ describe('detectDevBuild', () => {
   });
 
   it('a deeply nested global install stays outside the bounded ancestor search', () => {
-    // nvm's global install layout: <nvm-root>/versions/node/vX/lib/node_modules/
-    // @phnx-labs/agents-cli, with the nvm checkout's own `.git` several levels
-    // above that -- well past the bound, so it must never read as a dev build.
     const nvmRoot = mkTmp();
     fs.mkdirSync(path.join(nvmRoot, '.git'));
     const pkgDir = path.join(nvmRoot, 'versions', 'node', 'v24.0.0', 'lib', 'node_modules', '@phnx-labs', 'agents-cli');

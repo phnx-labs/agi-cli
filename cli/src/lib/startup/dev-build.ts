@@ -13,6 +13,7 @@ export function isDevVersionStamp(version: string): boolean {
 }
 
 export function detectDevBuild(argv1: string, version: string): boolean {
+  // Realpath + exact package identity + bounded ancestry avoids classifying nested installs as dev.
   if (isDevVersionStamp(version)) return true;
   try {
     const cliPath = fs.realpathSync(argv1 || '');
@@ -26,7 +27,7 @@ export function detectDevBuild(argv1: string, version: string): boolean {
     for (let depth = 0; depth <= DEV_BUILD_GIT_ANCESTOR_DEPTH; depth++) {
       if (fs.existsSync(path.join(dir, '.git'))) return true;
       const parent = path.dirname(dir);
-      if (parent === dir) return false; // reached the filesystem root
+      if (parent === dir) return false;
       dir = parent;
     }
     return false;

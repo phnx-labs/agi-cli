@@ -11,8 +11,8 @@ import { resolveRunningPackageRoot } from '../../self-update.js';
 
 const __installStagingDirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** A concurrent upgrade must be long finished before an unattended sweep may touch its staging dir. */
 export const STALE_INSTALL_STAGING_AGE_MS = 10 * 60 * 1000;
+// The age gate must precede recursive removal so a live npm reify directory is never repaired away.
 
 /** Find retire-path staging dirs for `packageRoot` older than `maxAgeMs`. Re-implements the
  * self-update.ts sweep matching so the age check runs BEFORE deletion; the sweep helper deletes
@@ -39,7 +39,7 @@ function findAgedInstallStaging(packageRoot: string, maxAgeMs: number, now: numb
     try {
       mtimeMs = fs.statSync(full).mtimeMs;
     } catch {
-      continue; // vanished between readdir and stat — nothing to sweep
+      continue;
     }
     if (now - mtimeMs >= maxAgeMs) aged.push(full);
   }
@@ -55,7 +55,6 @@ export const installStagingCheck: HealCheck = {
     try {
       packageRoot = resolveRunningPackageRoot(__installStagingDirname);
     } catch {
-      // Not an npm/bun-managed install (source checkout) — nothing to sweep.
       return resultOf([], []);
     }
 

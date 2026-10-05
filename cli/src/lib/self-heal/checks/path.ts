@@ -19,8 +19,6 @@ export const pathCheck: HealCheck = {
       return resultOf([`added shims to PATH (${r.location ?? r.rcFile ?? 'PATH'})`], []);
     }
     if (r.success && r.alreadyPresent) {
-      // Present in the rc file but not in THIS process's PATH — a reload issue,
-      // not something to fix again. Report quietly.
       return resultOf([], [`shims dir in ${r.rcFile ?? 'rc file'} but not loaded — open a new terminal`]);
     }
     return resultOf([], [`could not add shims to PATH: ${r.error ?? 'unknown'}`]);

@@ -4,6 +4,8 @@ import type { Command } from 'commander';
  * no `enablePositionalOptions()` (tried for RUSH-2687, reverted): it cascades to all ~552 commands
  * and breaks leaves that read parent flags via `optsWithGlobals()`. */
 export function configureRootCommand(program: Command, name: string, version: string): Command {
+  // Do not enable global positional options: parent commands own flags that may follow leaf nouns,
+  // and their leaves recover those options through optsWithGlobals().
   return program
     .name(name)
     .description(
@@ -16,7 +18,6 @@ export function configureRootCommand(program: Command, name: string, version: st
     .addHelpCommand(false);
 }
 
-/** Resume takes one device; its parent listing command takes a variadic list. */
 export function normalizeResumeDeviceArgs(args: string[]): string[] {
   if (args[0] !== 'sessions' || args[1] !== 'resume') return args;
   let options = true;

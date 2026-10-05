@@ -37,9 +37,7 @@ export const shimsCheck: HealCheck = {
           if (!ctx.dryRun) ensureShimCurrent(agent);
           fixed.push(`${cmd} shim`);
         } else if (!shimPointsAtLiveInstall(agent)) {
-          // Schema is current but the baked AGENTS_BIN points at a different, removed
-          // install (dev build, old npm-global, rotated version dir). ensureShimCurrent
-          // would no-op on a schema-current shim, so force a rewrite to the current install.
+          // A schema-current shim may bake a dead AGENTS_BIN; ensureShimCurrent would no-op.
           if (!ctx.dryRun) createShim(agent);
           fixed.push(`${cmd} shim (repointed to current install)`);
         }
@@ -55,7 +53,6 @@ export const shimsCheck: HealCheck = {
         }
       }
 
-      // Pre-split ~/.agents/shims/<cli> files cause false-positive shadow hits.
       if (!ctx.dryRun && removeLegacyUserShim(agent)) fixed.push(`removed legacy ${cmd} shim`);
     }
 
