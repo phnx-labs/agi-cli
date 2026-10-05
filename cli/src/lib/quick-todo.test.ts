@@ -129,7 +129,6 @@ describe('addQuickTodo', () => {
     expect(asked[0]).toEqual(['create', '--description', `Expires Oct 20.\nMint a new one.\n\n${QUICK_TODO_MARKER}`, '--status', 'Todo',
       '--cycle', 'active', '--skip-milestone', '--priority', 'low', '--project', 'AGI', '--due-date', '2026-10-09',
       '--assign', 'bisma', '--', 'Rotate the share token']);
-    // "me" is the API key's owner, which is linear's default: no --assign.
     await addQuickTodo('Call back', { assignee: 'me', defs: [agi], now: NOW }, linear);
     expect(asked[1]).not.toContain('--assign');
   });
@@ -144,7 +143,6 @@ describe('addQuickTodo', () => {
     expect(await refuse('Call back', { due: '2026-02-30' })).toBe('Expected a due date like 2026-10-09, got "2026-02-30".');
     expect(await refuse('Call back', { description: 'x'.repeat(10_001) })).toBe('The description is over 10,000 characters.');
     expect(asked).toHaveLength(0);
-    // Today is not the past.
     await addQuickTodo('Call back', { due: '2026-10-04', defs: [agi], now: NOW }, linear);
     expect(asked[0]).toContain('2026-10-04');
   });
