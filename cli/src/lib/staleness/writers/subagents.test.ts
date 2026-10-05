@@ -14,7 +14,6 @@ function makeTempHome(): string {
   return dir;
 }
 
-/** Write a central subagent under `~/.agents/subagents/<name>/AGENT.md`. */
 function writeCentralSubagent(home: string, name: string, agentMd: string): void {
   const dir = path.join(home, '.agents', 'subagents', name);
   fs.mkdirSync(dir, { recursive: true });
@@ -53,9 +52,6 @@ afterEach(() => {
 describe('subagents writer surfaces a refusal instead of swallowing it', () => {
   it.skipIf(IS_WINDOWS)('reports the reason a requested subagent is not discoverable', () => {
     const home = makeTempHome();
-    // An AGENT.md with no frontmatter fence: parseSubagentFrontmatter returns
-    // null, so listInstalledSubagents drops it — the exact shape a CRLF-mangled
-    // fence produced on Windows before the parse fix.
     writeCentralSubagent(home, 'broken', 'no frontmatter here, just prose.\n');
 
     const result = write(home, 'claude', ['broken']);

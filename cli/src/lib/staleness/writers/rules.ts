@@ -11,7 +11,6 @@ import type { ResourceWriter, WriteArgs, WriteResult } from './types.js';
 import { lazyAgentMap } from './lazy-map.js';
 
 export interface RulesSelection {
-  /** Preset name to compose. Empty string falls through to `"default"` in the composer. */
   preset: string;
 }
 
@@ -27,18 +26,13 @@ function buildRulesWriter(agent: AgentId): ResourceWriter<RulesSelection> {
       const targetName = cap.file;
       const composed = composeRulesFromState({ preset: selection.preset || undefined });
       const agentDir = path.join(versionHome, agentConfigDirName(agent));
-      // `cap.file` is a trusted constant from AGENTS table; openclaw ships a
-      // nested path (`workspace/AGENTS.md`) so we use path.join rather than
-      // safeJoin (which rejects path separators in `name`).
       const destFile = path.join(agentDir, targetName);
       fs.mkdirSync(path.dirname(destFile), { recursive: true });
-      // Remove any pre-existing symlink before writing — a stale symlink
-      // could point at a deleted source and writeFileSync would chase it
-      // to nothing.
+      // Unlink a stale symlink before writing so we never follow and clobber its external target.
       try {
         const st = fs.lstatSync(destFile);
         if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(destFile);
-      } catch { /* destination did not exist */ }
+      } catch {  }
       fs.writeFileSync(destFile, composed.content);
       return { synced: [targetName], paths: [destFile] };
     },

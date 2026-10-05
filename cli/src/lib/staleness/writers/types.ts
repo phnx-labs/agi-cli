@@ -5,18 +5,13 @@ import type { AgentId } from '../../types.js';
 import type { ResourceKind } from './kinds.js';
 
 export interface WriteArgs<Sel> {
-  /** Agent version (e.g. "1.2.3") — passed for version-gated capability checks and side files. */
   version: string;
-  /** Absolute path to the version's home dir, i.e. `~/.agents/.history/versions/<agent>/<version>/home`. */
   versionHome: string;
-  /** Kind-specific selection payload. */
   selection: Sel;
-  /** Current working directory — used by writers that consult project-layer state. */
   cwd: string;
 }
 
 export interface WriteResult {
-  /** Names actually written. Empty array = write produced nothing (not an error). */
   synced: string[];
   /** Absolute paths of artifacts this write materialized, recorded as the manifest's
    * `writtenTargets` so `isStale` can flag a deleted artifact with one existsSync per path (#2398,
@@ -31,18 +26,13 @@ export interface WriteResult {
 /** Inverse of a write: locate and delete the artifact for one resource `name` in a version home.
  * Used only by the manifest-bounded prune (RUSH-2438), which proves names were installed and gone. */
 export interface RemoveArgs {
-  /** Agent version (e.g. "1.2.3"). */
   version: string;
-  /** Absolute path to the version's home dir. */
   versionHome: string;
-  /** Resource name to remove (no extension). */
   name: string;
-  /** Current working directory — used by writers that consult project-layer state. */
   cwd: string;
 }
 
 export interface RemoveResult {
-  /** True when an artifact owned by this writer was found and deleted. */
   removed: boolean;
 }
 

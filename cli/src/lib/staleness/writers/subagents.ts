@@ -27,23 +27,16 @@ function buildSubagentsWriter(agent: AgentId): ResourceWriter<string[]> {
       for (const name of selection) {
         const sub = map.get(name);
         if (!sub) {
-          // Requested but not discoverable as an installed central subagent —
-          // e.g. its AGENT.md failed to parse. Say so instead of silently
-          // dropping it, which read as an unactionable doctor "hold" (PHNX-3187).
           errors.push(`subagent '${name}': no parseable AGENT.md in ~/.agents/subagents`);
           continue;
         }
         try {
           target.write(dir, sub);
           synced.push(sub.name);
-          // The registry owns the layout — record the artifact paths this
-          // write occupies so a later deletion reads as stale (#2398).
           for (const entry of target.occupied(dir, sub.name)) {
             if (fs.existsSync(entry.path)) paths.push(entry.path);
           }
         } catch (e) {
-          // A genuine fs/transform failure must surface with its reason, not
-          // vanish behind a bare `catch` (RUSH-2677 / PHNX-3187).
           errors.push(`subagent '${sub.name}': ${(e as Error).message}`);
         }
       }

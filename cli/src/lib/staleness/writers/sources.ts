@@ -8,8 +8,8 @@ import { getUserAgentsDir, getAgentsDir, getEnabledExtraRepos, getCommandsDir, g
 import { isSafeSegmentName, safeJoin } from '../../paths.js';
 import { AGENTS } from '../../agents.js';
 
-/** Trusted source bases for content-like kinds. Project layer excluded. */
 function trustedSourceBases(): { dir: string }[] {
+  // Executable materialization trusts user, system, and enabled extras, never the current project.
   return [
     { dir: getUserAgentsDir() },
     { dir: getAgentsDir() },
@@ -50,11 +50,8 @@ function pluginSupportsAgent(manifest: PluginManifest, agent?: AgentId): boolean
   return !manifest.agents || manifest.agents.length === 0 || manifest.agents.includes(agent);
 }
 
-/** Every `plugins/<plugin>/skills` dir across trusted source bases, filtered to an optional plugin/agent scope. */
 export function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
   const dirs: string[] = [];
-  // A harness that loads plugin skills natively gets no flattened copy and no
-  // plugin credit for a top-level skills/<name>: that copy is an orphan there.
   if (options.agent && AGENTS[options.agent]?.nativePluginSkills) return dirs;
   for (const base of trustedSourceBases()) {
     const pluginsDir = path.join(base.dir, 'plugins');
@@ -76,7 +73,6 @@ export function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string
   return dirs;
 }
 
-/** Find the trusted source for a command markdown by name. */
 export function resolveCommandSource(name: string): string | null {
   const candidates = [
     safeJoin(path.join(getUserAgentsDir(), 'commands'), `${name}.md`),
@@ -86,7 +82,6 @@ export function resolveCommandSource(name: string): string | null {
   return candidates.find(isLiveFile) ?? null;
 }
 
-/** Find the trusted source directory for a skill by name. */
 export function resolveSkillSource(name: string, options: { agent?: AgentId; plugins?: Set<string> } = {}): string | null {
   const candidates = [
     safeJoin(path.join(getUserAgentsDir(), 'skills'), name),
@@ -97,7 +92,6 @@ export function resolveSkillSource(name: string, options: { agent?: AgentId; plu
   return candidates.find(isLiveDir) ?? null;
 }
 
-/** List trusted plugin-bundled skill names, filtered to an optional plugin/agent scope. */
 export function listPluginSkillNames(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
   const names = new Set<string>();
   for (const skillsDir of pluginSkillDirs(options)) {
@@ -153,7 +147,6 @@ function findNestedHookFile(hooksRoot: string, basename: string): string | null 
     if (name.startsWith('.') || HOOK_GROUP_SKIP_DIRS.has(name)) continue;
     const groupDir = path.join(hooksRoot, name);
     if (!isLiveDir(groupDir)) continue;
-    // Only group dirs (those with scripts) contribute nested scripts.
     if (!dirHasTopLevelScripts(groupDir)) continue;
     const candidate = path.join(groupDir, basename);
     if (isLiveFile(candidate)) return candidate;
@@ -172,8 +165,6 @@ export function resolveHookSource(name: string): string | null {
   const base = path.basename(name);
 
   for (const hooksRoot of roots) {
-    // Exact relative path (top-level or group/name) — multi-segment needs
-    // path.join + containment, not safeJoin (single-segment only).
     if (name.includes('/') || name.includes('\\')) {
       const candidate = path.resolve(hooksRoot, name);
       const rootResolved = path.resolve(hooksRoot);
@@ -186,11 +177,9 @@ export function resolveHookSource(name: string): string | null {
     } else if (isSafeSegmentName(name)) {
       try {
         const top = safeJoin(hooksRoot, name);
-        // File script first; then directory bundle (e.g. tests/ fixtures).
         if (isLiveFile(top)) return top;
         if (isLiveDir(top) && !dirHasTopLevelScripts(top)) return top;
       } catch {
-        /* invalid segment */
       }
     }
     const nested = findNestedHookFile(hooksRoot, base);
@@ -199,7 +188,6 @@ export function resolveHookSource(name: string): string | null {
   return null;
 }
 
-/** All trusted command-skill source roots, used to dedup name collisions for commands-as-skills writes. */
 export function trustedSkillRoots(): string[] {
   return [
     path.join(getUserAgentsDir(), 'skills'),

@@ -3,6 +3,7 @@
  * top level fires before it is initialized. */
 import type { AgentId } from '../../types.js';
 
+// Lazy access breaks the AGENTS → versions → staleness writers module-initialization cycle.
 export function lazyAgentMap<T>(
   build: () => Partial<Record<AgentId, T>>
 ): Partial<Record<AgentId, T>> {

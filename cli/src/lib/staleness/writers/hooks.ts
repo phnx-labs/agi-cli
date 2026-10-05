@@ -21,7 +21,6 @@ function removePath(target: string): void {
       fs.rmSync(target, { recursive: true, force: true });
     }
   } catch {
-    /* already gone */
   }
 }
 
@@ -104,7 +103,7 @@ function buildHooksWriter(agent: AgentId): ResourceWriter<string[]> {
           removePath(hookTarget);
           return { removed: true };
         }
-      } catch { /* already gone / inaccessible */ }
+      } catch {  }
       return { removed: false };
     },
   };

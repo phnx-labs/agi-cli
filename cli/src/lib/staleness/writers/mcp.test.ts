@@ -14,7 +14,6 @@ function makeTempHome(): string {
   return dir;
 }
 
-/** A HOME holding one user-scope MCP server, ready to sync. */
 function homeWithOneServer(): string {
   const home = makeTempHome();
   const userMcpDir = path.join(home, '.agents', 'mcp');

@@ -35,7 +35,7 @@ function removePath(p: string): void {
     const st = fs.lstatSync(p);
     if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(p);
     else if (st.isDirectory()) fs.rmSync(p, { recursive: true, force: true });
-  } catch { /* already gone */ }
+  } catch {  }
 }
 
 function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
@@ -49,7 +49,7 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
         if (fs.lstatSync(skillsTarget).isSymbolicLink()) {
           removePath(skillsTarget);
         }
-      } catch { /* does not exist yet */ }
+      } catch {  }
       fs.mkdirSync(skillsTarget, { recursive: true });
 
       const synced: string[] = [];
@@ -67,9 +67,6 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
     },
     remove({ versionHome, name }: RemoveArgs): RemoveResult {
       const agentDir = path.join(versionHome, agentConfigDirName(agent));
-      // A command-installed-as-skill lives in the same skills/ dir but is owned
-      // by the commands writer's prune — never delete it from here, or a
-      // still-live converted command would vanish under a skill prune.
       if (listCommandSkillsInVersion(agentDir).includes(name)) {
         return { removed: false };
       }
@@ -79,7 +76,7 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
           removePath(destDir);
           return { removed: true };
         }
-      } catch { /* already gone / inaccessible */ }
+      } catch {  }
       return { removed: false };
     },
   };
@@ -88,8 +85,6 @@ function buildSkillsWriter(agent: AgentId): ResourceWriter<string[]> {
 export const skillsWriters = lazyAgentMap<ResourceWriter<string[]>>(() => {
   const m: Partial<Record<AgentId, ResourceWriter<string[]>>> = {};
   for (const agent of capableAgents('skills')) {
-    // Agents that natively read ~/.agents/skills/ don't get a version-home
-    // write — the orchestrator clears the dir for them.
     if (AGENTS[agent].nativeAgentsSkillsDir) continue;
     m[agent] = buildSkillsWriter(agent);
   }

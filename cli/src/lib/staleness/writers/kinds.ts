@@ -25,7 +25,6 @@ export const ALL_RESOURCE_KINDS: readonly ResourceKind[] = [
   'workflows',
 ] as const;
 
-/** Map kind -> capability name on AgentConfig.capabilities. */
 export function kindToCapability(kind: ResourceKind): CapabilityName {
   return kind === 'permissions' ? 'allowlist' : kind;
 }

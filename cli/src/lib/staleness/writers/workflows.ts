@@ -20,7 +20,7 @@ function buildWorkflowsWriter(agent: AgentId): ResourceWriter<string[]> {
         try {
           const r = syncWorkflowToVersion(wf.path, name, agent, versionHome);
           if (r.success) synced.push(name);
-        } catch { /* per-item failure: skip */ }
+        } catch {  }
       }
       return { synced };
     },
