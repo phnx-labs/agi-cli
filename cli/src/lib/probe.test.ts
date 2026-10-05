@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { probeCapture } from './probe.js';
 
+// Real process trees prove completion/hard-exit reaps grandchildren despite PID-publication races.
 const posixOnly = describe.skipIf(process.platform === 'win32');
 
 function writeForker(dir: string, opts: { parentExits: boolean }): string {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
+// Same-account fresh usage proves liveness except forceLive/signed-out paths; transient errors preserve known-live.
+// Slot installs use slot:<id>, and absent slot directories are not probe targets.
 import {
   authAccountLabel,
   authCacheKey,

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+// Isolated installs never become normal defaults or credential homes.
 describe.skipIf(process.platform === 'win32')('isolated default', () => {
   let home: string;
   const A = '9.9.4';

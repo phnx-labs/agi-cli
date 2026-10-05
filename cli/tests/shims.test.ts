@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { generateShimScript, generateVersionedAliasScript } from '../src/lib/installations/shims.js';
 
+// Launch shims may use only filesystem-only sync --launch, never foreground sync.
+// Subcommands must not receive --version: Commander's top-level option intercepts it and exits.
 
 describe('shims - resource comparison', () => {
   let tempDir: string;

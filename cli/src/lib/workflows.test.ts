@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
+// Remove only workflow-owned stale agents, retain Task when subagents ship, and preserve user files.
+// Antigravity workflows are HOME-global and may overwrite only files bearing our ownership marker.
 import {
   parseLoopBlock,
   parseWorkflowFrontmatter,

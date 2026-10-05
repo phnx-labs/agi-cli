@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { decideRoutineAuthReadiness, decideHostAuthFromPing } from './routine-readiness.js';
 
+// Missing auth is ready only with an explicit remote launchable bit; older payloads fail closed.
 describe('decideRoutineAuthReadiness (shared local/host decision)', () => {
   it('worker with no probe row but a launchable token → ready', () => {
     expect(decideRoutineAuthReadiness(undefined, true)).toEqual({ ok: true });
