@@ -263,7 +263,7 @@ function dirCopy(opts: {
 }
 
 
-// Each entry owns the current versus migrated layout for that harness.
+// Current native layouts live here; one-time legacy layouts belong in migration code.
 export const SUBAGENT_TARGETS: Partial<Record<AgentId, SubagentTarget>> = {
   claude: flatFile({ subdir: ['.claude', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
   grok: flatFile({ subdir: ['.grok', 'agents'], ext: '.md', transform: transformSubagentForClaude }),
