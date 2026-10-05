@@ -1,5 +1,7 @@
 import type { AgentId, Meta, NativeAccountRecord } from './types.js';
 
+// Pure leaf: no state, keychain, network, or account-registry imports; device rows override central rows.
+
 function mergedNativeAccounts(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
 ): NativeAccountRecord[] {
@@ -12,6 +14,7 @@ export function registeredNativeAccountForEmail(
   agent: AgentId,
   email: string,
 ): NativeAccountRecord | null {
+  // Multiple identity matches are ambiguous and must not be guessed.
   const needle = email.trim().toLowerCase();
   if (!needle) return null;
   const matches = mergedNativeAccounts(meta).filter(

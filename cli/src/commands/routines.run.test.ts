@@ -214,6 +214,7 @@ describeRoutines('routines run --json', () => {
   });
 
   it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
+    // A stop file synchronizes the processes without wall-clock races.
     const stopFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-overlap-')), 'stop');
     const home = makeHome({
       jobs: [{
@@ -502,6 +503,7 @@ describeRoutines('routines edit — headless context repair', () => {
 });
 
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
+  // The isolated history dir prevents the daemon's SIGTERM sweep from touching real user processes.
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
     const home = makeDaemonHome();
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;

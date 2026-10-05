@@ -168,6 +168,7 @@ export function registerTmuxCommands(program: Command): void {
         console.error(chalk.red('attach requires a TTY. Run this from an interactive shell.'));
         process.exit(1);
       }
+      // Attach-time repair replaces daemon reconciliation; an exited-agent husk still needs teardown because pane hooks only detach clients.
       await ensureSessionHookRepaired(name, socket);
       const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${name}`] });
       await teardownIfAgentExited(name, socket);

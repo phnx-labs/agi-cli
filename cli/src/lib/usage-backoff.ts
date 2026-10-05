@@ -59,6 +59,7 @@ const MAX_BACKOFF_MS = 60 * 60 * 1000;
 
 let backoffDirOverride: string | null = null;
 export function setUsageBackoffDirForTest(dir: string | null): string | null {
+  // Tests redirect this seam so rate-limit probes cannot write the operator cache.
   const prev = backoffDirOverride;
   backoffDirOverride = dir;
   return prev;
@@ -69,6 +70,7 @@ function backoffDir(): string {
 }
 
 export function parseRetryAfterMs(header: string | null | undefined, now: number = Date.now()): number | null {
+  // Server delays cap at one hour; an unusable header falls through to the caller's fallback.
   const raw = (header ?? '').trim();
   if (!raw) return null;
 
@@ -127,6 +129,7 @@ export function noteUsageRateLimited(
   retryAfter: string | null | undefined,
   opts?: { now?: number; fallbackMs?: number; account?: string | null },
 ): void {
+  // Each deadline gets its own file so concurrent processes can only increase the effective backoff.
   const now = opts?.now ?? Date.now();
   const fallbackMs = opts?.fallbackMs ?? 15 * 60 * 1000;
   const ms = parseRetryAfterMs(retryAfter, now) ?? fallbackMs;
@@ -143,6 +146,7 @@ export function usageRateLimitedUntil(
   now: number = Date.now(),
   account?: string | null,
 ): number | null {
+  // Read the maximum applicable deadline; account penalties must not starve sibling accounts.
   const scopes = account ? [backoffScope(agent, null), backoffScope(agent, account)] : [backoffScope(agent, null)];
   let latest: number | null = null;
   for (const scope of scopes) {

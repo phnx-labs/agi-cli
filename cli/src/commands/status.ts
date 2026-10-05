@@ -111,6 +111,7 @@ export function registerStatusCommand(syncCmd: Command): void {
       }
     }
 
+    // Pass raw --yes: non-TTY rendering is not authorization to mutate state.
     await promptDriftSync({ cwd, yes: opts.yes, status, quiet: true });
   });
 }

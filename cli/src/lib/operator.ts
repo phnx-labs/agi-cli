@@ -69,6 +69,7 @@ export function canPerform(id: string, action: string, root?: string): boolean {
 }
 
 export function isHighConsequenceAllowed(blockConsequence: string | undefined, operatorId: string, root?: string): boolean {
+  // Mailbox from-labels are untrusted; merge/deploy/admin requires a known operator with explicit rights.
   if (!blockConsequence || blockConsequence === 'normal') return true;
   if (!isKnownOperator(operatorId, root)) return false;
   if (isAdmin(operatorId, root)) return true;
@@ -84,6 +85,7 @@ export function isHighConsequenceAllowed(blockConsequence: string | undefined, o
  * the human's launch context).
  */
 export function verifyOperatorIdentity(claimedId: string | undefined, root?: string): boolean {
+  // Rights alone are insufficient: the environment must authenticate the same operator id.
   if (!claimedId) return false;
   if (!isKnownOperator(claimedId, root)) return false;
   const envId = process.env.AGENTS_OPERATOR_ID?.trim();

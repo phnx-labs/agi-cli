@@ -45,6 +45,7 @@ export function buildRunFinishNotification(
 }
 
 export function armRunFinishNotification(ctx: RunNotifyContext): void {
+  // The launching process owns the one completion notification.
   process.on('exit', (code) => {
     notifyDesktop(buildRunFinishNotification(ctx, code));
   });

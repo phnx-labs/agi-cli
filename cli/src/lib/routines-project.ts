@@ -117,6 +117,7 @@ interface SyncProjectResult {
 }
 
 export function syncProjectRoutines(projectRoot: string): SyncProjectResult {
+  // Project YAML never auto-fires: refresh only matching materialized copies and preserve activation, device pins, and createdAt.
   ensureAgentsDir();
   const abs = expandProjectPath(projectRoot);
   const git = readProjectGitSource(abs);
@@ -202,6 +203,7 @@ export interface SyncAllResult {
 }
 
 export function materialisedProjectRoots(): string[] {
+  // Sync is limited to sources already materialized in the job store.
   const roots = new Set<string>();
   for (const job of listJobs()) {
     if (job.source?.kind === 'project') roots.add(expandProjectPath(job.source.projectPath));
@@ -250,6 +252,7 @@ function registeredProjectRoots(): string[] {
 }
 
 export function discoverProjectRoutines(): DiscoveredProjectRoutine[] {
+  // Discovery is restricted to registered projects, never an arbitrary filesystem scan.
   const materialisedNames = new Set(listJobs().map((j) => j.name));
   const out: DiscoveredProjectRoutine[] = [];
   const seen = new Set<string>();
@@ -306,6 +309,7 @@ export function materialiseProjectRoutine(
   projectRoot: string,
   name: string,
 ): { job: JobConfig } | { error: string } {
+  // Materialization and enablement are separate; copying a routine must not activate it.
   ensureAgentsDir();
   const abs = expandProjectPath(projectRoot);
   const match = listProjectRoutineFiles(abs).find((f) => f.name === name);

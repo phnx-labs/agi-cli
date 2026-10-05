@@ -15,6 +15,7 @@ export class RunCloudError extends Error {
 }
 
 const RUN_CLOUD_CONFLICTS: Array<{ field: string; flag: string; set: (v: unknown) => boolean }> = [
+  // Cloud dispatch is shared; local-only controls are errors instead of silently ignored flags.
   { field: 'terminal', flag: '--terminal', set: (v) => v !== undefined && v !== false },
   { field: 'interactive', flag: '--interactive', set: (v) => v === true },
   { field: 'acp', flag: '--acp', set: (v) => v === true },
@@ -74,6 +75,7 @@ export function cloudCapableAgentIds(): string[] {
 }
 
 export function resolveRunCloudProvider(agentId: string, explicitProvider?: string): CloudProvider {
+  // An explicit provider wins; agents without native cloud never inherit the configured default.
   if (explicitProvider) return resolveProvider(explicitProvider);
   if (!nativeProviderForAgent(agentId)) {
     throw new RunCloudError(
@@ -135,6 +137,7 @@ export async function handleRunCloud(
       providerOptions: {},
     };
     if (options.cloudEnv) dispatchOptions.providerOptions!.env = options.cloudEnv as string;
+    // Commander defaults must not alter cloud behavior unless the caller supplied --mode.
     if (command.getOptionValueSource('mode') === 'cli') {
       dispatchOptions.providerOptions!.mode = options.mode as string;
     }
