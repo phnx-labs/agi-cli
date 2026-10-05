@@ -1,13 +1,3 @@
-/**
- * Permissions staleness — every `groups/*.yaml` across user + system
- * contributes to the merged permission set (project layer not consulted by
- * the current sync writer). First-wins on name collision (user > system).
- *
- * The active preset env value (`AGENTS_PERMISSION_PRESET`) is part of the
- * fingerprint too — preset selection changes which groups get applied to
- * the agent config, so a preset switch without a content change still
- * counts as stale.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -16,7 +6,6 @@ import { fingerprintFile, isFileStale } from '../fingerprint.js';
 import { getActivePermissionPresetName } from '../../permissions.js';
 import type { PermEntry, FileEntry } from '../types.js';
 
-/** Walk user + system permissions/groups/. First-wins user > system on names. */
 function collectPermissionGroupFiles(): Record<string, string> {
   const seen = new Map<string, string>();
   for (const baseDir of [getUserPermissionsDir(), getPermissionsDir()]) {
@@ -34,7 +23,6 @@ function collectPermissionGroupFiles(): Record<string, string> {
   return Object.fromEntries(seen);
 }
 
-/** Build the permissions section of the manifest. */
 export function buildPermissions(): PermEntry {
   const groupFiles = collectPermissionGroupFiles();
   const groups: Record<string, FileEntry> = {};
@@ -48,7 +36,6 @@ export function buildPermissions(): PermEntry {
   };
 }
 
-/** True when the stored permissions section no longer matches current state. */
 export function isPermissionsStale(stored: PermEntry): boolean {
   if (stored.permissionPreset !== getActivePermissionPresetName()) return true;
   const currentGroups = collectPermissionGroupFiles();

@@ -7,7 +7,6 @@ import {
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** Write a minimal valid skill (dir + SKILL.md + optional extra files). */
 function writeSkill(fx: Fixture, layer: 'project'|'user'|'system', name: string, extraFiles: Record<string, string> = {}, skillMd = 'skill body'): string {
   const p = writeFile(fx, layer, `skills/${name}/SKILL.md`, skillMd);
   const dir = path.dirname(p);

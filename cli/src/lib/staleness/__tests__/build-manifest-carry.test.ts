@@ -1,7 +1,3 @@
-/**
- * RUSH-2320 #3 — buildManifest carries still-fresh fingerprints from a
- * previous manifest (no re-hash of unchanged sources).
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -51,9 +47,7 @@ describe('buildManifest carry-forward (RUSH-2320 #3)', () => {
     writeSkill(fx, 'changing', 'v1');
     call(fx, { cmd: 'build', agent: AGENT, version: VERSION, cwd: fx.projectRoot });
 
-    // Bump mtime + content so isFresh fails for "changing".
     const skillMd = path.join(fx.userDir, 'skills', 'changing', 'SKILL.md');
-    // Ensure mtime advances on filesystems with 1s resolution.
     const past = new Date(Date.now() - 5_000);
     fs.utimesSync(skillMd, past, past);
     fs.writeFileSync(skillMd, 'v2');

@@ -1,12 +1,3 @@
-/**
- * Subagents staleness — one directory per subagent (must contain AGENT.md),
- * first-wins across project > user > system > extras.
- *
- * Bug-fixed from v1: the old manifest derived its name list from
- * `listInstalledSubagents()` which only walks user + system. With project
- * subagents in `available.subagents`, the name-set diff always flipped to
- * "stale". This checker walks all four layers consistently.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';

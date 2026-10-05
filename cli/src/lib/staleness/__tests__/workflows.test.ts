@@ -72,13 +72,10 @@ describe('staleness e2e: workflows', () => {
   });
 
   it('v1 manifests with no workflows field: workflow appears -> stale, then clean after rebuild', () => {
-    // No workflows yet — build manifest.
     build(fx);
     expect(isStale(fx)).toBe(false);
-    // Add a workflow — should be detected as a new name.
     writeWorkflow(fx, 'user', 'fresh');
     expect(isStale(fx)).toBe(true);
-    // Rebuilding should bring it back to clean.
     build(fx);
     expect(isStale(fx)).toBe(false);
   });

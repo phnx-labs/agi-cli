@@ -1,18 +1,3 @@
-/**
- * Rules staleness — composed from a layered `rules.yaml` preset definition
- * plus per-layer `subrules/<name>.md` fragments. Fingerprints exactly the
- * source files that contribute to the active preset's composed output.
- *
- * Bug-fixed from v1: the old `resolveRuleFile` looked for `rules/<preset>.md`,
- * a path that never exists (presets live in `rules.yaml`, fragments live in
- * `subrules/`). That made the rules section always report stale. This module
- * uses `composeRulesFromState` to discover the actual source file set per
- * preset/cwd, so freshness reflects real source changes.
- *
- * Special-cased vs. the other checkers: agent + version are needed to read
- * the active preset, so this module doesn't conform to ResourceChecker. The
- * aggregator wires it up explicitly.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,18 +21,13 @@ function rulesDirForLayer(scope: LayerScope, cwd: string): string | null {
   }
   if (scope === 'user')   return getUserRulesDir();
   if (scope === 'system') return getResolvedRulesDir();
-  // extra: first registered extra repo's rules dir. The composer doesn't
-  // disambiguate multi-extra rules.yaml today, so we don't either.
   const extras = getEnabledExtraRepos();
   return extras.length > 0 ? path.join(extras[0].dir, 'rules') : null;
 }
 
-/**
- * Resolve the set of source files contributing to the active preset's output.
- * Keys are relative paths within the rules dir (stable across machines).
- * Values are absolute current paths.
- */
 function activeSources(agent: AgentId, version: string, cwd: string): Record<string, string> {
+  // Fingerprint the composer's actual contributors, including directory-form
+  // rule.md plus adjacent hooks.yaml; reconstructing preset paths misses both.
   const result: Record<string, string> = {};
   let compose;
   try {
@@ -63,12 +43,8 @@ function activeSources(agent: AgentId, version: string, cwd: string): Record<str
     if (fs.existsSync(yamlPath)) result['rules.yaml'] = yamlPath;
   }
   for (const sub of compose.subrules) {
-    // Key off the actual source path so dir-form subrules (subrules/<name>/rule.md)
-    // and flat ones (subrules/<name>.md) both fingerprint the file that really
-    // contributes to the output, not a hard-coded `.md` that may not exist.
     if (sub.subruleDir) {
       result[`subrules/${sub.name}/rule.md`] = sub.sourcePath;
-      // Fingerprint hooks.yaml too so editing a hook re-syncs the rules section.
       const hooksFile = path.join(sub.subruleDir, 'hooks.yaml');
       if (fs.existsSync(hooksFile)) result[`subrules/${sub.name}/hooks.yaml`] = hooksFile;
     } else {

@@ -1,10 +1,3 @@
-/**
- * Commands detector — mirrors the command dispatch in versions.ts. Inspects the version home,
- * returns command names. Honors the commands-as-skills marker for skills-only
- * agents (Kimi, Codex >= 0.117.0, …), treats the native file as authoritative
- * for dual-write targets (the skill copy is deliberately absent on a name
- * collision), and scans `{agentDir}/<commandsSubdir>/` for native-only targets.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from '../../types.js';
@@ -24,6 +17,8 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
       const agentConfig = AGENTS[agent];
       const agentDir = path.join(versionHome, agentConfigDirName(agent));
 
+      // A command-as-skill copy is authoritative only when that is the chosen
+      // runtime; dual-write must not require both copies or it refresh-loops.
       if (shouldInstallCommandAsSkill(agent, version)) {
         return listCommandSkillsInVersion(agentDir);
       }
@@ -33,22 +28,13 @@ function buildCommandsDetector(agent: AgentId): ResourceDetector {
       const nativeCommands = fs.readdirSync(commandsDir)
         .filter(f => f.endsWith(ext))
         .map(f => f.replace(new RegExp(`\\${ext}$`), ''));
-      // For a dual-write target the native file is the authoritative record that
-      // the command synced. The skill copy is derived, and
-      // installCommandSkillToVersion deliberately writes none when a real skill
-      // source already owns the name -- requiring both copies reported those
-      // commands missing forever and drove an `agents refresh` loop no sync could
-      // clear. This also matches `agents doctor`/`prune`, which read the
-      // unfiltered listCommandsInVersionHome.
       return nativeCommands;
     },
   };
 }
 
-// Detector registration mirrors writers/commands.ts — skills-capable agents
-// with no native command-file dir convert commands to skills by default; only
-// agents with their own slash-command runtime (nativeCommandRuntime) opt out.
 export const commandsDetectors = lazyAgentMap<ResourceDetector>(() => {
+  // Registration follows native-command-runtime semantics, not a static agent allowlist.
   const m: Partial<Record<AgentId, ResourceDetector>> = {};
   for (const id of MANAGED_AGENT_IDS) {
     const cfg = AGENTS[id];

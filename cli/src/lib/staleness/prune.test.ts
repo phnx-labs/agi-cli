@@ -1,19 +1,3 @@
-/**
- * RUSH-2438: `agents sync` was additive-only — a resource deleted from source
- * lingered in every version home forever, because the repo-scoped reconcile
- * path (`agents sync <agent>@all system`, `agents sync <agent> system --force`)
- * passes a selection, which turned off the full-sync orphan sweeps.
- *
- * These tests drive the REAL sync path (no mocking) inside an isolated `$HOME`
- * via `bun --eval`, exactly like `__tests__/extras-sync.test.ts`. They lock the
- * four safety properties the prune MUST hold, plus the writer-`remove()` parity
- * the manifest-bounded prune depends on:
- *
- *   (a) a source-removed resource IS pruned from the version home;
- *   (b) a user-authored file the sync never placed is NOT touched;
- *   (c) a same-named resource in another layer is NOT cross-pruned;
- *   (d) with no manifest, prune FAILS LOUD (deletes nothing).
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -27,7 +11,6 @@ import { MANAGED_AGENT_IDS } from '../agents.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 
-/** Run `scriptBody` under a throwaway $HOME; returns the parsed last JSON line. */
 function runInTempHome(scriptBody: string): Record<string, unknown> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-prune-'));
   try {
@@ -127,7 +110,7 @@ describe('agents sync prune (RUSH-2438)', () => {
     expect(result.manifestExisted).toBe(true);
     expect(result.beforeFiles).toEqual(['alpha.md', 'beta.md']);
     expect(result.prunedCommands).toEqual(['beta']);
-    expect(result.afterFiles).toEqual(['alpha.md']);            // beta.md gone, alpha.md kept
+    expect(result.afterFiles).toEqual(['alpha.md']);
   });
 
   it('(b) does NOT touch a user-authored file the sync never placed', () => {
@@ -143,8 +126,8 @@ describe('agents sync prune (RUSH-2438)', () => {
       console.log(JSON.stringify({ afterFiles: cmdFiles(), prunedCommands: r.pruned.commands }));
     `) as { afterFiles: string[]; prunedCommands: string[] };
 
-    expect(result.prunedCommands).toEqual([]);                  // nothing pruned
-    expect(result.afterFiles).toContain('mycustom.md');         // user file survives
+    expect(result.prunedCommands).toEqual([]);
+    expect(result.afterFiles).toContain('mycustom.md');
     expect(result.afterFiles).toContain('alpha.md');
   });
 
@@ -161,8 +144,8 @@ describe('agents sync prune (RUSH-2438)', () => {
       console.log(JSON.stringify({ afterFiles: cmdFiles(), prunedCommands: r.pruned.commands }));
     `) as { afterFiles: string[]; prunedCommands: string[] };
 
-    expect(result.prunedCommands).toEqual([]);                  // shared still in user layer
-    expect(result.afterFiles).toContain('shared.md');           // preserved
+    expect(result.prunedCommands).toEqual([]);
+    expect(result.afterFiles).toContain('shared.md');
     expect(result.afterFiles).toContain('alpha.md');
   });
 
@@ -183,9 +166,9 @@ describe('agents sync prune (RUSH-2438)', () => {
       }));
     `) as { manifestBefore: boolean; afterFiles: string[]; prunedCommands: string[] };
 
-    expect(result.manifestBefore).toBe(false);                  // no baseline
-    expect(result.prunedCommands).toEqual([]);                  // no guess-delete
-    expect(result.afterFiles).toContain('beta.md');             // stale file left in place
+    expect(result.manifestBefore).toBe(false);
+    expect(result.prunedCommands).toEqual([]);
+    expect(result.afterFiles).toContain('beta.md');
   });
 
   it('(a-codex) prunes a source-removed command from Codex command-as-skill homes', () => {
@@ -210,7 +193,7 @@ describe('agents sync prune (RUSH-2438)', () => {
     expect(result.beforeSkills).toContain('beta');
     expect(result.prunedCommands).toEqual(['beta']);
     expect(result.afterSkills).toContain('alpha');
-    expect(result.afterSkills).not.toContain('beta');           // command-skill dir gone
+    expect(result.afterSkills).not.toContain('beta');
   });
 
   it('(skill) prunes a skill deleted from source on a repo-scoped reconcile', () => {
@@ -229,16 +212,10 @@ describe('agents sync prune (RUSH-2438)', () => {
 
     expect(result.before).toEqual(['alpha', 'beta']);
     expect(result.prunedSkills).toEqual(['beta']);
-    expect(result.after).toEqual(['alpha']);          // beta skill dir removed, alpha kept
+    expect(result.after).toEqual(['alpha']);
   });
 
   it('(guard) a skill prune must NOT destroy a same-named command-skill', () => {
-    // The guard at writers/skills.ts remove() skips a dir that is currently a
-    // command-skill (agents_command marker). Construct the collision: a name that
-    // WAS a real skill (so the manifest records it under skills) but is now a
-    // command-installed-as-skill in the home. A skill prune considers it (gone
-    // from skill source, still materialized) and MUST leave it alone — deleting it
-    // would destroy a live command. If the guard were removed, this test fails.
     const result = runInTempHome(`
       writeSystemSkill('foo', 'foo skill');
       writeSystemSkill('keep', 'keep skill');
@@ -260,15 +237,12 @@ describe('agents sync prune (RUSH-2438)', () => {
       }));
     `) as { skills: string[]; fooStillPresent: boolean; fooIsCommandSkill: boolean; prunedSkills: string[] };
 
-    expect(result.prunedSkills).not.toContain('foo');  // skill prune left it alone
-    expect(result.fooStillPresent).toBe(true);         // command-skill dir survives
-    expect(result.fooIsCommandSkill).toBe(true);       // and is still the live command
+    expect(result.prunedSkills).not.toContain('foo');
+    expect(result.fooStillPresent).toBe(true);
+    expect(result.fooIsCommandSkill).toBe(true);
   });
 
   it('every writer for a PRUNABLE_KIND implements remove() (harness parity)', () => {
-    // The manifest-bounded prune only ever deletes through writer.remove(). If a
-    // prunable kind's writer for some harness lacks it, that harness silently
-    // never prunes — this pins parity across every registered writer.
     const missing: string[] = [];
     for (const kind of PRUNABLE_KINDS) {
       for (const agent of MANAGED_AGENT_IDS) {

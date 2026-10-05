@@ -83,8 +83,6 @@ describe('staleness e2e: plugins', () => {
   });
 
   it('plugin-internal resources do NOT pollute top-level checkers', () => {
-    // A skill inside a plugin must not be reported by the top-level skills
-    // checker — it's part of the plugin bundle, not a standalone skill.
     writePlugin(fx, 'user', 'one');
     fs.mkdirSync(path.join(fx.userDir, 'plugins/one/skills/inner'), { recursive: true });
     fs.writeFileSync(path.join(fx.userDir, 'plugins/one/skills/inner/SKILL.md'), 'inner');

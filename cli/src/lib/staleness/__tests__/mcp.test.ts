@@ -73,8 +73,6 @@ describe('staleness e2e: mcp', () => {
     writeFile(fx, 'user',    'mcp/b.yaml', yaml('dup', 'command: user'));
     writeFile(fx, 'project', 'mcp/c.yaml', yaml('dup', 'command: project'));
     expect(list(fx, 'mcp')).toEqual(['dup']);
-    // First-wins for first sighting (project), so editing user-layer dup
-    // should NOT mark the manifest stale.
     build(fx);
     writeFile(fx, 'user', 'mcp/b.yaml', yaml('dup', 'command: user-v2'));
     expect(isStale(fx)).toBe(false);

@@ -21,9 +21,6 @@ describe('staleness e2e: rules', () => {
   afterEach(()  => fx.cleanup());
 
   it('empty (no rules.yaml anywhere) -> build/isStale survive without throwing', () => {
-    // Active preset defaults to 'default' but no rules.yaml defines it.
-    // composeRulesFromState throws inside the checker; we swallow it and
-    // record an empty set. isStale should then return clean.
     build(fx);
     expect(isStale(fx)).toBe(false);
   });
@@ -36,8 +33,6 @@ describe('staleness e2e: rules', () => {
   });
 
   it('subrule content changed -> stale (THIS IS THE BUG-FIX TEST for v1)', () => {
-    // Pre-fix: rules section keyed by `<preset>.md` (never exists), so
-    // changes to subrule content were never detected.
     writeFile(fx, 'system', 'rules/rules.yaml',       presets({ default: ['core'] }));
     writeFile(fx, 'system', 'rules/subrules/core.md', 'original');
     build(fx);
@@ -66,8 +61,6 @@ describe('staleness e2e: rules', () => {
     writeFile(fx, 'system',  'rules/rules.yaml',       presets({ default: ['core'] }));
     writeFile(fx, 'system',  'rules/subrules/core.md', 'core');
     build(fx);
-    // Adding a project rules.yaml with the same preset name shadows
-    // system at the preset-definition layer.
     writeFile(fx, 'project', 'rules/rules.yaml',       presets({ default: ['core', 'project-only'] }));
     writeFile(fx, 'project', 'rules/subrules/project-only.md', 'proj');
     expect(isStale(fx)).toBe(true);

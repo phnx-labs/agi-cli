@@ -1,8 +1,3 @@
-/**
- * Subagents detector. The installed-name enumeration for every agent's on-disk
- * layout is declared once in the subagent registry; this detector is generic
- * and delegates to `listInstalledSubagentNames` instead of a per-agent builder.
- */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { listInstalledSubagentNames } from '../../subagents-registry.js';
