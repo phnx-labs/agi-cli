@@ -1,14 +1,3 @@
-/**
- * Rush Cloud session source.
- *
- * Fetches cloud-captured sessions from the cloud proxy (api.prix.dev) and caches
- * them locally so the existing filesystem-based parse pipeline works unchanged.
- *
- * Endpoints consumed by the cloud proxy:
- *   GET /api/v1/cloud-runs                  → list executions
- *   GET /api/v1/cloud-runs/:id              → get one (used for meta)
- *   GET /api/v1/cloud-runs/:id/session.jsonl → raw captured jsonl
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -70,7 +59,6 @@ async function api(method: string, endpoint: string, token: string): Promise<Res
   });
 }
 
-/** Coerce the `agent` field on a cloud-run row to a SessionAgentId. */
 function agentToFormat(agent: string): SessionAgentId | null {
   if (agent === 'claude') return 'claude';
   if (agent === 'codex') return 'codex';
@@ -101,11 +89,6 @@ function cachePathForExecution(executionId: string, agent: SessionAgentId): stri
   return assertContained(path.join(id, `session.${agent}.jsonl`), CLOUD_CACHE_DIR);
 }
 
-/**
- * List cloud executions the user has captured sessions for. Includes
- * completed + needs_review + failed; an empty session_path means capture
- * never ran, so those are silently dropped.
- */
 export async function discoverCloudSessions(options?: {
   limit?: number;
 }): Promise<SessionMeta[]> {
@@ -126,9 +109,6 @@ export async function discoverCloudSessions(options?: {
     const timestamp = row.updated_at || row.created_at || new Date().toISOString();
     const project = row.repo_owner && row.repo_name ? `${row.repo_owner}/${row.repo_name}` : undefined;
 
-    // filePath doubles as the sink path for the cached jsonl. parseSession
-    // dispatches on detectAgent which recognizes the `session.<format>.jsonl`
-    // suffix — so the local cache file name must preserve it.
     const filePath = cachePathForExecution(id, agent);
 
     out.push({
@@ -147,11 +127,6 @@ export async function discoverCloudSessions(options?: {
   return out;
 }
 
-/**
- * Fetch the jsonl for one cloud execution and stash it in the local cache.
- * Returns the local file path. Re-fetches on every call (cheap — executions
- * are immutable once complete). Callers may pass an already-known filePath.
- */
 export async function ensureCloudSessionCached(
   executionId: string,
   destPath?: string,
@@ -176,7 +151,6 @@ export async function ensureCloudSessionCached(
   return finalPath;
 }
 
-/** True if filePath points into the cloud session cache dir. */
 export function isCloudSessionPath(filePath: string): boolean {
   const root = path.resolve(CLOUD_CACHE_DIR);
   const resolved = path.resolve(filePath);

@@ -23,12 +23,10 @@ import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader
 
 const RESUMABLE_SESSION_AGENTS = new Set<SessionAgentId>(['claude', 'codex', 'muse', 'opencode']);
 
-/** One capability boundary for every surface that advertises faithful Resume. */
 export function sessionAgentSupportsResume(agent: SessionAgentId): boolean {
   return RESUMABLE_SESSION_AGENTS.has(agent);
 }
 
-/** Injectable credentials can authenticate the existing native context. */
 export interface RecoveryAccount {
   providerAccount: string;
   label: string;
@@ -36,11 +34,8 @@ export interface RecoveryAccount {
 }
 
 interface SessionRecoverySelection {
-  /** Installed binary only; account homes retain their own context label. */
   executableVersion?: string;
-  /** Explicit account selector resolved against the local candidate pool. */
   account?: string;
-  /** Effective model for readiness checks. */
   model?: string;
 }
 
@@ -50,10 +45,8 @@ export type SessionRecoveryTarget =
       agent: AgentId;
       version: string;
       cwd?: string;
-      /** The actual native context root used (a version home, or an account slot dir). */
       execHome?: string;
       configVersion?: string;
-      /** The exact account/version candidate recovery resolved to — never re-derive from `version` alone (PHNX-3940: several accounts can share one managed binary). */
       candidate: RotateCandidate;
       account?: RecoveryAccount;
       reason: string;
@@ -78,7 +71,6 @@ export class SessionRecoveryError extends Error {
   }
 }
 
-/** Canonical origin-device label for every recovery consumer. */
 export function sessionOriginDevice(
   session: Pick<SessionMeta, 'machine'>,
   self = machineId(),
@@ -86,7 +78,6 @@ export function sessionOriginDevice(
   return normalizeHost(session.machine ?? self);
 }
 
-/** The peer that must execute recovery, or undefined when this is the origin. */
 export function sessionRecoveryPeer(
   session: Pick<SessionMeta, 'machine'>,
   selfCheck: (host: string) => boolean = isSelfHost,
@@ -95,7 +86,6 @@ export function sessionRecoveryPeer(
   return normalizeHost(session.machine);
 }
 
-/** Whether an explicit placement names the session's origin device. */
 export function sessionRecoveryDestinationMatches(
   session: Pick<SessionMeta, 'machine'>,
   requestedHost: string,
@@ -146,15 +136,6 @@ function existingDirectory(dir: string | undefined): string | undefined {
   }
 }
 
-/**
- * Realpath of `filePath` when it is genuinely reachable from `homeRoot` (or
- * that root's agent config subdir), else `null`. The one place transcript
- * ownership is decided — reused by native-resume inspection, account
- * attribution, and disambiguation between several accounts sharing one
- * managed binary. Retained trash/backup transcripts are intentionally
- * rejected: they remain readable by `/continue`, but a home must not claim to
- * natively own a transcript it does not.
- */
 function resolveOwnedTranscriptRealpath(filePath: string, homeRoot: string, agent: AgentId): string | null {
   let realFile: string;
   try {
@@ -178,7 +159,6 @@ function transcriptOwnedByHome(filePath: string, homeRoot: string, agent: AgentI
   return resolveOwnedTranscriptRealpath(filePath, homeRoot, agent) !== null;
 }
 
-/** History filtering uses login identity, never an organization quota key. */
 export function sessionMatchesAccount(
   session: Pick<SessionMeta, 'agent' | 'filePath' | 'accountId'>,
   account: Pick<UnifiedAccount, 'id' | 'kind'> & { agent?: AgentId },
@@ -196,19 +176,10 @@ function candidateAccountId(candidate: RotateCandidate): string | undefined {
   return candidate.providerAccountId ?? candidate.nativeAccountId ?? (candidate.fromSlot && candidate.slotDir ? path.basename(candidate.slotDir) : undefined);
 }
 
-/** The actual native context root for a candidate: its account slot dir when it has one, else the managed version home. */
 function candidateHome(candidate: RotateCandidate): string {
   return candidate.slotDir || getVersionHomePath(candidate.agent, candidate.version);
 }
 
-/**
- * Whether `candidate` is the proven native owner of `session`'s transcript.
- * A provider (injected credential) candidate never qualifies: it has no
- * isolated context of its own, so a transcript sitting in the version home it
- * happens to ride in is not evidence it produced that transcript (the exact
- * "current credentials in an old home as historical proof" mistake this must
- * not repeat).
- */
 function candidateOwnsTranscript(candidate: RotateCandidate, session: SessionMeta): boolean {
   if (candidate.providerAccount && !session.accountId) return false;
   const home = candidateHome(candidate);
@@ -217,7 +188,6 @@ function candidateOwnsTranscript(candidate: RotateCandidate, session: SessionMet
   return transcriptOwnedByHome(session.filePath, home, candidate.agent);
 }
 
-/** Stored login identity wins; otherwise require actual native context ownership. */
 function pickOriginCandidate(session: SessionMeta, candidates: RotateCandidate[]): RotateCandidate | undefined {
   if (session.accountId) return candidates.find(candidate => candidateAccountId(candidate) === session.accountId);
   const native = candidates.filter(candidate => !candidate.providerAccount);
@@ -225,9 +195,6 @@ function pickOriginCandidate(session: SessionMeta, candidates: RotateCandidate[]
   return owners.length === 1 ? owners[0] : undefined;
 }
 
-/** Read the launch cwd Claude used to choose its projects/<cwd-key> directory.
- * Claude can record attachment envelopes before the first user turn, and those
- * envelopes retain the actual launch cwd even after the session changes dirs. */
 function readClaudeLaunchCwd(filePath: string): string | undefined {
   const maxBytes = 2 * 1024 * 1024;
   let fd: number;
@@ -248,7 +215,6 @@ function readClaudeLaunchCwd(filePath: string): string | undefined {
         if (typeof parsed?.cwd !== 'string' || !path.isAbsolute(parsed.cwd)) continue;
         if (existingDirectory(parsed.cwd)) return parsed.cwd;
       } catch {
-        // A malformed line or vanished cwd cannot identify a usable native home.
       }
     }
   } finally {
@@ -257,13 +223,6 @@ function readClaudeLaunchCwd(filePath: string): string | undefined {
   return undefined;
 }
 
-/**
- * Prove that the indexed transcript is reachable from the exact active
- * native context root that would receive native resume (a version home, or
- * an account slot dir). Retained trash/backup transcripts are intentionally
- * rejected here: they remain readable by `/continue`, but a new installation
- * or account slot must not native-resume an empty isolated home.
- */
 export function inspectNativeResumeSession(
   session: SessionMeta,
   versionHome: string,
@@ -356,7 +315,6 @@ function resolveExplicitAccountRecovery(
   };
 }
 
-/** Keep the native conversation where possible; replay remains a separate choice. */
 export function resolveSessionRecoveryFromCandidates(
   session: SessionMeta,
   candidates: RotateCandidate[],
@@ -374,15 +332,6 @@ export function resolveSessionRecoveryFromCandidates(
   const source = pickOriginCandidate(session, candidates);
   const sourceReady = source ? readinessFromCandidate(source, undefined, options.model ?? session.model).ready : false;
 
-  // Native-first with account rotation (PHNX-3626). When the origin login is
-  // usage/rate/session-LIMITED (not signed-out or revoked — those need a login,
-  // not a rotation, so they keep going to /continue per SES-39) but its native
-  // context is installed, native-resume-capable, and still owns the indexed
-  // transcript, keep resume NATIVE by rotating to a healthy INJECTABLE (provider)
-  // account in that SAME context — rather than dropping to /continue on a
-  // different version. Only a provider token/key qualifies: a native login
-  // lives in its own isolated context and cannot be forwarded, so it could
-  // never authenticate a resume that must read the origin's transcript (see §11).
   const originReadiness = source ? readinessFromCandidate(source, undefined, options.model ?? session.model) : null;
   const originLimited = !!originReadiness && !originReadiness.ready
     && (originReadiness.reason === 'rate_limited' || originReadiness.reason === 'out_of_credits' || originReadiness.reason === 'model_limited');
@@ -396,7 +345,6 @@ export function resolveSessionRecoveryFromCandidates(
       );
       const account = rotated ? recoveryAccountFromCandidate(rotated.picked) : undefined;
       if (account) {
-        // `originLimited` guarantees the origin is unhealthy with a limit reason.
         const why = originReadiness!.ready ? 'limited' : originReadiness!.reason;
         return {
           mode: 'native',
@@ -413,10 +361,6 @@ export function resolveSessionRecoveryFromCandidates(
     }
   }
 
-  // An exact healthy origin is deterministic: preserve its isolated context.
-  // If native resume is unavailable for that harness, /continue still
-  // launches there. Only an unusable/missing/ambiguous origin enters balanced
-  // account selection.
   const selection = sourceReady
     ? { picked: source! }
     : pickBalancedCandidate(candidates, undefined, options.model ?? session.model);
@@ -430,14 +374,6 @@ export function resolveSessionRecoveryFromCandidates(
   const version = options.executableVersion ?? selection.picked.version;
   const account = recoveryAccountFromCandidate(selection.picked);
   const continueWith = account ? `healthy ${account.label}` : `the selected ${agent} account`;
-  // Native resume without an injected RecoveryAccount is valid only for the
-  // exact healthy origin login — when sourceReady, `selection.picked` IS
-  // `source` by construction above, so no separate version comparison is
-  // needed (and none would be safe: an accountId-matched origin can carry a
-  // version different from the session's recorded one after a vendor
-  // relabel). A balanced same-version provider selected for a signed-out/
-  // revoked origin must stay on /continue; otherwise we would open the origin
-  // context with no usable credential and fail (or fork state).
   if (sourceReady && supportsNative(agent, version)) {
     const home = candidateHome(selection.picked);
     const inspection = nativeInspection ?? inspectNativeResumeSession(session, home);
@@ -473,23 +409,15 @@ export function resolveSessionRecoveryFromCandidates(
   };
 }
 
-/**
- * Whether recovery has conversation content to replay for this session: a
- * non-empty transcript file, or archived content in the index for a row this
- * device owns. A mirror digest or live registry entry is not conversation
- * content. The picker consults this before spending a terminal tab on a pick
- * that {@link assertRecoverableTranscript} would refuse one hop later.
- */
 export function sessionTranscriptReadable(session: SessionMeta): boolean {
   const file = splitSessionFilePath(session.filePath).container;
   try {
     if (file && fs.statSync(file).isFile() && fs.statSync(file).size > 0
       && (session.agent !== 'opencode' || parseOpenCode(session.filePath).length > 0)) return true;
-  } catch { /* The canonical scan already tried to repair this path. */ }
+  } catch {  }
   return !session.mirrorSyncedAt && !session.mirrorSource && Boolean(readSessionContent(session.id)?.trim());
 }
 
-/** Refuse recovery for a session with nothing to replay (PHNX-4080). */
 export function assertRecoverableTranscript(session: SessionMeta): void {
   if (sessionTranscriptReadable(session)) return;
   throw new SessionRecoveryError(
@@ -498,15 +426,6 @@ export function assertRecoverableTranscript(session: SessionMeta): void {
   );
 }
 
-/**
- * Resolve recovery for a durable session, reading the live account pool.
- *
- * Uses {@link collectRunCandidatesForRun} (native version-home logins PLUS
- * durable provider accounts, RUSH-3182) rather than the native-only
- * {@link collectRunCandidates}, so an origin-account limit can rotate to a
- * healthy provider account and stay NATIVE (PHNX-3626). `collect` is injectable
- * for tests and for callers that must stay native-only.
- */
 export async function resolveSessionRecovery(
   session: SessionMeta,
   collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
@@ -523,9 +442,6 @@ export async function resolveSessionRecovery(
   });
 }
 
-/** Stable self-command used by focus, resume, and attach. The owning device runs
- * the recovery resolver above; callers must not native-resume another version's
- * isolated home themselves. */
 export function sessionRecoveryRunArgs(session: Pick<SessionMeta, 'id'>): string[] {
   return ['run', 'auto', '--resume', session.id, '--interactive'];
 }

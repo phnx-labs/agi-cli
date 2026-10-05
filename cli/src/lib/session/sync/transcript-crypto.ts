@@ -28,32 +28,18 @@ import * as crypto from 'crypto';
 import type { R2Config } from './config.js';
 
 const ALG = 'aes-256-gcm';
-const KEY_LEN = 32; // AES-256
-const IV_LEN = 12; // GCM standard nonce
+const KEY_LEN = 32;
+const IV_LEN = 12;
 const TAG_LEN = 16;
 
-/** Serialized envelope stored as the R2 object body when encryption is on. */
 interface TranscriptEnvelope {
-  /** Envelope format version. */
   v: 1;
   alg: 'aes-256-gcm';
-  /** base64 12-byte GCM nonce, fresh per object. */
   iv: string;
-  /** base64 ciphertext. */
   ct: string;
-  /** base64 16-byte GCM auth tag. */
   tag: string;
 }
 
-/**
- * Decode the configured `R2_SYNC_ENC_KEY` into a 32-byte key, or null when the
- * bundle does not carry one (encryption off — see pushOwn's warning path).
- *
- * Accepts hex (64 chars) or base64; both must decode to exactly 32 bytes. A key
- * that is present but the wrong length THROWS rather than silently truncating —
- * a malformed key is a configuration bug, not a reason to fall back to a weaker
- * or wrong key.
- */
 export function resolveSyncEncKey(cfg: Pick<R2Config, 'syncEncKey'>): Buffer | null {
   const raw = cfg.syncEncKey?.trim();
   if (!raw) return null;
@@ -74,12 +60,10 @@ export function resolveSyncEncKey(cfg: Pick<R2Config, 'syncEncKey'>): Buffer | n
   return key;
 }
 
-/** Generate a fresh 32-byte transcript key, base64-encoded (for provisioning). */
 export function generateSyncEncKey(): string {
   return crypto.randomBytes(KEY_LEN).toString('base64');
 }
 
-/** Seal a transcript body. Returns the serialized envelope to store in R2. */
 export function encryptTranscript(plaintext: string, key: Buffer): string {
   const iv = crypto.randomBytes(IV_LEN);
   const cipher = crypto.createCipheriv(ALG, key, iv);
@@ -95,22 +79,12 @@ export function encryptTranscript(plaintext: string, key: Buffer): string {
   return JSON.stringify(envelope);
 }
 
-/**
- * Parse a stored object body into an envelope, or null when it is not one.
- *
- * A plaintext transcript is NDJSON — many JSON objects, one per line — so it
- * never parses as a single object carrying our `v`/`alg`/`ct`/`tag` fields. That
- * makes envelope-vs-plaintext detection unambiguous and lets a puller read BOTH
- * encrypted objects and any legacy plaintext already in the bucket (the beta
- * uploaded plaintext before this landed). This is format-version handling for a
- * real migration, not a "just in case" fallback.
- */
 export function parseEnvelope(body: string): TranscriptEnvelope | null {
   const trimmed = body.trimStart();
-  if (!trimmed.startsWith('{')) return null; // NDJSON first line is an object too, but…
+  if (!trimmed.startsWith('{')) return null;
   let obj: unknown;
   try {
-    obj = JSON.parse(body); // …the WHOLE body must be one JSON value to be an envelope
+    obj = JSON.parse(body);
   } catch {
     return null;
   }
@@ -127,12 +101,10 @@ export function parseEnvelope(body: string): TranscriptEnvelope | null {
   return null;
 }
 
-/** True when a stored object body is one of our encryption envelopes. */
 export function isTranscriptEnvelope(body: string): boolean {
   return parseEnvelope(body) !== null;
 }
 
-/** Open a sealed envelope. Throws on a wrong key / tampered body (GCM tag mismatch). */
 export function decryptEnvelope(envelope: TranscriptEnvelope, key: Buffer): string {
   const iv = Buffer.from(envelope.iv, 'base64');
   const ct = Buffer.from(envelope.ct, 'base64');
@@ -149,18 +121,9 @@ export function decryptEnvelope(envelope: TranscriptEnvelope, key: Buffer): stri
   }
 }
 
-/**
- * Return the plaintext transcript for a fetched object body, transparently
- * decrypting when it is an envelope.
- *
- *  - Envelope + key  → decrypted plaintext.
- *  - Envelope + no key → throws (the object is encrypted but this machine has no
- *    key to read it — surfacing that beats silently mis-merging ciphertext).
- *  - Plaintext body  → returned verbatim (legacy/unencrypted object).
- */
 export function decryptTranscriptBody(body: string, key: Buffer | null): string {
   const envelope = parseEnvelope(body);
-  if (!envelope) return body; // legacy plaintext object
+  if (!envelope) return body;
   if (!key) {
     throw new Error(
       'Fetched an encrypted transcript but R2_SYNC_ENC_KEY is not set in the r2.backups bundle. ' +

@@ -1,26 +1,3 @@
-/**
- * Fleet distribution of lightweight per-session preview/metadata (PHNX-3792).
- *
- * On the interactive/personal device, a session that originated on another host
- * used to render as a bare `[host/<peer>]` row with no topic, and its preview
- * pane fetched the peer's digest LIVE over SSH per row — slow, and blank when
- * the peer is asleep. This module mirrors each box's own session digests into
- * its own `~/.agents/devices/<device>/daemon-state.json`, which the usage-sync
- * SSH exchange (`accounting/usage-sync.ts`, PHNX-4116) carries to every peer:
- * a headed box's tick sends its envelope and stores each peer's reply, so both
- * directions land with no operator step and nothing rides the user repo. The consuming device folds peer
- * digests into its local `sessions` index as mirror rows, so the picker/list/
- * focus read a LOCAL row instead of dialing the peer. No transcript is shipped —
- * only topic/label, the peer's daemon-generated title (PHNX-3797), a
- * first-user-message snippet, last-activity, agent+version, cwd, ticket, and
- * PR — and the mirror is bounded and pruned by age.
- *
- * Direction is deliberately the inverse of usage-sync: EVERY box publishes its
- * own local sessions (workers are exactly where the remote sessions the personal
- * box lacks previews for are created), and every box EXCEPT a marked worker folds
- * peers' digests in (the picker is an interactive surface). A worker skips the
- * consume so its DB is not written with rows it never renders.
- */
 import { selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import {
   readFleetSharedDeviceStates,
@@ -36,14 +13,10 @@ import {
   upsertMirrorSession,
 } from './db.js';
 
-/** Cap on sessions published per device — the payload stays what a picker shows. */
 const SESSION_MIRROR_MAX_ROWS = 200;
-/** First-user-message snippet ceiling; the full turn stays on the owning box. */
 const SESSION_MIRROR_SNIPPET_MAX = 280;
-/** Mirror rows older than this since their last sync are pruned (staleness/size ceiling). */
 export const SESSION_MIRROR_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
 
-/** Caps for the timeline block on a published mirror row. */
 export const SESSION_MIRROR_MAX_STEPS = 8;
 export const SESSION_MIRROR_STEP_TEXT_MAX = 160;
 export const SESSION_MIRROR_REQUEST_MAX = 2_000;
@@ -53,7 +26,6 @@ function cap(value: string, max: number): string {
   return value.length > max ? value.slice(0, max) : value;
 }
 
-/** Bound the tidied request: prose capped, chips capped, never re-derived. */
 function boundedRequest(request: SessionRequest): SessionRequest {
   return {
     ...request,
@@ -65,7 +37,6 @@ function boundedRequest(request: SessionRequest): SessionRequest {
   };
 }
 
-/** Bound the step list. Counters are kept exact — only text is truncated. */
 function boundedTimeline(timeline: SessionTimeline): SessionTimeline {
   const steps = timeline.steps.slice(-SESSION_MIRROR_MAX_STEPS).map((step) => ({
     ...step,
@@ -76,7 +47,6 @@ function boundedTimeline(timeline: SessionTimeline): SessionTimeline {
   return { ...timeline, steps, ...(timeline.reason ? { reason: cap(timeline.reason, 200) } : {}) };
 }
 
-/** Bound the file rows; `total` still reports the real count. */
 function boundedFiles(files: SessionFiles): SessionFiles {
   return {
     ...files,
@@ -107,7 +77,6 @@ function snippet(value: string | null | undefined, max = SESSION_MIRROR_SNIPPET_
   return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
-/** Publish this device's most-recent local sessions into its owned shared-state file. */
 export async function publishSessionMirrorToSharedStore(
   options: PublishSessionMirrorOptions = {},
 ): Promise<PublishSessionMirrorResult> {
@@ -134,12 +103,7 @@ export async function publishSessionMirrorToSharedStore(
     timestamp: s.timestamp,
     ...(s.ticketId ? { ticketId: s.ticketId } : {}),
     ...(s.prUrl ? { prUrl: s.prUrl } : {}),
-    // Ride the daemon-computed summary (PHNX-3939) so a peer renders the goal /
-    // checkpoints / checklist inline — still no transcript, keeping the mirror light.
     ...(s.summary?.goal ? { goal: snippet(s.summary.goal, 400) } : {}),
-    // Bound on publish exactly as toMirrorSummary bounds on consume (50/100 items,
-    // 400-char text, 40-char `at`) so this box's own model output can't ride raw
-    // into the git-synced fleet state file — matching the snippet() cap on goal above.
     ...(s.summary?.checkpoints
       ? {
           checkpoints: s.summary.checkpoints
@@ -155,9 +119,6 @@ export async function publishSessionMirrorToSharedStore(
         }
       : {}),
     ...(s.summary?.summaryState ? { summaryState: s.summary.summaryState } : {}),
-    // Same bound-on-publish discipline as the summary above: the fleet state file
-    // is git-synced, so the request text, the step list, and the file rows are
-    // capped here rather than shipped raw (PHNX-3939).
     ...(s.timeline?.request ? { request: boundedRequest(s.timeline.request) } : {}),
     ...(s.timeline?.timeline ? { timeline: boundedTimeline(s.timeline.timeline) } : {}),
     ...(s.timeline?.files ? { files: boundedFiles(s.timeline.files) } : {}),
@@ -199,13 +160,6 @@ function isString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0;
 }
 
-/**
- * Validate one untrusted peer-supplied row into a DB upsert (or null when it is
- * missing a load-bearing field). Terminal-escape scrubbing is NOT done here —
- * the render path (`sanitizeMeta` in sessions-picker) scrubs every meta string
- * before it reaches a TTY, exactly as it does for live fan-out rows — this only
- * enforces shape and bounds so a malformed/hostile peer can't poison the index.
- */
 function toUpsert(raw: unknown): {
   id: string; shortId: string; agent: string; version?: string; machine: string;
   cwd?: string; topic?: string; firstUser?: string; label?: string; generatedTitle?: string;
@@ -241,13 +195,6 @@ function toUpsert(raw: unknown): {
   };
 }
 
-/**
- * Validate an untrusted peer's published request/timeline/files into the bounded
- * projection the local cache stores (PHNX-3939). Bounds mirror the publish side,
- * so a hostile or oversized peer cannot bloat this box's cache. Only a row that
- * carries a well-formed timeline is kept; a malformed one is dropped whole
- * rather than partially trusted.
- */
 function toMirrorTimeline(r: Record<string, unknown>): import('./db.js').SessionTimelineProjection | undefined {
   const timeline = toMirrorTimelineBlock(r.timeline);
   if (!timeline) return undefined;
@@ -266,12 +213,10 @@ function count(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0;
 }
 
-/** The verb keys a peer's `mix` may carry — anything else is dropped, not trusted. */
 const MIRROR_VERB_CLASSES: readonly SessionVerbClass[] = [
   'read', 'edit', 'run', 'git', 'test', 'browser', 'agent', 'other',
 ];
 
-/** A peer's per-verb breakdown, whitelisted by key and clamped by value. */
 function toMirrorMix(raw: unknown): SessionStep['mix'] | undefined {
   if (!isRecord(raw)) return undefined;
   const mix: Partial<Record<SessionVerbClass, number>> = {};
@@ -300,10 +245,6 @@ function toMirrorTimelineBlock(raw: unknown): SessionTimeline | undefined {
       failed: count(step.failed),
       blocked: count(step.blocked),
       ...(isString(step.now) ? { now: step.now.slice(0, SESSION_MIRROR_STEP_TEXT_MAX) } : {}),
-      // `mix` and `live` are what the sidebar renders a step WITH ("6 run ·
-      // 2 blocked", the amber now-line). Dropping them here made a remote row
-      // disagree with the local one about what a live step even is, while `now`
-      // survived — so they ride through, whitelisted like every other field.
       ...(step.live === true ? { live: true as const } : {}),
       ...((): { mix?: SessionStep['mix'] } => {
         const mix = toMirrorMix(step.mix);
@@ -363,17 +304,10 @@ function toMirrorFiles(raw: unknown): SessionFiles | undefined {
   return { changes, total: count(raw.total) || changes.length, source: raw.source === 'harness' ? 'harness' : 'tools' };
 }
 
-/** One published summary state, validated back into the union or undefined. */
 function toSummaryState(v: unknown): 'pending' | 'ready' | 'skipped' | undefined {
   return v === 'pending' || v === 'ready' || v === 'skipped' ? v : undefined;
 }
 
-/**
- * Validate an untrusted peer's published summary fields into a bounded
- * {@link SessionSummaryEntry} (PHNX-3939), or undefined when it carries none.
- * Bounds mirror the publish side so a hostile/oversized peer can't bloat the
- * local cache. Only a row with a resolvable `summaryState` is kept.
- */
 function toMirrorSummary(r: Record<string, unknown>): import('./db.js').SessionSummaryEntry | undefined {
   const summaryState = toSummaryState(r.summaryState);
   if (!summaryState) return undefined;
@@ -400,12 +334,6 @@ function toMirrorSummary(r: Record<string, unknown>): import('./db.js').SessionS
   };
 }
 
-/**
- * Fold peers' published session digests into this box's local `sessions` index
- * as mirror rows, then prune stale ones. Reads only the local user-repo checkout
- * (the daemon's Git transport already delivered peers' files) — no network. A
- * marked worker skips: the mirror feeds an interactive picker it never renders.
- */
 export function consumeSessionMirrorFromSharedStore(
   options: ConsumeSessionMirrorOptions = {},
 ): ConsumeSessionMirrorResult {
@@ -413,11 +341,6 @@ export function consumeSessionMirrorFromSharedStore(
   const role = options.role ?? selfConfiguredDeviceRole();
   const now = options.now ?? Date.now();
   if (role === 'worker') {
-    // A worker never renders the picker, so it does not consume peers' digests.
-    // But if this box was previously a non-worker it may still hold mirror rows,
-    // which it will never refresh or render — prune them all now (cutoff = now
-    // drops every row synced before this tick) rather than leave a demoted box's
-    // index permanently bloated with stale peer rows (PHNX-3792).
     result.pruned = pruneMirrorSessions(now);
     result.skipped = 'this device is a worker; the session mirror feeds the interactive picker';
     return result;

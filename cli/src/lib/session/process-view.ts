@@ -7,15 +7,11 @@ import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
 export interface HostProcessView {
   bootId?: string;
   pidNamespace?: string;
-  /** Namespace inodes can be reused within one boot; its init identifies the incarnation. */
   initStartTicks?: string;
   ownerPid?: number;
   ownerStartTicks?: string;
 }
 
-// Linux UAPI PID_NS_INIT_INO (include/uapi/linux/nsfs.h; previously
-// PROC_PID_INIT_INO in include/linux/proc_ns.h). This is a kernel-defined
-// namespace identity, independent of PID 1's executable or command name.
 function isInitialPidNamespace(view: HostProcessView): boolean {
   return view.pidNamespace === 'pid:[4026531836]';
 }
@@ -24,9 +20,6 @@ function sameProcessView(owner: HostProcessView, view: HostProcessView): boolean
   return owner.bootId === view.bootId && owner.pidNamespace === view.pidNamespace
     && owner.initStartTicks === view.initStartTicks;
 }
-/** Authenticate the legacy singleton with kernel socket credentials. A host
- * daemon invisible in a nested namespace has peer PID 0, never a colliding PID.
- * No socket/PID/command-name guess grants migration authority. */
 function verifiedLegacyDaemon(): boolean {
   try {
     execFileSync('python3', ['-c', `import os,socket,struct,sys
@@ -47,22 +40,17 @@ assert os.readlink('/proc/%d/ns/pid'%pid)==os.readlink('/proc/self/ns/pid')
 function hasLegacyState(): boolean {
   return [path.join(getTerminalsDir(), 'by-pid'), path.join(getCacheDir(), 'state', 'sessions')]
     .some(dir => fs.existsSync(dir) && fs.readdirSync(dir).length > 0)
-    // Health/log output records attempted starts, not ownership. The ordinary
-    // start path writes health.json BEFORE spawning its first daemon.
     || ['daemon.pid', 'daemon.lifetime', 'heartbeat.json'].some(file => fs.existsSync(path.join(getDaemonDir(), file)))
     || fs.existsSync(path.join(getCacheDir(), 'helpers', 'browser', 'browser.sock'))
     || ['.active-sessions.json', '.active-session-immutable.json'].some(file => fs.existsSync(path.join(getCacheDir(), file)));
 }
 
-/** Measure the calling process, never infer authority from a process name. */
 export function currentProcessView(): HostProcessView | undefined {
   if (process.platform !== 'linux') return {};
   try {
     if (Number(fs.readFileSync('/proc/self/stat', 'utf8').split(' ', 1)[0]) !== process.pid) return undefined;
     const bootId = fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
     const pidNamespace = fs.readlinkSync('/proc/self/ns/pid');
-    // NSpid is relative to the procfs mount. Multiple coordinates mean this
-    // mount exposes an ancestor namespace, even if numeric PIDs happen to match.
     const procPids = fs.readFileSync('/proc/self/status', 'utf8').match(/^NSpid:\s+([^\n]+)$/m)?.[1].trim().split(/\s+/);
     if (procPids?.length !== 1 || Number(procPids[0]) !== process.pid) return undefined;
     const initStat = fs.readFileSync('/proc/1/stat', 'utf8');
@@ -76,7 +64,6 @@ export function currentProcessView(): HostProcessView | undefined {
   }
 }
 
-/** Read-only ownership check. Observing a HOME never claims or migrates it. */
 export function hostProcessView(): HostProcessView | undefined {
   const view = currentProcessView();
   if (!view || process.platform !== 'linux') return view;
@@ -84,15 +71,10 @@ export function hostProcessView(): HostProcessView | undefined {
     const owner = JSON.parse(fs.readFileSync(path.join(getTerminalsDir(), 'process-view.json'), 'utf8')) as HostProcessView;
     return sameProcessView(owner, view) ? view : undefined;
   } catch (error) {
-    // The initial kernel namespace is authoritative before any daemon has
-    // enrolled this HOME. This observation itself must remain read-only.
     return (error as NodeJS.ErrnoException).code === 'ENOENT' && isInitialPidNamespace(view) ? view : undefined;
   }
 }
 
-/** Explicit writers may enroll a fresh HOME in their measured namespace.
- * Foreign ownership remains protected even when the prior writer is invisible.
- * The initial host may enroll legacy state before daemon startup. */
 export function writerProcessView(): HostProcessView | undefined {
   const view = currentProcessView();
   if (!view || process.platform !== 'linux') return view;
@@ -102,8 +84,6 @@ export function writerProcessView(): HostProcessView | undefined {
       const owner = JSON.parse(fs.readFileSync(file, 'utf8')) as HostProcessView;
       return sameProcessView(owner, view) ? view : undefined;
     }
-    // A foreign observer of legacy state must not even create a directory or
-    // claim lock. Repeat this preflight under the lock before enrollment.
     if (hasLegacyState() && !isInitialPidNamespace(view)) return undefined;
     fs.mkdirSync(getTerminalsDir(), { recursive: true });
     return withFileLock(file, () => {
@@ -111,7 +91,6 @@ export function writerProcessView(): HostProcessView | undefined {
         const owner = JSON.parse(fs.readFileSync(file, 'utf8')) as HostProcessView;
         return sameProcessView(owner, view) ? view : undefined;
       }
-      // Unowned nonempty registry is not evidence this caller owns the host.
       if (hasLegacyState() && !isInitialPidNamespace(view)) return undefined;
       atomicWriteFileSync(file, JSON.stringify(view), 'utf8');
       return view;
@@ -119,8 +98,6 @@ export function writerProcessView(): HostProcessView | undefined {
   } catch { return undefined; }
 }
 
-/** Preflight BEFORE even the PID-keyed legacy lifecycle lock is inspected.
- * The same decision is repeated under that lock before daemon state changes. */
 export function daemonProcessViewAllowed(): boolean {
   const view = currentProcessView();
   if (!view) return false;
@@ -135,9 +112,6 @@ export function daemonProcessViewAllowed(): boolean {
   } catch { return false; }
 }
 
-/** Called by the canonical daemon writer before lifecycle mutation.
- * This is a writer statement, not an observer's guess about a numeric PID.
- * Existing same-boot ownership cannot be taken over from another namespace. */
 export function recordDaemonProcessView(): void {
   const view = currentProcessView();
   if (!view) throw new Error('Cannot record daemon ownership from an incoherent process namespace');
