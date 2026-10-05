@@ -76,6 +76,7 @@ export function verifyVersionConverged(
   version: string,
   cwd: string = process.cwd(),
 ): ResidualDrift | null {
+  // Convergence comes from a post-write live-home diff, not manifest or file-presence claims.
   const report = diffVersionResources(agent, version, { cwd, excludeProject: true });
   const rows = rowsFromReport(agent, version, report)
     .filter((r) => r.status === 'drifted' || r.status === 'missing');
@@ -170,6 +171,7 @@ export async function computeSyncStatus(
   for (const agent of agentIds) {
     const def = getGlobalDefault(agent);
     for (const version of listInstalledVersions(agent)) {
+      // The actual non-project version-home diff is the source of truth.
       const report = diffVersionResources(agent, version, {
         cwd,
         excludeProject: true,
@@ -184,6 +186,7 @@ export async function computeSyncStatus(
         isDefault: version === def,
         everSynced: loadManifest(agent, version) !== null,
         counts,
+        // Orphans are prune-owned; only drift and missing resources request sync.
         needsSync: counts.drifted + counts.missing > 0,
         resources,
       });

@@ -96,6 +96,7 @@ export function orderedMilestones(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
 ): LinearMilestone[] {
+  // Declared milestones are authoritative; zero issues means unfinished.
   const progress = new Map<string, { done: number; total: number }>();
   for (const n of nodes) {
     const id = n?.projectMilestone?.id;
@@ -132,6 +133,7 @@ export function nextMilestone(
 ): LinearMilestone | undefined {
   const ordered = orderedMilestones(declared, nodes);
   const open = ordered.filter((m) => m.total === 0 || m.done < m.total);
+  // Linear's explicit next wins; otherwise choose the earliest unfinished milestone.
   return open.find((m) => m.isNext) ?? open[0];
 }
 
@@ -156,6 +158,7 @@ export async function fetchLinearProjectCounts(
   const cached = readCached<LinearProjectCounts>(projectId, nowMs);
   if (cached && !cached.stale) return cached.value;
   if (isRateLimited(nowMs)) return cached ? { ...cached.value, stale: true } : undefined;
+  // One abort budget covers all pages; milestones are fetched only on page zero.
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
@@ -199,6 +202,7 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
+  // Fresh/stale cache, shared reservation, and 429 backoff protect the shared quota.
   if (!reserveLinearRequest(apiKey)) return undefined;
   const issuesSelection =
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +

@@ -12,6 +12,7 @@ export const FLEET_SHARED_STATE_FILE = 'daemon-state.json';
 
 export type SharedAuthStatus = 'ready' | 'missing' | 'invalid';
 
+// Non-secret, untracked, device-owned state exchanged only through SSH. Session mirrors contain bounded metadata, never transcripts.
 export interface SessionMirrorRow {
   id: string;
   shortId: string;
@@ -122,6 +123,7 @@ function mergeFleetState(currentRaw: string, device: string, patch: FleetSharedS
     try { current = parseFleetSharedDeviceState(trimmed, device); }
     catch {  }
   }
+  // Patches merge fieldwise so a partial peer update cannot erase unrelated state.
   const next: FleetSharedDeviceState = {
     ...current,
     ...(patch.usage !== undefined ? { usage: patch.usage } : {}),
@@ -213,6 +215,7 @@ export function readOwnFleetSharedDeviceState(
   try { raw = fs.readFileSync(file, 'utf-8'); } catch {  }
   if (!raw.trim()) return { version: FLEET_SHARED_STATE_VERSION, device };
   const state = parseFleetSharedDeviceState(raw, device);
+  // receivedAt belongs to the receiver and never leaves in the owner's envelope.
   const { receivedAt: _receivedAt, ...own } = state;
   return own;
 }

@@ -79,6 +79,7 @@ export function hostHasGhAuth(): boolean {
 }
 
 export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, string>): Record<string, string> {
+  // Forward same-host GitHub auth, but never link the real ~/.agents master key or encrypted store into a prompt-driven child.
   const env: Record<string, string> = {
     HOME: overlayHome,
     AGENTS_USER_DIR: getUserAgentsDir(),
@@ -105,6 +106,7 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
 }
 
 export function getJobHomePath(name: string): string {
+  // Routine names are untrusted; safeJoin contains recursive cleanup inside the routines root.
   return path.join(safeJoin(getRoutinesDir(), name), 'home');
 }
 
@@ -166,6 +168,7 @@ export function linkHostGhConfig(overlayHome: string): void {
 }
 
 export function assertSandboxForwardsHostGhAuth(spawnEnv: Record<string, string>): void {
+  // Fail launch when sandboxing would silently hide host GitHub auth.
   if (!hostHasGhAuth()) return;
   if (spawnEnv.GH_TOKEN || spawnEnv.GH_ENTERPRISE_TOKEN || spawnEnv.GITHUB_TOKEN) return;
   if (spawnEnv.GH_CONFIG_DIR && fs.existsSync(path.join(spawnEnv.GH_CONFIG_DIR, 'hosts.yml'))) return;
@@ -185,6 +188,7 @@ export function generateCursorConfig(overlayHome: string): void {
   const overlayCursorDir = path.join(overlayHome, '.cursor');
   fs.mkdirSync(overlayCursorDir, { recursive: true });
   const overlayAuth = path.join(overlayCursorDir, 'auth.json');
+  // Windows uses same-volume hard links for Cursor auth, never credential copies.
   if (process.platform === 'win32') {
     try {
       fs.linkSync(realAuth, overlayAuth);
@@ -215,6 +219,7 @@ export function symlinkAllowedDirs(overlayHome: string, dirs: string[]): void {
   for (const dir of dirs) {
     const expanded = dir.replace(/^~/, realHome);
 
+    // Resolve traversal and symlinks before accepting anything outside HOME.
     let realPath: string;
     try {
       realPath = fs.realpathSync(expanded);
@@ -255,6 +260,7 @@ export function generateClaudeConfig(overlayHome: string, config: JobConfig): vo
         continue;
       }
 
+      // Filesystem tools are granted only through directory-scoped permissions; bare Bash and wildcards stay forbidden.
       if (DIR_SCOPED_TOOLS.has(tool)) {
         continue;
       }

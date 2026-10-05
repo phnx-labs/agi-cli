@@ -80,6 +80,7 @@ export function buildContinuePrompt(sessionId: string, prompt?: string): string 
 }
 
 export function parseLoopInterval(interval: string | undefined): number {
+  // Loop caps, budgets, and signals are enforced outside the agent; invalid intervals fail loud.
   if (interval === undefined) return 0;
   if (interval.trim() === '0') return 0;
   const ms = parseTimeout(interval);
@@ -92,6 +93,7 @@ export function parseLoopInterval(interval: string | undefined): number {
 }
 
 export function readLoopSignal(runDir: string): LoopSignal | null {
+  // Missing or corrupt external signals fail closed in runLoop.
   const file = loopSignalPath(runDir);
   if (!fs.existsSync(file)) return null;
   try {
@@ -123,6 +125,7 @@ export function defaultRunIteration(options: ExecOptions): Promise<IterationResu
     const useShell = process.platform === 'win32' && (
       !path.isAbsolute(executable) || executable.endsWith('.cmd')
     );
+    // Windows shell execution passes one fully quoted command and an empty argv.
     const spawnCommand = useShell ? composeWin32CommandLine(executable, args) : executable;
     const spawnArgs = useShell ? [] : args;
     const child = spawn(spawnCommand, spawnArgs, {
@@ -168,6 +171,7 @@ export async function runLoop(
   const maxIterations = loop.maxIterations ?? 1000;
   const intervalMs = parseLoopInterval(loop.interval);
 
+  // Each iteration gets a fresh session; only Claude continues through /continue.
   const firstSessionId = randomUUID();
   let prevSessionId = ctx.sessionId;
   let lastIterationSessionId = ctx.sessionId ?? firstSessionId;
@@ -184,6 +188,7 @@ export async function runLoop(
     );
   }
 
+  // Checkpoints track the latest session while the mailbox remains keyed by run ID.
   process.stderr.write(`[loop] mailbox: agents message ${ctx.runId} "<text>"\n`);
 
   let tokens = ctx.startTokens ?? 0;
@@ -252,6 +257,7 @@ export async function runLoop(
       try {
         result = await runIteration(iterOptions);
       } catch (err) {
+        // A process signal wins over a thrown child failure.
         if (stopSignal) {
           checkpoint(iteration - 1);
           return done(iteration - startIteration, 'signal');
@@ -282,6 +288,7 @@ export async function runLoop(
       }
 
       if (result.exitCode !== 0) {
+        // Ctrl-C is a signal stop, not an iteration error.
         if (stopSignal) {
           checkpoint(iteration);
           return done(completed, 'signal');

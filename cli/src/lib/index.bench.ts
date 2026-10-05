@@ -117,6 +117,7 @@ const REAL_PATH = process.env.PATH || '';
 const SYSTEM_DIR = getAgentsDir();
 const LEGACY_SYSTEM_DIR = getLegacySystemAgentsDir();
 const MIGRATED_SENTINEL_FILE = getMigratedSentinelPath();
+// Mirrors bootstrap.ts; divergence would benchmark a path migrated installs never take.
 const MIGRATION_SENTINEL_VALUE = 'v21';
 
 describe('checkForUpdates — maybeWarnMultiInstall (index.ts:535-575): the PATH + known-install-root scan', () => {
@@ -216,6 +217,7 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
 const CLI_ROOT = path.resolve(__dirname, '../..');
 const DIST_ROOT = path.dirname(CLI_ENTRY);
 
+// Per-process fixtures are pre-removed because module-scope failures can skip cleanup.
 const SHIM_LINK = path.join(os.tmpdir(), `agents-cli-bench-shim-agents-${process.pid}`);
 fs.rmSync(SHIM_LINK, { force: true });
 fs.symlinkSync(CLI_ENTRY, SHIM_LINK);
@@ -262,6 +264,7 @@ describe('detectDevBuild(process.argv[1], VERSION) — runs unconditionally at i
   });
 });
 
+// ESM load timings require a fresh process; module-scope preflight below makes dead rows fail instead of reporting NaN.
 function coldEval(specs: string[], extraEnv?: NodeJS.ProcessEnv): void {
   const src = specs.map((s) => `await import(${JSON.stringify(s)});`).join('\n');
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', src], {
@@ -303,6 +306,7 @@ const COMMANDER_SPEC = pathToFileURL(
   createRequire(import.meta.url).resolve('commander'),
 ).href;
 
+// Preflight warms this cache before any timed read.
 const COMPILE_CACHE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-compile-cache-'));
 const COMPILE_CACHE_ENV = { NODE_COMPILE_CACHE: COMPILE_CACHE_DIR } as const;
 
@@ -325,6 +329,7 @@ const EAGER_MINUS_BRAND = [
 ];
 const EAGER_WITH_BRAND = [...EAGER_MINUS_BRAND, BRAND_SPEC];
 
+// Validate every measured graph outside benchmark callbacks, where failures abort the suite.
 (function preflightColdImports(): void {
   for (const spec of [
     DEV_BUILD_SPEC,
@@ -540,11 +545,13 @@ const HOOKED_PROGRAM = registerBenchCommands(attachAuditHooks(buildRootProgram()
 const UNHOOKED_PROGRAM = registerBenchCommands(buildRootProgram());
 const ONE_APPEND_PROGRAM = registerBenchCommands(attachPostActionOnlyAuditHook(buildRootProgram()));
 
+// Redirect audit and perf output away from the user's real ~/.agents state.
 const AUDIT_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-audit-bench-'));
 const AUDIT_SINK = path.join(AUDIT_TMP, 'events.jsonl');
 process.env.AGENTS_PERF_DIR = path.join(AUDIT_TMP, 'perf');
 _resetForTest(AUDIT_SINK);
 
+// Bench mode skips suite beforeAll hooks, so realistic argv must be installed at module scope.
 const REAL_ARGV = process.argv;
 process.argv = [
   process.argv[0], process.argv[1],
@@ -561,6 +568,7 @@ afterAll(() => {
   try { fs.rmSync(AUDIT_TMP, { recursive: true, force: true }); } catch {  }
 });
 
+// Prove dispatch and warm first-append state before timing.
 await (async function preflightAuditDispatch(): Promise<void> {
   const before = dispatchCount;
   await HOOKED_PROGRAM.parseAsync(['node', 'agents', 'noop']);
@@ -592,6 +600,7 @@ await (async function preflightAuditDispatch(): Promise<void> {
   }
 })();
 
+// Bound the sink well below the 10 MiB rotation threshold so rotation never skews a sample.
 const PARSE_OPTS = { time: 400, iterations: 20, warmupTime: 100 } as const;
 
 describe('root program construction (index.ts:262-270) — commander work every invocation does before parse, warm in-process', () => {

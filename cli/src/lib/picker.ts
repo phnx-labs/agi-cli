@@ -84,6 +84,7 @@ export function pickerPageSize(opts: {
   previewMinRows?: number;
   minListRows?: number;
 }): number {
+  // Reserve a preview floor plus separator before sizing the list on small terminals.
   const previewMinRows = opts.previewMinRows ?? PREVIEW_MIN_ROWS;
   const minListRows = opts.minListRows ?? PICKER_MIN_LIST_ROWS;
   const linesAbove = Math.max(0, opts.linesAbovePrompt ?? 0);
@@ -499,6 +500,7 @@ interface DynamicPickerConfig<T, F, A = never> {
 }
 
 export function hotkeyToken(key: { name?: string; sequence?: string; ctrl?: boolean; meta?: boolean }): string {
+  // Printable hotkeys use sequence so shifted/punctuation keys survive; control keys use readline names.
   const seq = key.sequence;
   if (!key.ctrl && !key.meta && seq && seq.length === 1 && seq > ' ' && seq !== '\x7f') return seq;
   return key.name ?? '';
@@ -522,6 +524,7 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
     const [previewOpen, setPreviewOpen] = useState(Boolean(cfg.buildPreview));
     const [active, setActive] = useState(0);
     const [flash, setFlash] = useState('');
+    // Ref counters make repeated repaint/reload observable; generation rejects stale loads and nonce-only reloads preserve the cursor.
     const [reloadNonce, setReloadNonce] = useState(0);
     const reloadCount = useRef(0);
     const [loadedSeq, setLoadedSeq] = useState(0);
@@ -555,6 +558,7 @@ export function dynamicPicker<T, F, A = never>(config: DynamicPickerConfig<T, F,
         });
     }, [filter, reloadNonce]);
 
+    // loadedSeq invalidates memoized labels after each completed load.
     const results = useMemo(() => {
       const q = query.trim();
       const pool = q && cfg.matches ? items.filter((it) => cfg.matches!(it, q)) : items;
