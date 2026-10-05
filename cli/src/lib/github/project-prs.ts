@@ -1008,6 +1008,27 @@ export function ghFailure(err: unknown): string {
 /** The refusal `prs merge` gives a blocked PR when `--admin` was not passed. */
 export const BLOCKED_WITHOUT_ADMIN = 'Blocked by branch protection; pass --admin to merge as an admin';
 
+/** `mergeable_state` values GitHub would merge without anyone bypassing anything. */
+const MERGEABLE_STATES = new Set(['clean', 'unstable', 'has_hooks']);
+
+/**
+ * Why `prs merge` without `--admin` refuses a PR in `state`, or null when it may
+ * merge. Fail closed: only {@link MERGEABLE_STATES} pass. GitHub computes the
+ * state lazily, so right after a push it reads null/`unknown`, and an admin whose
+ * protection does not enforce on admins would otherwise merge past checks that
+ * have not even started.
+ */
+export function mergeRefusalWithoutAdmin(state: string): string | null {
+  if (MERGEABLE_STATES.has(state)) return null;
+  switch (state) {
+    case 'blocked': return BLOCKED_WITHOUT_ADMIN;
+    case 'dirty': return 'Has merge conflicts';
+    case 'behind': return 'The branch is behind its base; update it, or pass --admin to merge as an admin';
+    case 'draft': return 'Draft: mark it ready for review first';
+    default: return 'GitHub is still computing mergeability; try again in a moment';
+  }
+}
+
 /**
  * GitHub's merge refusal in words a person can act on. A 405 naming required
  * status checks says which ones have not passed; a 409 means the head moved since
@@ -1029,8 +1050,8 @@ export function readableMergeRefusal(message: string): string {
  * GitHub refuses with 409 when the head moved since the caller looked, so a push
  * that landed after the menu rendered is never merged unseen.
  *
- * Without `admin`, the PR's live `mergeable_state` is read first and a `blocked`
- * PR is refused before the PUT ({@link BLOCKED_WITHOUT_ADMIN}): an admin whose
+ * Without `admin`, the PR's live `mergeable_state` is read first and anything
+ * but a mergeable state is refused before the PUT ({@link mergeRefusalWithoutAdmin}): an admin whose
  * branch protection does not enforce on admins would otherwise merge past pending
  * or red required checks without ever asking for it. With `admin`, the PUT runs
  * directly and GitHub decides whether the viewer can bypass. Any refusal comes
@@ -1057,7 +1078,8 @@ export async function mergeProjectPr(
     } catch (err) {
       return { repo, number, method: chosen, merged: false, sha: null, message: ghFailure(err) };
     }
-    if (state === 'blocked') return { repo, number, method: chosen, merged: false, sha: null, message: BLOCKED_WITHOUT_ADMIN };
+    const refusal = mergeRefusalWithoutAdmin(state);
+    if (refusal !== null) return { repo, number, method: chosen, merged: false, sha: null, message: refusal };
   }
   let out: string;
   try {
@@ -1108,7 +1130,7 @@ export interface ProjectPrAutoMergeResult {
 export async function setProjectPrAutoMerge(
   repo: string,
   number: number,
-  opts: { enable: boolean; sha?: string; method?: MergeMethod },
+  opts: { enable: true; sha: string; method?: MergeMethod } | { enable: false },
   gh: GhExec = ghExec,
 ): Promise<ProjectPrAutoMergeResult> {
   const base = { repo, number };
@@ -1140,7 +1162,8 @@ export async function setProjectPrAutoMerge(
   let head: string;
   let chosen: MergeMethod;
   try {
-    head = assertHeadIs(repo, number, pr.sha, opts.sha ?? '');
+    if (!opts.sha) throw new Error('Auto-merge is pinned to the head you reviewed; pass its SHA.');
+    head = assertHeadIs(repo, number, pr.sha, opts.sha);
     chosen = opts.method ?? await defaultMergeMethod(repo, gh);
   } catch (err) {
     return { ...base, ...current, message: ghFailure(err) };

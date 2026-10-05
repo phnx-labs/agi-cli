@@ -523,8 +523,9 @@ as `expectedHeadOid`). `review --approve` on the viewer's own PR answers without
 call, since GitHub never allows it.
 
 **`prs merge --admin` is for a person's confirm click, never for an agent.**
-Without it, `merge` reads the live `mergeable_state` and refuses a `blocked` PR
-before the PUT. With it, the PUT runs and a repository admin whose protection does
+Without it, `merge` reads the live `mergeable_state` and refuses anything but a
+mergeable state (fail closed: `blocked`, `behind`, and a not-yet-computed state
+all stop before the PUT). With it, the PUT runs and a repository admin whose protection does
 not enforce on admins merges past pending or red required checks. AGI Menu passes
 it only from its "Confirm admin merge" button. Every agent shares the owner's
 GitHub identity, so the `gh-merge-guard` rule in the system layer denies agents
