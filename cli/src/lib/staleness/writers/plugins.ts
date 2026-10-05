@@ -1,7 +1,3 @@
-/**
- * Plugins writer — thin wrapper around `syncPluginToVersion`. Discovery and
- * per-agent format work lives in lib/plugins.ts.
- */
 import type { AgentId } from '../../types.js';
 import { capableAgents } from '../../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, pluginSupportsAgent, cleanOrphanedPluginSkills } from '../../plugins/plugins.js';
@@ -16,10 +12,6 @@ function buildPluginsWriter(agent: AgentId): ResourceWriter<string[]> {
       const all = discoverPlugins();
       const map = new Map(all.map(p => [p.name, p]));
 
-      // Clean orphan plugin-skills from plugins that no longer exist. Pass the
-      // discovered plugins (not just names) so a stale install under one
-      // marketplace is trashed even when another marketplace still ships that
-      // name — the PHNX-2618 shadow `code` plugin.
       cleanOrphanedPluginSkills(agent, versionHome, all);
 
       const synced: string[] = [];
