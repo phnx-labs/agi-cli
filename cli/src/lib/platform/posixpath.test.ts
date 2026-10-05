@@ -38,7 +38,6 @@ describe('ensureLocalBinSymlink', () => {
   });
 
   it('NEVER clobbers a dev-build symlink that points elsewhere', () => {
-    // Reproduces scripts/install.sh: ~/.local/bin/agents -> the dev build.
     const devBuild = path.join(dir, 'agents-cli-dev', 'dist', 'index.js');
     fs.mkdirSync(path.dirname(devBuild), { recursive: true });
     fs.writeFileSync(devBuild, '#!/usr/bin/env node\n');
@@ -49,7 +48,6 @@ describe('ensureLocalBinSymlink', () => {
     expect(res.ok).toBe(false);
     expect(res.created).toBe(false);
     expect(res.skippedReason).toMatch(/points to/);
-    // The dev symlink is untouched.
     expect(fs.realpathSync(linkPath)).toBe(fs.realpathSync(devBuild));
   });
 

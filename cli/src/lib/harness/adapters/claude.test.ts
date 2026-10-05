@@ -3,26 +3,11 @@ import { claudeAdapter, claudeWorkerLoginTrapPreflight } from './claude.js';
 import type { ExecConfigEnvCtx } from '../adapter.js';
 import type { ConfiguredDeviceRole } from '../../device-config.js';
 
-/**
- * The credential decision in `claudeAdapter.applyExecConfigEnv` — which account a
- * Claude run authenticates as — is a function of DEVICE ROLE alone, not run mode
- * (RUSH-2395, PHNX-3502). This exercises the whole matrix directly against the
- * adapter (no config/keychain), because getting it wrong silently reroutes a run
- * onto the wrong account: a headless run on the user's laptop hijacking their
- * login, or a worker run — interactive or headless — failing to pick up its
- * setup-token and landing on Claude Code's login screen instead.
- */
 describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKEN', () => {
   const VERSION_HOME = '/tmp/rush-2395-version-home';
   const OWN_TOKEN = 'sk-ant-oat01-own-account';
   const FOREIGN_TOKEN = 'sk-ant-oat01-someone-else';
 
-  /**
-   * Run the adapter with a stubbed setup-token resolver and return the token the
-   * run would end up authenticating with (undefined = defers to the per-version
-   * login). `ambient` seeds an already-present CLAUDE_CODE_OAUTH_TOKEN, standing
-   * in for a value inherited from a parent shell (sanitizeProcessEnv keeps it).
-   */
   function resolvedToken(opts: {
     interactive: boolean;
     deviceRole?: ConfiguredDeviceRole;
@@ -75,9 +60,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
 
   describe('worker device — INTERACTIVE runs also use the setup-token (PHNX-3502)', () => {
     it('injects the per-account setup-token on an interactive worker run', () => {
-      // `agents run claude --interactive --device <worker>`: a remotely dispatched
-      // TUI, not a human at that box's own Keychain-trusted session — there is no
-      // per-version login to defer to, so this must behave exactly like headless.
       expect(resolvedToken({ interactive: true, deviceRole: 'worker', setupToken: OWN_TOKEN }))
         .toBe(OWN_TOKEN);
     });
@@ -108,8 +90,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
 
   describe('personal device — every run defers to the per-version login', () => {
     it('a HEADLESS run on a personal box does NOT inject the setup-token (the RUSH-2395 fix)', () => {
-      // `agents run claude "fix the bug"` on the laptop: prompt present -> headless,
-      // but role personal -> must stay on the login, not the setup-token.
       expect(resolvedToken({ interactive: false, deviceRole: 'personal', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
@@ -138,8 +118,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
     });
 
     it('a desktop box is in the same headed bucket — a headless run defers to the login too', () => {
-      // desktop (a headed always-on Mac) holds a real per-version login just like
-      // personal, so it must never fall back to the worker setup-token.
       expect(resolvedToken({ interactive: false, deviceRole: 'desktop', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
@@ -155,14 +133,6 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
   });
 });
 
-/**
- * The worker login-screen trap: an interactive Claude run dispatched to a worker
- * (`agents run claude --interactive --device auto/<worker>`) whose selected
- * account has no synced setup-token used to fall through to Claude Code's own
- * "Select login method" screen — an interactive OAuth on a headless box that
- * never persists (the 10-minute re-login loop). `claudeWorkerLoginTrapPreflight`
- * refuses that run before spawn with the real fix. This pins the exact matrix.
- */
 describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap', () => {
   it('refuses an interactive worker run with NO setup-token (the bug)', () => {
     const msg = claudeWorkerLoginTrapPreflight({
@@ -173,25 +143,16 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
       machine: 'yosemite-m5',
     });
     expect(msg).toBeTruthy();
-    // Names the box, and hands the operator the real fix — never "log in here".
     expect(msg).toContain("yosemite-m5");
     expect(msg).toContain('agents accounts default claude');
     expect(msg).toContain('agents run claude#');
     expect(msg).not.toMatch(/log ?in here/i);
-    // The message is returned as spawn stderr, which runWithFallback scans with
-    // RATE_LIMIT_PATTERNS — a stray rate-limit/quota phrase would spuriously
-    // trigger an account-rotation fallback. Keep it clear of every such token.
     expect(msg).not.toMatch(
       /rate[\s-]?limit|usage[\s-]?limit|quota\s*(exceeded|reached|limit)|\b429\b|5[\s-]?hour[\s-]?limit|too many requests|overloaded|spend[\s-]?limit|out of (?:usage )?credits/i,
     );
   });
 
   it('does NOT gate an UNMARKED device (undefined role) — may be an unconfigured personal box whose first-run login is legitimate', () => {
-    // Only an EXPLICIT role:worker box is gated. An unmarked box could be a
-    // laptop not yet marked/logged-in, where Claude Code's login screen is the
-    // correct first-run flow — and we must not probe its native login on the hot
-    // path (a macOS keychain auth sheet). `--device auto` only lands on explicit
-    // workers, so the dispatched trap is still caught.
     expect(
       claudeWorkerLoginTrapPreflight({
         agent: 'claude',
@@ -203,11 +164,6 @@ describe('claudeWorkerLoginTrapPreflight — refuse the worker login-screen trap
   });
 
   it('allows the run when a credential will reach the child (setup-token OR an explicit --env override)', () => {
-    // hasWorkerCredential is true whenever a token reaches the child. The caller
-    // (exec.ts) ORs the resolved worker setup-token with an explicit
-    // `--env CLAUDE_CODE_OAUTH_TOKEN=…` — buildExecEnv merges options.env last, so
-    // that override authenticates the run and must NOT be refused (a sanctioned
-    // escape hatch forwarded across --device dispatch).
     expect(
       claudeWorkerLoginTrapPreflight({
         agent: 'claude',

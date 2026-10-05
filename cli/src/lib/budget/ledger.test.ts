@@ -27,7 +27,6 @@ afterEach(() => {
 
 describe('recordSpend', () => {
   it('computes costUsd from token usage via the pricing module (claude-opus-4)', () => {
-    // 1M input @ $5/Mtok + 1M output @ $25/Mtok = $30.
     const entry = recordSpend(
       {
         runId: 'r1',
@@ -59,12 +58,11 @@ describe('recordSpend', () => {
 describe('rollups', () => {
   beforeEach(() => {
     const today = new Date();
-    // Two claude runs and one codex run today; one claude run "yesterday".
-    recordSpend({ runId: 'rA', agent: 'claude', project: '/proj', model: 'claude-opus-4', usage: { inputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath); // $5
-    recordSpend({ runId: 'rA', agent: 'claude', project: '/proj', model: 'claude-opus-4', usage: { outputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath); // $25 (same run)
-    recordSpend({ runId: 'rB', agent: 'codex', project: '/proj', model: 'gpt-5', usage: { inputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath); // $1.25
+    recordSpend({ runId: 'rA', agent: 'claude', project: '/proj', model: 'claude-opus-4', usage: { inputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath);
+    recordSpend({ runId: 'rA', agent: 'claude', project: '/proj', model: 'claude-opus-4', usage: { outputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath);
+    recordSpend({ runId: 'rB', agent: 'codex', project: '/proj', model: 'gpt-5', usage: { inputTokens: 1_000_000 }, source: 'run', ts: today }, ledgerPath);
     const yesterday = new Date(today.getTime() - 24 * 3600 * 1000);
-    recordSpend({ runId: 'rC', agent: 'claude', project: '/other', model: 'claude-opus-4', usage: { inputTokens: 1_000_000 }, source: 'run', ts: yesterday }, ledgerPath); // $5
+    recordSpend({ runId: 'rC', agent: 'claude', project: '/other', model: 'claude-opus-4', usage: { inputTokens: 1_000_000 }, source: 'run', ts: yesterday }, ledgerPath);
   });
 
   it('spendForRun sums all observations of one run', () => {
@@ -72,7 +70,6 @@ describe('rollups', () => {
   });
 
   it('spendForDay aggregates ACROSS vendors (cross-vendor cap)', () => {
-    // today: claude $30 + codex $1.25 = $31.25 (yesterday's $5 excluded).
     expect(spendForDay(localDay(), loadLedger(ledgerPath))).toBeCloseTo(31.25, 6);
   });
 
@@ -82,7 +79,6 @@ describe('rollups', () => {
   });
 
   it('spendForAgent sums all-time across days', () => {
-    // claude: $30 today + $5 yesterday = $35.
     expect(spendForAgent('claude', loadLedger(ledgerPath))).toBeCloseTo(35, 6);
   });
 

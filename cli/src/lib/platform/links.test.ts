@@ -22,7 +22,6 @@ describe('createLink', () => {
 
     createLink(src, dst);
 
-    // Junction (Windows) or symlink (POSIX) — either way the content reads through.
     expect(fs.readFileSync(path.join(dst, 'inner.txt'), 'utf8')).toBe('hello');
   });
 

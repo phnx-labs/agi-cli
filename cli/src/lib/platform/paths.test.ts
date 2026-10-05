@@ -3,8 +3,6 @@ import * as os from 'os';
 import { looksLikePath, toComparablePath, homeDir, isWindowsAbsolutePath, toPosix, toPortableKey } from './paths.js';
 
 describe('looksLikePath', () => {
-  // POSIX markers must classify identically on every platform — this is the
-  // pre-existing behavior the migration must not regress.
   for (const platform of ['darwin', 'linux', 'win32'] as const) {
     it(`recognizes POSIX path markers on ${platform}`, () => {
       for (const q of ['.', './x', '../x', '/abs/path', '~', '~/x']) {
@@ -21,8 +19,6 @@ describe('looksLikePath', () => {
   it('recognizes Windows drive-letter and UNC paths ONLY on win32', () => {
     for (const q of ['C:\\repo', 'c:/repo', 'D:\\a\\b', '\\\\server\\share', '.\\rel', '..\\rel']) {
       expect(looksLikePath(q, 'win32')).toBe(true);
-      // The crux of #234's no-regression guarantee: the same string is a search
-      // term on macOS/Linux, never silently reinterpreted as a path filter.
       expect(looksLikePath(q, 'darwin')).toBe(false);
       expect(looksLikePath(q, 'linux')).toBe(false);
     }
@@ -72,12 +68,10 @@ describe('toPosix', () => {
 
 describe('toPortableKey', () => {
   it('produces the historical POSIX slug unchanged (no regression of on-disk keys)', () => {
-    // Old logic: cwd.replace(/\//g,'_').replace(/ /g,'_')
     expect(toPortableKey('/home/user/repo')).toBe('_home_user_repo');
     expect(toPortableKey('/home/user/my repo')).toBe('_home_user_my_repo');
   });
   it('drops the Windows drive colon and folds separators (NTFS-safe)', () => {
-    // Without the drop, ':' is illegal in a filename (ADS separator) -> ENOENT.
     expect(toPortableKey('C:\\Users\\me\\repo')).toBe('C_Users_me_repo');
     expect(toPortableKey('D:\\a\\b c')).toBe('D_a_b_c');
   });

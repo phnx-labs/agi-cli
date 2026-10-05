@@ -22,10 +22,6 @@ afterEach(() => {
 const tsxBin = path.resolve('node_modules/.bin/tsx');
 const skillsModuleUrl = pathToFileURL(path.resolve('src/lib/plugins/skills.ts')).href;
 
-/**
- * Spawn a subprocess with an isolated HOME so os.homedir() returns tempHome.
- * Evaluates `expression` after importing from skills.ts and returns the result.
- */
 function runSkills(home: string, expression: string): unknown {
   const child = spawnSync(tsxBin, ['-e', `
     import * as skills from ${JSON.stringify(skillsModuleUrl)};
@@ -44,9 +40,6 @@ function runSkills(home: string, expression: string): unknown {
   return JSON.parse(child.stdout.trim());
 }
 
-/**
- * Create a minimal valid skill directory with SKILL.md frontmatter.
- */
 function makeSkillDir(parentDir: string, skillName: string, opts: { withRules?: boolean } = {}): string {
   const skillDir = path.join(parentDir, skillName);
   fs.mkdirSync(skillDir, { recursive: true });
@@ -63,11 +56,6 @@ function makeSkillDir(parentDir: string, skillName: string, opts: { withRules?: 
   return skillDir;
 }
 
-/**
- * Create a fake installed version for an agent so listInstalledVersions() includes it.
- * listInstalledVersions checks for the binary at versions/<agent>/<version>/node_modules/.bin/<cliCommand>.
- * For claude the cliCommand is 'claude'.
- */
 function fakeInstalledVersion(home: string, agent: string, version: string, cliCommand: string = agent): void {
   const binDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
@@ -75,10 +63,6 @@ function fakeInstalledVersion(home: string, agent: string, version: string, cliC
   fs.writeFileSync(binPath, '#!/bin/sh\necho stub\n', { mode: 0o755 });
 }
 
-/**
- * Create the skills directory for a specific version home and optionally plant a skill.
- * Path: ~/.agents/versions/<agent>/<version>/home/.<agent>/skills/<skillName>/
- */
 function plantSkillInVersionHome(
   home: string,
   agent: string,
@@ -91,7 +75,6 @@ function plantSkillInVersionHome(
   return makeSkillDir(skillsDir, skillName, opts);
 }
 
-// ─── removeSkillFromVersion ───────────────────────────────────────────────────
 
 describe('removeSkillFromVersion — soft-delete', () => {
   it('moves the skill directory to trash instead of deleting it', () => {
@@ -110,18 +93,14 @@ describe('removeSkillFromVersion — soft-delete', () => {
     const result = runSkills(home, `skills.removeSkillFromVersion('${agent}', '${version}', '${skillName}')`);
     expect(result).toMatchObject({ success: true });
 
-    // Original path is gone
     expect(fs.existsSync(skillInVersion), 'skill must be gone from version home').toBe(false);
 
-    // Trash root must exist
     const trashRoot = path.join(home, '.agents', '.history', 'trash', 'skills', agent, version, skillName);
     expect(fs.existsSync(trashRoot), 'trash root for skill must exist').toBe(true);
 
-    // Exactly one timestamped snapshot inside trash root
     const snapshots = fs.readdirSync(trashRoot);
     expect(snapshots).toHaveLength(1);
 
-    // Snapshot must contain SKILL.md
     const snapshotDir = path.join(trashRoot, snapshots[0]);
     expect(fs.existsSync(path.join(snapshotDir, 'SKILL.md'))).toBe(true);
   });
@@ -140,16 +119,13 @@ describe('removeSkillFromVersion — soft-delete', () => {
     const [snapshot] = fs.readdirSync(trashRoot);
     const snapshotDir = path.join(trashRoot, snapshot);
 
-    // rules/rule-one.md must survive in the snapshot
     expect(fs.existsSync(path.join(snapshotDir, 'rules', 'rule-one.md'))).toBe(true);
   });
 
   it('returns success without error when skill does not exist', () => {
     const home = makeTempHome();
-    // No skill planted — skills dir doesn't even exist
     const result = runSkills(home, `skills.removeSkillFromVersion('claude', '2.0.0', 'nonexistent')`);
     expect(result).toMatchObject({ success: true });
-    // No trash directory should be created for a missing skill
     const trashRoot = path.join(home, '.agents', '.history', 'trash', 'skills', 'claude', '2.0.0', 'nonexistent');
     expect(fs.existsSync(trashRoot)).toBe(false);
   });
@@ -165,7 +141,6 @@ describe('removeSkillFromVersion — soft-delete', () => {
 
     const trashRoot = path.join(home, '.agents', '.history', 'trash', 'skills', agent, version, skillName);
     const stat = fs.statSync(trashRoot);
-    // 0o700 = owner rwx only. NTFS has no POSIX mode bits — POSIX-only assertion.
     expect(stat.mode & 0o777).toBe(0o700);
   });
 
@@ -175,11 +150,9 @@ describe('removeSkillFromVersion — soft-delete', () => {
     const version = '2.0.0';
     const skillName = 'repeated-skill';
 
-    // First removal
     plantSkillInVersionHome(home, agent, version, skillName);
     runSkills(home, `skills.removeSkillFromVersion('${agent}', '${version}', '${skillName}')`);
 
-    // Second removal — re-plant the skill
     plantSkillInVersionHome(home, agent, version, skillName);
     runSkills(home, `skills.removeSkillFromVersion('${agent}', '${version}', '${skillName}')`);
 
@@ -200,7 +173,6 @@ describe('removeSkillFromVersion — soft-delete', () => {
     const expectedTrashBase = path.join(home, '.agents', '.history', 'trash', 'skills');
     expect(fs.existsSync(expectedTrashBase)).toBe(true);
 
-    // Structure: .trash/skills/<agent>/<version>/<skillName>/<timestamp>/
     const agentDir = path.join(expectedTrashBase, agent);
     expect(fs.existsSync(agentDir)).toBe(true);
 
@@ -211,20 +183,11 @@ describe('removeSkillFromVersion — soft-delete', () => {
     expect(fs.existsSync(skillDir)).toBe(true);
 
     const [timestamp] = fs.readdirSync(skillDir);
-    // Timestamp must look like an ISO string with colons/dots replaced by dashes
-    // e.g. 2026-05-09T12-30-00-000Z
     expect(timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z$/);
   });
 });
 
-// ─── diffVersionSkills — plugin-provided skills are not orphans (PHNX-3185) ─────
 
-/**
- * Create a plugin under a base repo (`~/.agents` or `~/.agents/.system`) that
- * bundles a skill: `plugins/<plugin>/{.claude-plugin/plugin.json, skills/<name>}`.
- * The manifest carries the name+version pluginSkillDirs requires. Returns the
- * bundled skill's source dir so the caller can mirror its content into a home.
- */
 function makePluginSkill(baseRepoDir: string, pluginName: string, skillName: string): string {
   const pluginRoot = path.join(baseRepoDir, 'plugins', pluginName);
   fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
@@ -239,17 +202,12 @@ function makePluginSkill(baseRepoDir: string, pluginName: string, skillName: str
 }
 
 describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
-  // Codex only sees plugin skills through the flattened top-level copies, so
-  // the copy is legitimate there. Claude loads them from the plugin itself
-  // (nativePluginSkills), so the same copy is a duplicate — see the last case.
   it('credits a plugin-bundled skill as matched on a flattening harness, never an orphan', () => {
     const home = makeTempHome();
     const agent = 'codex';
     const version = '0.150.0';
     const systemRepo = path.join(home, '.agents', '.system');
 
-    // Source: a plugin bundles `design`. Home: the materialized copy (identical
-    // content, so it must read as `matched`, not `toUpdate`).
     makePluginSkill(systemRepo, 'design', 'design');
     plantSkillInVersionHome(home, agent, version, 'design');
 
@@ -269,8 +227,6 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
     const agent = 'claude';
     const version = '2.1.226';
 
-    // A skill in the version home that no source root — central, extra, or
-    // plugin — provides. This is the real orphan the detector must still catch.
     plantSkillInVersionHome(home, agent, version, 'ghost-skill');
 
     const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
@@ -287,8 +243,8 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
     const userRepo = path.join(home, '.agents');
 
     makePluginSkill(userRepo, 'write', 'blog');
-    plantSkillInVersionHome(home, agent, version, 'blog');       // plugin-backed → not orphan
-    plantSkillInVersionHome(home, agent, version, 'dead-one');   // no source → orphan
+    plantSkillInVersionHome(home, agent, version, 'blog');
+    plantSkillInVersionHome(home, agent, version, 'dead-one');
 
     const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
       orphans: string[];
@@ -305,8 +261,6 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
     const version = '2.1.226';
     const systemRepo = path.join(home, '.agents', '.system');
 
-    // Claude Code registers the plugin and lists `design:design` itself; the
-    // top-level skills/design copy is the second `/design` row in the picker.
     makePluginSkill(systemRepo, 'design', 'design');
     plantSkillInVersionHome(home, agent, version, 'design');
 
@@ -322,7 +276,6 @@ describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
   });
 });
 
-// ─── diffVersionSkills ────────────────────────────────────────────────────────
 
 describe('diffVersionSkills — orphan detection', () => {
   it('detects a skill in version home that is absent from central as an orphan', () => {
@@ -331,7 +284,6 @@ describe('diffVersionSkills — orphan detection', () => {
     const version = '2.0.0';
     const skillName = 'orphaned-skill';
 
-    // Plant skill in version home but NOT in central ~/.agents/skills/
     plantSkillInVersionHome(home, agent, version, skillName);
 
     const result = runSkills(
@@ -349,7 +301,6 @@ describe('diffVersionSkills — orphan detection', () => {
     const version = '2.0.0';
     const skillName = 'new-central-skill';
 
-    // Plant skill in central user skills dir only
     const centralSkillsDir = path.join(home, '.agents', 'skills');
     fs.mkdirSync(centralSkillsDir, { recursive: true });
     makeSkillDir(centralSkillsDir, skillName);
@@ -369,13 +320,11 @@ describe('diffVersionSkills — orphan detection', () => {
     const version = '2.0.0';
     const skillName = 'synced-skill';
 
-    // Plant identical skill in both central and version home
     const centralSkillsDir = path.join(home, '.agents', 'skills');
     fs.mkdirSync(centralSkillsDir, { recursive: true });
     makeSkillDir(centralSkillsDir, skillName);
 
     plantSkillInVersionHome(home, agent, version, skillName);
-    // Make the version home skill content identical to central
     const versionSkillMd = path.join(
       home, '.agents', '.history', 'versions', agent, version, 'home', `.${agent}`, 'skills', skillName, 'SKILL.md'
     );
@@ -398,7 +347,6 @@ describe('diffVersionSkills — orphan detection', () => {
     const version = '2.0.0';
     const skillName = 'stale-skill';
 
-    // Central has one version of SKILL.md
     const centralSkillsDir = path.join(home, '.agents', 'skills');
     fs.mkdirSync(centralSkillsDir, { recursive: true });
     const centralSkillDir = path.join(centralSkillsDir, skillName);
@@ -409,7 +357,6 @@ describe('diffVersionSkills — orphan detection', () => {
       'utf-8'
     );
 
-    // Version home has an older version
     plantSkillInVersionHome(home, agent, version, skillName);
 
     const result = runSkills(
@@ -440,10 +387,6 @@ describe('diffVersionSkills — orphan detection', () => {
     const agent = 'claude';
     const version = '2.0.0';
 
-    // A command-runtime install writes commands as skill wrappers carrying the
-    // `agents_command` marker. It is a command (reconciled by the commands diff),
-    // NOT a skill — it must never surface as a skill orphan, or `prune cleanup`
-    // would delete a live command (tickets, swarm-plan, …).
     const skillsDir = path.join(home, '.agents', '.history', 'versions', agent, version, 'home', `.${agent}`, 'skills');
     fs.mkdirSync(path.join(skillsDir, 'tickets'), { recursive: true });
     fs.writeFileSync(
@@ -489,7 +432,6 @@ describe('diffVersionSkills — orphan detection', () => {
   });
 });
 
-// ─── iterSkillsCapableVersions ────────────────────────────────────────────────
 
 describe('iterSkillsCapableVersions', () => {
   it('returns empty array when no versions are installed', () => {
@@ -536,7 +478,6 @@ describe('iterSkillsCapableVersions', () => {
 
   it('returns empty array when agent+version filter matches nothing installed', () => {
     const home = makeTempHome();
-    // No versions installed at all
 
     const result = runSkills(
       home,

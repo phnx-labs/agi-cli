@@ -1,11 +1,3 @@
-/**
- * OpenClaw Telegram provider — the mac-mini path.
- *
- * A DISTINCT provider from the rush-backed `telegram` (not a fallback): it
- * reuses the existing openclaw argv builder (lib/notify.ts). Hosts that have
- * openclaw on PATH (mac-mini) can map `transports.telegram: openclaw-telegram`;
- * hosts with a live rush daemon (zion) map `transports.telegram: telegram`.
- */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { buildOpenClawNotifyArgs } from '../../notify.js';

@@ -9,7 +9,6 @@ import {
   planOwnerForward,
 } from './owner-forward.js';
 
-/** Minimal dialable device profile (no tailscale block == dialable). */
 function device(name: string, platform: DeviceProfile['platform']): DeviceProfile {
   return {
     name,
@@ -22,7 +21,6 @@ function device(name: string, platform: DeviceProfile['platform']): DeviceProfil
   };
 }
 
-/** A Meta whose owner channel is the macOS-only rush iMessage transport. */
 function rushOwnerMeta(overrides: Partial<Meta> = {}): Meta {
   return {
     notify: { owner: { channel: 'imessage', to: '+18055551234' } },
@@ -68,7 +66,6 @@ describe('planOwnerForward', () => {
 
   it('selects only macOS peers, excludes self, and lists them as candidates', () => {
     const plan = planOwnerForward('imessage', rushOwnerMeta(), devices, 'yosemite-m3');
-    // linux (self + peer) and windows are not rush-capable; only macs remain.
     expect(plan.skip).toBeUndefined();
     expect(plan.candidates.sort()).toEqual(['mac-mini', 'studio']);
   });
@@ -123,12 +120,12 @@ describe('forwardOwnerNotifyToPeer', () => {
       devices,
       send: async (machine) => {
         tried.push(machine);
-        return okResult(machine); // first candidate delivers
+        return okResult(machine);
       },
     });
     expect(result?.ok).toBe(true);
-    expect(result?.id).toBe('owner-via-studio'); // interactive host tried first
-    expect(tried).toEqual(['studio']); // stopped after the first success
+    expect(result?.id).toBe('owner-via-studio');
+    expect(tried).toEqual(['studio']);
   });
 
   it('passes portable thread and sender fields to the peer send', async () => {
@@ -174,7 +171,7 @@ describe('forwardOwnerNotifyToPeer', () => {
       },
     });
     expect(result).toBeUndefined();
-    expect(tried.sort()).toEqual(['mac-mini', 'studio']); // both macs attempted
+    expect(tried.sort()).toEqual(['mac-mini', 'studio']);
   });
 
   it('returns undefined (never forwards) when no capable peer exists', async () => {
@@ -189,7 +186,7 @@ describe('forwardOwnerNotifyToPeer', () => {
       },
     });
     expect(result).toBeUndefined();
-    expect(called).toBe(false); // no SSH attempted
+    expect(called).toBe(false);
   });
 
   it('does not forward onward from a box that already received a forward (loop guard)', async () => {

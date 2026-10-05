@@ -1,11 +1,3 @@
-/**
- * Rules file management -- reading, writing, and syncing agent instructions.
- *
- * The canonical rules file (AGENTS.md) gets synced
- * into each agent's config directory under their native name (CLAUDE.md,
- * GEMINI.md, etc.). This module handles reading, managing includes, and
- * refreshing rules files across version homes.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,10 +22,6 @@ interface DiscoveredInstructions {
   filename: string;
 }
 
-/**
- * Central rules filename constant.
- * All agents map to this file in ~/.agents/rules/, renamed per-agent when synced.
- */
 const CENTRAL_RULES_FILENAME = 'AGENTS.md';
 const RULES_DOC_FILENAME = 'README.md';
 
@@ -63,31 +51,18 @@ function listRuleMarkdownFiles(rulesDir: string): string[] {
   return files.sort();
 }
 
-/**
- * Get the canonical central rules filename for an agent's instructionsFile.
- * Central storage uses AGENTS.md, which gets renamed per-agent when syncing:
- *   - Claude: AGENTS.md → CLAUDE.md
- *   - Gemini: AGENTS.md → GEMINI.md
- *   - Cursor: AGENTS.md → .cursorrules
- *   - Codex/OpenCode: AGENTS.md → AGENTS.md (no rename)
- */
 export function getCentralRulesFileName(agentId: AgentId): string {
   const agent = AGENTS[agentId];
   const instrFile = agent.instructionsFile;
 
-  // If it contains a path separator, extract just the filename
   const filename = instrFile.includes('/') ? path.basename(instrFile) : instrFile;
 
-  // If the agent's instructionsFile isn't AGENTS.md, it was renamed FROM AGENTS.md
   if (filename !== CENTRAL_RULES_FILENAME) {
     return CENTRAL_RULES_FILENAME;
   }
   return filename;
 }
 
-/**
- * Get the user-scope config dir for an agent (version-aware).
- */
 function getUserConfigDir(agentId: AgentId): string {
   const home = getEffectiveHome(agentId);
   return path.join(home, agentConfigDirName(agentId));
@@ -134,8 +109,6 @@ export function discoverInstructionsFromRepo(repoPath: string): DiscoveredInstru
 
   for (const agentId of ALL_AGENT_IDS) {
     const agent = AGENTS[agentId];
-    // AGENTS.md is the canonical central rules file - don't claim it per-agent.
-    // It gets installed centrally to ~/.agents/rules/ and synced per-agent.
     const possibleNames = [
       `${agentId}.md`,
       agent.instructionsFile,
@@ -190,7 +163,6 @@ export function listInstalledInstructionsWithScope(
   const results: InstalledInstructions[] = [];
   const agent = AGENTS[agentId];
 
-  // User-scoped instructions (version-aware when home is provided)
   const home = options?.home || getEffectiveHome(agentId);
   const userConfigDir = path.join(home, agentConfigDirName(agentId));
   const userPath = path.join(userConfigDir, agent.instructionsFile);
@@ -224,10 +196,6 @@ export function getInstructionsContent(agentId: AgentId, scope: InstructionsScop
   }
 }
 
-/**
- * Install rules files from repo rules/ to central ~/.agents/rules/ directory.
- * Nested presets/ and rules/ fragments are preserved so @imports keep working.
- */
 export function installInstructionsCentrally(
   repoPath: string,
   filesToInstall?: string[]
@@ -271,9 +239,6 @@ export function installInstructionsCentrally(
   return { installed, errors };
 }
 
-/**
- * List top-level rules files from user and system dirs (user wins on collision).
- */
 export function listCentralRules(): string[] {
   const seen = new Set<string>();
   for (const dir of [getUserRulesDir(), getResolvedRulesDir()]) {
