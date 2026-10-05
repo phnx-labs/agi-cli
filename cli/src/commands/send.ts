@@ -33,9 +33,7 @@ interface SendCliOpts {
   channel?: string;
   to?: string;
   thread?: string;
-  /** Preferred flag for local files. */
   attach?: string[];
-  /** Legacy alias of --attach. */
   attachment?: string[];
   url?: string[];
   from?: string;
@@ -72,29 +70,15 @@ async function runSend(
   const meta = readMeta();
   let input = toInput(positionalText, opts);
 
-  // An owner-bound ping (`agents send --to owner`) goes through
-  // the SAME composer as an important `feed post` (PHNX-3698): short-shaped body,
-  // TEAM-N keys linkified, session crumb as a tappable console URL — instead of a
-  // raw dump. A non-owner send (explicit --channel/--to) is delivered verbatim.
   let ownerCompose: ((format: SinkMessageFormat) => string) | undefined;
   if (isOwnerAlias(opts.to)) {
     const flagged = opts.text?.trim() ?? '';
     const positional = (positionalText ?? '').trim();
     const raw = flagged || positional;
-    // When both forms are given and disagree, leave it to sendMessage to fail
-    // loud with the "pass the message once" error rather than composing a guess.
     const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
     if (raw && !bothDiffer) {
-      // Resolve the context once, then let each owner destination render its own
-      // format: the envelope carries the plain default (for --json and dry-run
-      // display), while ownerCompose hands sendToOwner the mrkdwn variant for a
-      // Slack owner destination and plain for iMessage (PHNX-3698).
       ownerCompose = ownerMessageComposer(raw);
       input = { ...input, text: ownerCompose('plain'), positionalText: undefined };
-      // The console URL in the composed body only resolves once this session's
-      // trace shard is uploaded; fire that now so the tapped link isn't a 404.
-      // A --dry-run resolves + composes but MUST NOT act (its documented contract),
-      // so it never spawns the sync — it just shows what would be sent.
       fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });
     }
   }

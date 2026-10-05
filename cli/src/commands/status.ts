@@ -1,14 +1,3 @@
-/**
- * `agents sync status` — the unified sync-status surface.
- *
- * Nested under `sync` because this is sync drift, not a separate noun (RUSH-2864).
- * One command that answers "is my fleet in sync?" the same way every other
- * surface does, because it reads the same engine (computeSyncStatus). Human mode
- * renders the summary and, when a TTY finds drift, offers the interactive
- * "sync now?" flow (promptDriftSync). `--json` emits the stable UnifiedSyncStatus
- * contract the menu-bar and Agency consume. `--yes` reconciles everything with no
- * prompts (the "kick it" path, safe in scripts).
- */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -40,7 +29,6 @@ function versionSummary(v: AgentVersionStatus): string {
   return chalk.green('in sync');
 }
 
-/** Attach `status` under the `sync` group. The former top-level `agents status` is retired. */
 export function registerStatusCommand(syncCmd: Command): void {
   const cmd = addHostOption(
     syncCmd
@@ -65,10 +53,6 @@ export function registerStatusCommand(syncCmd: Command): void {
   });
 
   cmd.action(async (opts: StatusOptions, command: Command) => {
-    // Centralized surface read (the human/agent split in one place). Note we still
-    // pass the *raw* `opts.yes` to promptDriftSync below — it distinguishes an
-    // explicit `--yes` (act) from a non-TTY shell (report only), so `surface.assumeYes`
-    // (which conflates the two) would wrongly auto-reconcile in a plain pipe.
     const surface = resolveSurface(command);
     const cwd = opts.cwd ?? process.cwd();
 
@@ -80,7 +64,6 @@ export function registerStatusCommand(syncCmd: Command): void {
 
     const status = await computeSyncStatus({ cwd });
 
-    // Human summary header (always) — the per-version readout.
     console.log(chalk.bold('Fleet sync status'));
     if (status.system.unknown) {
       console.log(`  ${'.system repo'.padEnd(28)} ${chalk.gray('freshness unknown (no upstream)')}`);
@@ -91,8 +74,6 @@ export function registerStatusCommand(syncCmd: Command): void {
     } else {
       console.log(`  ${'.system repo'.padEnd(28)} ${chalk.green('up to date')}`);
     }
-    // A non-git / partial ~/.agents is its own drift state, not a per-agent
-    // "N missing" — surface it distinctly so the real problem isn't buried (PHNX-3301).
     if (status.user.notGitRepo) {
       console.log(
         `  ${'~/.agents (user repo)'.padEnd(28)} ${chalk.yellow('not a git repo — will adopt on next `agents sync` (or `agents repo sync user`)')}`,
@@ -102,7 +83,6 @@ export function registerStatusCommand(syncCmd: Command): void {
       console.log(chalk.gray('  (no installed agent versions)'));
     }
     for (const v of status.agents) {
-      // Model sits right beside the version, same priority (no label).
       const model = resolveConfiguredModel(v.agent, v.version)?.model;
       const defaultTag = v.isDefault ? ' (default)' : '';
       const plain = `${agentName(v.agent)}@${v.version}${model ? ` · ${model}` : ''}${defaultTag}`;
@@ -119,11 +99,6 @@ export function registerStatusCommand(syncCmd: Command): void {
       );
     }
 
-    // Config drift is its OWN class, not a per-agent "N missing": a box that has
-    // not folded its device-scoped state still carries a stale top-level header or
-    // a lingering central fleet/hosts/accounts/browser block. Surface it distinctly
-    // so an un-drained box is SEEN here instead of via a mystery pull conflict
-    // (PHNX-3315).
     if (status.config.staleHeader || status.config.centralLeaks.length > 0) {
       console.log(
         `  ${'config (device-scoped)'.padEnd(28)} ${chalk.yellow('not drained — folds automatically on normal `agents` use here (idempotent)')}`,
@@ -136,7 +111,6 @@ export function registerStatusCommand(syncCmd: Command): void {
       }
     }
 
-    // Hand off to the shared interactive/apply flow (summary already printed above).
     await promptDriftSync({ cwd, yes: opts.yes, status, quiet: true });
   });
 }

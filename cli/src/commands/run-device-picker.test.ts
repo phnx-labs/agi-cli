@@ -1,15 +1,3 @@
-/**
- * Real-file tests for the `agents run <agent>@` device picker (PHNX-4083).
- *
- * Everything the picker reads is pointed at a test-private HOME before any
- * module under test is imported (state.ts pins HOME at module load, the same
- * constraint registry.test.ts documents): the SSH device registry under
- * AGENTS_DEVICES_DIR, the fleet-stats cache under <HOME>/.agents/.cache, the
- * fleet-synced device docs under <HOME>/.agents/devices/<name>/, and the
- * account catalog in <HOME>/.agents/agents.yaml. No SSH is possible — the
- * registry names do not resolve — so a green read IS the proof the picker
- * never re-probes.
- */
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
@@ -17,9 +5,6 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-run-device-picker-test-'));
-// Vitest reuses worker processes across test files, so every env override here
-// is restored in afterAll — a leaked HOME would point later files' spawned
-// children at a deleted temp dir.
 const ORIGINAL_ENV = {
   HOME: process.env.HOME,
   AGENTS_DEVICES_DIR: process.env.AGENTS_DEVICES_DIR,
@@ -115,7 +100,7 @@ describe('readRunDeviceRows', () => {
     const { rows, snapshotAgeMs } = picker.readRunDeviceRows({ agent: 'claude' });
     const elapsed = Date.now() - started;
 
-    expect(elapsed).toBeLessThan(1_000); // a disk read, never a probe
+    expect(elapsed).toBeLessThan(1_000);
     expect(rows).toHaveLength(5);
 
     const byName = new Map(rows.map((row) => [row.name, row]));
@@ -124,7 +109,7 @@ describe('readRunDeviceRows', () => {
     expect(zion.platform).toBe('macos');
     expect(zion.online).toBe('online');
     expect(zion.role).toBe('personal');
-    expect(zion.headroom).toBe('light'); // worst of load 5 / mem 30
+    expect(zion.headroom).toBe('light');
     expect(zion.loadPercent).toBe(5);
 
     const worker1 = byName.get('worker-1')!;
@@ -149,7 +134,6 @@ describe('readRunDeviceRows', () => {
     expect(worker4.online).toBe('offline');
     expect(worker4.lastSeenAt).toBe(OFFLINE_CHECKED_AT);
 
-    // Age of the NEWEST stats row (worker-2, 30 s old at write time).
     expect(snapshotAgeMs).toBeGreaterThanOrEqual(29_000);
     expect(snapshotAgeMs).toBeLessThan(35_000);
   });
@@ -173,8 +157,6 @@ describe('readRunDeviceRows', () => {
       '      scope: version',
       '',
     ].join('\n'));
-    // worker-1 publishes a live verdict for the account; worker-2 publishes
-    // verdicts but not for this account; the other boxes publish nothing.
     writeSharedAccountRows('worker-1', [
       { accountId: 'acct-work', harness: 'claude', authMode: 'durable', verdict: 'live', checkedAt: '2026-09-12T09:00:00.000Z' },
     ]);
@@ -189,11 +171,9 @@ describe('readRunDeviceRows', () => {
     expect(byName.get('zion')!.hasAccount).toBeUndefined();
     expect(byName.get('worker-3')!.hasAccount).toBeUndefined();
 
-    // An account label the catalog has never heard of: no device can be answered.
     const unknown = picker.readRunDeviceRows({ agent: 'claude', accountLabel: 'nope' });
     for (const row of unknown.rows) expect(row.hasAccount).toBeUndefined();
 
-    // No label asked: the question was never posed.
     const unasked = picker.readRunDeviceRows({ agent: 'claude' });
     for (const row of unasked.rows) expect(row.hasAccount).toBeUndefined();
   });
@@ -217,7 +197,7 @@ describe('buildRunDeviceChoices', () => {
 
     const byName = new Map(choices.map((choice) => [choice.value, choice]));
     expect(byName.get('zion')!.name).toContain('this machine');
-    expect(byName.get('worker-3')!.name).toContain('—'); // no cached stats → no load number
+    expect(byName.get('worker-3')!.name).toContain('—');
     expect(byName.get('worker-4')!.disabled).toMatch(/^offline since \d{2}:\d{2}$/);
     expect(byName.get('zion')!.disabled).toBeUndefined();
   });
@@ -260,7 +240,6 @@ describe('buildRunDeviceChoices', () => {
     writeSharedAccountRows('worker-1', [
       { accountId: 'acct-work', harness: 'claude', authMode: 'durable', verdict: 'live' },
     ]);
-    // worker-2 publishes verdicts, none for this account: the catalog answers "no".
     writeSharedAccountRows('worker-2', [
       { accountId: 'acct-other', harness: 'claude', authMode: 'durable', verdict: 'live' },
     ]);
@@ -279,7 +258,6 @@ describe('buildRunDeviceChoices', () => {
 
 describe('pickRunDevice', () => {
   it('throws before any prompt when the registry holds no devices, naming agents devices add', async () => {
-    // beforeEach cleared the registry; nothing is seeded on purpose.
     await expect(picker.pickRunDevice({ agent: 'claude' }))
       .rejects.toThrow('No devices are registered. Add one with: agents devices add <name>');
   });

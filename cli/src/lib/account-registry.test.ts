@@ -36,8 +36,6 @@ import {
 } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
-  // A registry whose every access throws — stands in for a device whose provider
-  // bundle read / legacy migration / keychain decrypt would fail (the real crash).
   const poisoned = new Proxy({} as AccountRegistryDocument, {
     get() { throw new Error('provider registry accessed'); },
   });
@@ -71,16 +69,11 @@ describe('native account labels', () => {
     expect(() => labelNativeAccount('kimi', 'kimi:opaque=1', undefined, undefined, 'version')).toThrow('pass a manual label');
   });
 
-  // PHNX-3887: one human identity signed into several harnesses must be able to
-  // carry the SAME label on each. A global namespace let the first harness
-  // labelled squat the good name and forced prefixes (cxicloud, gkicloud).
   it('lets separate harnesses share one label name', () => {
     const claude = labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
     const codex = labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'icloud', 'version');
     const grok = labelNativeAccount('grok', 'grok:user=1', 'me@example.com', 'icloud', 'version');
     expect(new Set([claude.id, codex.id, grok.id]).size).toBe(3);
-    // `<harness>#<label>` resolves to that harness's own row, not whichever
-    // happened to be written first.
     expect(findUnifiedAccount('icloud', readMeta(), undefined, 'claude')).toMatchObject({ id: claude.id, agent: 'claude' });
     expect(findUnifiedAccount('icloud', readMeta(), undefined, 'codex')).toMatchObject({ id: codex.id, agent: 'codex' });
     expect(findUnifiedAccount('icloud', readMeta(), undefined, 'grok')).toMatchObject({ id: grok.id, agent: 'grok' });
@@ -92,9 +85,6 @@ describe('native account labels', () => {
       .toThrow("Account 'work' already exists for the codex harness.");
   });
 
-  // PHNX-3988: rename/remove/view must honor the same per-harness namespace that
-  // connect/label already do. A fleet-wide uniqueness check refused Codex
-  // renaming `cxicloud` → `icloud` because Claude already owned `icloud`.
   it('lets a harness take a name another harness already uses', () => {
     labelNativeAccount('claude', 'claude:user=1', 'me@example.com', 'icloud', 'version');
     labelNativeAccount('codex', 'codex:user=1', 'me@example.com', 'cxicloud', 'version');
@@ -161,7 +151,6 @@ describe('native account labels', () => {
   });
 
   it('removeAccount deletes every central row for the resolved (agent, identityKey)', () => {
-    // Two independently labeled boxes merge via git into two UUID rows for one identity.
     const identityKey = 'codex:account=dup:user=x:org=y';
     const row = (id: string) => ({
       id,
@@ -226,12 +215,8 @@ describe('native account labels', () => {
   });
 });
 
-// Account bundles carry no explicit backend, so on a headed macOS box the real
-// standalone would write them to the operator's login keychain; the bundle
-// suites run where keychain items are file-backed (headless Linux/Windows, CI).
 const fileBacked = await standaloneKeychainIsFileBacked();
 
-/** The raw bundle-metadata blob the standalone stored for `name` (identity vars, no secret). */
 function metadataBlob(name: string): string {
   const bundle = readBundleSync(name);
   return storeGetSync(bundle.backend ?? 'keychain', `agents-cli.bundles.${name}`);
@@ -582,15 +567,12 @@ describe.skipIf(!fileBacked)('legacy accounts.yaml migration', () => {
     ].join('\n'));
 
     const doc = readAccountRegistry(root);
-    // UUID preserved as the account's stable id.
     expect(doc.accounts[id]).toMatchObject({ id, name: 'work', provider: 'openrouter', auth: 'api-key' });
-    // Archived only after success; the live file is gone, the credential moved.
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(false);
     expect(fs.existsSync(path.join(root, 'accounts.migrated.yaml'))).toBe(true);
-    expect(hasKeychainTokenSync(legacyItem)).toBe(false); // old per-account item retired
+    expect(hasKeychainTokenSync(legacyItem)).toBe(false);
     expect(resolveCredentialAccount('work', 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe('sk-or-legacy');
 
-    // Idempotent: a second read does nothing (no live file to migrate).
     expect(readAccountRegistry(root).accounts[id]).toMatchObject({ id, name: 'work' });
   });
 
@@ -644,9 +626,7 @@ describe('native account device-scoping (PHNX-3315)', () => {
   it("routes a scope:'device' login to this box's device doc, keeping identity PII off central", () => {
     addNativeAccount('opencode-login', 'opencode', 'opencode:user=1', 'me@example.com', 'device');
 
-    // Visible through the effective list (central version natives + this box's device natives).
     expect(listNativeAccounts(readMeta()).map(a => a.name)).toContain('opencode-login');
-    // Its identity PII lives in the device doc, never the fleet-shared central file.
     expect(deviceDoc()).toContain('opencode:user=1');
     expect(deviceDoc()).toContain('me@example.com');
     expect(central()).not.toContain('opencode:user=1');
@@ -666,8 +646,6 @@ describe('native account device-scoping (PHNX-3315)', () => {
     expect(found).toMatchObject({ kind: 'native', id: acct.id, agent: 'droid', scope: 'device' });
   });
 
-  // PHNX-3940: leftover `homes` labels stay device-scoped; nativeAccountHome
-  // is the read path T5/T7 still use for legacy `acct-*` installs.
   it('reads the device-scoped home label and drops it when the account is removed', () => {
     const created = addNativeAccount('work', 'claude', 'claude:user=1', 'work@example.com', 'version');
     const entry = readMeta().accounts?.native?.[created.id];
@@ -695,9 +673,6 @@ describe('native account device-scoping (PHNX-3315)', () => {
   });
 
   it('bindAccount persists to the harness passed via preferAgent when an identity selector collides', () => {
-    // Same email signed into codex AND claude. `attach <email> claude@x` validated
-    // the claude row but bindAccount used to re-resolve un-scoped and could persist
-    // the binding to the codex row (review of PHNX cross-harness scoping).
     const codex = addNativeAccount('personal', 'codex', 'codex:user=1', 'dup@example.com', 'version');
     const claude = addNativeAccount('gmail', 'claude', 'claude:user=2', 'dup@example.com', 'version');
     expect(codex.id).not.toBe(claude.id);

@@ -1,19 +1,3 @@
-/**
- * Device picker for `agents run <agent>@` (PHNX-4083).
- *
- * The menu behind the trailing-`@` form: every registered fleet device,
- * rendered from files the daemon already keeps on disk — the SSH device
- * registry, the cached fleet stats (`.fleet-stats.json`), the fleet-synced
- * device docs (roles + descriptions), and the fleet-synced account catalog.
- *
- * This module NEVER probes: no SSH, no network, no re-fetch of stale rows.
- * `loadFleetStats` re-probes rows older than 3 minutes over SSH, which is the
- * multi-second hang a mid-run menu cannot afford; the whole point here is that
- * the picker renders the last cached fleet state, honestly aged ("fleet state
- * as of 2 min ago"), instead of re-deriving it live.
- *
- * PR 2 wires this into `agents run`; this module ships the data + menu only.
- */
 import { select } from '@inquirer/prompts';
 import type { AgentId } from '../lib/types.js';
 import { headroom, type Headroom } from '../lib/devices/health.js';
@@ -29,26 +13,25 @@ import { readSharedAccountVerdicts } from '../lib/account-catalog.js';
 import { readMeta } from '../lib/state.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 
-/** One row of the menu, already resolved from disk. Pure data so ordering is testable. */
 export interface RunDeviceRow {
   name: string;
-  platform?: string;               // 'macos' | 'linux' | 'windows' | undefined
-  isLocal: boolean;                // this machine
+  platform?: string;
+  isLocal: boolean;
   online: 'online' | 'offline' | 'unknown';
-  role?: string;                   // configured device role: 'worker' | 'personal' | 'desktop' | … (undefined when none)
-  description?: string;            // the registry's free-text description, if any
+  role?: string;
+  description?: string;
   loadPercent?: number;
   memPercent?: number;
-  headroom: Headroom;              // 'idle' | 'light' | 'busy' | 'loaded' | 'unknown'
-  statsFetchedAt?: number;         // ms epoch of the cached stats row
-  lastSeenAt?: string;             // ISO, for offline rows (registry reachability.checkedAt or tailscale lastSeen)
-  hasAccount?: boolean;            // undefined = unknown; true/false when an account label was given and the catalog knows
+  headroom: Headroom;
+  statsFetchedAt?: number;
+  lastSeenAt?: string;
+  hasAccount?: boolean;
 }
 
 interface RunDeviceChoice {
-  name: string;                    // rendered line: name · platform · this machine|online|offline · headroom · NN% load · NN% mem · role · ✓ acct|– acct
-  value: string;                   // device name
-  disabled?: boolean | string;     // offline rows: 'offline since HH:MM' (string is what @inquirer shows)
+  name: string;
+  value: string;
+  disabled?: boolean | string;
 }
 
 const HEADROOM_ORDER: Record<Headroom, number> = {
@@ -63,7 +46,6 @@ function formatPercentCell(value: number | undefined, suffix: string): string {
   return value === undefined ? '—' : `${Math.round(value)}% ${suffix}`;
 }
 
-/** 'HH:MM' (local) from an ISO timestamp; the raw string when it does not parse. */
 function formatHourMinute(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -72,15 +54,6 @@ function formatHourMinute(iso: string): string {
   return `${hh}:${mm}`;
 }
 
-/**
- * Pure. Ordering: this machine first; then online rows by headroom (idle,
- * light, busy, loaded, unknown) then loadPercent ascending then name; then
- * unknown-state rows; then offline rows, disabled with the last-seen time.
- *
- * `accountLabel` renders the ✓/– account mark on rows whose `hasAccount` the
- * catalog answered; without it the mark is omitted (hasAccount stays on the
- * row for the caller either way).
- */
 export function buildRunDeviceChoices(rows: RunDeviceRow[], accountLabel?: string): RunDeviceChoice[] {
   const byHeadroomLoadName = (a: RunDeviceRow, b: RunDeviceRow): number =>
     HEADROOM_ORDER[a.headroom] - HEADROOM_ORDER[b.headroom]
@@ -141,7 +114,7 @@ function resolveAccountDevices(
   const account = listNativeAccounts(readMeta()).find(
     (row) => row.agent === agent && (row.name === accountLabel || row.id === accountLabel),
   );
-  if (!account) return undefined; // the catalog has no such account — it cannot answer for any device
+  if (!account) return undefined;
   const shared = readSharedAccountVerdicts();
   const publishing = new Set<string>();
   for (const rows of shared.values()) {
@@ -154,12 +127,6 @@ function resolveAccountDevices(
   return { byDevice, publishing };
 }
 
-/**
- * Reads devices.yaml + the cached fleet stats + configured roles + (optionally)
- * whether `accountLabel` exists on each box. ZERO SSH, zero network, never
- * re-probes. Returns the rows and the age of the newest stats row (undefined
- * when no cache).
- */
 export function readRunDeviceRows(opts: { agent: AgentId; accountLabel?: string }): { rows: RunDeviceRow[]; snapshotAgeMs?: number } {
   const registry = loadDevicesSync();
   const statsCache = readStatsCache();
@@ -216,18 +183,7 @@ function formatSnapshotAge(ageMs: number): string {
   return `${Math.round(ageMs / 86_400_000)} d ago`;
 }
 
-/**
- * Interactive menu. Off a TTY: fail loud with the non-interactive forms,
- * exactly like the account picker. Prompt message: `Select a device for this
- * run (fleet state as of <age>):` where <age> is e.g. '2 min ago', or
- * `Select a device for this run (no cached fleet state):`. Returns the device
- * name, or null when the user cancels (Esc/Ctrl-C) — a cancel launches
- * nothing. Throws when the registry has no devices at all (the message names
- * `agents devices add`).
- */
 export async function pickRunDevice(opts: { agent: AgentId; accountLabel?: string }): Promise<string | null> {
-  // An empty registry is wrong on every terminal, so it is judged before the
-  // TTY gate: "register a device" is the useful answer, not "need a TTY".
   const { rows, snapshotAgeMs } = readRunDeviceRows(opts);
   if (rows.length === 0) {
     throw new Error('No devices are registered. Add one with: agents devices add <name>');

@@ -1,26 +1,3 @@
-/**
- * Routine lifecycle desktop notifications (RUSH-2030).
- *
- * The daemon fires a branded notification when a scheduled routine starts and
- * when it finishes (success or failure), routed through the MenubarHelper
- * companion (notify-desktop.ts) so it carries the agents-cli mark.
- *
- * Anti-spam threshold (Acceptance Criteria #4 — "define a sensible threshold so
- * users are not spammed"):
- *   - Agent / workflow routines: notify on BOTH start and finish. These are the
- *     runs whose output a user actually wants surfaced.
- *   - Command routines (deterministic housekeeping — version checks, `git pull`,
- *     notify shims that can fire every minute): notify only on FAILURE. A green
- *     housekeeping run is noise; a broken one is worth a ping. No start ping.
- *   - "Notable output" is folded into the single finish notification rather than
- *     sent as a third message: on failure the error reason, on success the first
- *     line of the run's report (the user-facing result) when the routine produced
- *     one. One start + one finish per run — never a stream.
- *
- * The pure builders (`routineStartNotification` / `routineFinishNotification`)
- * return `null` when the threshold says "don't notify", and are unit-tested; the
- * `notifyRoutine*` wrappers do the filesystem read + dispatch for the daemon.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -74,12 +51,6 @@ export function formatDuration(ms: number | undefined): string | null {
   return remMin ? `${hr}h ${remMin}m` : `${hr}h`;
 }
 
-/**
- * First non-empty line of a run report, trimmed to a notification-sized snippet.
- * This is the "notable output" surfaced on a successful finish — the routine's
- * own user-facing result. Returns null for an empty/whitespace report so the
- * caller falls back to a plain "Completed" body.
- */
 export function notableSnippet(report: string | null | undefined, maxLen = 140): string | null {
   if (!report) return null;
   const firstLine = report
@@ -113,16 +84,6 @@ export function routineStartNotification(
   };
 }
 
-/**
- * Notification for a routine that failed to even START — `executeJobDetached`
- * threw before the child was spawned, so no run record and no finish will ever
- * exist. The daemon fires the START notification unconditionally, so this closes
- * the "exactly one start + one finish" invariant: the orphaned start gets its
- * matching failure banner (RUSH-2030). Unlike a green finish this is never
- * suppressed — a broken start is worth a ping for every routine kind, including
- * command housekeeping. Clicking opens the runs folder (~/.agents/.history/runs)
- * since there is no run report to open.
- */
 export function routineStartFailedNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
   error: string,
@@ -136,20 +97,13 @@ export function routineStartFailedNotification(
   };
 }
 
-/**
- * Notification for a routine FINISH, or null when the threshold suppresses it
- * (a successful command-mode housekeeping run). Success carries the report's
- * first line when present (the notable output); failure carries the reason.
- * Clicking opens the run report/log when one is available, else the runs folder
- * (~/.agents/.history/runs).
- */
 export function routineFinishNotification(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'duration' | 'agent' | 'workflow' | 'command'>,
   opts: { report?: string | null; artifactPath?: string | null } = {},
 ): DesktopNotification | null {
   const kind = routineKind(meta);
   const ok = meta.status === 'completed';
-  if (kind === 'command' && ok) return null; // green housekeeping is noise
+  if (kind === 'command' && ok) return null;
 
   const action = openAction(opts.artifactPath) ?? 'routines:list';
 
@@ -165,7 +119,6 @@ export function routineFinishNotification(
     };
   }
 
-  // failed | timeout
   const reason =
     meta.status === 'timeout'
       ? 'Timed out'
@@ -181,7 +134,6 @@ export function routineFinishNotification(
   };
 }
 
-/** Read a finished run's report text + the best artifact to open on click. */
 function loadRunArtifacts(meta: Pick<RunMeta, 'jobName' | 'runId'>): {
   report: string | null;
   artifactPath: string | null;
@@ -204,22 +156,15 @@ function loadRunArtifacts(meta: Pick<RunMeta, 'jobName' | 'runId'>): {
   }
 }
 
-/** Daemon glue: fire the START notification for a triggered routine. Best-effort. */
 export function notifyRoutineStart(config: JobConfig): void {
   const n = routineStartNotification(config);
   if (n) notifyDesktop(n);
 }
 
-/**
- * Daemon glue: fire the "failed to start" notification when a routine trigger
- * threw before spawning a child. Pairs with the unconditional START ping so a
- * pre-spawn failure never leaves an orphaned "Routine started". Best-effort.
- */
 export function notifyRoutineStartFailed(config: JobConfig, error: string): void {
   notifyDesktop(routineStartFailedNotification(config, error));
 }
 
-/** Daemon glue: fire the FINISH notification for a completed run. Best-effort. */
 export function notifyRoutineFinish(meta: RunMeta): void {
   const { report, artifactPath } = loadRunArtifacts(meta);
   const n = routineFinishNotification(meta, { report, artifactPath });

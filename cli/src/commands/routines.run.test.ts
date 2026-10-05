@@ -22,12 +22,6 @@ import {
   CLI_ENTRYPOINT,
 } from './routines.test-fixture.js';
 
-// `routines run`/`edit`/`cleanup` execution slice of the routines.*.test.ts
-// suite (RUSH-2819), plus the pure-function unit tests for `buildRunsJson`
-// and `groupRoutineJobsByProject` and the bare-command-routing and
-// launch-target-parity coverage — split off the original 2,249-line
-// routines.test.ts (measured ~194s of test time) so vitest can parallelize
-// the file across worker forks. Shared fixtures: routines.test-fixture.ts.
 
 const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('run');
 registerLeakDetector();
@@ -127,9 +121,6 @@ describeRoutines('routines run wrong-host exact output', () => {
       expect(res.status).not.toBe(0);
       const output = res.stdout + res.stderr;
       expect(output).toContain("Job 'test-job' can only run on: yosemite-s0, mac-mini");
-      // The suggested host is the OWNER (lowest normalized name), not the first
-      // entry as written — the old suggestion pointed at a box that would refuse
-      // the run for exactly the same reason.
       expect(output).toContain('  agents routines run test-job --device mac-mini');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -223,13 +214,6 @@ describeRoutines('routines run --json', () => {
   });
 
   it('two independent CLI processes do not serialize overlapping foreground runs', async () => {
-    // The overlap window must stay open until this test is done probing it —
-    // a fixed `sleep N` raced real wall-clock time against source-mode CLI
-    // startup (10-15s+ on a loaded CI shard) and went flaky under contention.
-    // Instead, the job blocks on an observable state transition this test
-    // controls directly: a stop-file it does not create until AFTER it has
-    // asserted the second process was skipped. The `i -lt 1200` bound (60s)
-    // is a safety net for a wedged test, not the synchronization mechanism.
     const stopFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-overlap-')), 'stop');
     const home = makeHome({
       jobs: [{
@@ -255,7 +239,6 @@ describeRoutines('routines run --json', () => {
       try {
         fs.writeFileSync(stopFile, '');
       } catch {
-        // best-effort — the temp dir may already be gone
       }
     };
     try {
@@ -271,11 +254,6 @@ describeRoutines('routines run --json', () => {
       first.stdout.on('data', (chunk) => { firstStdout += chunk; });
       first.stderr.on('data', (chunk) => { firstStderr += chunk; });
 
-      // Wait until the first process writes meta.json with status 'running' —
-      // the readiness signal that the claim is held. Because the job now
-      // blocks on stopFile rather than a fixed sleep, this claim cannot
-      // expire out from under the second process no matter how long its own
-      // startup takes.
       const runsDir = path.join(home, '.agents', '.history', 'runs', 'overlap-job');
       const deadline = Date.now() + 30_000;
       let observedRunning = false;
@@ -289,12 +267,8 @@ describeRoutines('routines run --json', () => {
       }
       expect(observedRunning).toBe(true);
 
-      // The claim stays held (stopFile absent) for as long as this process
-      // needs — no race against a fixed sleep duration.
       const second = run(home, ['run', 'overlap-job', '--json']);
       expect(second.status, second.stderr).toBe(1);
-      // Assert on raw stdout before parsing so a startup failure (empty/partial
-      // output) surfaces as the actual stdout+stderr rather than a bare SyntaxError.
       expect(
         second.stdout.trim(),
         `second process stdout was not valid JSON — stdout: ${JSON.stringify(second.stdout)} stderr: ${JSON.stringify(second.stderr)}`,
@@ -316,8 +290,6 @@ describeRoutines('routines run --json', () => {
         status: 'completed',
       });
     } finally {
-      // Unblock the first process's job even if an assertion above threw,
-      // so a failed run doesn't leave an orphaned child spinning for 60s.
       releaseFirst();
       fs.rmSync(path.dirname(stopFile), { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
@@ -446,7 +418,6 @@ describeRoutines('bare routines command routing', () => {
       expect(bare.status, bare.stderr).toBe(0);
       expect(list.status, list.stderr).toBe(0);
       expect(bare.stdout).toBe(list.stdout);
-      // And it is real JSON, not the table.
       expect(() => JSON.parse(bare.stdout.trim())).not.toThrow();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
@@ -459,7 +430,6 @@ describeRoutines('bare routines command routing', () => {
       const bare = run(home, []);
       const list = run(home, ['list']);
       expect(bare.status, bare.stderr).toBe(0);
-      // Same rendered table as `routines list`.
       expect(bare.stdout).toBe(list.stdout);
       expect(bare.stdout).toContain('Scheduled Jobs');
       expect(bare.stdout).toContain('test-job');
@@ -481,11 +451,6 @@ describeRoutines('bare routines command routing', () => {
   });
 });
 
-// RUSH-2517: an agent with no TTY must be able to repair a paused routine and
-// activate it. Before this, the readiness gate printed
-// `agents routines edit <name> --project-anchor <name>  # or --cwd <path>`
-// (routine-context.ts:215,334) while `edit` accepted neither flag and its only
-// surface opened $EDITOR — so the hint named a command that could not be run.
 describeRoutines('routines edit — headless context repair', () => {
   const noContext = {
     name: 'needs-cwd',
@@ -497,7 +462,6 @@ describeRoutines('routines edit — headless context repair', () => {
   it('--cwd applies and saves without opening an editor', () => {
     const home = makeHome({ jobs: [noContext] });
     try {
-      // EDITOR would hang the run if the flag fell through to the $EDITOR path.
       const edited = run(home, ['edit', 'needs-cwd', '--cwd', '~'], { EDITOR: 'false' });
       expect(edited.status, edited.stderr).toBe(0);
       expect(edited.stdout).toContain("Routine 'needs-cwd' updated");
@@ -537,11 +501,6 @@ describeRoutines('routines edit — headless context repair', () => {
   });
 });
 
-// RUSH-2545 regression: the daemon spawned by startIsolatedDaemon must carry an
-// AGENTS_HISTORY_DIR confined to the test's tmpHome. Without this override the daemon
-// inherited the parent vitest process's real production AGENTS_HISTORY_DIR
-// (~/.agents/.history), and its SIGTERM sweep killed live tmux-wrapped Claude and
-// cgraph-mcp processes on every five-minute tick while the test suite ran.
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
     const home = makeDaemonHome();
@@ -652,9 +611,6 @@ describe('routines add/edit — launch-target parity flags (RUSH-2719)', () => {
       const job = readRoutineYaml(home, 'auto-place');
       expect(job?.host).toBe('auto');
       expect(job?.hostStrategy).toBe('fleet');
-      // No devices field in the definition: activation is per-device manifest
-      // membership (§8), so only the creating machine fires it by default —
-      // the double-fire guard is structural, not a persisted allowlist.
       expect(job?.devices).toBeUndefined();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });

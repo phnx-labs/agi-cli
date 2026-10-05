@@ -1,11 +1,3 @@
-/**
- * Mailbox liveness sweep and GC.
- *
- * A box whose owning agent is no longer alive is a ghost: pending messages will
- * never be drained, and any feed block tied to that box is stale. This module
- * archives dead-box messages and prunes old consumed entries so the spool stays
- * bounded under fleet load.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import { getFeedDir, getMailboxRootDir } from './state.js';
@@ -29,10 +21,8 @@ export interface GcResult {
 
 interface GcOptions {
   root?: string;
-  /** Feed store root. Defaults to getFeedDir(). */
   feedRoot?: string;
   now?: Date;
-  /** Age in minutes after which consumed entries are pruned. Default 24h. */
   maxConsumedAgeMinutes?: number;
 }
 
@@ -149,8 +139,6 @@ export function gcMailbox(
     return result;
   }
 
-  // Pre-compute dead blocks so we remove each once, regardless of how many
-  // messages reference it.
   const blocksToRemove = new Set<string>();
   for (const block of listBlocks(feedRoot)) {
     if (!activeBoxIds.has(block.mailboxId)) {
@@ -167,7 +155,6 @@ export function gcMailbox(
       result.deadBoxes++;
       result.messagesDroppedDead += archiveAllPending(boxDir, 'dead', feedRoot);
       result.consumedPruned += pruneConsumed(boxDir, maxConsumedAgeMinutes, now);
-      // Also prune the empty box dir if it is now empty.
       try {
         for (const sub of ['inbox', 'processing', 'consumed']) {
           const subdir = path.join(boxDir, sub);
@@ -179,20 +166,14 @@ export function gcMailbox(
           fs.rmdirSync(boxDir);
         }
       } catch {
-        // ignore
       }
     } else {
-      // Live box: archive expired messages (same path as drain/peek) so GC does
-      // not leave expired files in inbox/processing while only bumping metrics.
       result.messagesDroppedExpired += sweepExpired(boxDir, name, now, feedRoot);
       result.consumedPruned += pruneConsumed(boxDir, maxConsumedAgeMinutes, now);
     }
   }
 
   for (const blockId of blocksToRemove) {
-    // A dead box's block is kept for up to maxConsumedAgeMinutes after a bounce
-    // receipt is written so the operator/sender can see the failure. Stale blocks
-    // (older than the prune window) are removed.
     if (blockAgeMinutes(blockId, feedRoot, now) >= maxConsumedAgeMinutes) {
       if (removeBlock(blockId, feedRoot)) {
         result.blocksRemoved++;

@@ -9,32 +9,12 @@ import { findGitRepos, collectCommits, toSearchDate } from '../git-output.js';
 let root: string;
 let repo: string;
 
-/**
- * Run a git command in `repo`, optionally stamping author+committer identity
- * and dates.
- *
- * Identity is passed as ENV, not `-c user.email=…`, because git's
- * `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL` environment variables OUTRANK
- * `-c` config. A developer box that exports those (many do, and the agent
- * fleet does) silently re-authored every fixture commit to the ambient
- * identity, so `collectCommits(['alice@example.com', …])` matched nothing and
- * four tests failed with a bare `expected +0 to be 2`. CI never saw it — its
- * runners export no such vars — so this only ever broke locally and, worse,
- * inside the fail-closed release-attestation producer, where it blocked
- * releases from any box with a git identity in the environment.
- *
- * The env we hand git is therefore built explicitly rather than inherited
- * wholesale: the four identity vars are always set (never left to leak in),
- * which makes the fixture's authorship independent of the host.
- */
 function git(args: string[], dateIso?: string, identity?: { email: string; name: string }): void {
   const env = { ...process.env } as Record<string, string>;
   if (dateIso) {
     env.GIT_AUTHOR_DATE = dateIso;
     env.GIT_COMMITTER_DATE = dateIso;
   }
-  // Always assign, even with no identity passed, so an ambient GIT_AUTHOR_EMAIL
-  // can never decide who authored a fixture commit.
   env.GIT_AUTHOR_EMAIL = identity?.email ?? 'fixture@example.com';
   env.GIT_COMMITTER_EMAIL = identity?.email ?? 'fixture@example.com';
   env.GIT_AUTHOR_NAME = identity?.name ?? 'Fixture';
@@ -64,25 +44,19 @@ afterEach(() => {
 
 describe('findGitRepos', () => {
   it('discovers a git repo nested below the root and does not descend into it', () => {
-    // A repo nested two levels down; a decoy non-repo dir alongside.
     fs.mkdirSync(path.join(root, 'nested', 'not-a-repo'), { recursive: true });
     const repos = findGitRepos(root, 4);
     expect(repos).toContain(repo);
-    // The repo's own .git must not be returned as a separate repo.
     expect(repos.every(r => !r.endsWith('.git'))).toBe(true);
   });
 
   it('respects maxDepth', () => {
-    // repo is at depth 2 (nested/my-repo); depth 1 should not find it.
     expect(findGitRepos(root, 1)).not.toContain(repo);
   });
 });
 
 describe('collectCommits', () => {
   beforeEach(() => {
-    // Commit oldest-first so committer dates are monotonic (newest = HEAD), as in
-    // any real repo. `git log --since` stops traversing once it hits a commit
-    // older than the window, so an out-of-order HEAD would hide newer ancestors.
     commitAs('alice@example.com', 'Alice', 'old by alice', daysAgoIso(30));
     commitAs('bob@example.com', 'Bob', 'recent by bob', daysAgoIso(2));
     commitAs('alice@example.com', 'Alice', 'recent by alice', daysAgoIso(1));
@@ -91,7 +65,7 @@ describe('collectCommits', () => {
   it('counts commits by all given authors within the window, tallied per author', async () => {
     const since = daysAgoIso(7);
     const { total, byAuthor } = await collectCommits([repo], since, ['alice@example.com', 'bob@example.com']);
-    expect(total).toBe(2); // the 30-day-old one is excluded by the window
+    expect(total).toBe(2);
     const map = Object.fromEntries(byAuthor.map(a => [a.author, a.commits]));
     expect(map['alice@example.com']).toBe(1);
     expect(map['bob@example.com']).toBe(1);
@@ -100,13 +74,13 @@ describe('collectCommits', () => {
   it('restricts to the named author', async () => {
     const since = daysAgoIso(7);
     const { total } = await collectCommits([repo], since, ['alice@example.com']);
-    expect(total).toBe(1); // bob excluded by author, old-alice excluded by window
+    expect(total).toBe(1);
   });
 
   it('widening the window includes older commits', async () => {
     const since = daysAgoIso(60);
     const { total } = await collectCommits([repo], since, ['alice@example.com']);
-    expect(total).toBe(2); // both alice commits now in range
+    expect(total).toBe(2);
   });
 
   it('is case-insensitive on author email', async () => {
@@ -121,14 +95,12 @@ describe('collectCommits', () => {
   });
 
   it('dedupes the same commit seen via multiple clones (the --all-hosts fix)', async () => {
-    // A second clone of the repo exposes the identical SHAs to git log. Counting
-    // both clones must NOT double the commits — SHA identity collapses them.
     const clone = path.join(root, 'clone');
     execFileSync('git', ['clone', '-q', repo, clone], { stdio: 'pipe' });
     const since = daysAgoIso(7);
     const one = await collectCommits([repo], since, ['alice@example.com', 'bob@example.com']);
     const both = await collectCommits([repo, clone], since, ['alice@example.com', 'bob@example.com']);
-    expect(both.total).toBe(one.total); // deduped, not 2x
+    expect(both.total).toBe(one.total);
     expect(both.shas.sort()).toEqual(one.shas.sort());
   });
 });

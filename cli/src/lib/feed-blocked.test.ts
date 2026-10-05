@@ -1,10 +1,3 @@
-/**
- * `agents feed post --blocked` — the declared-block path.
- *
- * Real path throughout: a block is built from a real posted event, written to a
- * real temp feed dir, read back with the real reader, and planned against a real
- * sink config. Nothing is mocked.
- */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -29,9 +22,6 @@ afterEach(() => {
 });
 
 describe('status.blocked event kind', () => {
-  // A blocked post must rank as a milestone, not routine activity — readers
-  // collapse `activity` tier to counts, which would bury the one thing that
-  // needs a human.
   it('is a milestone, so readers never collapse it into a count', () => {
     expect(MILESTONE_EVENTS).toContain('status.blocked');
     expect(tierForEvent('status.blocked')).toBe('milestone');
@@ -49,8 +39,6 @@ describe('buildDeclaredBlock', () => {
     expect(approval.safeDefault).toBe('leave it');
   });
 
-  // costOfDelay drives the urgency filter (isPhoneUrgent). A declared block is by
-  // definition an agent that has stopped, so it must not rank as low-cost.
   it('marks a declared block high cost-of-delay', () => {
     expect(buildDeclaredBlock(AGENT, { text: 'stuck' }).costOfDelay).toBe('high');
     expect(buildDeclaredBlock(AGENT, { text: 'stuck' }).kind).toBe('declared');
@@ -84,14 +72,11 @@ describe('blockBroadcastContext', () => {
     expect(blockBroadcastContext(block).level).toBe('important');
   });
 
-  // The operator reading this on a phone should not have to go find the session.
   it('carries the exact command that unblocks it', () => {
     const ctx = blockBroadcastContext(block);
     expect(ctx.focus).toBe('agents focus 74a4893f');
   });
 
-  // A sink gated on minLevel:important must actually receive a block. Before this
-  // wiring, publishBlock never reached the broadcast layer at all.
   it('reaches an important-gated sink, with the ask in the message', () => {
     const planned = planFeedBroadcast(
       { owner: { channel: 'owner', minLevel: 'important' } },
@@ -99,14 +84,11 @@ describe('blockBroadcastContext', () => {
     );
     expect(planned).toHaveLength(1);
     const message = planned[0].text!;
-    // Title/body when extras provide them; footer names the box + session.
     expect(message).toContain('npm token expired, cannot publish');
     expect(message).toContain('Sent from');
     expect(message).toContain('yosemite-s1');
   });
 
-  // The phone message must be actionable WITHOUT a CLI: it shows the choices and
-  // the default-on-timeout, and never `agents focus <id>` (unusable from a phone).
   it('renders options + default-on-timeout, and NOT a CLI reply command', () => {
     const withChoices = buildDeclaredBlock(AGENT, {
       text: 'publish now or wait for review?',
@@ -121,7 +103,6 @@ describe('blockBroadcastContext', () => {
     expect(message).not.toContain('agents focus');
   });
 
-  // A decision block with no default still shows its choices, but no default line.
   it('shows choices without a default line when the block has no safe default', () => {
     const noDefault = buildDeclaredBlock(AGENT, { text: 'which config?', options: ['a', 'b'] });
     const message = renderSinkArgv(['{message}'], blockBroadcastContext(noDefault))![0];
@@ -130,8 +111,6 @@ describe('blockBroadcastContext', () => {
     expect(message).not.toContain('agents focus');
   });
 
-  // The placeholder regex is /\{([a-z]+)\}/g — lowercase only. A camelCase name
-  // would never substitute, and renderSinkArgv would silently skip the sink.
   it('exposes block placeholders that the lowercase-only regex can actually match', () => {
     const argv = renderSinkArgv(['x', '{focus}', '{class}', '{cost}', '{block}'], blockBroadcastContext(block));
     expect(argv).toBeDefined();
@@ -143,7 +122,6 @@ describe('blockBroadcastContext', () => {
     ]);
   });
 
-  // A status post has no focus command, so the sink must still render for it.
   it('leaves a plain post without a focus line (title + body + footer only)', () => {
     const argv = renderSinkArgv(['{message}'], {
       title: 'CI green',
@@ -164,10 +142,6 @@ describe('blockDeliveryFailure — the fail-loud contract', () => {
   const ok = { name: 'owner', ok: true };
   const bad = { name: 'owner', ok: false, error: 'rush CLI not found on PATH' };
 
-  // This lived inline in the command action and was therefore never covered,
-  // which is exactly how a `--json` early-return silently bypassed it: the
-  // machine caller — the one that actually reads the exit code — got 0 while a
-  // human got 1. Reviewer caught it; this pins the contract in a pure function.
   it('reports failure when no sink is configured', () => {
     expect(blockDeliveryFailure(true, [])).toMatch(/no feed\.broadcast sink configured/);
   });
@@ -179,14 +153,11 @@ describe('blockDeliveryFailure — the fail-loud contract', () => {
     expect(msg).toContain('daemon down');
   });
 
-  // Redundant channels are the whole point: a dead rush login must not mask a
-  // delivered desktop notification.
   it('stays silent when at least one sink got through', () => {
     expect(blockDeliveryFailure(true, [bad, ok])).toBeUndefined();
     expect(blockDeliveryFailure(true, [ok])).toBeUndefined();
   });
 
-  // A plain status post is fire-and-forget; an unconfigured sink is not an error.
   it('never fails a non-blocked post', () => {
     expect(blockDeliveryFailure(false, [])).toBeUndefined();
     expect(blockDeliveryFailure(false, [bad])).toBeUndefined();

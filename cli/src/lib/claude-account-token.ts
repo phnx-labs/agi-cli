@@ -23,31 +23,9 @@ import { ensureSlot, recordSlot } from './accounts/slots.js';
 import { harnessWorkerKinds } from './harness-auth-capabilities.js';
 import type { DeviceAccountSlot, NativeAccountRecord } from './types.js';
 
-/**
- * Reserved FILE-BASED secrets bundle holding long-lived, non-rotating Claude
- * setup-tokens. Usage/probe reads authenticate with these instead of Claude
- * Code's ACL-bound login item, so they never pop Touch ID. Keyed strictly
- * per-account (`CLAUDE_CODE_OAUTH_TOKEN_<slug>` from the account email) — never a
- * bare key, so one account's token can't be misapplied to another in a
- * multi-account fleet.
- */
-/** Alias of the reserved-store name so mint/seed shares one source of truth. */
 export const AUTH_BUNDLE = AUTH_STORE_ALIAS;
 export { ReservedBundleWrongBackendError };
 
-/**
- * A well-formed Claude OAuth setup-token: the `sk-ant-oat01-` prefix followed by
- * token-safe characters only, on a single line. `claude setup-token` mints exactly
- * this; nothing else is a token.
- *
- * The provisioning capture bug behind #1767 stored the raw `claude setup-token`
- * TTY stream — the welcome banner, ANSI control sequences, box-drawing art, and the
- * token buried inside — under a per-account key instead of the parsed value. That
- * blob is not a token: injected as `Authorization: Bearer <blob>` it made Anthropic
- * reject every request and the run crash. agents-cli only *consumes* these tokens
- * (the mint itself is the Rush Cloud / mint-auth path), so this is the boundary
- * where a corrupt bundle entry must be caught before it reaches the auth header.
- */
 const SETUP_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]+$/;
 
 interface SetupTokenCacheEntry {
@@ -55,21 +33,9 @@ interface SetupTokenCacheEntry {
   token: string | null;
 }
 
-/**
- * Process-local memo of resolved setup-tokens, keyed by the caller's cache key
- * AND the per-account token key — a version home that switches accounts must
- * miss, never be served the previous account's token. Plaintext setup-tokens
- * are never written to another cache. The bundle now
- * lives behind the standalone `secrets` process (one spawn per read), so the
- * memo is what keeps a probe loop over many accounts from re-decrypting the
- * whole `auth` bundle per account; it is bounded by {@link SETUP_TOKEN_MEMO_TTL_MS}
- * so a rotation performed by another process is observed within seconds, and
- * an in-process writer clears it outright ({@link invalidateClaudeSetupTokenCache}).
- */
 const setupTokenCache = new Map<string, SetupTokenCacheEntry>();
 const SETUP_TOKEN_MEMO_TTL_MS = 10_000;
 
-/** Drop every memoized setup-token; called after this process seeds or rotates one. */
 export function invalidateClaudeSetupTokenCache(): void {
   setupTokenCache.clear();
 }
@@ -108,12 +74,10 @@ function credentialFingerprint(credentialPath: string): string {
   }
 }
 
-/** True only for a clean, single-line `sk-ant-oat01-…` token — see {@link SETUP_TOKEN_RE}. */
 export function isValidClaudeSetupToken(value: string): boolean {
   return SETUP_TOKEN_RE.test(value);
 }
 
-/** The per-account key an email maps to inside the `auth` bundle. */
 export function claudeAccountTokenKey(account: string): string {
   const slug = account
     .trim()
@@ -124,7 +88,6 @@ export function claudeAccountTokenKey(account: string): string {
   return `CLAUDE_CODE_OAUTH_TOKEN_${slug}`;
 }
 
-/** Signed-in account email for a version home, from `.claude.json` (no keychain). */
 export function readClaudeAccountEmail(home?: string): string | null {
   const base = home ?? os.homedir();
   for (const p of [path.join(base, '.claude', '.claude.json'), path.join(base, '.claude.json')]) {
@@ -134,48 +97,20 @@ export function readClaudeAccountEmail(home?: string): string | null {
       }).oauthAccount?.emailAddress;
       if (typeof email === 'string' && email.trim().length > 0) return email.trim();
     } catch {
-      // Missing/unreadable at this location — try the next.
     }
   }
   return null;
 }
 
-/**
- * Resolve a long-lived `claude setup-token` for the account signed into `home`
- * from the reserved FILE-BASED `auth` bundle. Returns the token or null. Reads
- * ONLY when the bundle is file-backed (never keychain), so this path itself can
- * never trigger a Touch ID prompt — that is the entire point: usage/probe reads
- * authenticate with the shareable setup-token, not the ACL-bound login item.
- */
 export function resolveClaudeSetupToken(home?: string): string | null {
-  // Require a known account (email) up front: without it we cannot key a
-  // per-account token, and we must NOT fall back to a bare shared key that
-  // would misapply one account's setup-token to another.
   const email = readClaudeAccountEmail(home)
-    // Self-heal (PHNX-3660): a home provisioned before seed-on-attach carries an
-    // `.oauth_token` but no identity. Recover the email from the bundle and
-    // write it back, so the home converges instead of needing a re-attach.
-    // Explicit-home only: with no home the probe targets the operator's real
-    // ~/.claude.json, which a library read must never rewrite.
     ?? (home ? discoverClaudeAccountEmailFromOauthToken(home) : null);
   if (!email) return null;
   return resolveClaudeSetupTokenForEmail(email, home ?? os.homedir());
 }
 
-/** Negative/positive discovery cache, keyed by home + .oauth_token fingerprint (SHOULD-2). */
 const discoveryCache = new Map<string, { fingerprint: string; email: string | null }>();
 
-/**
- * Recover a home's account email from its `.claude/.oauth_token` by matching
- * the token VALUE against the `auth` bundle (the slug encodes the email, and
- * the re-encode check makes the decode lossless or fail). On a match the
- * identity is written back via {@link seedClaudeWorkerHomeIdentity}, so this
- * runs at most once per home. Returns null — and writes nothing — when the
- * file is missing, malformed, or matches no bundle key: a token that no longer
- * exists in the bundle must not resurrect an account mapping. A no-match
- * result is cached against the token file's fingerprint so a rotated-out home
- * does not re-decrypt the bundle on every probe.
- */
 function discoverClaudeAccountEmailFromOauthToken(home: string): string | null {
   try {
     const tokenPath = path.join(home, '.claude', '.oauth_token');
@@ -212,15 +147,6 @@ function discoverEmailUncached(home: string, tokenPath: string): string | null {
   return null;
 }
 
-/**
- * Decode the email a `CLAUDE_CODE_OAUTH_TOKEN_<slug>` key encodes — or null
- * when the decode is ambiguous. The mapping collapses every non-alphanumeric
- * to `_`, so a `_` surviving in the decoded address cannot be told apart from
- * a folded `.`/`+`/etc. (`FIRST_DOT_LAST_AT_GMAIL_DOT_COM` decodes to
- * `first_dot_last@gmail.com`, which round-trips — wrongly — under the bare
- * re-encode check; review BLOCKER 1). Only a fully unambiguous decode — local
- * and domain pure `[a-z0-9]`, dots in the domain only — is trusted.
- */
 function emailFromTokenKey(key: string): string | null {
   const prefix = 'CLAUDE_CODE_OAUTH_TOKEN_';
   if (!key.startsWith(prefix)) return null;
@@ -233,20 +159,6 @@ function emailFromTokenKey(key: string): string | null {
   return email;
 }
 
-/**
- * Resolve a long-lived setup-token for an EXPLICIT account email, independent of
- * any version home's `.claude.json`. This is what lets worker-slot provisioning
- * seed a headless worker home that has never had an interactive login: the
- * account's non-rotating setup-token is already fleet-synced in the file-based
- * `auth` bundle, keyed by email ({@link claudeAccountTokenKey}), so we can write
- * the home's `.oauth_token` from it without the circular
- * "read the home's email to resolve the home's token" dependency that
- * {@link resolveClaudeSetupToken} has. Same file-backed-only, fail-closed,
- * fingerprint-stable read as the home-keyed path — it is the shared core.
- *
- * `cacheKey` scopes the process-local token cache; callers pass a version home
- * so a home-keyed and email-keyed read of the same account share nothing stale.
- */
 export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string): string | null {
   try {
     const trimmed = email.trim();
@@ -411,24 +323,8 @@ export function isClaudeWorkerHomeSeeded(home: string): boolean {
   return true;
 }
 
-/**
- * Seed a worker slot's `.claude.json` (both locations Claude Code reads) with
- * the account identity AND `hasCompletedOnboarding`. A worker never has a human
- * at it, so nothing else can complete Claude Code's first-run onboarding (theme
- * picker, "Let's get started"); without the flag every slot launch re-onboarded.
- * Everything else in the document is preserved.
- *
- * Without an email only the onboarding flag is seeded: a provider (setup-token)
- * launch runs in the shared version home, whose identity belongs to whatever
- * native login lives there, so it must not be rewritten. A document already
- * carrying the requested state is left untouched, so a launch never rewrites a
- * config Claude Code is using.
- */
 export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string): void {
   const trimmed = email?.trim() || undefined;
-  // A version home usually links `.claude/.claude.json -> ../.claude.json`. The
-  // temp-write + rename below would replace that link with a regular file and
-  // split one config into two, so write through a link to the file it names.
   const targets = new Set<string>();
   for (const p of [
     path.join(versionHome, '.claude', '.claude.json'),

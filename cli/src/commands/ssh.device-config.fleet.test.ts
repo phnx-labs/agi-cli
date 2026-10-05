@@ -1,12 +1,3 @@
-/**
- * agents devices config --fleet — the fleet-wide defaults layer.
- *
- * Split out of a single 18-test `ssh.device-config.test.ts` that ran ~44s
- * locally (151s on a loaded worker) — 8.4s per test, and one of the files
- * setting the suite's floor: vitest parallelises across FILES and runs one
- * file's tests sequentially in a single worker. Shared spawn harness lives in
- * `device-config-test-harness.ts`.
- */
 import { describe, expect, it } from 'vitest';
 import {
   guardedHome,
@@ -29,13 +20,10 @@ describe('devices config --fleet (fleet-wide defaults layer)', () => {
     const central = centralDoc();
     expect(central).toContain('defaults:');
     expect(central).toContain('schedulerEnabled: false');
-    // No device doc is written for a fleet default.
     expect(deviceDoc('mac-mini')).not.toContain('schedulerEnabled');
 
-    // This box can read the fleet-sourced effective value.
     const self = JSON.parse(run(['devices', 'config', 'mac-mini', 'scheduler.enabled', '--json']).stdout);
     expect(self).toEqual({ device: 'mac-mini', key: 'scheduler.enabled', value: false, source: 'fleet' });
-    // A peer cannot read a machine-local key, even when the value is a fleet default.
     const peer = run(['devices', 'config', 'zion', 'scheduler.enabled', '--json']);
     expect(peer.status).toBe(1);
     expect(peer.stderr).toContain('machine-local');
@@ -54,7 +42,6 @@ describe('devices config --fleet (fleet-wide defaults layer)', () => {
     expect(JSON.parse(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '--json']).stdout))
       .toEqual({ device: 'mac-mini', key: 'agents.max-concurrent', value: 2, source: 'fleet' });
 
-    // --fleet --unset removes the default; the key is back to built-in behavior.
     expect(run(['devices', 'config', '--fleet', 'agents.max-concurrent', '--unset']).status).toBe(0);
     expect(JSON.parse(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '--json']).stdout))
       .toEqual({ device: 'mac-mini', key: 'agents.max-concurrent', value: null, source: 'default' });
@@ -85,19 +72,14 @@ describe('devices role', () => {
     addDevice('mac-mini', 'muqsit@192.0.2.2');
     addDevice('yosemite-s0', 'muqsit@192.0.2.3');
 
-    // Fleet-wide default: every registered device is a worker.
     expect(run(['devices', 'config', '--fleet', 'role', 'worker']).status).toBe(0);
 
-    // Marking yosemite-s0's own role creates ITS per-device doc; mac-mini
-    // never gets one and must still resolve to 'worker' through the fleet
-    // default — the exact gap #2622's non-author review flagged.
     const setRole = run(['devices', 'role', 'yosemite-s0', 'worker', '--json']);
     expect(setRole.status, setRole.stderr).toBe(0);
     const parsed = JSON.parse(setRole.stdout) as { autoPoolWorkers: string[] };
     expect(parsed.autoPoolWorkers).toContain('yosemite-s0');
     expect(parsed.autoPoolWorkers).toContain('mac-mini');
 
-    // The human-readable path names it too.
     const text = run(['devices', 'role', 'yosemite-s0', 'worker']);
     expect(text.status, text.stderr).toBe(0);
     expect(text.stdout).toContain('mac-mini');
@@ -105,14 +87,6 @@ describe('devices role', () => {
 });
 
 describe('devices describe (RUSH-3062 surface)', () => {
-  // `describe` is thin sugar over the 'description' config key — these tests
-  // pin that BOTH names drive the same store, not two parallel code paths.
-  // Every `run()` is a full process spawn (~2s) and cli/AGENTS.md treats the
-  // required check's latency as a correctness requirement, so this asserts through
-  // the device doc — a file read — wherever a second CLI round-trip would only
-  // re-read what was just written. The CLI reads that remain are the ones whose
-  // POINT is the CLI surface: that `describe --json` and `config --json` return
-  // the identical object, i.e. one store behind two names.
   it('describe: sets, reads back, unsets — and shares one store with `devices config`', () => {
     guardedHome();
     addDevice('mac-mini', 'muqsit@192.0.2.2');
@@ -122,12 +96,10 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(set.stdout).toContain('description');
     expect(deviceDoc('mac-mini')).toContain('description: signing + notarize box');
 
-    // The one assertion that genuinely needs both surfaces: same store, two names.
     const viaConfig = JSON.parse(run(['devices', 'config', 'mac-mini', 'description', '--json']).stdout);
     expect(viaConfig).toEqual({ device: 'mac-mini', key: 'description', value: 'signing + notarize box', source: 'device' });
     expect(JSON.parse(run(['devices', 'describe', 'mac-mini', '--json']).stdout)).toEqual(viaConfig);
 
-    // Unquoted multi-word text joins the argv parts, same as config.
     expect(run(['devices', 'describe', 'mac-mini', 'gpu', 'box', '-', 'cuda', '12.4']).status).toBe(0);
     expect(deviceDoc('mac-mini')).toContain('description: gpu box - cuda 12.4');
 
@@ -135,7 +107,6 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(unset.status, unset.stderr).toBe(0);
     expect(deviceDoc('mac-mini')).not.toContain('description:');
 
-    // Failure modes share this setup rather than paying for their own.
     const unknown = run(['devices', 'describe', 'zoin', 'nope']);
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toMatch(/Unknown device 'zoin'/);
@@ -156,7 +127,6 @@ describe('devices describe (RUSH-3062 surface)', () => {
     const row = (JSON.parse(json.stdout) as Array<Record<string, any>>).find((r) => r.name === 'mac-mini');
     expect(row).toBeDefined();
     expect(row!.description).toBe('signing box');
-    // New disk fields ride the existing `health` object — additive, no renames.
     expect(row!.health.diskTotalBytes).toBeGreaterThan(0);
     expect(row!.health.diskFreeBytes).toBeGreaterThan(0);
     expect(row!.health.diskUsedPercent).toBeGreaterThanOrEqual(0);
@@ -169,13 +139,8 @@ describe('devices describe (RUSH-3062 surface)', () => {
     const plain = list.stdout.replace(/\x1b\[[0-9;]*m/g, '');
     expect(plain).toMatch(/device\s+platform\s+spec\s+load\s+mem\s+disk\s+headroom/);
     expect(plain).toContain('signing box');
-    expect(plain).toContain('disk free'); // Fleet capacity footer
+    expect(plain).toContain('disk free');
     expect(plain).toContain("1 ignored node not listed — 'agents devices ignored'");
-    // The local probe yields a real spec cell: "<n>c <RAM> <disk>", e.g.
-    // "4c 15.6G 144G" or "20c 122G 3.7T". fmtBytes emits one optional decimal and
-    // any of K/M/G/T/P, and which a runner produces depends on its hardware — so
-    // match the SHAPE, not one machine's formatting. (/\d+c \d+G? \d/ passed on a
-    // box rendering "122G" and failed on a runner rendering "15.6G".)
     expect(plain).toMatch(/\d+c \d+(\.\d+)?[KMGTP] \d+(\.\d+)?[KMGTP]/);
   });
 });

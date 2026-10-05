@@ -1,22 +1,3 @@
-/**
- * System-layer skills and subagents refresh at `agents run` launch time.
- *
- * `agents sync <harness>@all system` rewrites every version home, but nothing
- * runs it when the `.system` mirror moves: the shim's `--launch` path compiles
- * project rules and mirrors project resources only, and the SessionStart
- * autosync fires the umbrella at most once per 4 h. Rules already close that
- * gap per run (`rules/run-sync.ts`); skills and subagents did not, so a merged
- * system-layer skill change left 31 of 33 installed copies on the old text
- * (PHNX-4056). This is the same shape as the rules run-sync: a small per-
- * (agent, version) sentinel of source fingerprints, stat-tier comparison, and
- * a write through the registered writers only when a source file changed.
- *
- * Scope: the system layer's `skills/` and `subagents/` directories. The
- * writers resolve each name through the normal precedence (a user-layer
- * shadow still wins), and the active resource profile filters both kinds the
- * same way `syncResourcesToVersion` does. Never blocks a launch: any failure
- * is swallowed and leaves the sentinel stale, so the next run retries.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId } from './types.js';
@@ -28,7 +9,6 @@ import { filterNamesForActiveResourceProfile } from './resource-profiles.js';
 interface KindSentinel { dir: string; files: Fingerprint[] }
 interface SystemRunSentinel { skills?: KindSentinel; subagents?: KindSentinel }
 
-/** ~/.agents/.cache/system-run-sync/ — regenerable; a lost sentinel costs one extra write. */
 function sentinelPath(agent: AgentId, version: string): string {
   const key = `${agent}@${version}`.replace(/[^a-zA-Z0-9@._-]/g, '_');
   return path.join(getCacheDir(), 'system-run-sync', `${key}.json`);
@@ -70,15 +50,10 @@ function namesWithMarker(dir: string, marker: string): Map<string, string> {
 }
 
 interface SystemRunSyncResult {
-  /** Names rewritten per kind; empty when the sentinel matched (skip-fast). */
   skills: string[];
   subagents: string[];
 }
 
-/**
- * Refresh the system layer's skills and subagents into the version home when
- * their source directories changed since the last run for (agent, version).
- */
 export function applySystemResourcesAtRun(
   agent: AgentId,
   version: string,
@@ -101,8 +76,6 @@ export function applySystemResourcesAtRun(
     const writer = getWriter(kind, agent);
     if (!writer) continue;
     const sources = namesWithMarker(dir, marker);
-    // The active resource profile is the per-client scoping seam (a brand pins
-    // one); it filters every kind here exactly as `syncResourcesToVersion` does.
     const names = filterNamesForActiveResourceProfile(kind, Array.from(sources.keys()), sources);
     if (names.length === 0) {
       next[kind] = { dir, files: fingerprintDir(dir) };
@@ -112,11 +85,9 @@ export function applySystemResourcesAtRun(
     try {
       written = writer.write({ version, versionHome, selection: names, cwd: '' });
     } catch {
-      continue; // leave the sentinel stale so the next run retries
+      continue;
     }
     result[kind] = written.synced;
-    // A per-name failure (an AGENT.md that does not parse) also leaves the
-    // sentinel stale: the next run retries instead of never seeing it again.
     if (written.errors?.length) continue;
     next[kind] = { dir, files: fingerprintDir(dir) };
   }
