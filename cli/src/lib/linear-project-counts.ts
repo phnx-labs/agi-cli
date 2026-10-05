@@ -32,104 +32,48 @@ import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeC
 import { reserveLinearRequest } from './linear-rate-limit.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
-/** Overall budget across all pages — the card must never hang on Linear. */
 const TIMEOUT_MS = 8_000;
 const PAGE_SIZE = 250;
-/** Hard page cap so a pathological project can't page forever within the budget. */
 const MAX_PAGES = 10;
 
-/**
- * The next checkpoint the project is working toward: the earliest-dated
- * milestone that still has unfinished issues. A percentage says how far along
- * the project is; this says what it is due to hit next.
- */
 export interface LinearMilestone {
   name: string;
-  /** `YYYY-MM-DD` as Linear stores it. Absent when the milestone has no date. */
   targetDate?: string;
-  /** Issues in this milestone in a `completed`-type state. */
   done: number;
-  /**
-   * Issues assigned to this milestone. Legitimately `0` — a milestone can be
-   * declared with a date long before any issue is filed under it (that is the
-   * state of every milestone in this repo's own Linear project), and such a
-   * milestone is still the next checkpoint. The card omits the fraction rather
-   * than printing a meaningless `0/0`.
-   */
   total: number;
-  /** True when Linear itself flags this as the project's next milestone. */
   isNext?: boolean;
 }
 
-/** A milestone as the project declares it, independent of any issue. */
 export interface LinearMilestoneNode {
   id?: string;
   name?: string;
   targetDate?: string | null;
-  /**
-   * Linear's own marker. Observed values: `"next"` (it flags exactly one) and
-   * `"unstarted"`. Treated as an opaque string and only compared to `"next"` —
-   * the enum is not documented as closed, so switching exhaustively on it would
-   * break the day Linear adds a value.
-   */
   status?: string | null;
 }
 
-/** The counts the card renders. `total` counts every issue in the project. */
 export interface LinearProjectCounts {
-  /** Issues in a `completed`-type state. */
   done: number;
-  /** All issues in the project (any state type, including canceled). */
   total: number;
-  /** Issues in a `started`-type state. */
   inProgress: number;
-  /**
-   * True when the page cap cut the fetch short — `total` is then a LOWER
-   * bound (rendered `2500+`), never presented as the complete count.
-   */
   truncated?: boolean;
-  /**
-   * True when this answer came from the cache after a failed or skipped fetch.
-   * The card labels it rather than dropping the line — a populated Linear row
-   * that silently vanishes on one timeout is the defect this replaces.
-   */
   stale?: boolean;
-  /**
-   * Every milestone the project declares, in the order the card shows them:
-   * unfinished first by target date, then the finished ones. A project with
-   * three checkpoints has three; showing only the next one hides the shape of
-   * the plan, which is what `projects view` exists to show.
-   */
   milestones?: LinearMilestone[];
-  /**
-   * The one the project is working toward — `milestones[0]` when there is an
-   * unfinished one. Kept as its own field because the compact card shows only
-   * this, while `view` shows the whole list.
-   */
   nextMilestone?: LinearMilestone;
 }
 
-/** One issue node as the query selects it. */
 export interface LinearIssueNode {
   state?: { type?: string } | null;
   projectMilestone?: { id?: string; name?: string; targetDate?: string | null } | null;
 }
 
-/** The GraphQL response shape this module consumes (recorded for the tests). */
 export interface LinearIssuesResponse {
   issues?: {
     nodes?: LinearIssueNode[];
     pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
   };
-  /** Only the FIRST page asks for this — the milestone list does not paginate. */
   project?: { projectMilestones?: { nodes?: LinearMilestoneNode[] } } | null;
 }
 
-/**
- * Pure mapping: a Linear issues response → card counts, grouping by state
- * type. Defensive at the boundary — a missing `issues`/`nodes` yields zeros,
- * an issue with no state still counts toward `total`.
- */
 export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProjectCounts {
   const nodes = data.issues?.nodes ?? [];
   let done = 0;
@@ -148,25 +92,10 @@ export function countsFromIssuesResponse(data: LinearIssuesResponse): LinearProj
   return counts;
 }
 
-/**
- * Pick the milestone the project is working toward next.
- *
- * The **declared** list is authoritative for which milestones exist, their
- * names, and their dates; issues only supply progress. Deriving the list from
- * issues instead looks tempting (it costs no extra request) and is wrong: a
- * milestone with nothing filed under it yet would be invisible, and that is the
- * common case — every milestone in this repo's own Linear project has zero
- * issues assigned, so an issue-derived list showed nothing at all.
- *
- * Next = the earliest-dated milestone that is not finished. A milestone with no
- * issues counts as unfinished (it is upcoming work, not completed work). Undated
- * milestones sort last, ties break by declaration order, so the answer is stable.
- */
 export function orderedMilestones(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
 ): LinearMilestone[] {
-  // Progress per milestone id, from whatever issues do carry one.
   const progress = new Map<string, { done: number; total: number }>();
   for (const n of nodes) {
     const id = n?.projectMilestone?.id;
@@ -186,11 +115,8 @@ export function orderedMilestones(
       return m;
     })
     .filter((m): m is LinearMilestone & { order: number } => m !== undefined);
-  // total 0 means "declared, nothing filed yet" — unfinished, not done.
   const open = (m: LinearMilestone) => m.total === 0 || m.done < m.total;
   all.sort((a, b) => {
-    // Unfinished before finished: what is still ahead is what a reader is
-    // scanning for.
     if (open(a) !== open(b)) return open(a) ? -1 : 1;
     if (a.targetDate && b.targetDate) return a.targetDate < b.targetDate ? -1 : a.targetDate > b.targetDate ? 1 : a.order - b.order;
     if (a.targetDate) return -1;
@@ -200,14 +126,6 @@ export function orderedMilestones(
   return all.map(({ order: _order, ...m }) => m);
 }
 
-/**
- * The milestone the project is working toward next.
- *
- * Linear flags one itself (`status: "next"`), and that is the answer the user
- * sees in Linear's own UI, so it wins when present. Only when nothing is
- * flagged does this fall back to "earliest-dated unfinished", which is a
- * reasonable guess but still a guess.
- */
 export function nextMilestone(
   declared: LinearMilestoneNode[],
   nodes: LinearIssueNode[],
@@ -217,7 +135,6 @@ export function nextMilestone(
   return open.find((m) => m.isNext) ?? open[0];
 }
 
-/** $LINEAR_API_KEY → macOS Keychain → ~/.linear-cli/config.json. Null if none. */
 function resolveApiKey(): string | null {
   const fromChain = resolveLinearApiKey();
   if (fromChain) return fromChain;
@@ -231,47 +148,29 @@ function resolveApiKey(): string | null {
   }
 }
 
-/**
- * Fetch issue counts for one Linear project, paging `issues` filtered by
- * project id. One shared AbortController bounds the WHOLE paged fetch at ~8s;
- * any failure (no key, network, API error, abort) returns undefined so the
- * card just omits the line. `fetchPage` is injectable for tests — the
- * accumulator (cursor hand-off, cap) is the risky logic, not the HTTP.
- */
 export async function fetchLinearProjectCounts(
   projectId: string,
   fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
   nowMs: number = Date.now(),
 ): Promise<LinearProjectCounts | undefined> {
-  // Requests are the scarce budget (2500/hr; complexity is untouched), and this
-  // pages up to 10 of them per project per call. Serve a fresh snapshot without
-  // spending any.
   const cached = readCached<LinearProjectCounts>(projectId, nowMs);
   if (cached && !cached.stale) return cached.value;
-  // A prior 429 said there is nothing left to spend — don't spend one finding
-  // that out again. Fall through to the stale snapshot rather than no line.
   if (isRateLimited(nowMs)) return cached ? { ...cached.value, stale: true } : undefined;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   try {
     const all: LinearIssueNode[] = [];
-    // Declared on the project, not on its issues — only page 0 asks for it.
     let declared: LinearMilestoneNode[] = [];
     let after: string | undefined;
     let truncated = false;
     for (let page = 0; ; page++) {
       const data = await fetchPage(projectId, after, ctrl.signal);
-      // A failed fetch keeps the last good answer on screen, marked stale,
-      // instead of the line vanishing. One 8s timeout must not blank a chip
-      // that was populated a minute ago — the rule `mergeAuthHealthEntries`
-      // already encodes for account health.
       if (!data) return cached ? { ...cached.value, stale: true } : undefined;
       if (page === 0) declared = data.project?.projectMilestones?.nodes ?? [];
       all.push(...(data.issues?.nodes ?? []));
       const pi = data.issues?.pageInfo;
       if (!pi?.hasNextPage || !pi.endCursor) break;
       if (page + 1 >= MAX_PAGES) {
-        // The cap cut the fetch short — total is a lower bound, say so.
         truncated = true;
         break;
       }
@@ -293,7 +192,6 @@ export async function fetchLinearProjectCounts(
   }
 }
 
-/** One real GraphQL page; undefined on any HTTP/API-level failure. */
 async function fetchLinearIssuesPage(
   projectId: string,
   after: string | undefined,
@@ -301,15 +199,7 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
-  // Proactive shared budget (PHNX-2310): every agent on this key spends from one
-  // hourly pool, so N concurrent drains can't collectively blow Linear's 2500/hr
-  // limit. When the pool is spent, skip the request — the accumulator serves the
-  // last good (stale) snapshot instead, exactly as it does on any other failure.
-  // This is the proactive complement to the reactive 429 backoff below.
   if (!reserveLinearRequest(apiKey)) return undefined;
-  // The declared-milestone list rides along on the FIRST page only — it does
-  // not paginate, and re-requesting it per page would spend up to MAX_PAGES
-  // copies of the same answer.
   const issuesSelection =
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
     PAGE_SIZE +
@@ -330,9 +220,6 @@ async function fetchLinearIssuesPage(
     signal,
   });
   if (res.status === 429) {
-    // Record when the budget refills so later runs skip the call entirely
-    // rather than spending one of the zero remaining requests to be told so.
-    // The header is epoch milliseconds; absent or unparseable, back off a TTL.
     const now = Date.now();
     noteRateLimited(parseRateLimitReset(res.headers.get('x-ratelimit-requests-reset'), now), now);
     return undefined;

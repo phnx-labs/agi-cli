@@ -1,23 +1,3 @@
-/**
- * Unified sync-status engine — the SINGLE source of truth for "is this resource
- * synced to this agent version?" consumed by `agents doctor`, `agents view`, the
- * menu-bar app, and any Agency surface.
- *
- * Why this exists: before this module there were four different notions of
- * "synced" living in four files:
- *   - doctor:  isStale() vs .sync-manifest.json  — catches SOURCE drift only.
- *   - view:    git working-tree state of ~/.agents/ — a resource can show green
- *              while its installed copy is stale/deleted/corrupted (false positive).
- *   - lists:   file-exists-in-home — never reports content drift at all.
- *   - menubar: read doctor --json (so it inherited doctor's source-only blind spot).
- *
- * The reliable signal is diffVersionResources() (src/lib/doctor-diff.ts): it reads
- * the ACTUAL version home and compares it to the resolved sources, so it catches
- * every drift class — source-side changes AND home-side rot (deleted / corrupted /
- * hand-edited installed copies) AND orphans. This module wraps it once, maps its
- * per-resource DiffStatus onto one stable enum, folds in `.system` repo freshness,
- * and lets every surface render the same warnings instead of re-deriving them.
- */
 
 import simpleGit from 'simple-git';
 import { AgentId } from './types.js';
@@ -36,13 +16,6 @@ import * as fs from 'fs';
 import { isGitRepo, readOriginUrl } from './git.js';
 import { detectConfigDrift, type ConfigDrift } from './config-drift.js';
 
-/**
- * One stable status per resource, unified across every surface.
- *  - `synced`  — installed copy matches the resolved source (DiffStatus 'ok').
- *  - `drifted` — installed copy exists but differs from source (DiffStatus 'diff').
- *  - `missing` — source exists, nothing installed in the version home ('missing').
- *  - `orphan`  — installed in the home with no source ('extra'); prune's job, not sync's.
- */
 type ResourceSyncStatus = 'synced' | 'drifted' | 'missing' | 'orphan';
 
 export interface ResourceStatusRow {
@@ -51,7 +24,6 @@ export interface ResourceStatusRow {
   kind: DoctorKind;
   name: string;
   status: ResourceSyncStatus;
-  /** Human-readable specifics for a drifted row (e.g. plugin version delta). */
   detail?: string;
 }
 
@@ -59,76 +31,46 @@ export interface AgentVersionStatus {
   agent: AgentId;
   version: string;
   isDefault: boolean;
-  /** False = no .sync-manifest.json: this version was never synced (cold). */
   everSynced: boolean;
   counts: { synced: number; drifted: number; missing: number; orphan: number };
-  /** drifted + missing > 0 — a real reconcile is owed. Orphans do NOT set this
-   * (heal never deletes; orphan removal is `agents prune cleanup`). */
   needsSync: boolean;
   resources: ResourceStatusRow[];
 }
 
 export interface SystemRepoStatus {
   dir: string;
-  /** Commits the local `.system` checkout is behind its tracking branch, as of
-   * the last background fetch (no network is performed here). 0 = up to date. */
   behind: number;
   ahead: number;
   branch: string | null;
-  /** True when the dir isn't a git repo or has no upstream — behind is unknown. */
   unknown: boolean;
 }
 
 export interface UserRepoStatus {
   dir: string;
-  /**
-   * True when `~/.agents` exists but is not a git repo (or is a repo with no
-   * `origin`) — a partial install `agents repo sync user` will adopt in place
-   * (PHNX-3301). A DISTINCT drift state, not a per-agent "N missing" count.
-   */
   notGitRepo: boolean;
 }
 
 export interface UnifiedSyncStatus {
   system: SystemRepoStatus;
   user: UserRepoStatus;
-  /** Config drift: has this box drained its device-scoped state, or is it still
-   *  carrying per-box state in the shared top-level agents.yaml? (PHNX-3315) */
   config: ConfigDrift;
   agents: AgentVersionStatus[];
   totals: {
     drifted: number;
     missing: number;
     orphan: number;
-    /** Versions with a manifest that are behind on content. */
     versionsNeedingSync: number;
-    /** Versions that were never synced at all. */
     versionsNeverSynced: number;
-    /** Distinct agent ids that own at least one version needing sync. */
     agentsNeedingSync: number;
   };
 }
 
-/**
- * Residual drift for a single (agent, version) after a reconcile — the drifted
- * and missing rows that a sync claimed to fix but did not. `orphan` rows are
- * deliberately excluded: sync never removes them (that is `agents prune`'s job),
- * so they are not "unfinished sync". Empty `drifted`+`missing` ⇒ converged.
- */
 export interface ResidualDrift {
   agent: AgentId;
   version: string;
   rows: ResourceStatusRow[];
 }
 
-/**
- * Re-check that a version's home now matches its resolved sources after a
- * reconcile. This is the post-write verification the `agents sync` success line
- * depends on (PHNX-3186): the exit line must not read "reconciled" while drift
- * it was asked to fix stays put. Resolves against non-project layers only
- * (`excludeProject: true`), mirroring what the sync writer targets. Returns null
- * when the version converged (no drifted/missing), else the residual rows.
- */
 export function verifyVersionConverged(
   agent: AgentId,
   version: string,
@@ -141,7 +83,6 @@ export function verifyVersionConverged(
   return { agent, version, rows };
 }
 
-/** One-line-per-resource description of residual drift, for the sync exit line. */
 export function formatResidualDrift(residual: ResidualDrift[]): string[] {
   const lines: string[] = [];
   for (const r of residual) {
@@ -153,11 +94,6 @@ export function formatResidualDrift(residual: ResidualDrift[]): string[] {
   return lines;
 }
 
-/**
- * The rows behind a "N drifted" count, one line each, for the human renderers.
- * A count alone cannot be acted on; the name says which skill or hook to look
- * at, and `detail` says what differs when the differ knows.
- */
 export function formatDriftRows(v: AgentVersionStatus): string[] {
   return v.resources
     .filter((r) => r.status === 'drifted' || r.status === 'missing')
@@ -195,18 +131,10 @@ function rowsFromReport(
 
 interface SyncStatusOptions {
   cwd?: string;
-  /** Restrict to specific agent ids; undefined = every supported agent. */
   agents?: AgentId[];
-  /** Restrict to specific resource kinds; undefined = all. */
   kinds?: DoctorKind[];
 }
 
-/**
- * Read `.system` repo freshness WITHOUT touching the network. `git status`
- * reports ahead/behind against the remote-tracking ref, which the detached
- * auto-pull worker keeps warm via periodic `git fetch`. This is the same number
- * the menu-bar surfaces; we read it once, here, so every surface agrees.
- */
 async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
   const dir = getSystemAgentsDir();
   const base: SystemRepoStatus = { dir, behind: 0, ahead: 0, branch: null, unknown: true };
@@ -218,7 +146,6 @@ async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
       behind: status.behind ?? 0,
       ahead: status.ahead ?? 0,
       branch: status.tracking ?? status.current ?? null,
-      // Without a tracking branch there's no upstream to compare against.
       unknown: !status.tracking,
     };
   } catch {
@@ -226,27 +153,13 @@ async function getSystemRepoStatus(): Promise<SystemRepoStatus> {
   }
 }
 
-/**
- * Detect whether `~/.agents` (the user config layer) is git-backed. A partial
- * install — runtime state present but no `.git` (or no `origin`) — is a distinct
- * drift state that `agents repo sync user` heals by adopting in place (PHNX-3301),
- * surfaced separately from per-version resource gaps. Purely local; no network.
- */
 async function getUserRepoStatus(): Promise<UserRepoStatus> {
   const dir = getUserAgentsDir();
   if (!fs.existsSync(dir)) return { dir, notGitRepo: false };
   if (!isGitRepo(dir)) return { dir, notGitRepo: true };
-  // A repo with no `origin` is just as partial for adopt's purposes — reuse the
-  // single origin-URL reader rather than a second remote check.
   return { dir, notGitRepo: readOriginUrl(dir) === null };
 }
 
-/**
- * Compute unified sync status across the fleet. Resolves against non-project
- * layers only (`excludeProject: true`) — the GLOBAL version home is never
- * reconciled against per-cwd `<cwd>/.agents/` resources, so counting them as
- * "missing" there would be a false gap (matches doctor's overview semantics).
- */
 export async function computeSyncStatus(
   options: SyncStatusOptions = {},
 ): Promise<UnifiedSyncStatus> {
