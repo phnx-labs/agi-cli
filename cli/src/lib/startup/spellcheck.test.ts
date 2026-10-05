@@ -1,6 +1,3 @@
-/**
- * Pure spellcheck for unknown top-level commands (RUSH-2329).
- */
 import { describe, expect, it } from 'vitest';
 import { closestTopLevelCommand, levenshtein } from './spellcheck.js';
 import { KNOWN_TOP_LEVEL_COMMANDS } from './command-registry.js';
@@ -31,7 +28,6 @@ describe('closestTopLevelCommand', () => {
   });
 
   it('preserves first-seen order on distance ties', () => {
-    // Both "ab" and "ac" are distance 1 from "aa"; the first in candidate order wins.
     const { closest, minDist } = closestTopLevelCommand('aa', ['ab', 'ac', 'zz']);
     expect(minDist).toBe(1);
     expect(closest).toBe('ab');

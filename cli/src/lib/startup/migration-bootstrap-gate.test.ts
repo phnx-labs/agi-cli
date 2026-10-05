@@ -1,11 +1,3 @@
-/**
- * RUSH-2454: --help/--version must not load migrate.js (hosts/routine graph).
- *
- * Spawns the real CLI entry under a Node custom loader that records every
- * resolved module URL. Asserts the documentation paths never resolve
- * migrate.ts/migrate.js, while a non-docs command with a missing sentinel
- * does (proving the loader sees loads, not that the gate is a no-op).
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -42,9 +34,6 @@ export async function resolve(specifier, context, nextResolve) {
 }
 `,
   );
-  // Embed absolute file:// URLs — on Windows a bare C:\… path is not a valid
-  // ESM specifier (ERR_UNSUPPORTED_ESM_URL_SCHEME), and pathToFileURL('./')
-  // would resolve against process.cwd() rather than this scratch dir.
   const hooksUrl = pathToFileURL(hooks).href;
   const parentUrl = pathToFileURL(dir + path.sep).href;
   fs.writeFileSync(
@@ -61,9 +50,6 @@ function runCli(args: string[], env: NodeJS.ProcessEnv, loader: string): {
   stdout: string;
   stderr: string;
 } {
-  // On Windows, bare absolute paths are not valid ESM URLs for `--import`
-  // (`c:` is not a scheme → ERR_UNSUPPORTED_ESM_URL_SCHEME). The entry script
-  // still takes a native path (a file:// entry is re-resolved relative to cwd).
   const result = spawnSync(
     process.execPath,
     ['--import', pathToFileURL(loader).href, '--import', 'tsx', INDEX, ...args],
@@ -88,11 +74,6 @@ function loadedMigrateStrict(logPath: string): { migrate: boolean; fold: boolean
   let migrate = false;
   let fold = false;
   for (const line of lines) {
-    // RUSH-2454's target is the INSTALLATIONS migrate — the hosts/routine graph
-    // folded at bootstrap. Match only `lib/installations/migrate.ts|js` (not
-    // migrate-fold/migrate-targets, and NOT `lib/accounts/migrate.ts`, which is
-    // the separate PHNX-3940 account-slot migration a signin-badge render legitimately
-    // pulls in when an account exists — a false positive this gate never meant to catch).
     if (/\/migrate-fold\.(ts|js)/.test(line)) fold = true;
     else if (/\/installations\/migrate\.(ts|js)(\?|#|$)/.test(line)) migrate = true;
   }
@@ -106,7 +87,6 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
     const home = path.join(scratch, 'home');
     fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
-    // Plant a missing sentinel + legacy dir that WOULD fold if the path ran.
     fs.mkdirSync(path.join(home, '.agents-system', 'hooks'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents-system', 'hooks', 'x.sh'), 'x');
 
@@ -114,8 +94,6 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
       ...process.env,
       HOME: home,
       USERPROFILE: home,
-      // Force non-dev so the gate under test is the helpOrVersion one, not
-      // the AGENTS_SKIP_MIGRATION default that detectDevBuild sets.
       AGENTS_SKIP_MIGRATION: '0',
       AGENTS_NO_AUTOPULL: '1',
       AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
@@ -129,7 +107,6 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
     const loads = loadedMigrateStrict(log);
     expect(loads.migrate, `migrate.js must not load on --version; log:\n${loads.raw.slice(0, 2000)}`).toBe(false);
     expect(loads.fold, `migrate-fold.js must not load on --version; log:\n${loads.raw.slice(0, 2000)}`).toBe(false);
-    // Legacy dir must be untouched — proof the fold hop did not run.
     expect(fs.lstatSync(path.join(home, '.agents-system')).isDirectory()).toBe(true);
     expect(fs.existsSync(path.join(home, '.agents', '.system'))).toBe(false);
   });
@@ -165,22 +142,12 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
     const { loader, log } = writeLoader(scratch);
     const home = path.join(scratch, 'home');
     fs.mkdirSync(path.join(home, '.agents', '.system'), { recursive: true });
-    // ensureInitialized needs a .git in the system dir for non-setup commands;
-    // use a command that is SETUP_EXEMPT or skip init — `uninstall --help` is
-    // still help. Use `events --help`? That's help gated.
-    //
-    // `agents doctor` goes through ensureInitialized. Plant a minimal system
-    // repo so ensureInitialized does not exit hard.
     fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
     fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
-    // No v19 sentinel → needRun true → import migrate.js
-    // Plant legacy dir so fold has work (via runMigration's first step too).
     const legacy = path.join(home, '.agents-system');
-    // legacy as real dir would merge into existing .system
     fs.mkdirSync(path.join(legacy, 'extra'), { recursive: true });
     fs.writeFileSync(path.join(legacy, 'extra', 'f.txt'), '1');
 
-    // `view` is a light eager command; may still need system repo. doctor is fine.
     const result = runCli(['doctor', '--json'], {
       ...process.env,
       HOME: home,
@@ -192,13 +159,11 @@ describe('migration bootstrap gate (RUSH-2454)', () => {
       NODE_NO_WARNINGS: '1',
     }, loader);
 
-    // doctor may exit non-zero on a sparse fixture; we only care that migrate loaded.
     const loads = loadedMigrateStrict(log);
     expect(
       loads.migrate || loads.fold,
       `expected migrate or fold to load on real command; status=${result.status} stderr=${result.stderr.slice(0, 500)}\nlog:\n${loads.raw.slice(0, 2000)}`,
     ).toBe(true);
-    // With missing sentinel, migrate.js itself must load (runMigration path).
     expect(loads.migrate, `migrate.js must load when sentinel missing; log:\n${loads.raw.slice(0, 2000)}`).toBe(true);
   });
 });
