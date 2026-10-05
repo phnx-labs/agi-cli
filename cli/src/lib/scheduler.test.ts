@@ -22,6 +22,7 @@ describe('JobScheduler.reloadAll — device activation refresh', () => {
     vi.spyOn(activation, 'routineEnabledOnThisDevice').mockImplementation(() => active);
   });
 
+  // This suite writes real ~/.agents; remove its deterministic device directory so test state cannot leak into the operator's tracked configuration.
   afterEach(() => {
     vi.restoreAllMocks();
     try { deleteJob(name); } catch {  }
