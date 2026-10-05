@@ -403,3 +403,7 @@ testless:
   - cli/LICENSE
   - cli/CLAUDE.md
   - cli/GEMINI.md
+  # CI-runner box supervisor: every action (systemctl restart, runner
+  # re-registration, server reaping) hits live infra over SSH and the Hetzner
+  # API, so there is nothing hermetic to test here.
+  - scripts/ci-runner/supervise.sh
