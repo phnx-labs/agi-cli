@@ -5,7 +5,6 @@ import * as path from 'path';
 
 import { cachedViewer, emailDigest, parseViewer, viewerCachePath, VIEWER_FRESH_MS, VIEWER_RETRY_MS } from './viewer.js';
 
-/** Real `gh api users/octocat --jq '{login, avatar_url, name, email}'` output. */
 const RECORDED = fs.readFileSync(new URL('./testdata/gh-api-user.json', import.meta.url), 'utf-8');
 const OCTOCAT = {
   login: 'octocat',
@@ -27,7 +26,6 @@ function tmp(): string {
   return d;
 }
 
-/** Replays the recorded REST answer (or a failure) and counts the spawns. */
 function replay(answer: string | Error) {
   let calls = 0;
   const gh = async (args: string[]) => {

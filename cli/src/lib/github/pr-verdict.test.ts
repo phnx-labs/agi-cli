@@ -1,15 +1,3 @@
-/**
- * Tests for the merge-on-green selector.
- *
- * Fixtures are shaped after live GitHub payloads captured 2026-08-20:
- *   - PR #2847 (phnx-labs/agi-cli): reviewDecision empty, reviews [], one
- *     issue comment starting `**Non-author review verdict: APPROVE**`, CI green.
- *   - PR #2849: no reviews, no comments, so unapproved.
- *   - merge-guard.sh's carried-from fixtures (#2736 laundering).
- *
- * No network: the selector is pure over those shapes. The poll that *fetches*
- * them lives in pr-mergeable.ts.
- */
 
 import { describe, expect, it } from 'vitest';
 import {
@@ -36,11 +24,9 @@ const RED: StatusCheck[] = [
   { conclusion: 'FAILURE', status: 'COMPLETED' },
 ];
 
-/** Live #2847 comment body (truncated to the verdict line + one paragraph). */
 const APPROVE_COMMENT_2847 =
   '**Non-author review verdict: APPROVE**\n\nIndependent subagent review (checked out the branch, ran `git diff origin/main...HEAD`).';
 
-/** Live #2802 comment: a bare APPROVE line, also a fleet-convention verdict. */
 const APPROVE_COMMENT_2802 =
   'APPROVE\n\nNon-author review (subagent-based, this repo\'s automated `prix/code-reviewer` is paused per #1767).';
 

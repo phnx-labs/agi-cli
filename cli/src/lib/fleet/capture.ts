@@ -1,18 +1,3 @@
-/**
- * Serialize the live environment into a `fleet:` manifest.
- *
- * `captureFleet` is PURE — it takes the previous manifest plus already-gathered
- * inputs (device names, per-device agent specs, browser profiles, secret-bundle
- * names, routine names) and returns the new manifest. All I/O (registry read,
- * `agents secrets`/`routines` enumeration, YAML write) happens in the command
- * (`commands/fleet-capture.ts`); keeping this pure makes the privacy contract —
- * NAMES ONLY, never IPs/usernames — trivially unit-testable.
- *
- * Additive by design: it merges OVER an existing manifest and never clobbers a
- * hand-authored per-device override (`agents:` you set by hand wins over a
- * captured one). The captured roster reflects live state, so it becomes the
- * source of truth for WHICH devices exist.
- */
 
 import type {
   FleetManifest,
@@ -21,42 +6,23 @@ import type {
 } from './types.js';
 
 export interface CaptureInputs {
-  /** Registered device names to record (the roster — names only). */
   devices: string[];
-  /** Optional per-device agent specs (e.g. from `--from-pins`), keyed by name. */
   agentsByDevice?: Record<string, string[]>;
-  /** Fleet defaults to seed when the manifest has none (source's own agents). */
   defaults?: FleetDefaults;
-  /** Secrets-bundle NAMES to ensure exist (values stay in the keychain). */
   secretsBundles?: string[];
-  /** Routine NAMES that should be active on the fleet. */
   routines?: string[];
 }
 
-/**
- * Build the new `fleet:` manifest from the previous one and captured inputs.
- * Pure — no SSH, no filesystem, no registry. The returned object carries device
- * names + desired state only; a caller that serializes it to YAML can assert no
- * address/username ever appears.
- */
+// Capture serializes device names only; addresses and usernames never enter the manifest.
 export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInputs): FleetManifest {
   const prevDevices = prev && prev.devices !== 'all' && typeof prev.devices === 'object'
     ? prev.devices
     : {};
 
-  // Roster: explicit map of the captured names. A hand-authored override for a
-  // device that still exists is preserved; a captured agent list only fills in
-  // when the manifest didn't already pin one for that device.
-  //
-  // A device absent from `inputs.devices` drops OUT of the roster — that is the
-  // intended "live state is the source of truth for WHICH devices exist". A
-  // leftover `config:` on an override is the LEGACY #2458 store (folded into
-  // per-device docs by migrateDeviceConfigStores). Carry it forward so a
-  // capture from a box that has not seen a peer cannot re-strip a not-yet-
-  // migrated peer's settings. Config only, never its roster fields.
   const devices: Record<string, FleetDeviceOverride> = {};
+  // Preserve hand-authored config for absent peers and legacy manifests during migration.
   for (const [name, prevOverride] of Object.entries(prevDevices)) {
-    if (inputs.devices.includes(name)) continue; // handled by the roster loop below
+    if (inputs.devices.includes(name)) continue;
     const config = prevOverride?.config;
     if (config && Object.keys(config).length > 0) devices[name] = { config };
   }
@@ -71,7 +37,6 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
   }
 
   const manifest: FleetManifest = {
-    // Keep hand-authored defaults; otherwise seed from the source snapshot.
     defaults: prev?.defaults ?? inputs.defaults ?? {},
     devices,
   };
@@ -80,9 +45,7 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
     manifest.discovery = { ...prev.discovery };
   }
 
-  // Dismissals are operator state, not live state — a capture must never wipe
-  // them (fleet.ignored syncs; losing it re-suggests every dismissed node
-  // fleet-wide). Carry forward verbatim, same contract as `discovery`.
+  // Discovery dismissals are operator state, not disposable scan output.
   if (prev?.ignored && prev.ignored.length > 0) {
     manifest.ignored = prev.ignored.map((e) => ({ ...e }));
   }

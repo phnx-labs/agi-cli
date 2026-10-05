@@ -6,7 +6,6 @@ import {
   validateSummarizeResult,
 } from './summarize.js';
 
-/** A fake Anthropic /v1/messages endpoint returning the given assistant text. */
 function stubEndpoint(text: string, ok = true): { fetch: typeof fetch; calls: any[] } {
   const calls: any[] = [];
   const fetchImpl = (async (url: any, init: any) => {
@@ -96,7 +95,6 @@ describe('summarize (stubbed model endpoint)', () => {
     const stub = stubEndpoint('{"goal":"Ship it","checkpoints":["did A"],"checklist":[{"text":"B","done":false}]}');
     const r = await summarize('Ship it end to end', { phase: 'running' }, { ...OPTS, fetchImpl: stub.fetch });
     expect(r).toEqual({ goal: 'Ship it', checkpoints: ['did A'], checklist: [{ text: 'B', done: false }] });
-    // It POSTed to the configured base URL with the model + no tools.
     expect(stub.calls[0].url).toBe('http://localhost:11434/v1/messages');
     expect(stub.calls[0].body.model).toBe('qwen2.5:3b');
     expect(stub.calls[0].body.tools).toBeUndefined();
@@ -135,7 +133,7 @@ describe('summarize (stubbed model endpoint)', () => {
     }) as unknown as typeof fetch;
     try {
       await summarize('do it', {}, { ...OPTS, fetchImpl });
-      expect(calls[0].apiKey).toBe(''); // empty, not the ANTHROPIC key
+      expect(calls[0].apiKey).toBe('');
     } finally {
       if (prev === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prev;
       if (prevSumm !== undefined) process.env.AGENTS_SUMMARIZER_API_KEY = prevSumm;

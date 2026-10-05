@@ -1,15 +1,8 @@
-/** Resolve Agents permission groups and caller identities for the standalone
- * engine. The engine alone writes helper policy and peer files. */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { getUserPermissionsDir, getPermissionsDir } from '../state.js';
 
-// Walk all permission group YAMLs (user dir wins on name collision) and
-// collect Computer(<bundle-id>) patterns from each group's `allow:` list.
-// Returns distinct bundle ids. Line-by-line regex extraction matches
-// buildPermissionsFromGroups: YAML parsers stumble on the nested quotes in
-// some rule values, but the strict pattern below catches our shape cleanly.
 export function loadComputerAllowList(): string[] {
   const seenFiles = new Set<string>();
   const allowed = new Set<string>();
@@ -29,7 +22,6 @@ export function loadComputerAllowList(): string[] {
       if (!entry.isFile()) continue;
       if (!entry.name.endsWith('.yml') && !entry.name.endsWith('.yaml')) continue;
 
-      // User dir wins on filename collision.
       const stem = entry.name.replace(/\.(yaml|yml)$/, '');
       if (seenFiles.has(stem)) continue;
       seenFiles.add(stem);
@@ -42,9 +34,6 @@ export function loadComputerAllowList(): string[] {
         continue;
       }
 
-      // Strict regex: optional whitespace, dash, quoted Computer(<id>).
-      // Only honors `allow:` lines — `deny:` Computer patterns would be a
-      // contradiction (everything is deny-by-default already).
       let inAllow = false;
       for (const rawLine of content.split('\n')) {
         const line = rawLine.replace(/\r$/, '');
@@ -66,24 +55,7 @@ export function loadComputerAllowList(): string[] {
   return [...allowed].sort();
 }
 
-/**
- * Default peer set: the standalone `computer` executable, this `agents` CLI's
- * own runtime, plus Rush.app if it's installed. realpath() the symlink chain so
- * we record the on-disk path the helper will see via proc_pidpath, not the shim
- * path.
- *
- * The standalone's path is the one that changed with PHNX-4075: the daemon's
- * caller is now the engine process, not this CLI. `agents`' own execPath stays
- * on the list because the engine may be a `.js` bin run through this same
- * runtime (`invocation()` in computer-client.ts), in which case proc_pidpath
- * still reports the runtime.
- *
- * Why path-based instead of codesign-team-id? The agents CLI is unsigned
- * today (npm distribution), and even if we sign Rush.app the team-id
- * check would need a separate roundtrip. Path is concrete and fast; the
- * daemon already runs as the user so anyone who can swap a binary at
- * these paths can do worse via other means.
- */
+// Trust concrete realpaths: legitimate launchers differ, but arbitrary same-team processes stay excluded.
 export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] {
   const out = new Set<string>();
   const add = (p: string) => {
@@ -94,16 +66,10 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
     }
   };
 
-  // The standalone engine — the process that actually opens the socket now.
   if (opts.computerBin) add(opts.computerBin);
 
-  // The runtime currently running this CLI. Still a possible proc_pidpath when
-  // the engine is a .js bin executed through it.
   if (process.execPath) add(process.execPath);
 
-  // Rush.app — the consumer Electron client. Both the helper-binary and
-  // the main app binary are possible callers depending on how Rush wires
-  // the RPC client.
   const rushCandidates = [
     '/Applications/Rush.app/Contents/MacOS/Rush',
     '/Applications/Rush.app/Contents/MacOS/Electron',
@@ -115,14 +81,6 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
   return [...out].sort();
 }
 
-/**
- * Parse a `host:port` VNC endpoint, defaulting the port to 5901. Pure.
- *
- * Kept on the consumer side because the `--vnc` FLAG is parsed here — the
- * platform gate has to know whether a remote desktop was named before the
- * engine is ever spawned (see `shouldBlockOffPlatform`). The RFB protocol
- * implementation itself went to the engine.
- */
 function parseVncEndpoint(raw: string | undefined): { host: string; port: number } | null {
   if (!raw || raw.length === 0) return null;
   const idx = raw.lastIndexOf(':');
@@ -133,11 +91,6 @@ function parseVncEndpoint(raw: string | undefined): { host: string; port: number
   return { host: host || '127.0.0.1', port };
 }
 
-// Resolve the TCP endpoint for a remote daemon (the Windows helper), if
-// configured. That helper binds loopback TCP and is reached over an `ssh -L`
-// tunnel, so the endpoint is a local forwarded port. COMPUTER_HELPER_TCP is
-// "host:port" (host defaults to 127.0.0.1); COMPUTER_HELPER_TOKEN is the shared
-// secret sent in the first `auth` frame.
 export function resolveTcpEndpoint(): { host: string; port: number; token: string | null } | null {
   const raw = process.env.COMPUTER_HELPER_TCP;
   if (!raw || raw.length === 0) return null;
@@ -148,11 +101,6 @@ export function resolveTcpEndpoint(): { host: string; port: number; token: strin
   return { host: hostPart || '127.0.0.1', port, token: token && token.length > 0 ? token : null };
 }
 
-// Resolve the VNC/RFB endpoint for driving a remote GUI desktop over the RFB
-// protocol (an x11vnc/Xvnc server — e.g. a headless Linux desktop or an LXD
-// container exposing x11vnc on the host's Tailscale IP). COMPUTER_HELPER_VNC is
-// "host:port" (port defaults to 5901); COMPUTER_HELPER_VNC_PASSWORD is the VNC
-// password.
 export function resolveVncEndpoint(): { host: string; port: number; password: string } | null {
   const parsed = parseVncEndpoint(process.env.COMPUTER_HELPER_VNC);
   if (!parsed) return null;

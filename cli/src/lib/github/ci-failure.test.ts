@@ -5,9 +5,6 @@ import { actionsIds, excerptFromLog, EXCERPT_LIMIT, readCiFailure, rerunFailedJo
 
 const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdata', name), 'utf-8');
 
-// Recorded from phnx-labs/agi-cli main at 4b709a7 (2026-10-04), after a re-run of
-// the failed jobs: every check green except `windows`, whose job log is
-// actions-job-windows.txt. The check runs and status are in rollupForSha's shape.
 const SHA = '4b709a7e5c7026f4dcc56336235180386a992b03';
 const REPO = 'phnx-labs/agi-cli';
 const WINDOWS_EXCERPT = [
@@ -21,7 +18,6 @@ const WINDOWS_EXCERPT = [
   'Process completed with exit code 1.',
 ];
 
-/** A gh runner answering from recorded payloads, keyed by the REST path; records what was asked. */
 function recordedGh(routes: Record<string, string | Error>) {
   const asked: string[][] = [];
   const gh = async (args: string[]) => {
@@ -35,15 +31,12 @@ function recordedGh(routes: Record<string, string | Error>) {
   return { gh, asked };
 }
 
-/** gh's failure as execFile reports it: the message GitHub returned is on stderr. */
 const ghError = (stderr: string) => Object.assign(new Error('Command failed: gh'), { stderr });
 
 describe('excerptFromLog', () => {
   it('keeps the error lines of a real failed job and none of the runner setup or cleanup', () => {
     const excerpt = excerptFromLog(testdata('actions-job-windows.txt'));
     expect(excerpt).toEqual(WINDOWS_EXCERPT);
-    // The recorded log mentions credentials and $ErrorActionPreference in the
-    // checkout and its cleanup; neither is the failure.
     expect(excerpt.join('\n')).not.toMatch(/includeif|ErrorActionPreference|\x1b|^\d{4}-\d\d-\d\dT/m);
   });
 
@@ -104,7 +97,6 @@ describe('readCiFailure', () => {
         excerptError: null,
       }],
     });
-    // gh refuses to print a log carrying escape sequences unless allowed to.
     expect(asked.find((a) => a.includes(`repos/${REPO}/actions/jobs/111568802006/logs`))).toContain('--allow-escape-sequences');
   });
 

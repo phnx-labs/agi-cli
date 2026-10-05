@@ -32,31 +32,20 @@ describe('getModelPricing normalization', () => {
   });
 
   it('prices the Claude 5 line, which cannot fall back to Claude 4', () => {
-    // Regression guard: matching is dash-bounded, so `claude-opus-5` does NOT match the
-    // `claude-opus-4` key. Before these entries existed it returned null and 478 real
-    // sessions priced to $0 — silently, because an unpriced model contributes nothing
-    // rather than erroring.
     const opus5 = getModelPricing('claude-opus-5');
     expect(opus5).not.toBeNull();
-    expect(opus5!.inputPerToken).toBe(0.000005);   // $5 / MTok
-    expect(opus5!.outputPerToken).toBe(0.000025);  // $25 / MTok
+    expect(opus5!.inputPerToken).toBe(0.000005);
+    expect(opus5!.outputPerToken).toBe(0.000025);
 
     const sonnet5 = getModelPricing('claude-sonnet-5');
     expect(sonnet5).not.toBeNull();
-    expect(sonnet5!.inputPerToken).toBe(0.000002);  // $2 / MTok — introductory, ends 2026-08-31
-    expect(sonnet5!.outputPerToken).toBe(0.00001);  // $10 / MTok
+    expect(sonnet5!.inputPerToken).toBe(0.000002);
+    expect(sonnet5!.outputPerToken).toBe(0.00001);
 
-    // Distinct from the Claude 4 rates, so a silent fallback would be caught.
     expect(sonnet5!.inputPerToken).not.toBe(getModelPricing('claude-sonnet-4')!.inputPerToken);
   });
 
   it('keeps every Claude model family shipped to date priced', () => {
-    // The failure mode is silence: a model absent from the table prices to $0 and no
-    // command reports it. This list is maintained by hand and therefore CANNOT catch a
-    // model that ships after it was written — `getModelPricing('claude-opus-6')`
-    // returns null with this suite green. It guards against a regression that REMOVES
-    // an entry, not against a future addition. Catching the latter needs a check
-    // against the live pricing page, which this offline suite deliberately does not do.
     for (const id of [
       'claude-opus-5', 'claude-sonnet-5', 'claude-fable-5', 'claude-mythos-5',
       'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5',
@@ -71,7 +60,6 @@ describe('getModelPricing normalization', () => {
     expect(lite).not.toBeNull();
     expect(flash).not.toBeNull();
     expect(lite!.inputPerToken).not.toBe(flash!.inputPerToken);
-    // Lite is the cheaper of the two.
     expect(lite!.inputPerToken).toBeLessThan(flash!.inputPerToken);
   });
 

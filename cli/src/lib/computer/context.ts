@@ -39,21 +39,15 @@ import { resolveActor } from '../actor.js';
 import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
 
-/** A `--device <name>` target, resolved against the fleet. */
 export interface ComputerTargetContext {
-  /** The device name as the user typed it. */
   alias: string;
-  /** `user@host`, already validated against ssh option injection. */
   host: string;
   user: string;
-  /** Bare host — the ssh-config Host name or address, without the user. */
   hostname: string;
   platform: string;
-  /** Per-device ssh identity flags, in argv order. Possibly empty. */
   sshArgs: string[];
 }
 
-/** Who is acting, so the engine can stamp the action it reports back. */
 interface ComputerSessionContext {
   sessionId?: string;
   launchId?: string;
@@ -68,10 +62,6 @@ interface ComputerContext {
   session: ComputerSessionContext;
 }
 
-/**
- * Which agent session is acting. Same precedence the admission cache used
- * before the extraction — the harness-native id first, then agents' own.
- */
 function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefined {
   return env.CODEX_THREAD_ID
     || env.CLAUDE_CODE_SESSION_ID
@@ -83,29 +73,12 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
 }
 
 interface BuildContextOptions {
-  /** `--device <name>`, if given. */
   device?: string;
-  /** Direct host targeting, which bypasses fleet resolution. */
   host?: string;
-  /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
-  /**
-   * A precomputed target (PHNX-4090: `resolveDeviceHost` in `commands/computer.ts`
-   * already resolved the device's `computer.host` config, or the ssh fallback).
-   * When present, `device` is used only to gate the local-permissions branch
-   * below — this skips a second, possibly Windows-gated, fleet resolution.
-   */
   target?: ComputerTargetContext;
 }
 
-/**
- * Build the context handed to the engine on fd 3.
- *
- * `device` resolution goes through the shared fleet resolver and keeps the
- * Windows expectation the computer subsystem has always enforced — a
- * `--device` pointing at a Mac gets the same refusal as before, from the fleet
- * layer that can actually see the device's platform.
- */
 export async function buildComputerContext(opts: BuildContextOptions = {}): Promise<ComputerContext> {
   let target: ComputerTargetContext | undefined = opts.target;
   if (!target && opts.device) {
@@ -128,8 +101,6 @@ export async function buildComputerContext(opts: BuildContextOptions = {}): Prom
     ...(!opts.device && !opts.host && !process.env.COMPUTER_HELPER_TCP && !process.env.COMPUTER_HELPER_VNC
       ? { permissions: { allow: loadComputerAllowList() } } : {}),
     peers: { allow: loadDefaultPeers({ computerBin: opts.computerBin }) },
-    // Spread rather than assigned: a local invocation must not ship a `target`
-    // key at all, so the engine never has to distinguish absent from null.
     ...(target ? { target } : {}),
     session: {
       sessionId: agentSessionId(),

@@ -12,8 +12,6 @@ describe('deriveShortId', () => {
     expect(deriveShortId('ses_zyxwvu987654', /^ses_/)).toBe('zyxwvu98');
   });
 
-  // The regression: an id that is *only* its prefix strips to '' and used to
-  // corrupt the NOT NULL short_id index. It must never return empty.
   it('never returns empty when the strip empties the id', () => {
     expect(deriveShortId('session_', /^session_/)).toBe('session_');
     expect(deriveShortId('api-', /^api-/)).toBe('api-');

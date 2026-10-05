@@ -4,7 +4,6 @@ import { compareVersions } from './primitives.js';
 import { AgentSpecError, type VersionProvider } from './types.js';
 import { resolveAgentTargets, resolveSingleAgentTarget, resolveVersionFilter, resolveListFilter } from './resolve.js';
 
-// In-memory provider — the whole point of the DI seam: no fs, no $HOME.
 function providerOf(state: {
   installed?: Partial<Record<string, string[]>>;
   project?: Partial<Record<string, string>>;
@@ -24,10 +23,6 @@ function providerOf(state: {
 const CLAUDE = 'claude' as AgentId;
 
 describe('isolated default', () => {
-  // An isolated-only agent never has a global default — that is what --isolated
-  // guarantees — so the chain has to keep going or `--agents codex` throws at a user
-  // who has explicitly run `agents use`. resolveVersion already did this; the two
-  // resolvers had drifted, and only this one still threw.
   it('bare resolves to the isolated default when there is no global one', () => {
     const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.0' } });
     expect(resolveSingleAgentTarget('claude', p)).toEqual({ agent: CLAUDE, version: '2.1.0', source: 'isolated-default' });
@@ -51,7 +46,6 @@ describe('isolated default', () => {
   });
 
   it('ambiguity is resolved by the isolated default rather than throwing', () => {
-    // Two isolated copies and no global default used to be a hard error.
     const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.1' } });
     expect(() => resolveSingleAgentTarget('claude', p)).not.toThrow();
   });

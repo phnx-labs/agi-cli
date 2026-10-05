@@ -17,15 +17,12 @@ function ledgerDir(): string {
 }
 afterEach(() => { for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
 
-/** One line exactly as the standalone engine appends it. */
 function line(record: Record<string, unknown>): string {
   return `${JSON.stringify({ event: 'computer.action', ...record })}\n`;
 }
 
 describe('the standalone computer action ledger', () => {
   it('reads the engine\'s own records, which never reach the feed ledger', () => {
-    // The regression this covers: `computer` run directly by an operator writes
-    // ONLY here, so reading the feed ledger alone showed no actions at all.
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'run', ts: '2026-09-13T10:00:00Z', pid: 11, invocationId: 'inv-a', task: 'fill the form' })
@@ -42,7 +39,6 @@ describe('the standalone computer action ledger', () => {
   it('reports no capture for an action the producer recorded none for', () => {
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
-      // A failed write leaves the action with no capture — never a guessed path.
       line({ command: 'screenshot', ts: '2026-09-13T10:00:02Z', pid: 11, invocationId: 'inv-a' })
       + line({ command: 'screenshot', ts: '2026-09-13T10:00:03Z', pid: 11, invocationId: 'inv-a', capture: { kind: 'screenshot', name: 'x.jpg' } }));
     const actions = listStandaloneComputerActions({ dir });
@@ -61,11 +57,11 @@ describe('the standalone computer action ledger', () => {
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'click', ts: '2026-09-13T10:00:01Z', pid: 1, invocationId: 'ok' })
-      + '{"command":"click"}\n'            // no timestamp
-      + '{"ts":"2026-09-13T10:00:02Z"}\n'  // no verb
-      + '{"command":"click","ts":"nope"}\n' // unparseable timestamp
+      + '{"command":"click"}\n'
+      + '{"ts":"2026-09-13T10:00:02Z"}\n'
+      + '{"command":"click","ts":"nope"}\n'
       + 'not json at all\n'
-      + '{"command":"type","ts":"2026-09-13T10:00:03Z"'); // a write in progress
+      + '{"command":"type","ts":"2026-09-13T10:00:03Z"');
     const actions = listStandaloneComputerActions({ dir });
     expect(actions.map((action) => action.verb)).toEqual(['click']);
   });
@@ -77,7 +73,6 @@ describe('the standalone computer action ledger', () => {
       Array.from({ length: 5 }, (_, i) => line({ command: `new${i}`, ts: `2026-09-13T10:00:0${i}Z`, pid: 1 })).join(''));
     const bounded = listStandaloneComputerActions({ dir, limit: 3 });
     expect(bounded).toHaveLength(3);
-    // Newest-first within the budget: the old day is never reached.
     expect(bounded.map((action) => action.verb)).toEqual(['new4', 'new3', 'new2']);
   });
 
@@ -92,9 +87,6 @@ describe('merging the two ledgers', () => {
   });
 
   it('prefers the standalone record for a run present in both', () => {
-    // A forwarded `agents computer` writes BOTH stores, and the forwarding
-    // rewrites ts and pid — so the two copies disagree on exactly the fields a
-    // timestamp/pid dedupe would key on. invocationId is echoed unchanged.
     const standalone = [action({ invocationId: 'inv-a', pid: 11, tsMs: 1_000, bundle: 'com.apple.Safari' })];
     const legacy = [action({ invocationId: 'inv-a', pid: 99, tsMs: 5_000, bundle: 'rewritten' })];
     const merged = mergeComputerActionSources(standalone, legacy);
@@ -112,8 +104,6 @@ describe('merging the two ledgers', () => {
   });
 
   it('keeps an invocationId-less legacy record rather than dropping history', () => {
-    // It cannot be matched to anything, so dropping it would lose a row the
-    // standalone ledger never had.
     const merged = mergeComputerActionSources([action({ invocationId: 'inv-a' })], [action({ invocationId: undefined, tsMs: 9_000 })]);
     expect(merged).toHaveLength(2);
   });
@@ -136,12 +126,6 @@ describe('merging the two ledgers', () => {
 
 describe('the installed producer\'s real record shape', () => {
   it('attributes a no-host record to the observing machine, not to `unknown`', () => {
-    // Observed on installed computer 0.1.5: the record carries NO host, NO
-    // hostname and NO machineId. `groupIntoComputerRuns` then fell back to
-    // `machine: 'unknown'`, the projected row's device read `unknown`, and the
-    // action vanished under any device filter — while its capture.host correctly
-    // said the observing box. The default belongs at this source, because this
-    // ledger is per-machine by construction.
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'run', ts: '2026-09-13T15:20:00Z', invocationId: 'inv-real', task: 'read the screen' })
@@ -149,7 +133,6 @@ describe('the installed producer\'s real record shape', () => {
 
     const actions = listStandaloneComputerActions({ dir, observer: 'zion' });
     expect(actions.every((action) => action.hostname === 'zion')).toBe(true);
-    // `host` names a genuinely DRIVEN remote box and must stay absent here.
     expect(actions.every((action) => action.host === undefined)).toBe(true);
 
     const rows = groupIntoComputerRuns(actions);
@@ -165,7 +148,6 @@ describe('the installed producer\'s real record shape', () => {
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'click', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-remote', host: 'win-mini' }));
     const rows = groupIntoComputerRuns(listStandaloneComputerActions({ dir, observer: 'zion' }));
-    // The invoking machine is still the observer; the DRIVEN one is win-mini.
     expect(rows[0]!.machine).toBe('zion');
     expect(rows[0]!.remoteHost).toBe('win-mini');
   });
@@ -180,9 +162,6 @@ describe('the installed producer\'s real record shape', () => {
 
 describe('the observer threads through the assembler', () => {
   it('keeps a row\'s device and the reporting scope naming the same box', () => {
-    // Before this the ledger defaulted to `machineId()` while the projection was
-    // handed a caller-supplied scope, so the two could name one machine
-    // differently and a device filter would miss the row.
     const dir = ledgerDir();
     fs.writeFileSync(path.join(dir, '2026-09-13.jsonl'),
       line({ command: 'click', ts: '2026-09-13T15:20:01Z', invocationId: 'inv-s' }));

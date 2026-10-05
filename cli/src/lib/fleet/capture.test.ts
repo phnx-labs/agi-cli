@@ -17,25 +17,20 @@ describe('captureFleet', () => {
     expect(m.devices).not.toBe('all');
     const map = m.devices as Record<string, { agents?: string[] }>;
     expect(Object.keys(map).sort()).toEqual(['mac-mini', 'yosemite-s0']);
-    // per-device agents from --from-pins land on the device; the other inherits.
     expect(map['mac-mini'].agents).toEqual(['claude@latest', 'droid@latest']);
     expect(map['yosemite-s0'].agents).toBeUndefined();
     expect(m.defaults?.agents).toEqual(['claude@latest', 'codex@latest']);
-    expect(m.secrets?.bundles).toEqual(['attio', 'ssh-keys']); // sorted, names only
+    expect(m.secrets?.bundles).toEqual(['attio', 'ssh-keys']);
     expect(m.routines).toEqual(['cycle-hygiene', 'review-open-prs']);
   });
 
   it('PRIVACY: the serialized fleet: block carries no IP, username, host, or browser endpoint', () => {
-    // The live registry has addresses (100.x), users (`muqsit`), and the browser
-    // block has ssh://user@host endpoints. NONE may leak into agents.yaml fleet:.
     const m = captureFleet(undefined, inputs);
     const out = yaml.stringify({ fleet: m });
-    expect(out).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/); // no IPv4
+    expect(out).not.toMatch(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
     expect(out).not.toMatch(/address:/);
     expect(out).not.toMatch(/\buser:/);
-    expect(out).not.toMatch(/ssh:\/\//); // no browser ssh endpoints
-    // The only legit `@` is an agent version spec (`claude@latest`, `codex@1.2`).
-    // Strip those, then any remaining `@` would be a leaked user@host.
+    expect(out).not.toMatch(/ssh:\/\//);
     const stripped = out.replace(/@latest/g, '').replace(/@\d[\w.-]*/g, '');
     expect(stripped).not.toMatch(/@/);
   });
@@ -52,12 +47,9 @@ describe('captureFleet', () => {
     };
     const m = captureFleet(prev, inputs);
     const map = m.devices as Record<string, { agents?: string[]; login?: string }>;
-    // hand-authored agents + login on mac-mini win over the captured pins.
     expect(map['mac-mini'].agents).toEqual(['gemini@latest']);
     expect(map['mac-mini'].login).toBe('skip');
-    // the newly-seen device is still added.
     expect(map['yosemite-s0']).toBeDefined();
-    // hand-authored defaults are kept, not overwritten by inputs.defaults.
     expect(m.defaults?.agents).toEqual(['claude@latest']);
   });
 
@@ -68,10 +60,6 @@ describe('captureFleet', () => {
   });
 
   it('keeps the config of a device missing from the captured roster', () => {
-    // `fleet.devices.<name>.config` is the operator-config store, so a capture
-    // run from a box whose registry has not seen a peer used to erase that
-    // peer's settings outright. Observed for real: capturing on yosemite-s0
-    // deleted zion's whole config block from the shared agents.yaml.
     const prev = {
       devices: {
         zion: { config: { browserRemoteControl: false, defaultBrowserProfile: 'comet-local' } },
@@ -82,14 +70,11 @@ describe('captureFleet', () => {
     const m = captureFleet(prev, { devices: ['yosemite-s0'] });
     const map = m.devices as Record<string, { agents?: string[]; config?: Record<string, unknown> }>;
 
-    // The roster still reflects live state — the captured device is present.
     expect(map['yosemite-s0']).toBeDefined();
-    // zion's config survives even though it dropped out of the roster.
     expect(map['zion'].config).toEqual({
       browserRemoteControl: false,
       defaultBrowserProfile: 'comet-local',
     });
-    // A dropped device carries config ONLY — never its stale roster fields.
     expect(map['mac-mini']).toBeUndefined();
   });
 
@@ -113,7 +98,6 @@ describe('captureFleet', () => {
     const m = captureFleet(prev, { devices: ['yosemite-s0'] });
 
     expect(m.ignored).toEqual([{ name: 'old-laptop', ignoredAt: '2026-08-20T10:00:00.000Z', ignoredOn: 'zion' }]);
-    // Carried by value — mutating the old manifest must not leak into the new one.
     prev.ignored![0].name = 'mutated';
     expect(m.ignored![0].name).toBe('old-laptop');
   });

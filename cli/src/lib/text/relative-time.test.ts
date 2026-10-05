@@ -1,9 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts } from './relative-time.js';
 
-// Times are pinned at 12:00Z so the local calendar day matches the UTC day in
-// every timezone the tests might run in (no midnight rollover), keeping the
-// month/day assertions deterministic on CI (UTC) and locally alike.
 describe('formatRelativeTime', () => {
   afterEach(() => vi.useRealTimers());
 
@@ -48,8 +45,6 @@ describe('sessionAgeParts', () => {
   afterEach(() => vi.useRealTimers());
 
   it('reports creation and last activity as two fields for a session that ran', () => {
-    // The case the listing exists for: last touched an hour ago, but started
-    // three days back — one label cannot say both.
     vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
     expect(sessionAgeParts('2026-07-01T12:00:00.000Z', '2026-07-04T11:00:00.000Z')).toEqual({
       created: '3d',
@@ -58,7 +53,6 @@ describe('sessionAgeParts', () => {
   });
 
   it('drops the creation field when the session lived under a minute', () => {
-    // Both halves would name the same moment; a duplicate is not information.
     vi.setSystemTime(new Date('2026-07-04T12:00:00.000Z'));
     expect(sessionAgeParts('2026-07-04T09:00:00.000Z', '2026-07-04T09:00:30.000Z')).toEqual({
       last: '2 hours ago',

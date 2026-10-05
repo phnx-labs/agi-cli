@@ -1,9 +1,3 @@
-/**
- * Pure-logic tests for the AGI Menu UserDefaults → config migration (PHNX-3999).
- * The `defaults` exec and the sentinel are the thin macOS-only shell; the import
- * DECISION (which keys, never overriding a set value) and the type coercion are
- * the parts that must be right, and they are pure.
- */
 
 import { describe, expect, it } from 'vitest';
 import { planMenubarPrefMigration, coerceMenubarPrefValue } from './migrate-prefs.js';
@@ -15,10 +9,9 @@ describe('planMenubarPrefMigration', () => {
       'menubar.menu.showPreviews': false,
       'menubar.menu.defaultProject': 'rush',
       'menubar.menu.groupBy': 'agent',
-      workingRowsShown: 99, // a bare leaf key is NOT the stored name — ignored
+      workingRowsShown: 99,
       unknownLegacyKey: 'ignored',
     };
-    // groupBy is already set in config → must NOT be overridden.
     const setKeys = new Set(['menubar.menu.groupBy']);
     const plan = planMenubarPrefMigration(ud, (name) => !setKeys.has(name));
     const names = plan.map((p) => p.name).sort();

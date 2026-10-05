@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Fresh HOME before importing the config store (same pattern as the db tests).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-summ-cfg-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -53,13 +52,10 @@ describe('isSummarizerReady memo', () => {
 
   it('defaults false (nothing configured) and is stable within the TTL', () => {
     expect(isSummarizerReady(1000)).toBe(false);
-    // A read inside the TTL window returns the cached value.
     expect(isSummarizerReady(1500)).toBe(false);
   });
 
   it('reflects runnable, not just enabled — enabled-but-unconfigured is NOT ready', () => {
-    // With no baseUrl/model configured, `enabled` alone must not make it ready:
-    // the merge would otherwise show a `pending` that never resolves.
     expect(isSummarizerRunnable({ enabled: true })).toBe(false);
   });
 });

@@ -1,13 +1,3 @@
-/**
- * PHNX-3520 — surfacing the held set of agent worktrees, broken into buckets.
- *
- * Real git only, no mocks: each case builds a bare "origin", a primary checkout
- * with a `.agents/worktrees/<slug>` container, and real linked worktrees in the
- * three held states the sweep collapses into one count. The regression these
- * pin is the ticket's core failure — a worktree whose branch carries commits on
- * no remote (the PHNX-2951 / PHNX-2732 stranded-work class) must surface as its
- * OWN `unmerged-commits` bucket, and `--push` must publish it, never delete.
- */
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -48,10 +38,6 @@ function configureIdentity(repo: string): void {
   git(repo, ['config', 'commit.gpgsign', 'false']);
 }
 
-/**
- * A bare origin + a clone whose default branch (main) is pushed, with the
- * `.agents/worktrees` container ready. Returns the clone (the "repo root").
- */
 function makeRepo(): { repo: string; origin: string } {
   const root = tempDir();
   const origin = path.join(root, 'origin.git');
@@ -65,13 +51,11 @@ function makeRepo(): { repo: string; origin: string } {
   git(repo, ['add', '.']);
   git(repo, ['commit', '-m', 'init']);
   git(repo, ['push', '-u', 'origin', 'main']);
-  // origin/HEAD -> origin/main, so resolveDefaultRef finds a ref to compare against.
   git(repo, ['remote', 'set-head', 'origin', 'main']);
   fs.mkdirSync(path.join(repo, '.agents', 'worktrees'), { recursive: true });
   return { repo, origin };
 }
 
-/** Add a linked worktree on a new branch and return its path. */
 function addWorktree(repo: string, slug: string): string {
   const wt = path.join(repo, '.agents', 'worktrees', slug);
   git(repo, ['worktree', 'add', '-b', slug, wt, 'main']);
@@ -87,8 +71,6 @@ function commitInto(wt: string, file: string, body: string, msg: string): void {
 
 describe('classifyHeld (pure)', () => {
   it('surfaces unmerged commits even when the tree is also dirty', () => {
-    // The work-loss signal wins: a stranded branch that is also dirty must read
-    // as unmerged-commits, not uncommitted-changes — an operator would push it.
     expect(classifyHeld({ branch: 'b', dirtyFiles: 3, unmergedCommits: 2 })).toEqual({
       bucket: 'unmerged-commits',
       reason: 'unmerged-commits',
@@ -125,16 +107,12 @@ describe('collectHeldWorktrees (real git)', () => {
   it('breaks the held set into its three buckets instead of one count', async () => {
     const { repo } = makeRepo();
 
-    // Bucket 1 — unmerged-commits: a branch with a commit on no remote. THE
-    // stranded-work case the sweep hid behind a count.
     const stranded = addWorktree(repo, 'phnx-2732-stranded');
     commitInto(stranded, 'feature.ts', 'export const x = 1;\n', 'feat: real work');
 
-    // Bucket 2 — uncommitted-changes: no unmerged commits, just a dirty tree.
     const dirty = addWorktree(repo, 'dirty-tree');
     fs.writeFileSync(path.join(dirty, 'scratch.txt'), 'wip\n');
 
-    // A clean, fully-merged worktree — must NOT be held.
     const clean = addWorktree(repo, 'already-merged');
     void clean;
 
@@ -159,7 +137,6 @@ describe('collectHeldWorktrees (real git)', () => {
 
     const held = await collectHeldWorktrees(repo);
     const row = held.find((w) => w.name === 'pushed-branch');
-    // Still unmerged relative to main, but its work is visible on origin.
     expect(row?.bucket).toBe('unmerged-commits');
     expect(row?.hasRemoteBranch).toBe(true);
   });
@@ -177,12 +154,10 @@ describe('pushStrandedBranch (real git — the safe recovery action)', () => {
     const res = await pushStrandedBranch(repo, row);
     expect(res.pushed).toBe(true);
 
-    // The branch is now on origin — work made visible, worktree untouched.
     expect(git(origin, ['branch', '--list', 'phnx-2951-lost'])).toContain('phnx-2951-lost');
     expect(fs.existsSync(wt)).toBe(true);
     expect(fs.existsSync(path.join(wt, 'lost.ts'))).toBe(true);
 
-    // Idempotent: a second push is refused because the branch now exists on origin.
     const again = await pushStrandedBranch(repo, row);
     expect(again.pushed).toBe(false);
     expect(again.reason).toContain('already on origin');
@@ -194,8 +169,6 @@ describe('pushStrandedBranch (real git — the safe recovery action)', () => {
     commitInto(wt, 'a.ts', '1\n', 'feat: work');
     const [row] = (await collectHeldWorktrees(repo)).filter((w) => w.name === 'went-clean');
 
-    // Merge the work into origin/main out-of-band, so the branch is no longer
-    // stranded by the time push runs — it must fail closed, not push.
     git(repo, ['checkout', 'main']);
     git(repo, ['merge', '--ff-only', 'went-clean']);
     git(repo, ['push', 'origin', 'main']);
@@ -227,9 +200,6 @@ describe('aggregateHeld (pure fleet roll-up)', () => {
   });
 
   it('filtering to one bucket keeps total/devices consistent with the shown rows', () => {
-    // Regression for the --fleet --bucket path: scope the per-device inputs
-    // BEFORE aggregating so `total` counts exactly the rows listed, never the
-    // unfiltered sum with other buckets zeroed underneath it.
     const mk = (name: string, bucket: HeldWorktree['bucket']): HeldWorktree => ({
       repo: '/r', repoName: 'r', name, path: `/r/.agents/worktrees/${name}`, branch: name,
       bucket, reason: bucket === 'undeterminable' ? 'status-unreadable' : bucket,
@@ -247,7 +217,6 @@ describe('aggregateHeld (pure fleet roll-up)', () => {
     expect(agg.total).toBe(2);
     expect(agg.total).toBe(agg.buckets['unmerged-commits'].length);
     expect(agg.buckets['uncommitted-changes']).toEqual([]);
-    // Per-device totals reflect the filter, not the unfiltered set.
     expect(agg.devices).toEqual([
       { device: 'a', total: 1 },
       { device: 'b', total: 1 },

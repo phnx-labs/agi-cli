@@ -72,52 +72,28 @@ import {
   resolveLaunchSession,
 } from '../browser/sessions-list.js';
 
-/** Max chars of a `run --task` description persisted to the ledger — see the
- *  module docblock's retention/privacy note. */
 export const TASK_PREVIEW_MAX_CHARS = 200;
 
-/** Cap on how many raw ledger rows a single read scans/returns. `query()`
- *  already reads newest-first and stops at this cutoff mid-scan, so raising
- *  it only ever costs as much as the history actually holds. */
 const DEFAULT_ACTION_LIMIT = 5000;
 
-/** One `computer.action` ledger entry, narrowed to the fields this module
- *  renders or groups by. */
 export interface ComputerAction {
-  /** CLI verb: `click`, `type`, `screenshot`, … or `run` for the task marker
-   *  `registerRunCommand` emits before entering the model loop. */
   verb: string;
   ts: string;
   tsMs: number;
-  /** The emitting CLI process's own pid — the run/task grouping key. */
   pid: number;
-  /** Unique for the emitting CLI process; absent only on legacy ledger rows. */
   invocationId?: string;
-  /** The driven app's pid, when resolved. */
   targetPid?: number;
   bundle?: string;
-  /** `--device <device>` target when this action drove a remote daemon. */
   host?: string;
-  /** Truncated `--task` text; only ever present on a `verb: 'run'` marker. */
   task?: string;
   sessionId?: string;
   launchId?: string;
   agent?: string;
   machineId?: string;
   hostname?: string;
-  /**
-   * The file a successful `screenshot` action actually wrote.
-   *
-   * Recorded by the standalone engine only AFTER the write succeeded, so its
-   * presence is proof the file existed — which is why nothing here ever derives
-   * a path from the verb. An action from before the producer carried this field
-   * has no capture, and that is reported honestly as none rather than guessed at
-   * from an output flag that may never have been written.
-   */
   capture?: { path: string; kind: 'screenshot'; name: string; bytes?: number };
 }
 
-/** A capture record, accepted only when the producer gave a real path + name. */
 function parseActionCapture(value: unknown): ComputerAction['capture'] | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const record = value as Record<string, unknown>;
@@ -154,33 +130,11 @@ function recordToAction(r: EventRecord): ComputerAction | null {
   };
 }
 
-/**
- * The standalone engine's OWN action ledger.
- *
- * `agents computer` is a thin consumer of the standalone `computer` engine
- * (PHNX-4075), and that engine ALWAYS appends every action it performs to
- * `<cache>/computer/actions/<day>.jsonl` — independently of whether agents-cli
- * was in the call at all. So a `computer` command the operator ran directly
- * appears ONLY here: it never reached `recordComputerAction`, so it is in
- * neither the feed event ledger nor `computer_sessions`. Reading only those two
- * meant the actions an operator actually performed were invisible to every
- * agents-cli surface.
- */
 export function standaloneComputerActionsDir(): string {
   return path.join(getCacheDir(), 'computer', 'actions');
 }
 
-/**
- * One line of the standalone ledger as a {@link ComputerAction}.
- *
- * The on-disk record is the same `computer.action` event the engine reports on
- * fd 4 — the contract `computer-client.ts` `ComputerActionEvent` already
- * describes and `recordComputerAction` already consumes — so this maps the same
- * fields rather than inventing a second vocabulary. A record missing the two
- * fields that make it an action at all (`command`, a parseable timestamp) is
- * skipped, never defaulted: the file is plain JSONL another process may be
- * mid-append to.
- */
+// Direct engine invocations exist only in its standalone ledger.
 function standaloneLineToAction(line: string, observer: string): ComputerAction | null {
   let parsed: unknown;
   try { parsed = JSON.parse(line); } catch { return null; }
@@ -193,19 +147,8 @@ function standaloneLineToAction(line: string, observer: string): ComputerAction 
   if (Number.isNaN(tsMs)) return null;
   const text = (key: string): string | undefined => (typeof record[key] === 'string' ? record[key] as string : undefined);
   const num = (key: string): number | undefined => (typeof record[key] === 'number' ? record[key] as number : undefined);
-  // The producer identifies the DRIVEN host only for a remote run, and emits no
-  // `hostname`/`machineId` of its own at all. Defaulting those to the observing
-  // machine HERE, at the source, is what keeps a direct local action attributable:
-  // without it `groupIntoComputerRuns` fell back to `machine: 'unknown'`, the row's
-  // device read `unknown`, and every locally-run `computer` action vanished the
-  // moment a consumer filtered by device. The observer IS the machine that ran it
-  // — this ledger is per-machine by construction, written by the engine on the box
-  // it ran on — so the fallback is a fact, not a guess. An explicit `host` still
-  // wins, because that names a genuinely different driven machine.
   return {
     verb, ts, tsMs,
-    // The engine's pid is its own; a record without one still groups by
-    // invocationId, which is the identity that actually matters here.
     pid: num('pid') ?? 0,
     invocationId: text('invocationId'),
     targetPid: num('targetPid'),
@@ -216,37 +159,28 @@ function standaloneLineToAction(line: string, observer: string): ComputerAction 
     launchId: text('launchId'),
     agent: text('agent'),
     machineId: text('machineId'),
+    // Attribute to the observer only when the engine omitted its source machine.
     hostname: text('hostname') ?? observer,
     capture: parseActionCapture(record.capture),
   };
 }
 
-/**
- * Read the standalone ledger, newest day first, bounded by `limit` actions.
- *
- * Bounded by construction: days are read newest-first and reading stops as soon
- * as the budget is met, so a box with months of history costs the same as one
- * with a day of it.
- */
 export function listStandaloneComputerActions(opts: { limit?: number; dir?: string; observer?: string } = {}): ComputerAction[] {
   const dir = opts.dir ?? standaloneComputerActionsDir();
   const limit = opts.limit ?? DEFAULT_ACTION_LIMIT;
-  // This ledger is per-machine by construction, so "who ran it" is this machine
-  // unless the record names a driven remote host.
   const observer = opts.observer ?? machineId();
   let days: string[];
   try {
     days = fs.readdirSync(dir).filter((name) => name.endsWith('.jsonl')).sort().reverse();
   } catch {
-    return []; // The engine has never run here, or is not installed.
+    return [];
   }
   const out: ComputerAction[] = [];
   for (const day of days) {
     if (out.length >= limit) break;
     let lines: string[];
     try { lines = fs.readFileSync(path.join(dir, day), 'utf8').split('\n'); }
-    catch { continue; /* rotated or removed mid-read */ }
-    // Newest last within a day, and the budget favours the newest actions.
+    catch { continue;  }
     for (let index = lines.length - 1; index >= 0 && out.length < limit; index--) {
       const line = lines[index]!;
       if (!line) continue;
@@ -258,19 +192,7 @@ export function listStandaloneComputerActions(opts: { limit?: number; dir?: stri
   return out;
 }
 
-/**
- * Union the two ledgers, preferring the standalone record for any run present in
- * both.
- *
- * Dedupe keys on `invocationId`, NOT on a timestamp or pid. When a command is
- * forwarded through `agents computer`, BOTH stores receive it — and the
- * forwarding rewrites `ts` and `pid` on the way through, so the two copies of one
- * action do not agree on either. `invocationId` is minted by the engine and
- * echoed unchanged, which makes it the only field that identifies the same run in
- * both files. A legacy feed record with no invocationId cannot be matched to
- * anything, so it is kept: dropping it would lose history the standalone ledger
- * never had.
- */
+// Deduplicate ledgers only by the engine-minted invocation ID, never PID or timestamp.
 export function mergeComputerActionSources(standalone: ComputerAction[], legacy: ComputerAction[]): ComputerAction[] {
   const standaloneRuns = new Set<string>();
   for (const action of standalone) if (action.invocationId) standaloneRuns.add(action.invocationId);
@@ -283,11 +205,6 @@ export function mergeComputerActionSources(standalone: ComputerAction[], legacy:
   return merged;
 }
 
-/** Read `computer.action` events straight from the durable event ledger,
- *  newest first, bounded by `limit`. Malformed/legacy records (missing
- *  `command` or `pid`, or an unparseable `ts`) are skipped, never thrown —
- *  the ledger is a plain rotated JSONL file another process can be mid-write
- *  or mid-rotate against. */
 export function listComputerActions(opts: { limit?: number } = {}): ComputerAction[] {
   const records = query({ eventTypes: ['computer.action'], limit: opts.limit ?? DEFAULT_ACTION_LIMIT });
   const out: ComputerAction[] = [];
@@ -298,59 +215,28 @@ export function listComputerActions(opts: { limit?: number } = {}): ComputerActi
   return out;
 }
 
-/** Why a row carries no session digest: `linked` resolved one, `unresolved`
- *  has a sessionId/launchId but no matching indexed session, `unlinked` has
- *  neither (a bare terminal invocation with no agent session env at all). */
 export type ComputerRunLinkStatus = 'linked' | 'unresolved' | 'unlinked';
 
-/** One task-first row: every `computer.action` emitted by one CLI process
- *  (see the module docblock's "Grouping key" note), plus the agent session
- *  it links to when resolvable. */
 export interface ComputerRunRow {
-  /** Invoking CLI process's pid. Absent on a run recovered from the DB after
-   *  the ledger pruned — that process is long gone and its pid unknowable. */
   pid?: number;
   invocationId?: string;
-  /**
-   * Total actions for a run recovered from the DB after the event ledger
-   * pruned its individual actions. Set ONLY on such rows: when it is present,
-   * `actions`/`counts` are empty because the per-verb detail is genuinely gone,
-   * and this total is all that survived. Live ledger rows leave it undefined
-   * and report real per-verb `counts` instead.
-   */
   recoveredActionCount?: number;
-  /** Truncated task description — present only for a `computer run --task`
-   *  invocation; a bare verb call has none. */
   task?: string;
-  /** Invoking machine's hostname — the CLI's own machine, not necessarily
-   *  the driven one (see `remoteHost`). */
   machine: string;
   machineId?: string;
-  /** `--device <device>` target when the run drove a remote (Windows) daemon. */
   remoteHost?: string;
-  /** Best-known target app bundle across the run's actions. */
   bundle?: string;
   agent?: string;
   sessionId?: string;
   launchId?: string;
   linkStatus: ComputerRunLinkStatus;
   linkedSession?: SessionMeta;
-  /** Newest first; excludes the `run` task marker itself. */
   actions: ComputerAction[];
-  /** Per-verb counts over `actions` (never includes the `run` marker). */
   counts: Record<string, number>;
-  /** Oldest action's mtime — the row's start. */
   startMs: number;
-  /** Newest action's mtime — the row's sort/age key. */
   endMs: number;
 }
 
-/**
- * Group flat ledger actions into task-first rows, newest first. Pure:
- * session resolvers are passed in, so this has no filesystem/session-index
- * dependency and is unit-testable with synthetic data (see
- * {@link buildComputerSessionRows} for the impure disk/index-reading caller).
- */
 export function groupIntoComputerRuns(
   actions: ComputerAction[],
   resolveSession?: (sessionId: string) => SessionMeta | null,
@@ -358,8 +244,7 @@ export function groupIntoComputerRuns(
 ): ComputerRunRow[] {
   const byInvocation = new Map<string, ComputerAction[]>();
   for (const [index, a] of actions.entries()) {
-    // Legacy rows have no trustworthy process identity. Pids are recyclable,
-    // so preserve each event separately instead of inventing a relationship.
+    // Legacy rows stay distinct because PIDs recycle and carry no stable run identity.
     const key = a.invocationId ?? `legacy:${a.pid}:${a.tsMs}:${index}`;
     const list = byInvocation.get(key) ?? [];
     list.push(a);
@@ -369,7 +254,7 @@ export function groupIntoComputerRuns(
   const rows: ComputerRunRow[] = [];
   for (const group of byInvocation.values()) {
     const pid = group[0].pid;
-    group.sort((a, b) => b.tsMs - a.tsMs); // newest first
+    group.sort((a, b) => b.tsMs - a.tsMs);
 
     const marker = group.find((a) => a.verb === 'run');
     const driving = group.filter((a) => a.verb !== 'run');
@@ -411,53 +296,19 @@ export function groupIntoComputerRuns(
   return rows;
 }
 
-/**
- * Add runs the event ledger no longer holds, from the durable
- * `computer_sessions` table (RUSH-2549).
- *
- * The ledger is deliberately bounded — it prunes at 7 days / 50 MiB — so before
- * this, a run simply disappeared from `agents sessions --computer` on day 8 even
- * though it had happened and its identity was known. The DB row is metadata
- * only, so a recovered row carries its identity, timing and action COUNT but no
- * per-verb breakdown: those individual actions lived in the pruned ledger and
- * are genuinely gone. It is listed as a real run with an empty `actions` list
- * rather than silently omitted, and never fabricated back.
- *
- * Ledger rows win on collision: while both exist the ledger is richer.
- */
+// Recover only history older than the retained ledger; preserve ID dedupe and aggregate detail.
 function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
   const seen = new Set(rows.map((r) => r.invocationId));
-  // Ask the DB for what the ledger CANNOT still hold — everything older than
-  // the oldest action the ledger returned. Reading the newest N instead is
-  // self-defeating: those are precisely the rows `seen` discards, so once the
-  // table exceeds the read limit the recovery returns nothing and history
-  // disappears past the ledger window again — the exact bug this recovery
-  // exists to prevent. With no ledger rows at all there is nothing to exclude,
-  // so every stored row is recoverable.
   const startedBeforeMs = rows.length > 0
     ? Math.min(...rows.map((r) => r.startMs))
     : undefined;
   for (const record of listComputerSessionRecords({ limit, startedBeforeMs })) {
-    // The dedup is LOAD-BEARING — do not delete it as redundant with the WHERE
-    // clause above. A run's DB `started_at` is its TRUE start and is never
-    // updated, while the ledger row's `startMs` is only its oldest RETAINED
-    // action. So a long `computer run` that began before the ledger window but
-    // kept acting inside it sits below the cutoff, is selected by the SQL, and
-    // is already present as a ledger row. This is what drops the duplicate.
     if (seen.has(record.invocationId)) continue;
     const linked = record.sessionId ? getSessionById(record.sessionId) : null;
     rows.push({
-      // No pid: the process is long gone and the ledger entry that knew it has
-      // been pruned. Fabricating `0` rendered rows labelled "pid 0" (see the
-      // label fallbacks in this file and computer-sessions-picker.ts).
       pid: undefined,
       invocationId: record.invocationId,
       task: record.taskPreview,
-      // machineId() form ("zion"), the same normalized id the DB stored; the
-      // ledger path records the raw os.hostname() ("Zion.local") in `machine`.
-      // Setting BOTH from the one value we have keeps `--machine` substring
-      // filtering working on either spelling instead of silently missing
-      // recovered rows (events.ts documents the hostname/machineId split).
       machine: record.machine,
       machineId: record.machine,
       bundle: undefined,
@@ -467,10 +318,6 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
       launchId: record.launchId,
       linkStatus: linked ? 'linked' : (record.sessionId || record.launchId) ? 'unresolved' : 'unlinked',
       linkedSession: linked ?? undefined,
-      // The per-verb breakdown lived in the pruned ledger and is genuinely gone
-      // — it is never reconstructed. The TOTAL survives in the row, so report
-      // it as an explicit total rather than dropping it: a 40-action run must
-      // not render identically to one that did nothing.
       actions: [],
       counts: {},
       recoveredActionCount: record.actionCount,
@@ -480,14 +327,8 @@ function appendPrunedRunsFromDb(rows: ComputerRunRow[], limit?: number): void {
   }
 }
 
-/** Build task-first rows from the real ledger, resolving each row's owning
- *  session against the live indexes. The interactive picker's (and the
- *  flat/`--json` printer's) data source. `machine` narrows to rows whose
- *  invoking hostname, machineId, or `--device` target contains the substring. */
 export function buildComputerSessionRows(opts: { limit?: number; machine?: string; observer?: string } = {}): ComputerRunRow[] {
   const actions = mergeComputerActionSources(
-    // `observer` is threaded from the caller's scope so a row's device and the
-    // scope that reported it can never name the same box differently.
     listStandaloneComputerActions({ limit: opts.limit, ...(opts.observer ? { observer: opts.observer } : {}) }),
     listComputerActions({ limit: opts.limit }),
   );
@@ -497,10 +338,7 @@ export function buildComputerSessionRows(opts: { limit?: number; machine?: strin
     (sessionId) => getSessionById(sessionId),
     (launchId) => resolveLaunchSession(index, launchId),
   );
-  // Retention runs here, on the listing path, never on the action hot path:
-  // one row per `agents computer` CLI process means the table would otherwise
-  // grow without bound. Best-effort — a read-only DB must not break a listing.
-  try { pruneToolSessions(); } catch { /* listing must not fail on retention */ }
+  try { pruneToolSessions(); } catch {  }
   appendPrunedRunsFromDb(rows, opts.limit);
   rows.sort((a, b) => b.endMs - a.endMs);
   if (!opts.machine) return rows;
@@ -513,11 +351,6 @@ export function buildComputerSessionRows(opts: { limit?: number; machine?: strin
   );
 }
 
-/**
- * Search predicate for the interactive picker: task text, machine/remote
- * host, target bundle, the linked session's agent/topic/label, or any
- * driven verb in the row.
- */
 export function matchesComputerSessionRow(row: ComputerRunRow, queryText: string): boolean {
   const q = queryText.trim().toLowerCase();
   if (!q) return true;
@@ -532,17 +365,6 @@ export function matchesComputerSessionRow(row: ComputerRunRow, queryText: string
   return row.actions.some((a) => a.verb.toLowerCase().includes(q));
 }
 
-/** Human one-line summary of a row's per-verb action counts, most frequent
- *  first — shared by the flat table and the interactive picker's label. */
-/**
- * One row's action summary — the single renderer every surface should use.
- *
- * A run recovered from the DB after the ledger pruned has no per-verb detail,
- * only a total. Rendering it through the per-verb formatter printed
- * "(no actions)", which is indistinguishable from a run that did nothing — so a
- * 40-action run read as empty. Report the surviving total, and say plainly that
- * the breakdown is gone rather than implying we still have it.
- */
 export function formatRowActions(row: ComputerRunRow): string {
   if (row.recoveredActionCount !== undefined) {
     const n = row.recoveredActionCount;
@@ -558,7 +380,6 @@ export function formatActionCounts(counts: Record<string, number>): string {
   return parts.join(', ') || '(no actions)';
 }
 
-/** Human table for the CLI. Returns lines (no trailing newline). */
 export function renderComputerSessionRows(rows: ComputerRunRow[]): string {
   if (rows.length === 0) return 'No computer actions recorded.';
   const lines: string[] = [];
@@ -578,18 +399,8 @@ export function renderComputerSessionRows(rows: ComputerRunRow[]): string {
   return lines.join('\n');
 }
 
-/** Default row cap for the flat/non-interactive table. A computer row is
- *  much finer-grained than a browser task — real usage is mostly one
- *  standalone verb per CLI invocation, not a `run --task` loop, so an
- *  unbounded flat dump against real history reads as hundreds of one-action
- *  rows (confirmed against a real machine's history while building this).
- *  The interactive picker has no such cap (it's searchable); only the
- *  static table needs one. `--limit` overrides. */
 export const DEFAULT_ROW_DISPLAY_LIMIT = 50;
 
-/** Slice `rows` to at most `limit` (newest first, rows are already sorted),
- *  and report how many were dropped — pure, so the cap arithmetic and the
- *  trailer condition are unit-testable without a console spy. */
 export function applyRowDisplayLimit(
   rows: ComputerRunRow[],
   limit: number = DEFAULT_ROW_DISPLAY_LIMIT,
@@ -598,19 +409,11 @@ export function applyRowDisplayLimit(
   return { shown, more: rows.length - shown.length };
 }
 
-/**
- * Shared CLI action for `agents computer sessions` and `agents sessions
- * --computer`. Non-interactive by design (the interactive routing decision
- * lives in `commands/computer-sessions-picker.ts`, mirroring
- * `runBrowserSessions`/`runBrowserSessionsCommand`'s split).
- */
 export function runComputerSessions(opts: { machine?: string; json?: boolean; limit?: number }): void {
   const rows = buildComputerSessionRows({ machine: opts.machine });
   printComputerSessionRows(rows, opts);
 }
 
-/** Print already-collected rows. Fleet callers use this after merging local and
- * remote JSON so text, limits, and JSON keep exactly one renderer. */
 export function printComputerSessionRows(
   rows: ComputerRunRow[],
   opts: { json?: boolean; limit?: number },

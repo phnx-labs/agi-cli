@@ -1,10 +1,3 @@
-/**
- * Pipeline tests for listMergeableRefs / selectListedMergeable.
- *
- * The gh runner is a table of recorded payloads (the same JSON `gh api` and
- * `gh pr list --repo` return), not a stub of the verdict itself. The live
- * #2847 comment and empty #2849 comments were captured 2026-08-20 via REST.
- */
 
 import { execFile } from 'child_process';
 import * as fs from 'fs';
@@ -151,7 +144,7 @@ describe('ghExec color env', () => {
         'pr', 'list', '--repo', 'phnx-labs/agi-cli', '--author', '@me',
         '--state', 'open', '--limit', '1', '--json', 'number',
       ]);
-      expect(raw.charCodeAt(0)).not.toBe(0x1b); // no ESC
+      expect(raw.charCodeAt(0)).not.toBe(0x1b);
       expect(Array.isArray(JSON.parse(raw))).toBe(true);
     } catch (err) {
       const msg = String((err as Error).message ?? err);
@@ -200,9 +193,8 @@ describe('live gh --repo from a non-repo cwd (RUSH-2848 defect 1)', () => {
       expect(Array.isArray(JSON.parse(String(stdout)))).toBe(true);
     } catch (err) {
       const msg = String((err as Error).message ?? err);
-      // This is the bug: without --repo, gh infers the repo from cwd and dies.
       expect(msg).not.toMatch(/not a git repository/);
-      if (/gh|auth|rate limit|network/i.test(msg)) return; // unauthenticated CI
+      if (/gh|auth|rate limit|network/i.test(msg)) return;
       throw err;
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

@@ -18,11 +18,6 @@ function seedFile(home: string, rel: string, content: string, mode = 0o600): voi
   fs.chmodSync(abs, mode);
 }
 
-// RUSH-2527 / SING-1b: a native OAuth / session login MUST NOT be copied between
-// devices. `snapshotAuth` — the read/capture side of `apply`'s former login
-// propagation — therefore captures NOTHING, for every agent, on every platform,
-// signed in or not. The old receive/materialize primitive is deleted, so there
-// is no hidden write path left to exercise.
 describe('snapshotAuth — native OAuth logins are never captured (SING-1b)', () => {
   it('captures nothing even for a signed-in portable runtime (codex) on Linux', () => {
     const src = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-src-'));
@@ -63,7 +58,6 @@ describe('FLEET_AUTH_FILES coverage', () => {
   it('maps the portable-auth agents but NONE are propagatable anymore (SING-1b)', () => {
     for (const agent of ['claude', 'codex', 'grok', 'kimi', 'opencode', 'antigravity']) {
       expect(FLEET_AUTH_FILES[agent]?.length).toBeGreaterThan(0);
-      // Portable file on disk, but a native OAuth login is never copied between devices.
       expect(isCredentialSafeToPropagate(agent)).toBe(false);
       expect(isPropagatableAgent(agent)).toBe(false);
     }
@@ -78,11 +72,6 @@ describe('FLEET_AUTH_FILES coverage', () => {
   });
 });
 
-// PHNX-3940 T6: the generalized reserved-store sync must never reach for a native
-// OAuth/session file — only durable setup-tokens / API keys ride the fleet. This
-// pins the ban at its source: a fixture home holding EVERY FLEET_AUTH_FILES entry
-// yields an EMPTY transfer plan, on both platforms, because none of those files is
-// safe to propagate. If a future edit flips one to propagatable, this fails.
 describe('the transfer plan never selects any native login file (PHNX-3940 T6)', () => {
   function seedEveryAuthFile(home: string): void {
     for (const [agent, specs] of Object.entries(FLEET_AUTH_FILES)) {
