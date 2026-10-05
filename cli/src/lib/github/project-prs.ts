@@ -38,6 +38,7 @@ import { fetchViewerProfile } from './viewer.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
+import { npmView as defaultNpmView, readLatestTag, withMergesSince, type NpmView, type RepoRelease, type TagRead } from './release-drift.js';
 
 /** The author of a PR, as the menu renders it (login + avatar). */
 export interface ProjectPrAuthor {
@@ -138,6 +139,14 @@ export interface ProjectRepoPrs {
    * including with `--number`.
    */
   truncated: boolean;
+  /**
+   * The latest version tag, the merges since it, and npm's version of the package
+   * it released ({@link RepoRelease}); null with `--number`, when the repository
+   * has no version tag, or when that read failed (`releaseError` then says why).
+   */
+  release: RepoRelease | null;
+  /** Why `release` could not be read; null otherwise. */
+  releaseError: string | null;
   /** Non-null when the fetch failed — the list is then NOT authoritative. */
   error: string | null;
 }
@@ -156,6 +165,8 @@ export interface ProjectPrsEnvelope {
 export interface ProjectPrsContext {
   nowMs?: number;
   cacheDir?: string;
+  /** The `npm view` runner behind `release.npm`; tests inject a recorded answer. */
+  npmView?: NpmView;
 }
 
 /** Options for one `projects prs` run. `number` requires `repo`. */
@@ -281,7 +292,7 @@ export const MERGED_LIMIT = 20;
 export const MERGED_PAGE_CAP = 3;
 
 /** Check-run conclusions and status-context states that count as a failing check. */
-const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
+export const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
 
 /** What a menu row renders: the rollup state, plus the names to show when it is red. */
@@ -378,6 +389,11 @@ const isCachedRollup = (v: unknown): v is CachedRollup =>
   isRecord(v) && typeof v.readAt === 'number' && Array.isArray(v.items) &&
   v.items.every((i) => isRecord(i) && typeof i.name === 'string');
 
+/** A cached npm version read. */
+const isNpmRead = (v: unknown): v is { version: string | null; error: string | null; readAt: number } =>
+  isRecord(v) && typeof v.readAt === 'number' && (v.version === null || typeof v.version === 'string') &&
+  (v.error === null || typeof v.error === 'string');
+
 /** A cached merged-PR detail. */
 const isMergedDetail = (v: unknown): v is MergedDetail =>
   isRecord(v) && (v.mergedBy === null || typeof v.mergedBy === 'string') &&
@@ -388,7 +404,7 @@ const isMergedDetail = (v: unknown): v is MergedDetail =>
  * unreadable file, or an entry of the wrong shape, only costs re-reads: invalid
  * entries are dropped on load, so nothing downstream can trip over one and fail a list.
  */
-class KeyedCache<T> {
+export class KeyedCache<T> {
   private readonly file: string;
   private readonly sep: '@' | '#';
   private entries: Record<string, T> = {};
@@ -749,7 +765,13 @@ export async function buildProjectPrs(
   const filesCache = new PrFilesCache(cacheDir);
   const rollups = new KeyedCache<CachedRollup>(cacheDir, 'project-pr-ci.json', '@', isCachedRollup);
   const details = new KeyedCache<MergedDetail>(cacheDir, 'project-pr-merged.json', '#', isMergedDetail);
+  const npmVersions = new KeyedCache<{ version: string | null; error: string | null; readAt: number }>(cacheDir, 'project-npm-versions.json', '#', isNpmRead);
   const nowMs = ctx.nowMs ?? Date.now();
+  const npm = {
+    view: ctx.npmView ?? defaultNpmView,
+    nowMs,
+    cache: { get: (name: string) => npmVersions.get('npm', name), set: (name: string, v: { version: string | null; error: string | null; readAt: number }) => npmVersions.set('npm', name, v) },
+  };
   const sinceMs = nowMs - MERGED_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
   // Fetch repos in PARALLEL so a native caller's overall deadline scales with the
@@ -765,11 +787,13 @@ export async function buildProjectPrs(
           const pr = await fetchOnePr(slug, opts.number, gh);
           return {
             slug, sharedWith, pullRequests: [await enrichPr(slug, pr, gh)],
-            recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, error: null,
+            recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, release: null, releaseError: null, error: null,
           };
         }
         const errors = new CiErrors();
         const ci: CiReader = { slug, gh, rollups, errors, nowMs, reads: new Map() };
+        const tagRead: Promise<{ tag: TagRead | null; error: string | null }> = readLatestTag(slug, gh, npm)
+          .then((tag) => ({ tag, error: null }), (err: unknown) => ({ tag: null, error: ghFailure(err) }));
         const [listed, mergedRead, defaultBranch] = await Promise.all([
           listOpenPrs(slug, gh),
           listRecentlyMerged(slug, sinceMs, gh).catch((err: unknown) => {
@@ -798,6 +822,11 @@ export async function buildProjectPrs(
             .map((m, i) => ({ ...m, pr: { ...m.pr, scope: mergedScopes[i] } }))
             .filter((m) => m.pr.scope !== null);
         }
+        const { tag, error: releaseError } = await tagRead;
+        // Every scoped merge in the window, before the row cap, so the count is not capped at 20.
+        const release = tag
+          ? withMergesSince(tag, mergedListed ? merged.map((m) => m.pr) : null, { sinceMs, truncated: mergedRead?.truncated ?? false })
+          : null;
         merged = merged.slice(0, MERGED_LIMIT);
         const [openCi, recentlyMerged] = await Promise.all([
           mapBounded(pullRequests, 8, (pr) => readCi(ci, pr.headSha)),
@@ -823,13 +852,13 @@ export async function buildProjectPrs(
         }
         return {
           slug, sharedWith, pullRequests, recentlyMerged, defaultBranch,
-          ciError: errors.message, truncated: mergedRead?.truncated ?? false, error: null,
+          ciError: errors.message, truncated: mergedRead?.truncated ?? false, release, releaseError, error: null,
         };
       } catch (err) {
         // A fetch failure is reported, never relabeled as zero open PRs.
         return {
           slug, sharedWith, pullRequests: [], recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false,
-          error: err instanceof Error ? err.message : String(err),
+          release: null, releaseError: null, error: err instanceof Error ? err.message : String(err),
         };
       }
     }),
@@ -837,6 +866,7 @@ export async function buildProjectPrs(
   filesCache.save();
   rollups.save();
   details.save();
+  npmVersions.save();
 
   const partial = repositories.some((r) => r.error !== null);
   return { project, viewer: await viewerRead, repositories, partial };
@@ -873,7 +903,7 @@ export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Pro
  * sometimes followed by a hint line (a 401 adds `try authenticating with: gh auth
  * login`). Keep the line carrying the HTTP status, else the first line.
  */
-function ghFailure(err: unknown): string {
+export function ghFailure(err: unknown): string {
   const stderr = (err as { stderr?: unknown })?.stderr;
   const text = typeof stderr === 'string' && stderr.trim() ? stderr : err instanceof Error ? err.message : String(err);
   const lines = text.trim().split('\n').map((l) => l.trim()).filter(Boolean);

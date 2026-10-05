@@ -96,6 +96,7 @@ import {
   type MergeMethod,
 } from '../lib/github/project-prs.js';
 import { ghExec } from '../lib/github/pr-mergeable.js';
+import { readCiFailure, rerunFailedJobs } from '../lib/github/ci-failure.js';
 
 /** One glyph for a CI verdict in the human `prs` list; blank when there are no checks. */
 function ciMark(state: CiState | null): string {
@@ -1036,7 +1037,7 @@ async function runProjectCard(
   // no options of its own is what lets `prs merge` own --repo/--number/--json.
   const prsCmd = projects
     .command('prs')
-    .description('A project\'s open pull requests: list them (default), or act on one: ready, review, comment, merge.');
+    .description('A project\'s open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).');
   const prsListCmd = prsCmd
     .command('list <name>', { isDefault: true })
     .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter), scoped to this project\'s paths in a shared repo.')
@@ -1094,6 +1095,12 @@ async function runProjectCard(
             const wide = pr.scope === 'repo-wide' ? chalk.gray(' [repo-wide]') : '';
             console.log(`  ${ciMark(pr.ciState)} #${pr.number}${draft}${wide}  ${pr.title}  ${chalk.gray(`@${pr.author.login} · ${pr.headRefName}`)}`);
           }
+          if (r.release) {
+            const npm = r.release.npm?.version ? ` · npm ${r.release.npm.version}` : '';
+            const since = `${r.release.mergesSince}${r.release.mergesSinceComplete ? '' : '+'}`;
+            console.log(chalk.dim(`  ${r.release.latestTag} tagged ${r.release.latestTagAt.slice(0, 10)}${npm} · ${since} merged since`));
+          }
+          if (r.releaseError) console.log(chalk.yellow(`  Latest release could not be read: ${r.releaseError}`));
           if (r.ciError) console.log(chalk.yellow(`  CI and merged PRs are incomplete: ${r.ciError}`));
           if (r.truncated) console.log(chalk.yellow('  Merged list may be missing PRs: too many closed PRs were updated this week to read them all.'));
           if (r.recentlyMerged.length > 0) {
@@ -1252,6 +1259,82 @@ async function runProjectCard(
     `,
   });
 
+  const failureCmd = prsCmd
+    .command('failure <name>')
+    .description('Why one commit\'s CI failed: each failing check with the error lines of its job log.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--sha <commit>', 'The commit whose checks failed: a PR head, a merge commit, or the default branch head')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; sha: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const sha = prShaOrExit(opts.sha);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const report = await readCiFailure(repo, sha);
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else if (report.error) {
+        console.error(chalk.red(`Could not read the checks of ${repo}@${sha.slice(0, 7)}: ${report.error}`));
+      } else if (report.checks.length === 0) {
+        console.log(`No failing checks on ${repo}@${sha.slice(0, 7)}.`);
+      } else {
+        for (const check of report.checks) {
+          console.log(`${chalk.red('✗')} ${chalk.bold(check.name)}  ${chalk.gray(check.conclusion.toLowerCase())}${check.url ? `  ${chalk.gray(check.url)}` : ''}`);
+          for (const line of check.excerpt) console.log(`    ${line}`);
+          if (check.excerptError) console.log(chalk.yellow(`    ${check.excerptError}`));
+          if (check.runId !== null) console.log(chalk.gray(`    re-run: agents projects prs rerun ${name} --repo ${repo} --run-id ${check.runId}`));
+        }
+      }
+      if (report.error) process.exit(1);
+    });
+
+  setHelpSections(failureCmd, {
+    examples: `
+      agents projects prs rush --json                                   # read a ✗: defaultBranch.sha, a PR's headSha, or a merge's mergeCommitSha
+      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>
+      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha> --json
+    `,
+    notes: `
+      REST only: the commit's check runs and statuses, then each failing GitHub
+      Actions job's log (GET actions/jobs/{job}/logs). The excerpt drops timestamps,
+      colour and the runner's cleanup after "Post job cleanup.", and keeps the lines
+      that read like an error with one line of context each side, at most 12. A log
+      that cannot be read empties that excerpt and says why in excerptError; a check
+      that is not an Actions job has no log here. Exits 1 only when the checks
+      themselves could not be read.
+    `,
+  });
+
+  const rerunCmd = prsCmd
+    .command('rerun <name>')
+    .description('Re-run the failed jobs of one GitHub Actions workflow run.')
+    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--run-id <id>', 'The workflow run (runId from prs failure --json)')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string, opts: { repo: string; runId: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const raw = opts.runId.trim();
+      const runId = /^\d+$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(runId) || runId <= 0) prFail(`--run-id expects a positive integer, got "${opts.runId}".`);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await rerunFailedJobs(repo, runId);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.requested) console.log(`${chalk.green(result.message)}: ${repo} run ${runId}`);
+      else console.error(chalk.red(`Not re-run: ${repo} run ${runId}: ${result.message}`));
+      if (!result.requested) process.exit(1);
+    });
+
+  setHelpSections(rerunCmd, {
+    examples: `
+      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha> --json   # runId per failing check
+      agents projects prs rerun rush --repo phnx-labs/agi-cli --run-id 37243157132
+    `,
+    notes: `
+      One REST call (POST actions/runs/{id}/rerun-failed-jobs). Re-running only
+      repeats jobs, so it is safe to click again; GitHub refuses a run that is still
+      in progress (exit 1, requested: false in --json).
+    `,
+  });
+
   setHelpSections(prsCmd, {
     examples: `
       agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)
@@ -1260,6 +1343,8 @@ async function runProjectCard(
       agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>
       agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>
+      agents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>
     `,
   });
 

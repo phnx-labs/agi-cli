@@ -278,6 +278,33 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(stoppedRepo.truncated).toBe(false);
   });
 
+  it('reports the latest version tag, npm\'s version of its package, and the merges since it', async () => {
+    const tagRoutes: Routes = {
+      ...soloRoutes(),
+      'repos/acme/mono/tags?per_page=100': 'menubar/v3.0.0\tm3\nv2.0.0\tt2\nv1.9.0\tt1\n',
+      'repos/acme/mono/commits/t2': '{"date":"2026-10-01T00:00:00Z","files":["package.json","CHANGELOG.md"]}\n',
+      'repos/acme/mono/contents/package.json?ref=v2.0.0': `${Buffer.from('{"name":"@acme/mono","version":"2.0.0"}').toString('base64')}\n`,
+    };
+    const viewed: string[] = [];
+    const envelope = await buildProjectPrs(solo, {}, recordedGh(tagRoutes).gh, [solo], {
+      nowMs: NOW, cacheDir: freshCache(), npmView: async (name) => { viewed.push(name); return '1.9.0'; },
+    });
+    const [repo] = envelope.repositories;
+    expect(repo.releaseError).toBeNull();
+    // #13 and #10 merged after the tag; #15 before it.
+    expect(repo.release).toEqual({
+      latestTag: 'v2.0.0', latestTagAt: '2026-10-01T00:00:00Z', mergesSince: 2, mergesSinceComplete: true,
+      npm: { name: '@acme/mono', version: '1.9.0', error: null },
+    });
+    expect(viewed).toEqual(['@acme/mono']);
+
+    // A failed tag read is reported, never shown as a repository with no release.
+    const failed = await buildProjectPrs(solo, {}, recordedGh({
+      ...tagRoutes, 'repos/acme/mono/tags?per_page=100': Object.assign(new Error('gh'), { stderr: 'gh: Server Error (HTTP 500)\n' }),
+    }).gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    expect(failed.repositories[0]).toMatchObject({ release: null, releaseError: 'Server Error (HTTP 500)', error: null });
+  });
+
   it('a failed read names itself in ciError, keeps what succeeded, and never fails the repository', async () => {
     const rateLimited = Object.assign(new Error('Command failed: gh api'), {
       stderr: 'gh: API rate limit exceeded for user ID 1. (HTTP 403)\n',
@@ -357,7 +384,7 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.pullRequests[0]).toMatchObject({
       ciState: 'FAILURE', failingChecks: ['ci/external', 'test', 'deploy'], reviewDecision: 'APPROVED',
     });
-    expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false });
+    expect(repo).toMatchObject({ recentlyMerged: [], defaultBranch: null, ciError: null, truncated: false, release: null, releaseError: null });
   });
 
   it('reads the REST rollup with GitHub\'s precedence, and tells a finished rollup from a passing one', () => {

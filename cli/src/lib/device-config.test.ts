@@ -394,6 +394,20 @@ describe('validation', () => {
     }
     expect(() => setConfigValue('menubar.menu.deviceSort', 'fastest')).toThrow(/must be one of/);
   });
+
+  it('groups open PRs flat and merged PRs by day unless told otherwise, and refuses an unknown grouping', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    expect(getConfigValue('menubar.menu.prGroupOpen').spec.defaultValue).toBe('none');
+    expect(getConfigValue('menubar.menu.prGroupMerged').spec.defaultValue).toBe('day');
+    for (const mode of ['none', 'type', 'day']) {
+      setConfigValue('menubar.menu.prGroupOpen', mode);
+      setConfigValue('menubar.menu.prGroupMerged', mode);
+      expect(getConfigValue('menubar.menu.prGroupOpen').value).toBe(mode);
+      expect(getConfigValue('menubar.menu.prGroupMerged').value).toBe(mode);
+    }
+    expect(() => setConfigValue('menubar.menu.prGroupOpen', 'author')).toThrow(/must be one of/);
+    expect(() => setConfigValue('menubar.menu.prGroupMerged', 'week')).toThrow(/must be one of/);
+  });
 });
 
 describe('listConfig', () => {
@@ -432,6 +446,8 @@ describe('listConfig', () => {
       'menubar.menu.hideCompletedMilestones',
       'menubar.menu.includeOtherDeviceRequests',
       'menubar.menu.pinnedProjects',
+      'menubar.menu.prGroupMerged',
+      'menubar.menu.prGroupOpen',
       'menubar.menu.projectPriorityFilter',
       'menubar.menu.projectScope',
       'menubar.menu.projectSort',
