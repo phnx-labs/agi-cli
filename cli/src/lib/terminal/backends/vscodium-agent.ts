@@ -1,39 +1,15 @@
-/**
- * VSCodium agent-terminal backend — opens an agent terminal in a VSCodium /
- * Cursor / VS Code window via the swarmify `swarm-ext` extension's URI handler.
- *
- * Unlike iTerm/Ghostty (GUI terminal apps driven by AppleScript), the editor is
- * already running; we hand it a `<scheme>://swarmify.swarm-ext/spawn?…` URL via
- * the editor CLI's `--open-url` flag. The extension opens an editor-tab terminal
- * in `cwd`, runs `command`, and its shell-adoption promotes a resume command
- * (e.g. `claude --resume <id>`) to the matching agent chip. Driving the editor
- * CLI (not macOS `open`) means this works over `--device` SSH and on Linux, needs
- * no OS URL-scheme handler registration, and sends the command into an
- * already-interactive login shell — so no `zsh -ilc` wrap (the other backends'
- * wrapper) is applied here.
- */
 import * as fs from 'fs';
 import type { TerminalBackend, LaunchSpec, SplitDirection, EngineContext } from '../types.js';
 
-/** The swarmify extension identifier that owns the `/spawn` URI verb. */
 const EXTENSION_AUTHORITY = 'swarmify.swarm-ext';
 
-/** An editor flavour that speaks the swarm-ext URI protocol. */
 export interface EditorVariant {
-  /** CLI on PATH, invoked with `--open-url`. */
   cli: string;
-  /** URL scheme the product registers (must match the CLI's product). */
   scheme: string;
-  /** macOS app bundle, for local availability detection. */
   app: string;
   label: string;
 }
 
-/**
- * Known editors, in preference order. VSCodium first — the backend is named for
- * it and is the user's editor; Cursor and VS Code also ship the extension and
- * are wired here for `makeVscodiumAgentBackend` / future registration.
- */
 export const EDITOR_VARIANTS: EditorVariant[] = [
   { cli: 'codium', scheme: 'vscodium', app: '/Applications/VSCodium.app', label: 'VSCodium' },
   { cli: 'cursor', scheme: 'cursor', app: '/Applications/Cursor.app', label: 'Cursor' },
@@ -48,20 +24,6 @@ function appExists(p: string): boolean {
   }
 }
 
-/**
- * The `<scheme>://swarmify.swarm-ext/spawn?p=<payload>` URL the extension handles.
- *
- * The payload is base64url-encoded JSON in a single `p` param — NOT one param per
- * field. VS Code percent-*decodes* `uri.query` once before the extension parses
- * it, so a `command`/`cwd` containing `&` (or `=`) would be mis-split by a naive
- * multi-param query. base64url is `[A-Za-z0-9_-]` only (no `&`, `=`, `%`, `+`,
- * `/`), so it survives that decode untouched and round-trips exactly.
- *
- * Optional `meta.agent` / `meta.sessionId` / `meta.title` let the extension set
- * the tab chip and status bar without sniffing the local process tree — required
- * when `command` is a remote attach (`ssh … tmux attach`) with no agent binary
- * on this box (#2478).
- */
 export function spawnUri(
   scheme: string,
   cwd: string,
@@ -69,6 +31,7 @@ export function spawnUri(
   direction?: SplitDirection,
   meta?: { agent?: string; sessionId?: string; title?: string },
 ): string {
+  // One base64url JSON field keeps cwd and command bytes from becoming URI query delimiters.
   const payload: {
     command: string;
     cwd: string;
@@ -88,7 +51,6 @@ export function spawnUri(
   return `${scheme}://${EXTENSION_AUTHORITY}/spawn?p=${p}`;
 }
 
-/** Build a backend bound to one editor variant. */
 export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBackend {
   return {
     id: 'vscodium-agent',
@@ -105,5 +67,4 @@ export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBacken
   };
 }
 
-/** Default backend: VSCodium (`codium` CLI, `vscodium://` scheme). */
 export const vscodiumAgentBackend: TerminalBackend = makeVscodiumAgentBackend(EDITOR_VARIANTS[0]);

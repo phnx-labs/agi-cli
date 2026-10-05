@@ -1,10 +1,3 @@
-/**
- * Codex Cloud provider -- wraps the `codex` CLI for cloud dispatch.
- *
- * Delegates to `codex cloud exec/status/list` subcommands, parsing their
- * JSON or text output into the unified CloudTask format. Streaming is
- * emulated via polling since Codex Cloud lacks an SSE endpoint.
- */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -23,13 +16,10 @@ import { getShimsDir } from '../state.js';
 
 const SHIMS_DIR = getShimsDir();
 
-/** Locate the codex binary, checking agents-cli shims first then PATH. */
 function findCodexBinary(): string | null {
-  // Check agents-cli shims first
   const shim = path.join(SHIMS_DIR, 'codex');
   if (fs.existsSync(shim)) return shim;
 
-  // Check PATH via which
   try {
     return execFileSync('which', ['codex'], { stdio: 'pipe' }).toString().trim() || null;
   } catch {
@@ -37,12 +27,10 @@ function findCodexBinary(): string | null {
   }
 }
 
-/** Check whether the codex CLI is installed and reachable. */
 function codexAvailable(): boolean {
   return findCodexBinary() !== null;
 }
 
-/** Spawn the codex CLI with the given arguments and capture its output. */
 function runCodex(args: string[], env?: Record<string, string>): Promise<{ stdout: string; stderr: string; code: number }> {
   const bin = findCodexBinary();
   if (!bin) return Promise.resolve({ stdout: '', stderr: 'codex not found', code: 127 });
@@ -62,13 +50,10 @@ function runCodex(args: string[], env?: Record<string, string>): Promise<{ stdou
   });
 }
 
-/** Best-effort parse of codex CLI output into task fields (tries JSON, then key:value lines). */
 function parseTaskFromText(text: string): Partial<CloudTask> {
-  // Codex cloud list/status output varies. Try JSON first, then parse text.
   try {
     return JSON.parse(text);
   } catch {
-    // Parse text output line by line for key: value patterns
     const result: Record<string, string> = {};
     for (const line of text.split('\n')) {
       const match = line.match(/^\s*(\w[\w\s]*\w)\s*[:=]\s*(.+)\s*$/);
@@ -88,9 +73,6 @@ export class CodexCloudProvider implements CloudProvider {
   id = 'codex' as const;
   name = 'Codex Cloud';
   targetKind = 'env' as const;
-  // No listTargets: OpenAI ships no non-interactive "list environments"
-  // command. `codex cloud exec` requires --env and the help points at the
-  // interactive `codex cloud` TUI to browse. So discovery is guidance-only.
 
   private defaultEnv?: string;
 
@@ -109,10 +91,6 @@ export class CodexCloudProvider implements CloudProvider {
       cancel: false,
       message: false,
       multiRepo: false,
-      // `codex cloud exec --env <id> <prompt>` is the only dispatch surface the
-      // codex CLI exposes — it has no flag to attach images or ride-along skills,
-      // and the env bundles its own context at creation time. Both stay false
-      // until the upstream CLI grows an attachment surface.
       skills: false,
       images: false,
     };
@@ -130,12 +108,6 @@ export class CodexCloudProvider implements CloudProvider {
       );
     }
 
-    // Codex envs bundle their own repo list — the repos a task can touch are
-    // fixed at env-creation time, not per-dispatch. Passing 2+ repos here is
-    // almost always a misconfiguration: either the user meant to dispatch to
-    // Rush (which does support multi-repo), or they need to create/pick a
-    // Codex env that already contains those repos. Fail loudly rather than
-    // silently ignore the extras.
     const repos = resolveDispatchRepos(options);
     if (repos.length > 1) {
       throw new Error(
@@ -154,14 +126,8 @@ export class CodexCloudProvider implements CloudProvider {
       throw new Error(`codex cloud exec failed: ${stderr || stdout}`);
     }
 
-    // The task id is the ONLY handle to the just-created execution — status,
-    // list, and the session-index reconcile all key on it. Codex prints it to
-    // stdout (JSON or a task_/id: line); some builds route it to stderr, so scan
-    // both. A synthetic `codex-<ts>` id was the old fallback here — it can never
-    // match the real execution, so it silently broke every follow-up. If the id
-    // genuinely can't be parsed, fail loudly and point at `agents cloud list`
-    // (which recovers the newest execution) rather than persist a bogus id.
     const taskId = extractTaskId(stdout) ?? extractTaskId(stderr);
+    // Persist only the execution id returned by Codex; a fabricated fallback cannot be resumed or queried.
     if (!taskId) {
       throw new Error(
         'codex cloud exec did not report a task id — the run may have dispatched, but ' +
@@ -239,7 +205,6 @@ export class CodexCloudProvider implements CloudProvider {
   }
 
   async *stream(taskId: string): AsyncIterable<CloudEvent> {
-    // Codex Cloud doesn't have SSE streaming. Poll status until terminal.
     const terminalStatuses = new Set<CloudTaskStatus>(['completed', 'failed', 'cancelled']);
     let lastStatus = '';
 
@@ -265,13 +230,11 @@ export class CodexCloudProvider implements CloudProvider {
         break;
       }
 
-      // Poll every 5 seconds
       await new Promise((r) => setTimeout(r, 5000));
     }
   }
 
   async cancel(_taskId: string): Promise<void> {
-    // Codex Cloud doesn't expose a cancel command via CLI.
     throw new Error('Cancel is not supported for Codex Cloud tasks via CLI.');
   }
 
@@ -280,14 +243,11 @@ export class CodexCloudProvider implements CloudProvider {
   }
 }
 
-/** Extract a task ID from codex CLI output (JSON field, key:value line, or UUID pattern). */
 export function extractTaskId(output: string): string | undefined {
-  // Try JSON first
   try {
     const data = JSON.parse(output);
     return data.id || data.task_id;
   } catch {
-    // Look for UUID-like patterns or task IDs in the text
     const match = output.match(/(?:task[_\s]?id|id)\s*[:=]\s*["']?([a-zA-Z0-9_-]+)/i)
       || output.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i)
       || output.match(/(task_[a-zA-Z0-9]+)/i);

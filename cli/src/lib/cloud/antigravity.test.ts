@@ -6,9 +6,6 @@ import {
 import { AntigravityCloudProvider } from './antigravity.js';
 import { normalizeProviderStatus } from './types.js';
 
-// The antigravity status mapping now lives in the shared
-// `normalizeProviderStatus('antigravity', …)` helper; assert it here (against
-// the same vocabulary) so a drift in that helper still trips this suite.
 describe("normalizeProviderStatus('antigravity', …)", () => {
   const mapStatus = (s: string | undefined) => normalizeProviderStatus('antigravity', s);
   it('maps Interactions API statuses to the canonical enum', () => {
@@ -73,7 +70,6 @@ describe('AntigravityCloudProvider capabilities', () => {
       const caps = p.capabilities();
       expect(caps.available).toBe(true);
       expect(caps.dispatch).toBe(true);
-      // Raw sandbox: no repo→PR, no follow-up messaging in v1.
       expect(caps.multiRepo).toBe(false);
       expect(caps.message).toBe(false);
     } finally {

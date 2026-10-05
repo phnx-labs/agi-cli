@@ -1,21 +1,3 @@
-/**
- * Host cloud provider — your own machines as a task-execution backend.
- *
- * A thin adapter over the hosts subsystem (lib/hosts/*): `agents cloud run
- * --provider host --device <name>` dispatches through the SAME detached-SSH
- * launch as `agents run --device`, and the resulting task shows up in BOTH
- * `agents cloud ps` and `agents devices ps` — one store (the host-task sidecars
- * under ~/.agents/.cache/hosts/), two views. No new transport, no relay: SSH
- * is the only wire, exactly like the rest of the host design (docs/fleet.md).
- *
- * Status semantics follow reconcile.ts's prime rule: completion is only ever
- * CONFIRMED from the remote `.exit` file — an unreachable host leaves a task
- * `running`, never guessed as failed. The cloud SQLite store row is a cached
- * index (the `cloud list` refresh loop upserts what `status()` returns); the
- * sidecar stays the source of truth. Reachability is memoized per target for
- * the life of the process so a down host costs ONE short timeout, not one per
- * task ("care around the cloud status-refresh path", lib/hosts/tasks.ts).
- */
 
 import type {
   CloudEvent,
@@ -36,9 +18,8 @@ import { dispatchPromptToHost, resolveHostRunTarget } from '../hosts/run-target.
 import { listAllHosts } from '../hosts/registry.js';
 import { terminateDispatchedTask } from '../hosts/dispatch.js';
 
-/** Host-task lifecycle → canonical cloud enum. `unknown` stays `running`
- *  (completion is confirmed, never guessed — reconcile.ts's rule). */
 function toCloudStatus(status: HostTask['status']): CloudTaskStatus {
+  // Unknown or unreachable is still running; only the remote exit file proves terminal state.
   switch (status) {
     case 'completed': return 'completed';
     case 'failed': return 'failed';
@@ -49,7 +30,6 @@ function toCloudStatus(status: HostTask['status']): CloudTaskStatus {
   }
 }
 
-/** Project a host-task sidecar into the cloud task shape. */
 export function hostTaskToCloudTask(task: HostTask): CloudTask {
   return {
     id: task.id,
@@ -68,23 +48,17 @@ export class HostCloudProvider implements CloudProvider {
   readonly name = 'Host (your machines)';
   readonly targetKind = 'host' as const;
 
-  /**
-   * Reachability memo, per target, for the life of this process. The cloud
-   * refresh loop calls `status()` once per active task; without the memo a
-   * down host would cost one ~6s ssh timeout PER task instead of one total.
-   * CLI processes are short-lived, so staleness is bounded by the invocation.
-   */
   private reachable = new Map<string, boolean>();
 
   capabilities(): ProviderCapabilities {
     return {
-      available: true, // ssh is the only dependency; per-host reachability is probed at dispatch
+      available: true,
       dispatch: true,
       status: true,
       list: true,
       stream: true,
       cancel: true,
-      message: true, // gated per task: needs the sessionId only Claude runs carry
+      message: true,
       multiRepo: false,
       skills: false,
       images: false,
@@ -110,8 +84,6 @@ export class HostCloudProvider implements CloudProvider {
       throw new Error('--branch has no meaning for --provider host (no clone step). Check out the branch on the host, or use --remote-cwd.');
     }
 
-    // DeviceOffloadUnsupportedError / HostResolutionError propagate — both carry
-    // actionable messages the CLI prints verbatim.
     const host = await resolveHostRunTarget(hostName, {
       any: options.providerOptions?.any === true,
     });
@@ -123,7 +95,7 @@ export class HostCloudProvider implements CloudProvider {
       timeout: options.timeout,
       remoteCwd: options.providerOptions?.remoteCwd as string | undefined,
       name: options.providerOptions?.name as string | undefined,
-      follow: false, // the cloud pipeline streams via stream(); never block dispatch
+      follow: false,
     });
     return hostTaskToCloudTask(task);
   }
@@ -139,12 +111,9 @@ export class HostCloudProvider implements CloudProvider {
     return filter?.status ? tasks.filter((t) => t.status === filter.status) : tasks;
   }
 
-  /**
-   * `reconcileTask` with the per-process reachability memo folded in: probe a
-   * target at most once per process; a down host leaves its tasks `running`.
-   */
   private reconcileMemoized(task: HostTask): HostTask {
     if (task.status !== 'running') return task;
+    // Probe each target once per provider instance; many tasks on one offline host share the timeout.
     if (!this.reachable.has(task.target)) {
       this.reachable.set(task.target, sshReachable(task.target, 6000));
     }
@@ -154,10 +123,6 @@ export class HostCloudProvider implements CloudProvider {
     return updateTask(task.id, terminalPatch(st.code)) ?? task;
   }
 
-  /**
-   * Offset-tail the remote log (the same one-round-trip fetch the `run --device`
-   * follow uses) and yield it as `text` events until the `.exit` file lands.
-   */
   async *stream(taskId: string): AsyncIterable<CloudEvent> {
     const task = loadTask(taskId);
     if (!task) throw new Error(`Unknown host task: ${taskId}`);
@@ -182,10 +147,10 @@ export class HostCloudProvider implements CloudProvider {
       if (fetched) {
         if (fetched.logChunk.length > 0) {
           offset += fetched.logChunk.length;
-          pollMs = fastPollMs; // output is flowing — snap back to the fast poll
+          pollMs = fastPollMs;
           yield { type: 'text', content: fetched.logChunk.toString('utf8') };
         } else {
-          pollMs = Math.min(Math.round(pollMs * 1.5), maxPollMs); // idle backoff
+          pollMs = Math.min(Math.round(pollMs * 1.5), maxPollMs);
         }
         const exit = fetched.exit.trim();
         if (exit !== '') {
@@ -206,11 +171,6 @@ export class HostCloudProvider implements CloudProvider {
     terminateDispatchedTask(task);
   }
 
-  /**
-   * Follow-up message = resume the run's session on the same host. Only runs
-   * that captured a session id (Claude — the one agent that takes
-   * `--session-id`) can be resumed; others get an actionable refusal.
-   */
   async message(taskId: string, content: string): Promise<void> {
     const task = loadTask(taskId);
     if (!task) throw new Error(`Unknown host task: ${taskId}`);
@@ -230,7 +190,6 @@ export class HostCloudProvider implements CloudProvider {
     });
   }
 
-  /** The unified host pool (enrolled hosts ∪ devices), dispatchable ones only. */
   async listTargets(): Promise<CloudTarget[]> {
     const hosts = await listAllHosts();
     return hosts

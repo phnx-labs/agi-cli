@@ -1,11 +1,3 @@
-/**
- * The engine — turns requests into open surfaces.
- *
- * `specForRequest` and `buildRequests` are pure (planning); `openSurface` and
- * `openSurfaces` add the side-effecting transport. A batch runs sequentially and
- * staggered so a `split-right` lands in the tab that was just opened (the split
- * targets the front pane).
- */
 import type { Backend, EngineContext, LaunchRequest, LaunchResult, LaunchSpec } from './types.js';
 import { BACKENDS } from './backends/index.js';
 import { planLayouts, type Packing } from './policy.js';
@@ -16,7 +8,6 @@ import { sshExec } from '../ssh-exec.js';
 const DEFAULT_STAGGER_MS = 400;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/** The concrete launch command for a request (pure — no side effects). */
 export function specForRequest(req: LaunchRequest): LaunchSpec {
   const backend = BACKENDS[req.backend];
   if (!backend) throw new Error(`unknown backend: ${req.backend}`);
@@ -38,12 +29,8 @@ export interface OpenOptions {
   ctx?: EngineContext;
 }
 
-/** Open a single surface for one request. Never throws — failures come back in the result. */
 export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): Promise<LaunchResult> {
   try {
-    // Both can throw: specForRequest on an unknown backend, runSpec when the
-    // SSH transport rejects an invalid --device target. Keep them inside the
-    // catch so a bad request degrades to a per-surface failure, never a throw.
     let resolved = req;
     if (req.host && req.host !== 'local' && homeRemainder(req.cwd) !== null) {
       const target = opts.resolveHost ? opts.resolveHost(req.host) : req.host;
@@ -62,11 +49,9 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
   }
 }
 
-/** One command to run as a surface. */
 export interface SurfaceItem {
   cwd: string;
   command: string[];
-  /** Optional harness identity for editor-backed backends (vscodium-agent). */
   agent?: string;
   sessionId?: string;
   title?: string;
@@ -78,7 +63,6 @@ export interface BuildRequestsOptions {
   packing?: Packing;
 }
 
-/** Turn a list of commands into layout-assigned requests (pure — the planning step). */
 export function buildRequests(items: SurfaceItem[], opts: BuildRequestsOptions): LaunchRequest[] {
   const layouts = planLayouts(items.length, opts.packing ?? 'two-per-tab');
   return items.map((item, i) => ({
@@ -97,10 +81,6 @@ export interface OpenManyOptions extends OpenOptions, BuildRequestsOptions {
   staggerMs?: number;
 }
 
-/**
- * Open many surfaces, applying the layout policy (default: two-per-tab).
- * Sequential + staggered so each split follows the tab it splits.
- */
 export async function openSurfaces(items: SurfaceItem[], opts: OpenManyOptions): Promise<LaunchResult[]> {
   const requests = buildRequests(items, opts);
   const stagger = opts.staggerMs ?? DEFAULT_STAGGER_MS;

@@ -1,11 +1,3 @@
-/**
- * Terminal launch engine — open an interactive command as a tab or split pane
- * in iTerm / Ghostty / tmux, on this machine or a remote host.
- *
- * Public entry point. Callers typically use `openSurfaces` (a batch with a
- * layout policy) or `openSurface` (a single request), and `availableBackends` /
- * `detectCurrentBackend` to pick a target. See docs/interfaces.md.
- */
 export type {
   Backend,
   SplitDirection,

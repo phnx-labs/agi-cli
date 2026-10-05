@@ -1,9 +1,3 @@
-/**
- * Rush Cloud provider -- dispatches tasks to the Factory Floor via api.prix.dev.
- *
- * Auth: reads the session token from ~/.rush/user.yaml (written by `rush login`).
- * Requires the Rush GitHub App installed on the target repo.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -30,8 +24,6 @@ import { selectBalancedVersion } from '../accounting/rotate.js';
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
-// Native OAuth/session credentials never cross the cloud boundary. A server
-// token request fails loud rather than materializing a harness login (see dispatch()).
 
 interface UserYaml {
   session?: {
@@ -49,13 +41,6 @@ interface Installation {
   repository_selection?: string;
 }
 
-/**
- * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
- * the token has not passed its expires_at timestamp (Unix milliseconds). A missing
- * expires_at, or `expires_at: 0` (a non-expiring Phoenix `pid_` bearer), is
- * treated as non-expired (see isRushSessionExpired, PHNX-3645). Pass yamlPath
- * to override the default path in tests.
- */
 export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   try {
     if (!fs.existsSync(yamlPath)) return false;
@@ -69,12 +54,6 @@ export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
   }
 }
 
-/**
- * Read the Rush session access token from ~/.rush/user.yaml. Exported (with an
- * overridable yamlPath, like isRushSessionValid) so the freshness behavior —
- * including the `expires_at: 0` non-expiring case (PHNX-3645) — is directly
- * testable; the class methods call it with the default path.
- */
 export function readToken(yamlPath: string = USER_YAML): string {
   if (!fs.existsSync(yamlPath)) {
     throw new Error('Not logged in to Rush. Run `rush login` first.');
@@ -93,7 +72,6 @@ export function readToken(yamlPath: string = USER_YAML): string {
   return token;
 }
 
-/** Read the user's email from the Rush session config, if available. */
 function readEmail(): string | undefined {
   try {
     const raw = fs.readFileSync(USER_YAML, 'utf-8');
@@ -104,7 +82,6 @@ function readEmail(): string | undefined {
   }
 }
 
-/** Make an authenticated request to the Rush API proxy. */
 async function api(method: string, endpoint: string, token: string, body?: unknown): Promise<Response> {
   const url = endpoint.startsWith('http') ? endpoint : `${PROXY_BASE}${endpoint}`;
   const headers: Record<string, string> = {
@@ -118,7 +95,6 @@ async function api(method: string, endpoint: string, token: string, body?: unkno
   });
 }
 
-/** Find the GitHub App installation ID for a given owner/repo pair. */
 async function findInstallation(token: string, owner: string, repo: string): Promise<number> {
   const res = await api('GET', '/api/v1/github/app/installations', token);
   if (!res.ok) {
@@ -140,45 +116,28 @@ async function findInstallation(token: string, owner: string, repo: string): Pro
   );
 }
 
-/** One version's entry in the account manifest sent on every dispatch. */
 interface AccountManifestEntry {
   version: string;
   email: string;
 }
 
-/**
- * Manifest of the user's local Claude accounts (version + account email only).
- * Sent on a non-balanced dispatch so the server knows which accounts exist and
- * can route to one. It carries **no credential material** and does NOT read the
- * native OAuth login (RUSH-2527 / SING-1b): agents-cli never reads a harness's
- * interactive login to build this. When the server asks for the underlying token
- * (a new account, or a rotation it can't otherwise resolve), the client does NOT
- * upload it — there is no consented path to copy a native OAuth login to the
- * cloud. Dispatch fails loud and steers to a portable provider account instead
- * (see the 401 handler in `dispatch()`).
- */
 interface AccountManifest {
   fp: string;
   versions: AccountManifestEntry[];
 }
 
-/** sha256 → hex. */
 function sha256(input: string): string {
   return crypto.createHash('sha256').update(input).digest('hex');
 }
 
-/**
- * Strip tokens/credentials from a server error body before surfacing it.
- * If the body is JSON with a `message` or `error` field, prefer that.
- * Otherwise truncate and redact anything that looks like a bearer token or JWT.
- */
 function sanitizeErrorBody(body: string): string {
+  // Prefer a bounded structured message; otherwise truncate and redact token-like unstructured text.
   const MAX_LEN = 300;
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
     const msg = (parsed.message ?? parsed.error ?? parsed.detail) as string | undefined;
     if (typeof msg === 'string') return msg.slice(0, MAX_LEN);
-  } catch { /* not JSON, fall through */ }
+  } catch {  }
   let safe = body.slice(0, MAX_LEN);
   safe = safe.replace(/eyJ[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
   safe = safe.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
@@ -187,11 +146,6 @@ function sanitizeErrorBody(body: string): string {
   return safe;
 }
 
-/**
- * Pull `prompt_code` out of a JSON-encoded error body. Returns null when the
- * body isn't JSON or doesn't carry one — caller falls through to the generic
- * dispatch-failed path.
- */
 function parsePromptCode(body: string): string | null {
   try {
     const parsed = JSON.parse(body) as { prompt_code?: unknown };
@@ -201,27 +155,17 @@ function parsePromptCode(body: string): string | null {
   }
 }
 
-/**
- * Build a manifest of the user's local Claude installations to send on every
- * cloud dispatch. The manifest is the contract the server uses to detect when
- * the user has added a new account or rotated a token.
- *
- * Returns null when no Claude versions are signed in (the dispatch falls back
- * to the platform-wide key, current behavior).
- */
 async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
+  // This is version/email routing metadata only; native OAuth and session credentials never leave the host.
   let candidateVersions: Array<{ version: string; email: string }>;
 
   if (strategy === 'balanced') {
-    // Use the same health-checked, deduped-by-email set that `agents run --balanced` uses.
-    // `result.healthy` contains one candidate per unique email, ordered by remaining capacity.
     const result = await selectBalancedVersion('claude');
     if (!result || result.healthy.length === 0) return null;
     candidateVersions = result.healthy
       .filter((c) => !!c.email)
       .map((c) => ({ version: c.version, email: c.email! }));
   } else {
-    // Default: all installed versions that have a signed-in account.
     const versions = listInstalledVersions('claude');
     if (versions.length === 0) return null;
     const rows = await Promise.all(
@@ -234,11 +178,6 @@ async function buildAccountManifest(strategy?: string): Promise<AccountManifest 
     candidateVersions = rows.filter((r): r is { version: string; email: string } => r !== null);
   }
 
-  // RUSH-2527 / SING-1b: do NOT read the native OAuth login to fingerprint it.
-  // The manifest carries version + account email only — enough for the server to
-  // route to an account. If the server needs the token itself, the client does NOT
-  // upload it (there is no consented path to copy a native OAuth login to the
-  // cloud); dispatch fails loud and steers to a portable provider account.
   const entries: AccountManifestEntry[] = candidateVersions
     .map(({ version, email }) => ({ version, email }))
     .sort((a, b) => a.version.localeCompare(b.version));
@@ -248,18 +187,7 @@ async function buildAccountManifest(strategy?: string): Promise<AccountManifest 
   return { fp, versions: entries };
 }
 
-// buildAccountTokensPayload / accountTokensFingerprint (which read every installed
-// Claude version's native OAuth token to upload it to the cloud) were REMOVED —
-// SING-1b forbids reading or transferring a native OAuth / session login, even
-// with consent. Cloud dispatch under a native login now fails loud and steers to a
-// portable provider account (see the 401 handler in dispatch()).
 
-/**
- * Build the POST body for /api/v1/cloud-runs. Exported so tests can verify
- * the back-compat shape (singular fields + repos[]) without needing real
- * GitHub installations or a live Rush session. `findInstallation` is the
- * only other I/O and it's tested by the cloud proxy integration suite.
- */
 export function buildDispatchBody(input: {
   agent?: string;
   prompt: string;
@@ -267,18 +195,8 @@ export function buildDispatchBody(input: {
   strategy?: string;
   resolvedRepos: Array<{ installation_id: number; repo_owner: string; repo_name: string }>;
   accountManifest?: AccountManifest | null;
-  /**
-   * Skill ride-alongs so the cloud pod isn't context-blind. Forwarded verbatim
-   * as `skills` so the Factory Floor can mount them by id/version before the
-   * agent runs. Omitted when empty.
-   */
   skills?: SkillRef[] | null;
-  /**
-   * Base64 image attachments for vision dispatch. Sliced to
-   * MAX_IMAGES_PER_DISPATCH — extras are dropped, never sent. Omitted when empty.
-   */
   images?: ImageAttachment[] | null;
-  /** Runtime env vars mounted into the cloud agent process. */
   env?: Record<string, string> | null;
 }): Record<string, unknown> {
   if (input.resolvedRepos.length === 0) {
@@ -337,11 +255,6 @@ export class RushCloudProvider implements CloudProvider {
       throw new Error('Rush Cloud requires --repo <owner/repo> (or --repo repeated for multi-repo).');
     }
 
-    // Budget pre-flight gate (issue #346). Cloud dispatches inherit the local
-    // project's caps; we refuse to POST a run that would breach an on_exceed:block
-    // cap. The repo slug is the project attribution key. Server-side spend is
-    // authoritative for live enforcement; this pre-flight is the deterministic
-    // "don't even start it" guard. Dormant when no caps are configured.
     {
       const { runPreflightGate } = await import('../budget/preflight.js');
       const projectKey = repos[0] ?? process.cwd();
@@ -356,9 +269,6 @@ export class RushCloudProvider implements CloudProvider {
       }
     }
 
-    // Validate each repo's shape and resolve its installation_id up front.
-    // Any bad entry fails the whole dispatch — we never want a half-started
-    // multi-repo run that only found installations for some of the repos.
     const token = readToken();
     const parsed = repos.map((full) => {
       const parts = full.split('/');
@@ -377,9 +287,6 @@ export class RushCloudProvider implements CloudProvider {
     );
 
     const strategy = (options.providerOptions as { strategy?: string } | undefined)?.strategy;
-    // When balanced, the server owns the pool and rotates internally — no
-    // client-side manifest needed. We just forward the strategy so the server
-    // knows to load from Vault instead of waiting for a manifest.
     const accountManifest = strategy === 'balanced' ? null : await buildAccountManifest();
 
     const body = buildDispatchBody({
@@ -396,12 +303,7 @@ export class RushCloudProvider implements CloudProvider {
 
     let res = await api('POST', '/api/v1/cloud-runs', token, body);
 
-    // The server asks the client to upload the underlying Claude OAuth token when
-    // it detects a new account or a rotation (401 + prompt_code). agents-cli NEVER
-    // reads or transfers a native OAuth / session login off this machine — not
-    // even with consent (SING-1b): a rotating token copied to the cloud is
-    // invalidated on its next refresh and logs the fleet out. Fail loud and steer
-    // to a portable provider account instead of exfiltrating the login.
+    // A 401 is diagnostic only: fail loud instead of retrying with native credential material.
     if (res.status === 401 && accountManifest) {
       const errBody = await res.clone().text();
       const promptCode = parsePromptCode(errBody);
@@ -504,10 +406,6 @@ export class RushCloudProvider implements CloudProvider {
 
   async cancel(taskId: string): Promise<void> {
     const token = readToken();
-    // The cancel ACTION endpoint (POST .../cancel) is what the backend implements;
-    // it works on paused runs too (queued / needs_review / input_required). A bare
-    // DELETE on the run 404s, so `agents cloud cancel` silently failed on anything
-    // that wasn't actively running.
     const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/cancel`, token);
     if (!res.ok) {
       throw new Error(`Failed to cancel task (${res.status}).`);

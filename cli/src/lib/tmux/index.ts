@@ -1,8 +1,3 @@
-/**
- * Public entry-point for the tmux integration. Consumers outside the CLI
- * (swarmify extension, `agents teams` multiplexer mode, future MCP wrapper)
- * should import from here.
- */
 
 export {
   findTmuxBinary,

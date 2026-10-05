@@ -1,24 +1,3 @@
-/**
- * Antigravity cloud provider — Google's Antigravity agent via the Gemini
- * **Managed Agents Interactions API**.
- *
- * The `agy` CLI is local-only (`--print` / `--sandbox`); Antigravity's cloud
- * surface is an HTTP endpoint that runs the Antigravity harness in a remote
- * ephemeral Linux sandbox:
- *
- *   POST https://generativelanguage.googleapis.com/v1beta/interactions
- *   x-goog-api-key: <GEMINI_API_KEY>
- *   { "agent": "antigravity-preview-05-2026", "input": "<prompt>", "environment": "remote" }
- *
- * The call is synchronous by default (the response carries `status` +
- * `output_text`), so `dispatch()` awaits it, returns a terminal CloudTask, and
- * `stream()` replays the buffered text + done events — same shape as the Factory
- * provider. It is a raw sandbox: no GitHub repo → PR (that's Rush's job).
- *
- * Auth: the Gemini API key comes from an `agents secrets` bundle named in
- * `cloud.providers.antigravity.secretsBundle` (never from agents.yaml), falling
- * back to GEMINI_API_KEY / GOOGLE_API_KEY in the environment.
- */
 
 import type {
   CloudProvider,
@@ -35,7 +14,6 @@ const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/inter
 const DEFAULT_MODEL = 'antigravity-preview-05-2026';
 const KEY_NAMES = ['GEMINI_API_KEY', 'GOOGLE_API_KEY'] as const;
 
-/** Shape of the Interactions API response we consume (defensive: all optional). */
 interface InteractionResponse {
   id?: string;
   interaction_id?: string;
@@ -45,7 +23,6 @@ interface InteractionResponse {
   error?: { message?: string } | string;
 }
 
-/** Build the Interactions API request body for a fresh dispatch. */
 export function buildInteractionBody(prompt: string, model: string): Record<string, unknown> {
   return {
     agent: model,
@@ -54,7 +31,6 @@ export function buildInteractionBody(prompt: string, model: string): Record<stri
   };
 }
 
-/** Parse an Interactions API response into a CloudTask (minus prompt/timestamps). */
 export function parseInteraction(resp: InteractionResponse): { id: string; status: CloudTaskStatus; summary?: string; environmentId?: string } {
   const id = resp.id ?? resp.interaction_id ?? `antigravity-${Date.now()}`;
   return {
@@ -65,7 +41,6 @@ export function parseInteraction(resp: InteractionResponse): { id: string; statu
   };
 }
 
-/** A completed interaction, buffered in-process for `stream()` to replay. */
 interface BufferedRun {
   events: CloudEvent[];
   task: CloudTask;
@@ -84,25 +59,15 @@ export class AntigravityCloudProvider implements CloudProvider {
     this.model = config?.model ?? DEFAULT_MODEL;
   }
 
-  /**
-   * True when a key *source* is configured. Cheap: never resolves the bundle
-   * (which could prompt for biometry) — that happens lazily at dispatch.
-   */
   private hasKeySource(): boolean {
     if (this.secretsBundle) return true;
     return KEY_NAMES.some((k) => Boolean(process.env[k]));
   }
 
-  /** Resolve the Gemini API key from the configured bundle or the environment. */
   private async resolveApiKey(): Promise<string> {
     if (this.secretsBundle) {
       try {
-        // Cloud dispatch resolves the key on its own (no human at a sheet), so the
-        // read is always `agentOnly` (SEC-13: never pop Touch ID on its own). A
-        // locked bundle THROWS the actionable "unlock <name>" message, which the
-        // catch below re-raises verbatim — dispatch genuinely needs the key, so it
-        // fails LOUD with the unlock hint rather than swallowing it into a wrong
-        // path. A `never`/no-ACL or broker-held bundle resolves silently.
+        // Unattended dispatch is broker-only: a locked bundle must fail, never open biometric UI or fall back.
         const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:antigravity', agentOnly: true });
         for (const k of KEY_NAMES) {
           if (env[k]) return env[k];
@@ -140,8 +105,6 @@ export class AntigravityCloudProvider implements CloudProvider {
   }
 
   async dispatch(options: DispatchOptions): Promise<CloudTask> {
-    // The Interactions sandbox has no GitHub repo → PR flow. Reject repos
-    // loudly rather than silently ignoring them (point the user at Rush).
     const repos = resolveDispatchRepos(options);
     if (repos.length > 0) {
       throw new Error(

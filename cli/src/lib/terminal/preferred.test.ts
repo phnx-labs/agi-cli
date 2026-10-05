@@ -9,16 +9,8 @@ import {
 } from './preferred.js';
 import type { Backend, EngineContext } from './types.js';
 
-// A GUI caller with no terminal in its ancestry — exactly the menu-bar helper's
-// launchd environment, which is the case this module exists for.
 const guiCtx: EngineContext = { platform: 'darwin', env: {} };
 
-/**
- * Availability is injected, never inherited from the machine. The real probe
- * stats `/Applications/Ghostty.app`, so tests that only set `platform: 'darwin'`
- * pass on a dev Mac with those apps and fail on a Linux CI runner — which is
- * exactly what happened to the first version of this file.
- */
 function withApps(...installed: Backend[]): BackendResolveDeps {
   return { isAvailable: (b) => installed.includes(b) };
 }
@@ -36,8 +28,6 @@ describe('backendFromSessions', () => {
   });
 
   it('falls to the next session when the newest host has no drivable backend', () => {
-    // warp is detected by the session engine but no backend drives it, so the
-    // iTerm session behind it decides — not a silent wrong-app launch.
     const sessions: SessionHostSample[] = [
       { host: 'warp', lastActivityMs: 9_000 },
       { host: 'iterm', lastActivityMs: 5_000 },
@@ -55,7 +45,6 @@ describe('backendFromSessions', () => {
   });
 
   it('skips a backend that is not installed, however recent the session', () => {
-    // A Ghostty session on a machine without Ghostty must not win.
     const sessions: SessionHostSample[] = [
       { host: 'ghostty', lastActivityMs: 9_000 },
       { host: 'iterm', lastActivityMs: 1_000 },
@@ -65,8 +54,6 @@ describe('backendFromSessions', () => {
   });
 
   it('skips tmux from a GUI caller, and takes it from inside tmux', () => {
-    // tmux is drivable only from inside tmux ($TMUX), and that check is env-only,
-    // so this case uses the REAL availability probe on every platform.
     expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 1 }], guiCtx)).toBeNull();
     const inTmux: EngineContext = { platform: 'darwin', env: { TMUX: '/tmp/tmux-501/default,1,0' } };
     expect(backendFromSessions([{ host: 'tmux', lastActivityMs: 1 }], inTmux))
@@ -74,9 +61,6 @@ describe('backendFromSessions', () => {
   });
 
   it('prefers the app a tmux session is VIEWED in over the multiplexer', () => {
-    // `agents run` tmux-wraps interactive runs, so a session started in Ghostty
-    // is attributed host 'tmux'. Without viewingApp it names nothing drivable
-    // and the menu bar guesses; with it, Ghostty wins.
     expect(backendFromSessions([{ host: 'tmux', viewingApp: 'ghostty', lastActivityMs: 9 }], guiCtx, macDefaults))
       .toEqual({ backend: 'ghostty', host: 'ghostty' });
   });
@@ -90,16 +74,11 @@ describe('backendFromSessions', () => {
   });
 
   it('ignores a host that only matches Object.prototype', () => {
-    // The host is data off the process table; a bare index would hand back a
-    // prototype member that BACKENDS cannot key on, and .isAvailable would throw.
     expect(backendFromSessions([{ host: 'constructor', lastActivityMs: 9 }], guiCtx, macDefaults)).toBeNull();
     expect(backendFromSessions([{ host: 'toString', lastActivityMs: 9 }], guiCtx, macDefaults)).toBeNull();
   });
 
   it('maps only hosts the engine can really drive', () => {
-    // Guard against a well-meaning "cursor -> vscodium-agent" edit: the single
-    // registered editor backend is bound to the VSCodium variant, so mapping
-    // Cursor would open the wrong app.
     expect(SESSION_HOST_BACKENDS.cursor).toBeUndefined();
     expect(SESSION_HOST_BACKENDS.code).toBeUndefined();
     expect(SESSION_HOST_BACKENDS.warp).toBeUndefined();
@@ -115,8 +94,6 @@ describe('resolveLaunchBackend', () => {
   });
 
   it('skips the current terminal when it is not drivable here', () => {
-    // Inside Ghostty over SSH, say: fall through to the session-derived answer
-    // rather than launching into an app this context cannot reach.
     const inGhostty: EngineContext = { platform: 'darwin', env: { TERM_PROGRAM: 'ghostty' } };
     expect(resolveLaunchBackend(inGhostty, [{ host: 'iterm', lastActivityMs: 9 }], withApps('iterm')))
       .toEqual({ backend: 'iterm', source: 'active-session', host: 'iterm' });
@@ -138,8 +115,6 @@ describe('resolveLaunchBackend', () => {
   });
 
   it('returns null where no terminal can be driven at all', () => {
-    // Linux, not inside tmux: nothing in the registry is available. Uses the
-    // REAL probe — no backend is installable there, on any machine.
     expect(resolveLaunchBackend({ platform: 'linux', env: {} }, [{ host: 'iterm' }])).toBeNull();
   });
 });

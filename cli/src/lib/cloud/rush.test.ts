@@ -92,8 +92,6 @@ describe('buildDispatchBody', () => {
   });
 
   it('includes account_manifest (version + email only, no credential material) when supplied', () => {
-    // RUSH-2527 / SING-1b: the manifest carries no token hash — agents-cli never
-    // reads the native OAuth login to build it. Only version + account email ride.
     const manifest = {
       fp: 'aaaa',
       versions: [
@@ -107,7 +105,6 @@ describe('buildDispatchBody', () => {
       accountManifest: manifest,
     });
     expect(body.account_manifest).toEqual(manifest);
-    // No per-version credential fingerprint / token anywhere in the ordinary body.
     expect(JSON.stringify(body)).not.toContain('cred_fp');
     expect(body.account_tokens).toBeUndefined();
   });
@@ -122,8 +119,6 @@ describe('buildDispatchBody', () => {
   });
 
   it('has no account_tokens surface at all — a native OAuth token is never uploaded (SING-1b)', () => {
-    // The token-upload payload was removed: buildDispatchBody has no accountTokens
-    // input, so the dispatch body can never carry Claude OAuth credentials.
     const body = buildDispatchBody({
       prompt: 'x',
       resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
@@ -201,7 +196,6 @@ describe('buildDispatchBody', () => {
     });
     expect(Array.isArray(body.images)).toBe(true);
     expect((body.images as ImageAttachment[]).length).toBe(MAX_IMAGES_PER_DISPATCH);
-    // The kept slice is the first MAX_IMAGES_PER_DISPATCH, in order.
     expect((body.images as ImageAttachment[])[0].data).toBe('img0');
     expect((body.images as ImageAttachment[])[MAX_IMAGES_PER_DISPATCH - 1].data).toBe(
       `img${MAX_IMAGES_PER_DISPATCH - 1}`,
@@ -258,20 +252,12 @@ describe('buildDispatchBody', () => {
   });
 
   it('has no upload-consent / token-upload surface anymore (SING-1b regression)', async () => {
-    // The consent gate and the token-upload helpers were removed — a native OAuth
-    // login can never be sent to the cloud, with or without consent. Assert the
-    // module no longer exports any of them, so a future change can't re-introduce
-    // the upload path unnoticed.
     const mod = (await import('./rush.js')) as Record<string, unknown>;
     expect(mod.hasRushUploadConsent).toBeUndefined();
     expect(mod.buildAccountTokensPayload).toBeUndefined();
     expect(mod.accountTokensFingerprint).toBeUndefined();
     expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
     expect(mod.readClaudeCredentialsBlob).toBeUndefined();
-    // readClaudeCredentialsBlob was deleted (RUSH-2359). Cloud dispatch never
-    // sent a token (SING-1b email-only manifest); the leftover helper still
-    // read Keychain / .credentials.json and was the #1767 shape. --lease SING-1b
-    // reads the wrapped blob itself in crabbox/runtimes.ts.
   });
 });
 
@@ -295,7 +281,7 @@ describe('isRushSessionValid', () => {
   });
 
   it('returns false when expires_at (ms) is in the past', () => {
-    const expiredAt = Date.now() - 3600_000; // 1 hour ago, Unix ms
+    const expiredAt = Date.now() - 3600_000;
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: expiredAt },
     });
@@ -303,7 +289,7 @@ describe('isRushSessionValid', () => {
   });
 
   it('returns true when expires_at (ms) is in the future', () => {
-    const futureAt = Date.now() + 3600_000; // 1 hour from now, Unix ms
+    const futureAt = Date.now() + 3600_000;
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: futureAt },
     });
@@ -315,10 +301,6 @@ describe('isRushSessionValid', () => {
     expect(isRushSessionValid(p)).toBe(true);
   });
 
-  // PHNX-3645: a Phoenix `pid_` bearer is stored with expires_at: 0, which by
-  // contract means NON-EXPIRING. Reading 0 as an epoch-ms/seconds timestamp put
-  // its expiry at 1970-01-01 and rejected every valid, fresh Phoenix session, so
-  // no Phoenix-authed box could use `agents run --cloud`.
   it('returns true when expires_at is 0 (non-expiring Phoenix pid_ bearer)', () => {
     const p = writeYaml(tmpDir, {
       session: { access_token: 'pid_abc123', expires_at: 0 },
@@ -336,9 +318,6 @@ describe('readToken', () => {
     return p;
   }
 
-  // PHNX-3645: readToken is the function whose thrown message was the literal
-  // user-facing bug ("Rush session expired at 1970-01-01"). A non-expiring
-  // Phoenix pid_ bearer (expires_at: 0) must return the token, not throw.
   it('returns the token for a non-expiring pid_ bearer (expires_at: 0)', () => {
     const p = writeYaml(tmpDir, {
       session: { access_token: 'pid_abc123', expires_at: 0 },
@@ -347,16 +326,13 @@ describe('readToken', () => {
   });
 
   it('throws for a genuinely expired session', () => {
-    const expiredAt = Date.now() - 3600_000; // 1 hour ago, Unix ms
+    const expiredAt = Date.now() - 3600_000;
     const p = writeYaml(tmpDir, {
       session: { access_token: 'tok', expires_at: expiredAt },
     });
     expect(() => readToken(p)).toThrow(/Rush session expired/);
   });
 
-  // PHNX-3805: the thrown message renders expires_at directly (ms → Date), not
-  // `expires_at * 1000`. Multiplying an already-ms value put the reported expiry
-  // ~57000 years in the future; the ISO date must land in a sane range.
   it('renders the expiry from ms without an extra *1000 (PHNX-3805)', () => {
     const expiredAt = Date.now() - 3600_000;
     const p = writeYaml(tmpDir, {

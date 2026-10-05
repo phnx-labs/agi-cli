@@ -19,7 +19,6 @@ describe('targetKind matrix', () => {
   it('only Codex (env) and Factory (computer) run inside a pre-provisioned target', () => {
     expect(new CodexCloudProvider().targetKind).toBe('env');
     expect(new FactoryCloudProvider().targetKind).toBe('computer');
-    // Rush is per-repo, Antigravity is an on-demand sandbox — no fixed target.
     expect(new RushCloudProvider().targetKind).toBeUndefined();
     expect(new AntigravityCloudProvider().targetKind).toBeUndefined();
   });
@@ -37,7 +36,6 @@ describe('Codex dispatch without an env', () => {
       name: 'MissingTargetError',
       kind: 'env',
     });
-    // guidance points at the interactive browser, since there's no list CLI
     await p.dispatch({ prompt: 'x' }).catch((e: MissingTargetError) => {
       expect(e.guidance).toMatch(/codex cloud/i);
     });
