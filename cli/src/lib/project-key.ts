@@ -9,6 +9,7 @@ export function claudeProjectDirName(cwd: string): string {
   return cwd.replace(/[/.]/g, '-');
 }
 
+// All project bucketing uses this worktree-aware fold; linked worktrees group under the primary repository.
 export function projectKeyFromCwd(cwd?: string | null): string | undefined {
   if (!cwd) return undefined;
   const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '').trim();
@@ -23,6 +24,7 @@ export function projectKeyFromCwd(cwd?: string | null): string | undefined {
   return base || undefined;
 }
 
+// Never climb above HOME or treat HOME's dotfiles repository as the project root.
 export function repoRootForCwd(dir: string, home: string = os.homedir()): string | undefined {
   const stop = path.resolve(home);
   let current = path.resolve(dir);
@@ -35,6 +37,7 @@ export function repoRootForCwd(dir: string, home: string = os.homedir()): string
   }
 }
 
+// A worktree maps to the primary repository's .agents, which owns all its worktrees.
 export function repoAgentsDirForCwd(cwd?: string | null, home?: string): string | undefined {
   if (!cwd) return undefined;
   const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '').trim();

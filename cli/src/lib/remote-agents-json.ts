@@ -63,6 +63,7 @@ export function parseRemoteAgentsJsonPayload<T>(
   machine: string,
   parse: RemoteAgentsJsonOptions<T>['parse'],
 ): { items: T[]; parseFailed: boolean } {
+  // Strip Windows CLIXML before command-specific JSON parsing.
   const parsed = normalizeRemoteAgentsJsonParse(parse(stripClixml(stdout), machine));
   return parsed.valid
     ? { items: parsed.items, parseFailed: false }
@@ -70,6 +71,7 @@ export function parseRemoteAgentsJsonPayload<T>(
 }
 
 export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?: string): string {
+  // Set the no-fanout guard on every peer command.
   if (remoteShellFor(os) === 'powershell') {
     return buildWindowsAgentsCommand({ args, env: { [noFanoutEnv]: '1' } });
   }
@@ -87,6 +89,7 @@ export function captureBoundedStdout(
   child: CapturableChild,
   { timeoutMs, signal }: { timeoutMs: number; signal?: AbortSignal },
 ): Promise<{ code: number | null; stdout: string }> {
+  // Bound bytes before decoding; overflow kills the peer and never trusts truncated JSON.
   return new Promise((resolve) => {
     const decoded = new RemoteUtf8Accumulator();
     let stdoutBytes = 0;
@@ -163,7 +166,9 @@ export async function gatherRemoteAgentsJson<T>(
   const skipped: string[] = [];
   const parseFailed: string[] = [];
 
+  // Early exit is only for globally unique lookups; listings and prefixes all-settle to detect ambiguity.
   const controller = options.earlyExit ? new AbortController() : undefined;
+  // Cancellation after a definitive hit is not a peer failure; large fleets need matching AbortSignal capacity.
   if (controller) setMaxListeners(targets.length + 1, controller.signal);
   let earlyResolved = false;
 

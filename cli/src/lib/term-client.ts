@@ -11,6 +11,7 @@ export interface TermResponse {
 }
 
 export function resolveTermBin(): string | null {
+  // The standalone CLI owns server resolution; this compatibility client has no fallback server.
   const override = process.env.TERM_BIN;
   if (override && override.trim().length > 0) return override.trim();
   return findInPath('term');
@@ -29,6 +30,7 @@ function runTerm(args: string[]): Promise<TermResponse> {
         reject(new Error(`term ${args[0]} produced no output: ${stderr.toString().trim() || (err ? err.message : 'unknown error')}`));
         return;
       }
+      // term may log before its response; its final stdout line is the JSON contract.
       const line = out.split('\n').pop() ?? '';
       try {
         resolve(JSON.parse(line) as TermResponse);
@@ -60,6 +62,7 @@ export function termExec(id: string, command: string): Promise<TermResponse> {
 }
 
 export function termWrite(id: string, input: string): Promise<TermResponse> {
+  // --raw preserves literal input bytes instead of interpreting escape sequences.
   return runTerm(['write', id, input, '--raw', '--json']);
 }
 
@@ -68,6 +71,7 @@ export function termScreen(id: string): Promise<TermResponse> {
 }
 
 export function termStop(id: string): Promise<TermResponse> {
+  // stop has no JSON response, so synthesize only its process result.
   return new Promise((resolve, reject) => {
     const bin = resolveTermBin();
     if (!bin) {

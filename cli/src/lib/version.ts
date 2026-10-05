@@ -64,6 +64,7 @@ export function resolveInstalledLayout(): InstallLayout | null {
 export function getCliVersion(
   pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
 ): string {
+  // Startup callers use one cached value; compiled Bun layouts fall back to the installed package.
   if (cached) return cached;
   cached = readVersionAt(pkgJsonPath) ?? readInstalledPackageVersion() ?? 'unknown';
   return cached;
@@ -77,5 +78,6 @@ function readInstalledPackageVersion(): string | null {
 export function getCliVersionFresh(
   pkgJsonPath: string = path.join(__dirname, '..', '..', 'package.json')
 ): string {
+  // Fresh callers intentionally reread disk after an upgrade.
   return readVersionAt(pkgJsonPath) ?? readInstalledPackageVersion() ?? 'unknown';
 }

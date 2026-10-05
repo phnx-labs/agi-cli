@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 const SEP = '\x1f';
 
 export function shouldWarnUnpushed(mode: string, interactive: boolean): boolean {
+  // Advisory only for writable noninteractive runs; it never mutates, blocks, or throws.
   return mode !== 'plan' && !interactive;
 }
 
@@ -19,6 +20,7 @@ interface UnpushedState {
 
 const INERT: UnpushedState = { isRepo: false, branch: null, hasUpstream: false, unpushed: [] };
 
+// Every probe is bounded to five seconds.
 async function git(args: string[], cwd: string): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { cwd, timeout: 5000 });
   return stdout.trim();
@@ -42,11 +44,13 @@ export async function getUnpushedState(cwd: string): Promise<UnpushedState> {
     hasRemote = false;
   }
   if (!hasRemote) {
+    // With no remote there is no actionable push command to recommend.
     return { isRepo: true, branch, hasUpstream: false, unpushed: [] };
   }
 
   let unpushed: { sha: string; subject: string }[] = [];
   try {
+    // HEAD must precede --not --remotes; unit separator preserves spaces in subjects.
     const out = await git(['log', 'HEAD', '--not', '--remotes', `--pretty=format:%h${SEP}%s`], cwd);
     unpushed = out
       ? out.split('\n').map((line) => {

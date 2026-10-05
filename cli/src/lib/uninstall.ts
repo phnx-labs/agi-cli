@@ -82,10 +82,12 @@ function symlinkTarget(p: string): string | null {
 }
 
 function removeLink(p: string): void {
+  // unlinkSync removes POSIX links and Windows junctions without following targets; rmSync EFAULTs on reparse points.
   fs.unlinkSync(p);
 }
 
 function planConfig(agent: AgentId): ConfigAction {
+  // Touch only agents-cli-owned symlinks; real directories and foreign links are user state.
   const realPath = getAgentConfigPath(agent);
   let stat: fs.Stats;
   try {
@@ -190,6 +192,7 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     errors: [],
   };
 
+  // Restore configs and home files before disposing ~/.agents, where their backups and targets live.
   for (const c of plan.configs) {
     try {
       if (c.kind === 'restore-backup') {
@@ -257,6 +260,7 @@ export function executeUninstall(plan: UninstallPlan, opts: { purge?: boolean; t
     }
   }
 
+  // Disposal defaults to recoverable move-aside; any earlier error downgrades --purge to preserve the only copy.
   if (fs.existsSync(plan.agentsDir)) {
     const purge = !!opts.purge && result.errors.length === 0;
     if (opts.purge && !purge) result.purgeDowngraded = true;

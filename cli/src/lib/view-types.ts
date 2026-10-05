@@ -12,6 +12,7 @@ export interface ViewJsonVersion {
   isDefault: boolean;
   isolated: boolean;
   isIsolatedDefault: boolean;
+  // signedIn is authentication state; launchable is the stricter runnable verdict.
   signedIn: boolean;
   launchable: boolean;
   authVerdict: AuthVerdict | null;
@@ -42,6 +43,7 @@ export interface ViewJsonVersion {
 }
 
 export interface ViewJsonRunReady {
+  // Computed from the same candidates as versions so Fleet does not contradict detail views.
   ready: boolean;
   reason: string;
   accounts: Array<{ name: string; ready: boolean; reason: string }>;

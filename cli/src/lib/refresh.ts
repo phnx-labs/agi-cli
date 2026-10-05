@@ -86,6 +86,7 @@ interface RefreshResult {
 }
 
 export async function refresh(options: RefreshOptions = {}): Promise<RefreshResult> {
+  // Refresh materializes declared state only; repository pulls belong to sync orchestration.
   const {
     agentFilter,
     skipPrompts = false,
@@ -95,6 +96,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     allowExecSurfaces = false,
   } = options;
   const agentsDir = getUserAgentsDir();
+  // quiet gates every progress line so JSON and fleet stdout remain one object.
   const log = (...args: unknown[]) => { if (!quiet) console.log(...args); };
   const declined: string[] = [];
   const reconciled: Array<{ agent: AgentId; version: string }> = [];
@@ -188,6 +190,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     const defaultVer = getGlobalDefault(agentId);
     if (!defaultVer && !requestedSelection) continue;
 
+    // Explicit or unattended reconciliation targets every installed version; interactive full refresh targets the default.
     const versionsToSync = requestedSelection || skipPrompts
       ? installedVersions
       : [defaultVer!];
@@ -196,6 +199,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
     let newResources: ReturnType<typeof getNewResources> | undefined;
     let hasAnySynced = false;
+    // Skip the installed-content scan when unattended force-full sync makes it irrelevant.
     if (!skipPrompts && !requestedSelection) {
       actuallySynced = getActuallySyncedResources(agentId, defaultVer!);
       newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());

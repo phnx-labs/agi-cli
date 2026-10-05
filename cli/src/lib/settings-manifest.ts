@@ -11,7 +11,7 @@
  * The manifest below classifies the remaining per-agent files, and
  * carryForwardSettings() fills gaps in a target version home from a source
  * version home. It never overwrites a value the target already has: scalars
- * keep the target's value, objects merge recursively, arrays union. That makes
+ * keep the target's value, objects merge recursively, arrays keep the target value. That makes
  * the operation idempotent and safe to run on every `agents add` / `agents use`.
  * (One scoped exception: the 'claude-trust' strategy promotes a stamped-default
  * `hasTrustDialogAccepted: false` to `true` — see the note on that entry.)
@@ -39,9 +39,11 @@ const SETTINGS_MANIFEST: Partial<Record<AgentId, ManifestEntry[]>> = {
     { rel: '.claude/settings.json', strategy: 'json-merge' },
     { rel: '.claude/settings.local.json', strategy: 'copy-if-absent' },
     { rel: '.claude/keybindings.json', strategy: 'copy-if-absent' },
+    // Claude carry-forward projects only accepted trust; credentials and session state stay version-local.
     { rel: '.claude.json', strategy: 'claude-trust' },
   ],
   codex: [
+    // auth.json is intentionally absent: each version home owns its login.
     {
       rel: '.codex/config.toml',
       strategy: 'toml-merge',
@@ -67,6 +69,7 @@ export function fillGaps(
   target: Record<string, unknown>,
   source: Record<string, unknown>
 ): Record<string, unknown> {
+  // Recurse only through plain objects; target scalars and arrays win so stale source entries are never re-appended.
   const out: Record<string, unknown> = { ...target };
   for (const [key, sourceValue] of Object.entries(source)) {
     if (!(key in out)) {
@@ -82,6 +85,7 @@ export function fillGaps(
 }
 
 function trustedClaudeProjects(source: Record<string, unknown>): string[] {
+  // Only true is portable trust; false is Claude's stamped default, not a persisted decline.
   const projects = isPlainObject(source.projects) ? source.projects : {};
   return Object.entries(projects)
     .filter(([, project]) => isPlainObject(project) && project.hasTrustDialogAccepted === true)
@@ -179,6 +183,7 @@ export function carryForwardSettings(
           } else {
             fs.mkdirSync(path.dirname(targetPath), { recursive: true });
           }
+          // Running Claude rewrites this file too, so carry-forward must be atomic.
           atomicWriteFileSync(
             targetPath,
             JSON.stringify({ ...targetObj, projects: targetProjects }, null, 2) + '\n'

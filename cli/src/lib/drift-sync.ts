@@ -73,6 +73,7 @@ async function healVersions(
   versionsByAgent: Map<AgentId, string[]>,
   cwd: string,
 ): Promise<VersionHealResult[]> {
+  // repairAfterSync also rewires hooks and managed runtime shims while healing drift.
   const out: VersionHealResult[] = [];
   for (const [agent, versions] of versionsByAgent) {
     if (versions.length === 0) continue;
@@ -125,6 +126,7 @@ export async function promptDriftSync(opts: DriftSyncOptions = {}): Promise<Drif
 
   if (!opts.quiet) renderSummary(status, needing);
 
+  // Non-interactive status without --yes only reports; .system pulls require explicit consent.
   if (opts.yes || !isInteractiveTerminal()) {
     if (!opts.yes) {
       console.log(chalk.gray('\nRun `agents sync status --yes` to sync, or `agents sync status` in a terminal to choose.'));
