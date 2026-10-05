@@ -62,7 +62,7 @@ describe('resolveSecretsBin', () => {
 
   it('fails loud with install guidance and no engine fallback when absent', () => {
     delete process.env.SECRETS_BIN;
-    process.env.PATH = ''; // nothing to resolve `secrets` from
+    process.env.PATH = '';
     _resetSecretsClientForTest();
     try {
       resolveSecretsBin();
@@ -131,8 +131,6 @@ describe('resolveSecretsBin', () => {
 
 describe('withRemoteStateRoot', () => {
   it('names the remote user agents dir for a push unless the caller chose a root', () => {
-    // The receiving agents-cli reads pushed bundles from ~/.agents (MIG-1 on
-    // its end too); a push without this lands in the remote's default ~/.secrets.
     expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam' }).remoteSecretsHome).toBe(REMOTE_USER_AGENTS_DIR);
     expect(REMOTE_USER_AGENTS_DIR).toBe('~/.agents');
     expect(withRemoteStateRoot({ remoteBackend: 'file', operation: 'seam', remoteSecretsHome: '/srv/agents' }).remoteSecretsHome).toBe('/srv/agents');
@@ -146,9 +144,6 @@ describe('buildServeEnv', () => {
   });
 
   it('bridges the old AGENTS_SECRETS_PASSPHRASE onto the standalone SECRETS_PASSPHRASE', () => {
-    // The standalone renamed AGENTS_SECRETS_* -> SECRETS_*; without this bridge
-    // it never sees the passphrase agents-cli's own file store was written under
-    // and would provision a fresh machine-local key it can't decrypt with.
     expect(buildServeEnv({ AGENTS_SECRETS_PASSPHRASE: 'p1' }).SECRETS_PASSPHRASE).toBe('p1');
   });
 
@@ -233,7 +228,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a hanging standalone fails loud at the bound, never the server 60s deadline', () => {
-    plantServe('sleep 30'); // never answers on fd 4
+    plantServe('sleep 30');
     _setSyncServeTimeoutForTest(3_000);
     const t0 = Date.now();
     try {
@@ -244,7 +239,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
       expect((error as SecretsClientError).code).toBe('TIMEOUT');
       expect((error as SecretsClientError).message).toContain('did not answer within 3s');
       expect((error as SecretsClientError).message).toContain('secrets --version');
-      expect(Date.now() - t0).toBeLessThan(6_000); // 3s bound + spawn slack, far under 60s
+      expect(Date.now() - t0).toBeLessThan(6_000);
     }
   });
 
@@ -295,10 +290,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
   });
 
   it('a standalone that writes nothing to fd 4 is surfaced as an empty response', () => {
-    // The mock never reads fd 3 either, so on a fast box the request write hits
-    // EPIPE; the client must still report what reached fd 4 (nothing), not the
-    // errno — the same outcome on either side of that race.
-    plantServe('exit 0'); // answers nothing
+    plantServe('exit 0');
     try {
       secretsRequestSync('handshake', []);
       throw new Error('expected a non-JSON failure');
@@ -323,7 +315,7 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
 
   it('a missing standalone fails loud immediately, never hanging', () => {
     delete process.env.SECRETS_BIN;
-    process.env.PATH = ''; // nothing to resolve `secrets` from
+    process.env.PATH = '';
     _resetSecretsClientForTest();
     const t0 = Date.now();
     try {
@@ -349,7 +341,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     for (const key of ENV_KEYS) saved[key] = process.env[key];
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-client-'));
     process.env.SECRETS_BIN = REAL_BIN;
-    process.env.HOME = home; // the standalone file store lives under $HOME/.agents/.cache/secrets
+    process.env.HOME = home;
     process.env.SECRETS_HOME = path.join(home, '.agents');
     // Set the OLD name on purpose: buildServeEnv must bridge it onto the standalone's renamed
     // SECRETS_PASSPHRASE, exercised end to end against the real store (a fresh key would still
@@ -383,7 +375,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
 
   it('reports bundleExists=false on a fresh home', async () => {
     expect(await bundleExists('absent-bundle')).toBe(false);
-    expect(bundleExistsSync('absent-bundle')).toBe(false); // sync fd-3-over-stdin transport
+    expect(bundleExistsSync('absent-bundle')).toBe(false);
   });
 
   it('the synchronous handshake round-trips under the bound (no fd-3 EOF hang)', () => {
@@ -406,7 +398,6 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     expect(resolved.bundle.backend).toBe('file');
     expect(resolved.env).toEqual({ MY_KEY: value });
 
-    // The same read on the synchronous path returns the same env.
     const sync = readAndResolveBundleEnvSync('round-trip');
     expect(sync.env).toEqual({ MY_KEY: value });
   });
@@ -422,7 +413,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
       answered = true;
     } catch (error) {
       expect(error).toBeInstanceOf(SecretsClientError);
-      answered = true; // a coded error is still a completed round-trip, not a hang
+      answered = true;
     }
     expect(answered).toBe(true);
   });
@@ -431,10 +422,8 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
     const { bundle, items } = fileBundle('scoped');
     await writeBundleWithItems(bundle, items);
 
-    // In scope: allowed.
     expect(await bundleExists('scoped', { allowedBundles: ['scoped'], scope: 'claude' })).toBe(true);
 
-    // Out of scope: the server fails closed with ACCESS_DENIED.
     await expect(bundleExists('scoped', { allowedBundles: ['other'], scope: 'claude' })).rejects.toMatchObject({
       code: 'ACCESS_DENIED',
     });
@@ -442,7 +431,7 @@ describe.skipIf(!REAL_BIN)('secrets protocol client against the real standalone'
 
   it('reports the backend a bundle lives on and lists it', async () => {
     const { bundle, items } = fileBundle('where');
-    writeBundleWithItemsSync(bundle, items); // sync writer
+    writeBundleWithItemsSync(bundle, items);
     expect(await bundleBackend('where')).toBe('file');
     expect(bundleBackendSync('where')).toBe('file');
     expect(listBundlesSync().map((b) => b.name)).toEqual(['where']);

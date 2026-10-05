@@ -29,19 +29,15 @@ import type {
  * The one thing an independent client re-declares rather than imports. */
 export const PROTOCOL_VERSION = 1;
 const MAX_PROTOCOL_BYTES = 8 * 1024 * 1024;
-/** Just over the server's own 60s deadline, so the server times out first. */
 const SERVE_TIMEOUT_MS = 65_000;
 /** The sync path serves surfaces that resolve secrets before continuing (`agents view`, account
  * rows, the `agents run` launch path) and must never hang for the standalone's 60s deadline
  * (PHNX-3989). 30s covers a cold boot under load (3s failed launches); not a fallback (DIST-1). */
 export const SYNC_SERVE_TIMEOUT_MS = 30_000;
-/** Test seam: a hang test plants a never-answering standalone and must not wait 30s. */
 let syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
 
 export interface SecretsContext {
-  /** Bundle allowlist; absent ⇒ full trust (the local agents client today). */
   allowedBundles?: string[];
-  /** Opaque scope the standalone folds into resolution — the harness name. */
   scope?: string;
 }
 
@@ -56,7 +52,6 @@ type ProtocolResponse =
   | { v: 1; id: string; ok: true; result: unknown }
   | { v: 1; id: string; ok: false; error: { code: string; message: string } };
 
-/** Serialize `Map`s the way the server's `decodeWire` expects to receive them. */
 function encodeWire(value: unknown): unknown {
   if (value instanceof Map) {
     return { $map: [...value.entries()].map(([key, item]) => [key, encodeWire(item)]) };
@@ -68,7 +63,6 @@ function encodeWire(value: unknown): unknown {
   return value === undefined ? null : value;
 }
 
-/** Reconstruct `Map`s from the server's `encodeWire`'d reply. */
 function decodeWire(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(decodeWire);
   if (value !== null && typeof value === 'object') {
@@ -84,7 +78,6 @@ function decodeWire(value: unknown): unknown {
   return value;
 }
 
-/** Carries the server's `{code, message}`, or a client-side transport code. */
 export class SecretsClientError extends Error {
   constructor(
     public readonly code: string,
@@ -102,7 +95,6 @@ export class SecretsClientError extends Error {
   }
 }
 
-/** True when `error` is a {@link SecretsClientError}, optionally with the given code. */
 export function isSecretsClientError(error: unknown, code?: string): error is SecretsClientError {
   return error instanceof SecretsClientError && (code === undefined || error.code === code);
 }
@@ -121,8 +113,8 @@ const SECRETS_TRANSPORT_CODES: ReadonlySet<string> = new Set([
   'IO_ERROR',
 ]);
 
-/** True when `error` is a {@link SecretsClientError} from the transport itself (the
- * standalone was unreachable/unusable), not a data error it answered with. */
+// Only transport failures may degrade to "unavailable". Data and policy errors
+// returned by the standalone are real answers and must surface.
 export function isSecretsTransportError(error: unknown): error is SecretsClientError {
   return error instanceof SecretsClientError && SECRETS_TRANSPORT_CODES.has(error.code);
 }
@@ -133,17 +125,14 @@ export function isSecretsTransportError(error: unknown): error is SecretsClientE
 const SERVICE_PREFIX = 'agents-cli';
 const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;
 
-/** The raw item holding one bundle key's value. */
 export function secretsKeychainItem(bundle: string, key: string): string {
   return `${SECRETS_ITEM_PREFIX}${bundle}.${key}`;
 }
 
-/** The raw item holding a profile provider's token (`agents-cli.<provider>.token`). */
 export function profileKeychainItem(provider: string): string {
   return `${SERVICE_PREFIX}.${provider}.token`;
 }
 
-/** The bundle-var form that points a key at its own raw item. */
 export function keychainRef(key: string): string {
   return `keychain:${key}`;
 }
@@ -165,7 +154,6 @@ export function parseBundleValue(raw: BundleValue): { literal: string } | { ref:
   return { ref: { provider: match[1] as SecretRef['provider'], value: match[2] } };
 }
 
-// --- executable resolution -------------------------------------------------
 
 let cachedBin: string | undefined;
 
@@ -200,6 +188,7 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
  * existing stores (MIG-1). A legacy AGENTS_SECRETS_PASSPHRASE is forwarded as SECRETS_PASSPHRASE
  * so the child can decrypt our file store; explicit values always win. */
 export function buildServeEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  // Adopt the existing agents state root and bridge the old passphrase name.
   const env: NodeJS.ProcessEnv = {
     ...base,
     SECRETS_HOME: base.SECRETS_HOME ?? getUserAgentsDir(),
@@ -261,7 +250,6 @@ function parseResponse(raw: Buffer): unknown {
   throw new SecretsClientError(parsed.error.code, parsed.error.message);
 }
 
-// --- raw transport (one spawn per request) ---------------------------------
 
 function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promise<unknown> {
   const { command, prefix } = invocation(resolveSecretsBin());
@@ -286,8 +274,6 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
     child.on('error', (error) =>
       fail(new SecretsClientError('SPAWN_FAILED', `Failed to spawn secrets: ${error.message}`)),
     );
-    // A child that dies before reading gives EPIPE here; the outcome surfaces on
-    // fd 4 / 'error' instead, so this handler just keeps it from throwing.
     const input = child.stdio[3] as Writable;
     input.on('error', () => {});
     input.end(request);
@@ -330,7 +316,6 @@ function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promi
   });
 }
 
-/** POSIX single-quote a token so the shell passes it to the child verbatim. */
 function shQuote(token: string): string {
   return `'${token.replace(/'/g, `'\\''`)}'`;
 }
@@ -380,7 +365,6 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   return parseResponse(raw);
 }
 
-// --- primitives ------------------------------------------------------------
 
 /** Send one operation to the standalone and await its typed result: spawns `secrets __serve` once;
  * `parseResponse` checks the protocol on the reply. Throws a {@link SecretsClientError} with the
@@ -403,14 +387,12 @@ export function secretsRequestSync<T = unknown>(
   return serveOnceSync(op, args, context) as T;
 }
 
-/** Test hook: forget the cached binary so a new env is re-resolved. */
 export function _resetSecretsClientForTest(): void {
   cachedBin = undefined;
   requestCounter = 0;
   syncServeTimeoutMs = SYNC_SERVE_TIMEOUT_MS;
 }
 
-/** Shorten the sync bound for a test that plants a hanging standalone; reset restores it. */
 export function _setSyncServeTimeoutForTest(ms: number): void {
   syncServeTimeoutMs = ms;
 }
@@ -419,7 +401,6 @@ export function _setSyncServeTimeoutForTest(ms: number): void {
 // the two primitives (async, with `*Sync` siblings for read-hot ops). Deliberately NOT the full op
 // table.
 
-// bundles.*
 export function readAndResolveBundleEnv(
   name: string,
   opts?: ResolveBundleOptions,
@@ -498,7 +479,6 @@ export function deleteBundleSync(name: string, context?: SecretsContext): boolea
   return secretsRequestSync('bundles.deleteBundle', [name], context);
 }
 
-/** Rename a bundle: metadata and raw items move together; the source is deleted last. */
 export function renameBundle(
   oldName: string,
   newName: string,
@@ -516,7 +496,6 @@ export function renameBundleSync(
   secretsRequestSync('bundles.renameBundle', [oldName, newName, opts ?? {}], context);
 }
 
-/** Rotate one keychain-backed key's value in place, preserving or patching its meta. */
 export function rotateBundleSecret(
   bundle: SecretsBundle,
   key: string,
@@ -534,7 +513,6 @@ export function rotateBundleSecretSync(
   secretsRequestSync('bundles.rotateBundleSecret', [bundle, key, opts], context);
 }
 
-// agent.*
 export function agentPing(): Promise<{ reachable: boolean; cliVersion?: string }> {
   return secretsRequest('agent.agentPing', []);
 }
@@ -543,7 +521,6 @@ export function agentStatus(): Promise<AgentStatusEntry[]> {
   return secretsRequest('agent.agentStatus', []);
 }
 
-// index.* (keychain items)
 export function getKeychainToken(item: string, context?: KeychainReadContext): Promise<string> {
   return secretsRequest('index.getKeychainToken', [item, context ?? {}]);
 }
@@ -595,7 +572,6 @@ export function storeSetSync(backend: SecretsBackend, item: string, value: strin
   secretsRequestSync('store.set', [backend, item, value]);
 }
 
-// remote.* / push.*
 export function remoteResolveEnv(
   target: string,
   bundle: string,
@@ -609,7 +585,6 @@ export function remoteResolveEnv(
  * the worker never finds the bundle. Remote-relative on purpose. */
 export const REMOTE_USER_AGENTS_DIR = '~/.agents';
 
-/** Fill in the remote state root unless the caller named one. Pure, for the seam test. */
 export function withRemoteStateRoot(opts: PushBundleOptions): PushBundleOptions {
   return { ...opts, remoteSecretsHome: opts.remoteSecretsHome ?? REMOTE_USER_AGENTS_DIR };
 }
@@ -630,7 +605,6 @@ export function pushBundleToHostAsync(
   return secretsRequest('push.pushBundleToHostAsync', [bundle, host, withRemoteStateRoot(opts)]);
 }
 
-// sync.* (transport pull, used by the `agents sync --secrets` umbrella stage)
 export function listRemoteBundles(context?: SecretsContext): Promise<RemoteBundleSummary[]> {
   return secretsRequest('sync.listRemoteBundles', [], context);
 }
@@ -643,7 +617,6 @@ export function pullBundle(
   return secretsRequest('sync.pullBundle', [name, opts], context);
 }
 
-// rc-hygiene.* (shell-rc credential-export advisory, `agents doctor`)
 export function scanUserRcFiles(homeDir?: string, context?: SecretsContext): Promise<RcSecretFinding[]> {
   return secretsRequest('rc-hygiene.scanUserRcFiles', homeDir === undefined ? [] : [homeDir], context);
 }
@@ -662,7 +635,6 @@ export function masterPassphraseInEnvSync(context?: SecretsContext): boolean {
 // injected secrets env or the bare process env reaches a child, so a bundle or inherited shell
 // can't smuggle one into an agent's process. Pure, engine-free.
 
-/** True for a dynamic-loader or language-interpreter override env var. */
 function isLoaderOrInterpreterEnv(name: string): boolean {
   const upper = name.toUpperCase();
   return (
@@ -683,8 +655,9 @@ function isLoaderOrInterpreterEnv(name: string): boolean {
   );
 }
 
-/** Strip loader/interpreter overrides from an env before it reaches a spawned child. */
 export function sanitizeProcessEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  // Apply at every agent and teammate spawn boundary: loader/interpreter knobs
+  // can execute caller-controlled code before the target harness starts.
   const out: NodeJS.ProcessEnv = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;

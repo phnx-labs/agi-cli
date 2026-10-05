@@ -28,12 +28,8 @@ import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 /** Default schedule between live usage fetches for one account; the delay helper's floor and ceiling
  * are both this, so polling is exactly every 5 minutes. */
 export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-/** Burn-rate divisor retained for the pure delay helper / tests; with min=max
- * the divisor does not change the scheduled interval. */
 export const REFRESH_BURN_DIVISOR = 4;
-/** At most this many live fetches per account per rolling hour (5m cadence ⇒ 12). */
 export const HOURLY_CALL_CAP = 12;
-/** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
 export const USAGE_REFRESH_TICK_MS = 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 /** Minimum spacing between live fetches to one network provider across accounts: round-robin,
@@ -50,7 +46,6 @@ export const PROVIDER_CATCHUP_MAX = 2;
  * the API call and keep the budget for idle accounts. */
 /** Consecutive failed live reads before one broken account is quarantined. */
 export const FAILURE_QUARANTINE_THRESHOLD = 3;
-/** A chronic offender waits this long while healthy siblings keep their cadence. */
 export const FAILURE_QUARANTINE_MS = 30 * 60 * 1000;
 const SKIP_JITTER_MIN_MS = 2_000;
 const SKIP_JITTER_RANGE_MS = 3_001;
@@ -60,17 +55,11 @@ const SKIP_JITTER_RANGE_MS = 3_001;
 export interface HeadroomEntry {
   status: UsageHeadroom['status'];
   minutesToLimit: number | null;
-  /** The session window's usedPercent in the last snapshot (the prev sample). */
   sessionUsedPercent: number | null;
-  /** Epoch ms the last snapshot was captured. */
   capturedAt: number | null;
-  /** Epoch ms this account is next due for a live refresh. */
   nextRefreshAt: number;
-  /** Epoch ms of recent live fetches, for the rolling-hour cap. */
   callTimestamps: number[];
-  /** Epoch ms this entry was written. */
   computedAt: number;
-  /** Consecutive live-fetch misses; absent on entries written before this field. */
   consecutiveFailures?: number;
 }
 
@@ -79,7 +68,6 @@ interface HeadroomCacheFile {
   entries: Record<string, HeadroomEntry>;
 }
 
-/** Test seam for the headroom cache path (see usage.ts `setClaudeUsageCachePathForTest`). */
 let headroomCachePathOverride: string | null = null;
 export function setHeadroomCachePathForTest(cachePath: string | null): string | null {
   const prev = headroomCachePathOverride;
@@ -90,29 +78,25 @@ function headroomCachePath(): string {
   return headroomCachePathOverride ?? path.join(getCacheDir(), '.usage-headroom.json');
 }
 
-/** Read the whole headroom cache (best-effort; missing/corrupt → empty map). */
 function readHeadroomCache(): Record<string, HeadroomEntry> {
   try {
     const parsed = JSON.parse(fs.readFileSync(headroomCachePath(), 'utf-8')) as HeadroomCacheFile;
     if (parsed && parsed.entries && typeof parsed.entries === 'object') return parsed.entries;
   } catch {
-    // missing or corrupt — treat as empty
   }
   return {};
 }
 
-/** Read one account's headroom entry, or null. */
 export function readHeadroomEntry(usageKey: string): HeadroomEntry | null {
   return readHeadroomCache()[usageKey] ?? null;
 }
 
-/** Merge entries into the cache (best-effort; preserves other accounts' rows). */
 export function writeHeadroomEntries(entries: Record<string, HeadroomEntry>): void {
   try {
     const cachePath = headroomCachePath();
     ensureLockTarget(cachePath, JSON.stringify({ version: 1, entries: {} }, null, 2));
     withFileLock(cachePath, () => {
-      // Re-read under the lock so a concurrent tick/view cannot drop rows.
+      // Re-read under the lock so concurrent refreshers cannot drop each other's rows.
       const merged: HeadroomCacheFile = {
         version: 1,
         entries: { ...readHeadroomCache(), ...entries },
@@ -120,7 +104,6 @@ export function writeHeadroomEntries(entries: Record<string, HeadroomEntry>): vo
       atomicWriteFileSync(cachePath, JSON.stringify(merged, null, 2));
     });
   } catch {
-    // best-effort; a failed write just means the router sees no projection
   }
 }
 
@@ -138,7 +121,6 @@ export function computeNextRefreshDelayMs(
   return Math.max(minMs, Math.min(maxMs, targetMs));
 }
 
-/** Recent call timestamps trimmed to the trailing hour. */
 export function pruneCallTimestamps(timestamps: number[], now: number, windowMs = HOUR_MS): number[] {
   const floor = now - windowMs;
   return timestamps.filter((ts) => ts > floor);
@@ -186,7 +168,6 @@ export function nextHeadroomEntry(
   };
 }
 
-/** Stable per-account delay in [2s, 5s], used to spread skipped accounts. */
 function skipJitterMs(usageKey: string): number {
   let hash = 0;
   for (const char of usageKey) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
@@ -220,6 +201,8 @@ function freshHeadroomEntry(
   now: number,
   capturedAtMs: number,
 ): HeadroomEntry {
+  // A recent statusline row is a free live sample: re-derive headroom without
+  // recording an API call, then schedule the next proactive refresh from it.
   const headroom = deriveUsageHeadroom(
     snapshot,
     prev && prev.capturedAt !== null && prev.sessionUsedPercent !== null
@@ -233,7 +216,6 @@ function freshHeadroomEntry(
     sessionUsedPercent: session?.usedPercent ?? prev?.sessionUsedPercent ?? null,
     capturedAt: snapshot.capturedAt?.getTime() ?? prev?.capturedAt ?? null,
     nextRefreshAt: capturedAtMs + REFRESH_INTERVAL_MS,
-    // Not an API call — do NOT record a timestamp (would wrongly spend budget).
     callTimestamps: pruneCallTimestamps(prev?.callTimestamps ?? [], now),
     computedAt: now,
     consecutiveFailures: 0,
@@ -261,8 +243,6 @@ export function providerLastCall(
  * clamped to `PROVIDER_CATCHUP_MAX` so an idle gap cannot re-burst. `PROVIDER_HOURLY_BUDGET` is
  * the only cap on a small fleet. */
 export function providerSpacingTokens(lastCallMs: number, now: number): number {
-  // A cold provider (never fetched) is treated as maximally idle: grant the
-  // catch-up ceiling so a couple of accounts warm immediately without bursting.
   const elapsed = lastCallMs <= 0 ? Infinity : now - lastCallMs;
   if (elapsed < PROVIDER_MIN_REFRESH_SPACING_MS) return 0;
   return Math.min(PROVIDER_CATCHUP_MAX, Math.floor(elapsed / PROVIDER_MIN_REFRESH_SPACING_MS));
@@ -276,7 +256,6 @@ function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomE
   return next;
 }
 
-/** One account considered for the headed poller. */
 export interface UsagePollCandidate {
   usageKey: string;
   agentId: AgentId;
@@ -284,8 +263,6 @@ export interface UsagePollCandidate {
   holdsNativeLogin: boolean;
 }
 
-/**
-/** Daemon auth-health may hit `/oauth/usage` only on a headed box, unless forceLive. */
 export function mayIssueUsageEndpointProbe(opts: {
   role: ConfiguredDeviceRole | undefined;
   forceLive?: boolean;
@@ -302,6 +279,8 @@ export function electUsagePoller(opts: {
   selfHoldsNativeLogin: boolean;
   peerPollers?: string[];
 }): string | null {
+  // Only native-login headed devices contend; statusline ingest never claims
+  // ownership. Lexical election converges multiple headed devices on one poller.
   const names = new Set<string>();
   if (opts.selfHoldsNativeLogin) names.add(normalizeHost(opts.selfDevice));
   for (const peer of opts.peerPollers ?? []) names.add(normalizeHost(peer));
@@ -331,13 +310,11 @@ export function shouldPollUsageAccount(
   return elected === normalizeHost(opts.selfDevice);
 }
 
-/** Native rotating login on this home — Claude's `.credentials.json` blob, else a credential file. */
 export function homeHoldsNativeLogin(agentId: AgentId, home: string): boolean {
   if (agentId === 'claude') return claudeHomeHasNativeOauthFile(home);
   return credentialPresence(agentId, home).perVersion;
 }
 
-/** usageKey → devices that published a `poll` row (statusline/sync do not claim). */
 export function pollerClaimsFromSharedStore(
   selfDevice: string,
   userAgentsDir = getUserAgentsDir(),
@@ -365,6 +342,7 @@ export function pollerClaimsFromSharedStore(
  * both use it so together they stay under `PROVIDER_HOURLY_BUDGET` (~30/hr). False means do not
  * fire. */
 export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: number): boolean {
+  // Auth-health and refresh share this per-account and per-provider budget.
   if (!agentUsesNetworkUsage(agentId)) return true;
   const cache = readHeadroomCache();
   const entry = cache[usageKey];
@@ -392,7 +370,6 @@ export function trySpendUsageApiCall(usageKey: string, agentId: AgentId, now: nu
   return true;
 }
 
-/** An account whose credentials live on the publisher host. */
 interface LocalUsageAccount {
   usageKey: string;
   agentId: AgentId;
@@ -408,6 +385,7 @@ export function orderUsageAccounts(
   cache: Record<string, HeadroomEntry>,
   tick: number,
 ): LocalUsageAccount[] {
+  // Spend scarce provider budget stalest-first; rotate cold accounts per tick.
   const rotate = (group: LocalUsageAccount[]): LocalUsageAccount[] => {
     if (group.length < 2) return group;
     const start = tick % group.length;
@@ -470,7 +448,7 @@ export async function buildLocalUsageAccounts(
     const { canonicalByUsageKey, usageFetchInputs } = buildCanonicalUsageContext(inputs);
     for (const [usageKey, fetchInput] of usageFetchInputs) {
       const canonical = canonicalByUsageKey.get(usageKey);
-      if (!canonical?.signedIn) continue; // only refresh accounts actually usable here
+      if (!canonical?.signedIn) continue;
       const home = fetchInput.home ?? getVersionHomePath(agentId, fetchInput.cliVersion ?? '');
       if (!shouldPollUsageAccount(
         { usageKey, holdsNativeLogin: nativeAt(agentId, home) },
@@ -479,9 +457,7 @@ export async function buildLocalUsageAccounts(
       accounts.push({
         usageKey,
         agentId,
-        // Native file login: skip setup-token (403s on /oauth/usage) and the
-        // ACL keychain (Touch ID). Linux headed boxes store the rotating blob
-        // in `.credentials.json`; a missing file is a no-op fetch.
+        // Native file-only credentials avoid worker setup tokens and Touch ID.
         fetch: async (signal?: AbortSignal) => {
           const { getUsageInfoForIdentity } = await import('./accounting/usage.js');
           return getUsageInfoForIdentity({
@@ -497,12 +473,9 @@ export async function buildLocalUsageAccounts(
   return accounts;
 }
 
-/** Injectable side effects, so `runUsageRefresh` is drivable without the daemon. */
 interface UsageRefreshDeps {
   now?: number;
-  /** Local-credential accounts to consider (one per unique usage key). */
   listAccounts: () => Promise<LocalUsageAccount[]>;
-  /** Persist a fresh snapshot to the usage cache (writeClaudeUsageCache). */
   writeUsageCache: (usageKey: string, snapshot: UsageSnapshot) => void;
   /** Epoch ms this provider (or, with `usageKey`, this account) is backed off until; null if free.
    * Per-account (RUSH-3036) so one throttled account cannot park its siblings. */
@@ -510,11 +483,8 @@ interface UsageRefreshDeps {
   /** The account's usage row from the shared cache (what routing reads), or null; lets the refresher
    * skip a redundant refresh when a free statusline ingest is recent. */
   readCachedSnapshot?: (usageKey: string) => UsageSnapshot | null;
-  /** Daemon tick deadline signal, forwarded to each account's provider fetch (PHNX-3608). */
   signal?: AbortSignal;
-  /** Stamp D8 provenance on a successful poll write. */
   pollerDevice?: string;
-  /** Fire after at least one snapshot was written (push-on-change). */
   onSnapshotsChanged?: (usageKeys: string[]) => Promise<void> | void;
 }
 
@@ -523,9 +493,7 @@ interface UsageRefreshResult {
   skippedNotDue: number;
   skippedBackoff: number;
   skippedCap: number;
-  /** Skipped because the provider's rolling-hour budget was already spent. */
   skippedBudget: number;
-  /** Skipped because a free statusline ingest already captured it recently. */
   skippedFresh: number;
   failed: number;
 }
@@ -565,8 +533,7 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     const entry = cache[account.usageKey] ?? null;
     const network = agentUsesNetworkUsage(account.agentId);
 
-    // A penalized account/provider is off-limits — poking it re-arms the
-    // penalty (the whole reason usage-backoff exists).
+    // Account-specific penalties cannot park siblings; provider-wide penalties still apply.
     if ((deps.backoffUntil(account.agentId, account.usageKey) ?? 0) > now) {
       updates[account.usageKey] = skippedHeadroomEntry(entry, account.usageKey, now, index);
       result.skippedBackoff += 1;
@@ -591,15 +558,10 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
       }
     }
 
-    // Global per-provider budget: cap aggregate endpoint traffic so it does not
-    // scale linearly with account count and trip the ~100/hr rate limit, and pace
-    // it smoothly. Non-network providers (local logs) have no endpoint to protect.
     if (network) {
       const overHourly = (budgetSpent.get(account.agentId) ?? 0) >= PROVIDER_HOURLY_BUDGET;
       const overSpacing = (spacingUsed.get(account.agentId) ?? 0) >= (spacingTokens.get(account.agentId) ?? 0);
       if (overHourly || overSpacing) {
-        // Leave the entry untouched so this still-due account competes again next
-        // tick, when budget/spacing frees — never starved (stalest-first serves it).
         result.skippedBudget += 1;
         continue;
       }
@@ -610,9 +572,6 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     try {
       const usage = await account.fetch(deps.signal);
       if (usage.snapshot) {
-        // `source` is provenance, not freshness. A forced collection that just
-        // reread a local harness event returns `last_seen`; that is still a
-        // successful collection and belongs in the shared read cache.
         const stamped = deps.pollerDevice
           ? { ...usage.snapshot, freshness: { source: 'poll' as const, poller: deps.pollerDevice } }
           : usage.snapshot;
@@ -621,13 +580,12 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
         result.refreshed += 1;
         refreshedKeys.push(account.usageKey);
       } else {
-        // No live snapshot (expired token / fetch miss): don't rewrite the usage
-        // cache, but still record the call + reschedule so a broken account
-        // isn't retried every tick.
+        // Preserve the last usage snapshot; reschedule and quarantine repeated misses.
         updates[account.usageKey] = failedHeadroomEntry(entry, now);
         result.failed += 1;
       }
     } catch {
+      // A failed fetch changes headroom scheduling only, never the usage cache.
       updates[account.usageKey] = failedHeadroomEntry(entry, now);
       result.failed += 1;
     }

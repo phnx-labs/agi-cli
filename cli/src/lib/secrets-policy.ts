@@ -65,7 +65,6 @@ export {
 // The standalone has no profile concept, so agents-cli computes the allowed set from the full
 // listing and forwards it as `SecretsContext.allowedBundles`.
 
-/** Filter `names` down to the ones the active resource profile allows for `secrets`. */
 function filterBundleNamesForActiveProfile(names: string[]): string[] {
   return filterNamesForActiveResourceProfile('secrets', names);
 }
@@ -74,6 +73,8 @@ function filterBundleNamesForActiveProfile(names: string[]): string[] {
  * client's default). `allNames` is the caller's already-fetched listing, so this is a pure filter
  * with no round trip. */
 export function resolveAllowedBundlesForActiveProfile(allNames: string[]): string[] | undefined {
+  // Recompute from the current profile each run. Undefined deliberately means
+  // full trust; an empty array means the active profile allows no bundles.
   const filtered = filterBundleNamesForActiveProfile(allNames);
   return filtered.length === allNames.length ? undefined : filtered;
 }
@@ -87,10 +88,7 @@ export async function resolveSecretsContextForRun(scope?: string): Promise<Secre
   return { allowedBundles: resolveAllowedBundlesForActiveProfile(allNames), scope };
 }
 
-// --- bundle@host remote-reference parsing (agents' own `--secrets` flag
-// semantics, REMOTE-1) -------------------------------------------------------
 
-/** Parse a `--secrets` flag value into its bundle name and optional `@host`. */
 export function splitBundleRef(ref: string): { bundle: string; host?: string } {
   const at = ref.indexOf('@');
   if (at === -1) return { bundle: ref };
@@ -102,7 +100,6 @@ export function splitBundleRef(ref: string): { bundle: string; host?: string } {
   return { bundle, host };
 }
 
-/** A remote (bundle@host) reference does not yet support key-subset or expiry overrides. */
 export function assertRemoteBundleFlagsUnsupported(
   bundleName: string,
   host: string,
@@ -121,7 +118,6 @@ export function assertRemoteBundleFlagsUnsupported(
 // only a safe auth readiness verdict into its fleet-shared state file; a deterministic ready
 // publisher transfers the bundle only to a peer reporting `missing`. Secret values never enter Git.
 
-/** Each import/read-back SSH operation gets this deadline plus the SSH hard-kill grace. */
 const AUTH_SYNC_PUSH_DEADLINE_MS = 20_000;
 
 export interface AuthSyncDevice {
@@ -187,6 +183,8 @@ export function electPublisher(
   ready: readonly string[],
   roleOf: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>,
 ): string | null {
+  // Prefer a headed source: interactive OAuth is minted there and durable keys
+  // flow outward to workers, never back into headed devices.
   const rank = (name: string): number => (isHeadedDeviceRole(roleOf(name)) ? 0 : 1);
   return [...ready].sort((a, b) => rank(a) - rank(b) || normalizeHost(a).localeCompare(normalizeHost(b)))[0] ?? null;
 }
@@ -213,7 +211,6 @@ function authStatus(local: { exists: boolean; ok: boolean }): SharedAuthStatus {
   return local.ok ? 'ready' : 'invalid';
 }
 
-/** Publish only safe readiness metadata; useful immediately before a repo push. */
 export async function publishReservedAuthVerdict(
   options: PublishAuthVerdictOptions = {},
 ): Promise<PublishAuthVerdictResult> {
@@ -322,13 +319,10 @@ export const SKIP_REASON_NO_PEER_REPLY = 'no daemon-state reply from this peer y
  * in a rolling upgrade. An EMPTY array is a legitimate "holds nothing" and is pushed to. */
 export const SKIP_REASON_NO_ACCOUNT_ROWS = 'daemon-state reply carries no account rows (fail closed)';
 
-/** One account's durable worker credential, resolved to (bundle, key). */
 export interface ReservedSyncAccount {
   accountId: string;
   harness: AgentId;
-  /** Reserved store `__<harness>__`, or the legacy `auth` alias for a pre-T1 claude row. */
   bundle: string;
-  /** Storage key `<ENV>_<accountId>` (or the legacy email-keyed claude key). */
   key: string;
   /** The credential's rotation fingerprint: `workerCredential.mintedAt` for a T1 row, `'legacy'` for
    * a pre-T1 claude row. A re-mint bumps it though the old token still authenticates, so presence
@@ -336,10 +330,8 @@ export interface ReservedSyncAccount {
   fingerprint: string;
 }
 
-/** A peer as the plan sees it: its role, reachability, and the keys it is KNOWN to hold. */
 export interface ReservedSyncPeer {
   name: string;
-  /** `personal`/`desktop` -- receives the account row, never a durable key. */
   headed: boolean;
   reachable: boolean;
   pinned: boolean;
@@ -366,6 +358,8 @@ export function planReservedStoreSync(
   accounts: ReservedSyncAccount[],
   peers: ReservedSyncPeer[],
 ): ReservedSyncPlanItem[] {
+  // Deliver durable credentials only to non-headed worker-equivalent peers. A missing peer reply
+  // or account inventory fails closed rather than guessing the remote state.
   const keysByBundle = new Map<string, Set<string>>();
   for (const account of accounts) {
     let keys = keysByBundle.get(account.bundle);
@@ -420,15 +414,12 @@ export function reservedSyncTargets(meta: Pick<Meta, 'accounts' | 'deviceAccount
 // account (`accounts.rows`, from `account-state-daemon-service.ts`). The envelope types rows as
 // opaque, so we narrow the two fields the planner reads.
 
-/** The subset of a peer's per-account verdict row this planner reads. */
 export interface PeerAccountVerdict {
   accountId: string;
   harness: string;
-  /** `missing` ⇒ no working credential on the peer; anything else ⇒ present. */
   verdict: string;
 }
 
-/** Narrow a peer's opaque `accounts.rows` to the verdict fields the planner reads. */
 export function readPeerAccountVerdicts(state: FleetSharedDeviceState | undefined): PeerAccountVerdict[] {
   const rows = state?.accounts?.rows;
   if (!Array.isArray(rows)) return [];
@@ -466,7 +457,7 @@ function readDeliveryMemo(root?: string): Record<string, string> {
   try {
     const parsed = JSON.parse(fs.readFileSync(deliveryMemoPath(root), 'utf-8')) as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, string>;
-  } catch { /* missing/malformed → empty memo */ }
+  } catch {  }
   return {};
 }
 
@@ -483,6 +474,8 @@ export function peerPresentKeys(
   verdicts: PeerAccountVerdict[],
   delivered: (bundle: string, key: string) => string | undefined,
 ): Record<string, ReadonlySet<string>> {
+  // Presence requires both a non-missing peer verdict and the fingerprint of
+  // this credential version; rotation must force a new delivery.
   const held = new Set(
     verdicts.filter((v) => v.verdict !== 'missing').map((v) => `${v.harness}:${v.accountId}`),
   );
@@ -497,7 +490,6 @@ export function peerPresentKeys(
 
 interface ReservedStoreSyncResult {
   publisher: string | null;
-  /** Legacy raw reserved items adopted into their bundle on this box before planning (local repair). */
   adopted: Array<{ bundle: string; key: string }>;
   pushed: Array<{ device: string; bundle: string; keys: string[] }>;
   skipped: Array<{ device: string; reason: string }>;
@@ -508,24 +500,19 @@ interface ReservedStoreSyncDeps {
   listDevices?: () => DeviceProfile[];
   localName?: string;
   userAgentsDir?: string;
-  /** Where the publisher-side delivery memo lives; defaults to `getCacheDir()`. */
   cacheDir?: string;
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   isPinned?: (name: string) => boolean;
   peerRole?: (name: string) => ReturnType<typeof selfConfiguredDeviceRole>;
   selfRole?: () => ReturnType<typeof selfConfiguredDeviceRole>;
   localReady?: boolean;
-  /** Does THIS publisher hold (bundle, key) to push? Defaults to a local bundle read. */
   hasLocalKey?: (bundle: string, key: string) => boolean;
-  /** Adopt pre-bundle raw reserved items locally before planning; defaults to `adoptLegacyReservedStoreItems`. */
   adoptLegacy?: (meta: Pick<Meta, 'accounts' | 'deviceAccounts'>) => Promise<{ adopted: Array<{ bundle: string; key: string }>; errors: Array<{ bundle: string; key: string; message: string }> }>;
   push?: (bundle: string, host: string) => Promise<PushBundleResult>;
   sshTarget?: (device: DeviceProfile) => string;
 }
 
 function defaultHasLocalKey(bundle: string, key: string): boolean {
-  // Reserved-store aware: readReservedCredential reads a `__<harness>__` item
-  // directly and a legacy/provider bundle through the normal resolver.
   return readReservedCredential(bundle, key) !== null;
 }
 
@@ -539,9 +526,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
   const root = deps.userAgentsDir ?? getUserAgentsDir();
   const meta = (deps.readMetaFn ?? readMeta)();
 
-  // Local repair first: a reserved key written by 1.22.84–1.22.89 is a bare
-  // file item with no bundle record, which the push below cannot read. Adopt
-  // it into its bundle here so the plan sees it; nothing leaves the box.
   const adopt = deps.adoptLegacy ?? (async (m) => (await import('./auth-mint.js')).adoptLegacyReservedStoreItems(m));
   try {
     const adoption = await adopt(meta);
@@ -615,9 +599,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
       const out = await push(item.bundle, sshTarget(profile));
       if (out.ok) {
         result.pushed.push({ device: item.device, bundle: item.bundle, keys: item.keys });
-        // Record the fingerprint delivered so an UNCHANGED key is not re-pushed
-        // next tick; a re-mint (new fingerprint) or a removed key (verdict flips
-        // `missing`) still re-pushes.
         for (const key of item.keys) {
           const fp = targets.find((t) => t.bundle === item.bundle && t.key === key)?.fingerprint;
           if (fp) memo[memoKey(item.device, item.bundle, key)] = fp;
@@ -635,7 +616,6 @@ export async function syncReservedStores(deps: ReservedStoreSyncDeps = {}): Prom
 
 interface ReconcileWorkerSlotsResult {
   provisioned: string[];
-  /** Stale slots removed from the device doc (accountId no longer registered). */
   dropped: string[];
   skipped: Array<{ accountId: string; reason: string }>;
   errors: Array<{ accountId: string; message: string }>;
@@ -646,11 +626,8 @@ interface ReconcileWorkerSlotsDeps {
   readMetaFn?: () => Pick<Meta, 'accounts' | 'deviceAccounts'>;
   hasLocalKey?: (bundle: string, key: string) => boolean;
   provision?: (account: NativeAccountRecord) => void;
-  /** True when an existing durable slot already carries everything provisioning seeds. */
   slotSeeded?: (harness: AgentId, slotDir: string) => boolean;
-  /** Remove stale slot records from the device doc. Default: {@link dropSlots}. */
   dropSlots?: (accountIds: readonly string[]) => void;
-  /** Emit an operational log line. Default: the daemon log (fire-and-forget). */
   log?: (level: 'INFO' | 'WARN', message: string) => void;
 }
 
@@ -670,10 +647,8 @@ function defaultSlotSeeded(harness: AgentId, slotDir: string): boolean {
  * interactive native login, invariant 7). Idempotent. */
 export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): ReconcileWorkerSlotsResult {
   const result: ReconcileWorkerSlotsResult = { provisioned: [], dropped: [], skipped: [], errors: [] };
-  // `'selfRole' in deps` (not `??`) so a caller can inject an explicit `undefined`
-  // to mean "unmarked device"; a caller that omits it reads the real machine role.
   const role = 'selfRole' in deps ? deps.selfRole : selfConfiguredDeviceRole();
-  if (isHeadedDeviceRole(role)) return result; // headed boxes provision via native login
+  if (isHeadedDeviceRole(role)) return result;
   const meta = (deps.readMetaFn ?? readMeta)();
   const slots = readSlots(meta as Pick<Meta, 'deviceAccounts'>);
   const hasLocalKey = deps.hasLocalKey ?? defaultHasLocalKey;
@@ -689,8 +664,6 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
     const droppable: DeviceAccountSlot[] = [];
     for (const slot of stale) {
       try {
-        // force ignores an already-absent token; a real failure (EACCES) keeps
-        // the slot so the record is never dropped while its credential lingers.
         fs.rmSync(path.join(slot.slotDir, '.claude', '.oauth_token'), { force: true });
         droppable.push(slot);
       } catch (err) {
@@ -721,9 +694,6 @@ export function reconcileLocalWorkerSlots(deps: ReconcileWorkerSlotsDeps = {}): 
     }
     try {
       provision(account);
-      // A re-seed that still reads as unseeded is a slot file this box cannot
-      // repair (a .claude.json that exists but does not parse is left alone by
-      // the seeder). Surface it instead of logging "provisioned" every tick.
       if (reseed && !slotSeeded(account.agent, existing.slotDir)) {
         result.errors.push({ accountId: account.id, message: `slot ${existing.slotDir} is still not fully seeded after re-provisioning; a config file there exists but cannot be parsed` });
         continue;
