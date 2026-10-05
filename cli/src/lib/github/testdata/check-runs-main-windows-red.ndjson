@@ -1,9 +1,9 @@
-{"conclusion":"SUCCESS","name":"attest","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157146/job/111559054330"}
-{"conclusion":"SUCCESS","name":"Analyze (python)","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724186"}
-{"conclusion":"SUCCESS","name":"Analyze (actions)","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724117"}
-{"conclusion":"SUCCESS","name":"Analyze (javascript-typescript)","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724077"}
-{"conclusion":"SKIPPED","name":"test","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111555723833"}
-{"conclusion":"FAILURE","name":"windows","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111555723085"}
-{"conclusion":"SUCCESS","name":"warm-dep-cache","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111555722987"}
-{"conclusion":"SUCCESS","name":"bench","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157166/job/111555722737"}
-{"conclusion":"SUCCESS","name":"gitleaks","url":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157163/job/111555722733"}
+{"conclusion":"SKIPPED","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111568803153","name":"test","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111568802676","name":"warm-dep-cache","status":"COMPLETED"}
+{"conclusion":"FAILURE","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111568802006","name":"windows","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157146/job/111559054330","name":"attest","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724186","name":"Analyze (python)","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724117","name":"Analyze (actions)","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243156614/job/111555724077","name":"Analyze (javascript-typescript)","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157166/job/111555722737","name":"bench","status":"COMPLETED"}
+{"conclusion":"SUCCESS","link":"https://github.com/phnx-labs/agi-cli/actions/runs/37243157163/job/111555722733","name":"gitleaks","status":"COMPLETED"}

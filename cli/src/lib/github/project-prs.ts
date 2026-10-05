@@ -293,7 +293,7 @@ export const MERGED_PAGE_CAP = 3;
 
 /** Check-run conclusions and status-context states that count as a failing check. */
 export const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'CANCELLED', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
-const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
+export const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
 
 /** What a menu row renders: the rollup state, plus the names to show when it is red. */
 export interface CiSummary {
@@ -825,7 +825,7 @@ export async function buildProjectPrs(
         const { tag, error: releaseError } = await tagRead;
         // Every scoped merge in the window, before the row cap, so the count is not capped at 20.
         const release = tag
-          ? withMergesSince(tag, mergedListed ? merged.map((m) => m.pr) : null, { sinceMs, truncated: mergedRead?.truncated ?? false })
+          ? withMergesSince(tag, mergedListed ? merged.map((m) => m.pr) : null, { sinceMs, truncated: mergedRead?.truncated ?? false, base: defaultBranch?.name ?? null })
           : null;
         merged = merged.slice(0, MERGED_LIMIT);
         const [openCi, recentlyMerged] = await Promise.all([

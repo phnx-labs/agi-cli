@@ -31,9 +31,9 @@ export interface RepoRelease {
   latestTag: string;
   /** When the tagged commit was committed. */
   latestTagAt: string;
-  /** PRs in `recentlyMerged` merged after `latestTagAt`. */
+  /** PRs in `recentlyMerged` merged into the default branch after `latestTagAt`. */
   mergesSince: number;
-  /** False when `mergesSince` may be short: the tag predates the merged window, or the merged list was truncated or unread. */
+  /** False when `mergesSince` may be short: the tag predates the merged window, the merged list was truncated or unread, or the default branch is unknown. */
   mergesSinceComplete: boolean;
   /** Null when no package.json in the tagged commit (or at the root) is public and carries the tag's version. */
   npm: NpmVersion | null;
@@ -102,7 +102,8 @@ export async function readLatestTag(
   gh: GhExec,
   npm: { view: NpmView; cache: NpmVersionCache; nowMs: number },
 ): Promise<TagRead | null> {
-  const tags = (await gh(['api', `repos/${slug}/tags?per_page=100`, '--cache', '1h', '--jq', '.[] | [.name, .commit.sha] | @tsv']))
+  // Every page: the highest version is computed here, not taken from GitHub's listing order.
+  const tags = (await gh(['api', `repos/${slug}/tags?per_page=100`, '--paginate', '--cache', '1h', '--jq', '.[] | [.name, .commit.sha] | @tsv']))
     .split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.split('\t') as [string, string]);
   const latestTag = latestVersionTag(tags.map(([name]) => name));
   if (!latestTag) return null;
@@ -142,26 +143,29 @@ async function readNpmVersion(name: string, npm: { view: NpmView; cache: NpmVers
     const killed = (err as { killed?: boolean })?.killed;
     read = { version: null, error: killed ? 'npm view timed out after 5 s' : (stderr.split('\n').find(Boolean) ?? String(err)) };
   }
-  npm.cache.set(name, { ...read, readAt: npm.nowMs });
+  // Only an answer is cached: a timeout or a missing npm must not blank the version for an hour.
+  if (read.version !== null) npm.cache.set(name, { ...read, readAt: npm.nowMs });
   return { name, ...read };
 }
 
 /**
- * Complete a tag read with the merges since it. `merged` is the repository's
+ * Complete a tag read with the merges into `base` (the default branch) since it.
+ * `merged` is the repository's
  * scoped merges in the window, before the 20-row cap (null when they could not be
  * read); the count is complete only when the tag falls inside the merged window
  * and the closed-PR scan was not truncated.
  */
 export function withMergesSince(
   tag: TagRead,
-  merged: ReadonlyArray<{ mergedAt: string }> | null,
-  window: { sinceMs: number; truncated: boolean },
+  merged: ReadonlyArray<{ mergedAt: string; baseRefName: string }> | null,
+  window: { sinceMs: number; truncated: boolean; base: string | null },
 ): RepoRelease {
   const tagMs = Date.parse(tag.latestTagAt);
-  const since = (merged ?? []).filter((m) => Date.parse(m.mergedAt) > tagMs).length;
+  // Without the default branch's name every base counts, and the count is not complete.
+  const since = (merged ?? []).filter((m) => Date.parse(m.mergedAt) > tagMs && (window.base === null || m.baseRefName === window.base)).length;
   return {
     ...tag,
     mergesSince: since,
-    mergesSinceComplete: merged !== null && tagMs >= window.sinceMs && !window.truncated,
+    mergesSinceComplete: merged !== null && window.base !== null && tagMs >= window.sinceMs && !window.truncated,
   };
 }
