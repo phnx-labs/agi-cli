@@ -438,6 +438,8 @@ if (mode === 'plain-fail') {
   process.exit(1);
 }
 if (mode === 'stdout-spend-limit-then-ok') {
+  // Claude prints billing refusals to STDOUT, not stderr — the cascade must
+  // still detect them (via the SpawnResult stdout tail).
   if (n === 1) {
     process.stdout.write("You've hit your org's monthly spend limit \\u00b7 run /usage-credits to raise it\\n");
     process.exit(1);
