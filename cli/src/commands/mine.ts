@@ -1,17 +1,3 @@
-/**
- * `agents mine` helpers — white-label the CLI under your own name.
- *
- * `agents setup mine init <name>` mints a personally-named binary (e.g. `jack`) that
- * IS agents-cli: a pure pass-through shim on PATH that runs every `agents` verb
- * under the brand's name, with the brand's disabled commands and curated
- * resource profile applied. Manage verbs live under `agents setup mine`
- * (`list` / `toggle` / `remove`); the bare `agents setup mine` wizard is the
- * discoverable entry point (see setup-mine.ts).
- *
- * Storage: brand config in `meta.brands` (agents.yaml); the curated resource set
- * reuses the resource-profile engine — each brand owns a preset named
- * `mine-<name>` in `meta.profiles.presets`. See lib/brand.ts.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 
@@ -28,30 +14,20 @@ import { updateMeta } from '../lib/state.js';
 import { KNOWN_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 import type { BrandConfig, ResourceProfilePreset } from '../lib/types.js';
 
-/** Profiled resource kinds a brand can curate via `toggle --disable-<kind>`. */
 type ToggleKind = 'plugins' | 'skills' | 'commands' | 'mcp' | 'hooks' | 'subagents';
 
-/** Built-in top-level command names, for validating `--disable <cmd>`. */
 function knownCommandNames(): Set<string> {
   const names = new Set<string>(KNOWN_TOP_LEVEL_COMMANDS);
-  // Inline aliases registered outside COMMAND_LOADERS (see src/index.ts).
   for (const n of ['perms', 'exec', 'jobs', 'cron', 'upgrade']) names.add(n);
   return names;
 }
 
-/**
- * Add/remove a `!name` exclusion on a preset's pattern list for one kind,
- * keeping `*` so everything not explicitly disabled stays enabled. Deletes the
- * key entirely once nothing but `*` remains, so a clean brand has an empty preset.
- */
 function applyResourceToggle(
   preset: ResourceProfilePreset,
   kind: ToggleKind,
   name: string,
   enable: boolean,
 ): void {
-  // Cast to a plain string-bag: writing through the union-keyed `preset[kind]`
-  // collapses to `never` under strict TS, so index the bag instead.
   const bag = preset as unknown as Record<string, string[] | undefined>;
   const arr = [...(bag[kind] ?? [])];
   if (arr.length === 0) arr.push('*');
@@ -67,7 +43,6 @@ function applyResourceToggle(
   else bag[kind] = arr;
 }
 
-/** Ensure the brand's preset exists in meta.profiles.presets and return a mutable copy path. */
 function ensurePresetExists(name: string): void {
   const presetName = brandPresetName(name);
   updateMeta((meta) => {
@@ -80,7 +55,6 @@ function ensurePresetExists(name: string): void {
   });
 }
 
-/** Mutate the brand's resource preset under lock. */
 function editPreset(name: string, fn: (preset: ResourceProfilePreset) => void): void {
   const presetName = brandPresetName(name);
   updateMeta((meta) => {
@@ -93,10 +67,6 @@ function editPreset(name: string, fn: (preset: ResourceProfilePreset) => void): 
   });
 }
 
-/**
- * Create (or re-mint) a brand. Shared by `setup mine init` and the `setup mine`
- * wizard. Writes the shim, the brand config, and an empty resource preset.
- */
 export function initBrand(
   name: string,
   opts: { disabledCommands?: string[]; force?: boolean } = {},
@@ -142,10 +112,6 @@ function printMinted(name: string, pathWarning: boolean): void {
   }
 }
 
-/**
- * Register brand manage verbs (`init`/`list`/`toggle`/`remove`) under a parent
- * Command — used by `agents setup mine`.
- */
 export function registerMineManageCommands(cmd: Command): void {
   cmd
     .command('init <name>')
@@ -199,7 +165,6 @@ export function registerMineManageCommands(cmd: Command): void {
         process.exit(1);
       }
 
-      // Built-in command toggles → brand.disabledCommands.
       const disabledSet = new Set(cfg.disabledCommands ?? []);
       const known = knownCommandNames();
       for (const c of options.disable ?? []) {
@@ -213,7 +178,6 @@ export function registerMineManageCommands(cmd: Command): void {
       else delete nextCfg.disabledCommands;
       upsertBrand(nextCfg);
 
-      // Resource toggles → the brand's profile preset.
       const resourceOps: Array<[ToggleKind, string, boolean]> = [];
       for (const p of options.disablePlugin ?? []) resourceOps.push(['plugins', p, false]);
       for (const p of options.enablePlugin ?? []) resourceOps.push(['plugins', p, true]);

@@ -1,12 +1,3 @@
-/**
- * `agents modes` — list the permission modes a harness accepts for
- * `agents run` / `agents teams add`.
- *
- * Mirror of `agents models`: humans and orchestrating agents read this before
- * picking `--mode plan|edit|auto|skip`. Modes are per-agent today (not version-
- * gated); `agent@version` is accepted so the configured run.defaults mode for
- * that version can be shown beside the catalog.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -26,7 +17,6 @@ import { setHelpSections } from '../lib/help.js';
 import type { AgentId } from '../lib/types.js';
 import { getGlobalDefault, listInstalledVersions, resolveVersion, resolveVersionAlias } from '../lib/installations/versions.js';
 
-/** Agents that show in the no-arg overview (skip hard-deprecated). */
 const MODE_AGENTS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
 interface Target {
@@ -35,7 +25,6 @@ interface Target {
   isDefault: boolean;
 }
 
-/** Register `agents modes [agent[@version]]`. */
 export function registerModesCommand(program: Command): void {
   const modes = program
     .command('modes [agentSpec]')
@@ -140,7 +129,6 @@ function resolveTargets(agentSpec: string | undefined): Target[] {
   }
 
   if (versionSpec) {
-    // resolveVersionAlias exits process if the concrete version is not installed.
     const version = resolveVersionAlias(agent, versionSpec) ?? null;
     return [{ agent, version, isDefault: version === getGlobalDefault(agent) }];
   }
@@ -180,7 +168,6 @@ function printCatalog(catalog: AgentModesCatalog, version: string | null, isDefa
   }
 
   for (const note of catalog.notes) {
-    // Keep the full-alias note quiet; surface degrades more visibly.
     if (note.startsWith("'full'")) continue;
     console.log(chalk.gray(`  note: ${note}`));
   }

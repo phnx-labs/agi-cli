@@ -1,7 +1,3 @@
-/**
- * `agents projects todo add|list|done|undo` — quick to-dos in Linear, the verbs
- * behind AGI Menu's Home to-do line. The logic lives in `lib/quick-todo.ts`.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -26,14 +22,12 @@ function todoLine(t: QuickTodo): string {
   return `${chalk.bold(t.identifier)}  ${t.title}  ${chalk.gray(facts)}`;
 }
 
-/** A Linear identifier, or exit 1 with the same `ok: false` shape every verb prints. */
 function issueIdOrExit(raw: string, json: boolean | undefined): string {
   const id = raw.trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9]*-\d+$/.test(id)) report({ ok: false, todo: null, message: `Expected a Linear issue identifier like PHNX-123, got "${raw}".` }, json);
   return id;
 }
 
-/** Print one verb's result and exit 1 when it did not happen. */
 function report(result: TodoResult, json: boolean | undefined): void | never {
   if (json) console.log(JSON.stringify(result, null, 2));
   else if (result.ok) console.log(`${chalk.green(result.message)}${result.todo ? `\n  ${todoLine(result.todo)}` : ''}`);

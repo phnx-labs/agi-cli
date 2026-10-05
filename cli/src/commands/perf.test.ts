@@ -1,10 +1,3 @@
-/**
- * Real SQLite warehouse under a temp dir — no mocks. Covers the project
- * filter's plumbing through loadHookProfile (the SQLite-vs-legacy-JSONL
- * fallback), which has a real bug shape: a project filter that finds no
- * warehouse rows must NOT silently fall back to the unfilterable legacy
- * JSONL log and show unfiltered results.
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -51,8 +44,6 @@ describe('loadHookProfile', () => {
 
   it('maps exit-2 to blockCount and exit-1 to errorCount (RUSH-2294)', () => {
     const base = Date.now();
-    // ask-user-question-guard exits 2 by design on the first AskUserQuestion;
-    // only a real crash (exit 1) should inflate errorCount.
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 10, exitCode: 0 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 12, exitCode: 2 });
     recordSample({ tsMs: base, kind: 'hook.fire', label: 'ask-user-question-guard', durationMs: 11, exitCode: 2 });
@@ -72,7 +63,6 @@ describe('loadHookProfile', () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'perf-cmd-repo-'));
     fs.mkdirSync(path.join(repo, '.git'));
     try {
-      // Sample exists, but under a DIFFERENT project than what we'll filter on.
       recordSample({ kind: 'hook.fire', label: 'git-guard', durationMs: 10, cwd: repo });
 
       const rows = loadHookProfile(1, 'some-other-project-name');
@@ -128,10 +118,6 @@ describe('formatRateColumn', () => {
 });
 
 describe('frictionAction', () => {
-  // friction events (emitFriction in events.ts) carry no cwd today — agents
-  // _internal friction has no --cwd flag — so --project (inherited from the
-  // shared `perf` parent command) must fail loud instead of silently
-  // returning unfiltered results, which would look like it filtered.
   it('rejects --project with a clear error instead of silently ignoring it', () => {
     const errors: string[] = [];
     const originalError = console.error;

@@ -26,7 +26,6 @@ beforeEach(() => {
   vi.spyOn(state, 'getSystemAgentsDir').mockReturnValue(path.join(TEST_ROOT, 'system', '.agents'));
   vi.spyOn(state, 'getProjectAgentsDir').mockReturnValue(null);
 
-  // Real, registered accounts every link-account/unlink-account test can reference.
   addAccount('personal', 'openrouter', 'api-key', 'sk-personal-test', USER_DIR);
   addAccount('work', 'openrouter', 'api-key', 'sk-work-test', USER_DIR);
 });
@@ -41,7 +40,6 @@ interface RunResult {
   exitCode: number | null;
 }
 
-/** Run `agents route <args>` (or `agents routes <args>`) in-process against the mocked user dir. */
 async function runRoute(args: string[], noun: 'route' | 'routes' = 'route'): Promise<RunResult> {
   const program = new Command();
   program.exitOverride();
@@ -131,7 +129,6 @@ describe.skipIf(!fileBacked)('agents route allow', () => {
     const router = readRouter('research');
     expect(router.harnesses.kimi.models).toEqual(['best']);
     expect(router.harnesses.kimi.accounts).toEqual(['work']);
-    // grok is untouched by narrowing kimi
     expect(router.harnesses.grok.models).toEqual(['cheap', 'default']);
   });
 
@@ -159,7 +156,6 @@ describe.skipIf(!fileBacked)('agents route link-account / unlink-account', () =>
     await runRoute(['link-account', 'research', 'grok', 'personal']);
     expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
 
-    // linking the same account twice does not duplicate it
     await runRoute(['link-account', 'research', 'grok', 'personal']);
     expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
 
@@ -187,7 +183,6 @@ describe.skipIf(!fileBacked)('agents route link-account / unlink-account', () =>
     await runRoute(['link-account', 'research', 'grok', 'personal']);
     const result = await runRoute(['unlink-account', 'research', 'grok', 'not-a-real-account']);
     expect(result.exitCode).toBe(1);
-    // the real, already-linked account is untouched
     expect(readRouter('research').harnesses.grok.accounts).toEqual(['personal']);
   });
 });
@@ -208,7 +203,6 @@ describe.skipIf(!fileBacked)('agents route edit verbs refuse a non-user-layer ro
     const result = await runRoute(['allow', 'shared', 'grok', 'best']);
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("resolves from the 'project' layer");
-    // the project-layer file is untouched, and no shadowing user-layer file was created
     expect(readRouter('shared', TEST_ROOT).harnesses.grok.models).toEqual(['cheap']);
     expect(fs.existsSync(path.join(USER_DIR, 'routers', 'shared.yml'))).toBe(false);
   });
@@ -297,7 +291,6 @@ describe.skipIf(!fileBacked)('agents route rename', () => {
   it('re-keys the stored router, preserving every field', async () => {
     await runRoute(['add', 'research', '--harness', 'grok,kimi', '--tier', 'cheap,default', '--task', 'research']);
     await runRoute(['link-account', 'research', 'grok', 'personal']);
-    // weights + hijack have no CLI setter yet -- write them into the file directly
     const file = path.join(USER_DIR, 'routers', 'research.yml');
     const withExtras = { ...readRouter('research'), weights: { cost: 0.7, success: 0.3 }, hijack: true };
     fs.writeFileSync(file, yaml.stringify(withExtras));

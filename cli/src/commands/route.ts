@@ -1,13 +1,3 @@
-/**
- * Named router management commands.
- *
- * Registers the `agents route` command tree for creating, viewing, and
- * removing named routers -- reusable, task-typed allowlists of harnesses x
- * models/tiers x linked accounts that a future routing decision resolves
- * strictly within (see `.agents/artifacts/2026-08-10/agent-router-spec.md`,
- * requirements E1/E2). This ticket ships persistence + management only;
- * invoking a router to route a task is a separate ticket.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -30,14 +20,6 @@ import { setHelpSections } from '../lib/help.js';
 import { findAccount } from '../lib/account-registry.js';
 import * as path from 'path';
 
-/**
- * Read a router that must be safely editable/removable from here: `writeRouter`
- * and `deleteRouter` only ever touch the user layer, so editing a router that
- * currently resolves from a project/system layer would silently write to a
- * user-layer file that stays permanently shadowed (the edit "succeeds" but is
- * never read back — the router keeps resolving to its project/system copy).
- * Fails loud instead, naming the layer and pointing at the fix.
- */
 function requireEditableRouter(name: string): Router {
   const source = routerSource(name);
   if (source === null) die(`Router '${name}' not found.`);
@@ -51,7 +33,6 @@ function requireEditableRouter(name: string): Router {
   return readRouter(name);
 }
 
-/** Highest-tier-reached summary for a router's declared model/tier allowlist. */
 function routerTierSummary(router: Router): string {
   const seen = new Set<string>();
   for (const allowlist of Object.values(router.harnesses)) {

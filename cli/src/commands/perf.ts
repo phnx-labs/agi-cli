@@ -1,17 +1,3 @@
-/**
- * `agents insights perf` — latency rollups over the disposable perf SQLite
- * warehouse (former top-level `agents perf`, moved under insights in PHNX-3391).
- *
- * Subcommands:
- *   agents insights perf              multi-section summary (commands + hooks + runs)
- *   agents insights perf hooks        per-hook p50/p99 + cache hit rates
- *   agents insights perf commands     slowest CLI command paths (from command.end)
- *   agents insights perf run          agent.run / perf.timing labels
- *   agents insights perf friction     sessions stuck repeatedly hitting the same guard
- *
- * Soft-joins sessions.db via shared string keys (session_id, agent, machine) —
- * no foreign keys. Warehouse lives at ~/.agents/.cache/perf/perf.db (safe to wipe).
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -54,7 +40,6 @@ function parseLimit(raw: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-/** Map warehouse rows shaped like hook.fire into the existing HookProfileRow UI. */
 export function asHookRows(rows: PerfAggregateRow[]): HookProfileRow[] {
   return rows.map((r) => ({
     hook: r.label,
@@ -92,11 +77,6 @@ function printTable(
   }
 }
 
-/**
- * `err:12% block:40% to:4%` when any rate is present, else ''.
- * Exit 2 (intentional deny) is `block:`, not `err:` — so a deny-by-design
- * guard no longer reads as a crashing hook in the table.
- */
 export function formatRateColumn(r: { errorRate?: number; blockRate?: number; timeoutRate?: number }): string {
   const parts: string[] = [];
   if (r.errorRate) parts.push(`err:${Math.round(r.errorRate * 100)}%`);
@@ -168,9 +148,6 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
     ]),
     sliced.map((r) => r.p99Ms > warnMs),
   );
-  // Sub-phase break-out (agent.run's `startup` = spawn overhead before the child
-  // runs, PHNX-3468). Indented under the row so a slow boot is visible next to
-  // the total without adding columns that are empty for phaseless labels.
   for (const r of sliced) {
     if (!r.phases) continue;
     for (const [name, ph] of Object.entries(r.phases)) {
@@ -179,12 +156,6 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
   }
 }
 
-/**
- * Prefer SQLite samples; fall back to the legacy daily JSONL so existing
- * instrumentation still surfaces until shims are resynced. `project` only
- * narrows the SQLite path — the legacy JSONL log has no cwd, so a fallback
- * hit ignores it (a caller filtering by project has no legacy rows to miss).
- */
 export function loadHookProfile(days: number, project?: string): HookProfileRow[] {
   const fromDb = asHookRows(aggregateSamples({ days, kinds: ['hook.fire'], project }));
   if (fromDb.length > 0 || project) return fromDb;
@@ -226,19 +197,7 @@ function runAction(opts: PerfGlobalOpts): void {
   renderLabelTable('run/timing', rows, warnMs, limit);
 }
 
-/**
- * Sessions stuck repeatedly hitting the SAME guard block (git-guard,
- * rm-guard, git-require-clean-tree, …) instead of adapting after the first
- * denial. Reads the `friction` event sink (emitFriction in events.ts) that
- * guard hooks self-report into via `agents _internal friction` before they
- * exit 2 — see lib/friction-heuristics.ts for the grouping.
- */
 export function frictionAction(opts: PerfGlobalOpts): void {
-  // --project is declared on the shared `perf` parent for hooks/commands/run,
-  // where every sample carries a cwd. friction events (emitFriction in
-  // events.ts) don't carry one today — agents _internal friction has no
-  // --cwd flag — so silently accepting the flag here would look like it
-  // filtered when it did nothing. Fail loud instead of no-op.
   if (opts.project) {
     console.error(chalk.red("agents insights perf friction does not support --project yet — friction events carry no cwd to filter on."));
     process.exitCode = 1;
@@ -309,10 +268,6 @@ function attachSharedOptions(cmd: Command): Command {
     .option('--json', 'Emit JSON instead of a table');
 }
 
-/**
- * Commander binds a flag declared on both parent and child to the *parent*.
- * Merge so `agents insights perf commands --json` still sees json:true on the leaf.
- */
 function leafOpts(cmd: Command): PerfGlobalOpts {
   const parent = cmd.parent && typeof cmd.parent.opts === 'function'
     ? (cmd.parent.opts() as PerfGlobalOpts)
@@ -320,14 +275,6 @@ function leafOpts(cmd: Command): PerfGlobalOpts {
   return { ...parent, ...(cmd.opts() as PerfGlobalOpts) };
 }
 
-/**
- * Attach the `perf` latency-rollup command under a parent (the top-level
- * `insights` group). Performance is an insight, not a top-level noun — `agents
- * perf` was retired in favour of `agents insights perf` (PHNX-3391). It is a
- * sibling of `agents insights cost` / `output`, registered in
- * `registerInsightsCommand` beside them (top-level insights only, not
- * `sessions insights`).
- */
 export function registerPerfSubcommand(parent: Command): void {
   const perf = parent
     .command('perf')
@@ -347,8 +294,6 @@ Examples:
   agents insights perf friction               # sessions stuck retrying the same guard block
 `);
 
-  // Options live on the parent so `agents insights perf --json` and
-  // `agents insights perf commands --json` both work (see leafOpts).
   attachSharedOptions(perf).action(function summary(this: Command) {
     summaryAction(this.opts() as PerfGlobalOpts);
   });

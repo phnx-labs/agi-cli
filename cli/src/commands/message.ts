@@ -1,26 +1,3 @@
-/**
- * `agents message <target> <text>` — send a message to a running or parked agent.
- *
- * Delivery is routed by agent state (RUSH-1474):
- *   - running, between tool calls → mailbox spool (PreToolUse inject)
- *   - parked on AskUserQuestion with a tmux/iterm rail → keystroke inject
- *   - parked headless (no rail) → `agents run --resume <id> -- <answer>`
- *   - cloud task → provider.message()
- *
- * Cross-host is handled one layer up: `--device <h>` routes the whole command over
- * ssh via `REMOTE_PASSTHROUGH` (see src/lib/hosts/passthrough.ts), so the box is
- * written on the host that actually owns the agent. A caller who doesn't already
- * know the host (a detached `agents run --device <h> --no-follow` dispatch) is
- * still resolved automatically: a `target` matching no local/cloud session falls
- * through to the `~/.agents/.cache/hosts/` records `agents devices ps` reads
- * (RUSH-2366 follow-up — see decideHostTaskRoute in lib/mailbox-target.ts), and
- * the message is rerouted there.
- *
- * For local agents, the message is tied to the agent's current open feed block
- * (if any). The first answer to a block wins: a second concurrent answer is
- * rejected with the surface that already answered. Delivery receipts
- * (queued → consumed → continued) are surfaced in the feed store.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { spawn } from 'child_process';
@@ -56,30 +33,22 @@ import {
 import { injectIntoTerminal } from '../lib/terminal/index.js';
 import { setHelpSections } from '../lib/help.js';
 
-/** Find the still-open block addressed to `mailboxId`, if any. */
 function findOpenBlockForMailbox(mailboxId: string): OpenBlock | undefined {
-  // Fast path: the mailbox id is usually the session id, so the block id is
-  // directly derivable. This avoids scanning the whole feed store.
   const direct = readBlock(blockIdForSession(mailboxId));
   if (direct && direct.mailboxId === mailboxId) return direct;
-  // Fallback: scan (agentId-based mailbox ids, rare).
   return listBlocks().find((b) => b.mailboxId === mailboxId);
 }
 
-/** Live session whose mailbox id equals `mailboxId`. */
 function findSessionForMailbox(mailboxId: string, sessions: ActiveSession[]): ActiveSession | undefined {
   return sessions.find((s) => mailboxIdForActiveSession(s) === mailboxId);
 }
 
-/** Claim first-answer-wins on the open block; dies if already answered / unauthorized. */
 function claimBlockAnswer(
   block: OpenBlock | undefined,
   opts: { from?: string; as?: string; surface?: string },
 ): void {
   if (!block) return;
   const operatorId = opts.as;
-  // High-consequence answers require env-proven identity (AGENTS_OPERATOR_ID),
-  // not merely a caller-supplied known --as id (RUSH-1619).
   const verified = verifyOperatorIdentity(operatorId);
   const claim = recordAnswer(block.blockId, {
     answeredBy: opts.from,
@@ -133,9 +102,7 @@ async function deliverViaInject(route: AnswerRoute, mailboxId: string): Promise<
     die(`Internal error: inject route missing target/payload for ${mailboxId}.`);
   }
   const result = await injectIntoTerminal(route.inject, route.payload, {
-    // Digit selection and free text both need Enter to submit the TUI choice.
     enter: true,
-    // Digit+Enter as two writes is safer for Ink TUI.
     combined: false,
   });
   if (!result.ok) {
@@ -152,10 +119,6 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
     die(`Internal error: resume route incomplete for ${mailboxId}.`);
   }
   const argv = resumeArgv(route);
-  // Relaunch the same agents CLI (via getAgentsInvocation, which resolves the
-  // real binary — not a bun /$bunfs virtual path under the compiled build) so
-  // version pins and wrappers stay consistent. Detach so the resume can take
-  // over a TTY when interactive; for feed answers we pass it non-interactively.
   const inv = getAgentsInvocation(argv);
   const child = spawn(inv.command, inv.args, {
     stdio: 'inherit',
@@ -174,19 +137,6 @@ async function deliverViaResume(route: AnswerRoute, mailboxId: string): Promise<
   );
 }
 
-/**
- * Reroute a message to a detached `agents run --device <host> --no-follow`
- * dispatch (RUSH-2366 follow-up). `getActiveSessions()` never sees these: the
- * live process is on the dispatch's host, not this machine, so the local
- * session resolver in `resolveMessageTarget` reports "no running agent" even
- * while `agents devices ps` shows the same dispatch running with a live remote
- * pid — the only recovery was kill-and-redispatch, losing all context.
- *
- * Re-spawns `agents message <remoteRef> <text> --device <host>` through
- * `getAgentsInvocation`, so it re-enters via the SAME `--device` REMOTE_PASSTHROUGH
- * choke point (`lib/hosts/passthrough.ts`) any explicit `--device` caller uses,
- * and resolves against the remote box's own active sessions.
- */
 async function deliverViaHostReroute(
   route: Extract<HostTaskRoute, { kind: 'reroute' }>,
   text: string,
@@ -212,13 +162,6 @@ async function deliverViaHostReroute(
   }
 }
 
-/**
- * `message` is the agent-control plane (RUSH-2123): the answer/keystroke/
- * injected input a running agent consumes, never a notification a human reads.
- * Mirrors SHARED_NOTES in commands/send.ts so an agent reading either --help
- * sees the same three-plane map and doesn't reach for `message` when it means
- * `send`.
- */
 const CONTROL_PLANE_NOTES = `
   Planes (do not mix them up):
     message / sessions inject  - CONTROL a running agent (mailbox answer, terminal keystroke, or resume by runtime)
@@ -285,7 +228,6 @@ export function registerMessageCommand(program: Command): void {
               die(route.reason);
             }
 
-            // First-answer-wins for any path that closes an open block.
             claimBlockAnswer(block, opts);
 
             if (route.kind === 'mailbox') {
@@ -320,12 +262,6 @@ export function registerMessageCommand(program: Command): void {
           return;
         }
         case 'none': {
-          // RUSH-2384: a live local process can still advertise `--session-id
-          // <target>` in its argv when getActiveSessions lost the row (empty
-          // by-pid registry, teams status flap, fold into a parent). Mailbox
-          // delivery only needs the id — prove liveness from the process table
-          // before giving up, so a mid-run agent is never unreachable while
-          // its pid is alive.
           if (await isSessionIdLiveOnProcessTable(target)) {
             try {
               const block = findOpenBlockForMailbox(target);
@@ -351,15 +287,6 @@ export function registerMessageCommand(program: Command): void {
             }
             return;
           }
-          // Not a local/cloud session — check whether it's a detached
-          // `--device ... --no-follow` dispatch, which `getActiveSessions()`
-          // never sees (its live process is on another host). Same records
-          // `agents devices ps` reads, so the two commands never disagree.
-          // Heal first, exactly as `agents devices stop`/`agents devices ps` do: a detached
-          // dispatch record never self-updates, so a finished run is still
-          // stamped `status:'running'` on disk. Without this we'd route a dead
-          // task through an SSH reroute that can only fail, instead of
-          // reporting it finished here.
           const onDisk = resolveTaskRef(target);
           const hostRoute = decideHostTaskRoute(
             onDisk ? reconcileRunningTasks([onDisk])[0] : null,

@@ -1,15 +1,3 @@
-/**
- * Extra DotAgent repo management.
- *
- * Registers `agents repos add|init|list|remove|enable|disable` (`repo` alias)
- * which manage additional DotAgent repos alongside the primary ~/.agents/.system/
- * repo so private, work, or team skills can ship separately from public ones.
- *
- * Extras are user-level config: managed clones live at ~/.agents-<alias>/ as
- * peer dirs to ~/.agents/, and user-owned repos may live anywhere. All extras
- * are registered in meta.extraRepos. Sync functions merge their resources into
- * agent version homes after the user repo's (user-wins on name collisions).
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { visibleWidth, padVisible } from '../lib/format.js';
@@ -33,12 +21,6 @@ import {
 
 const HOME = os.homedir();
 
-/**
- * Resolve a target argument to an absolute path.
- * - No arg: ~/.agents/
- * - Looks like a path (starts with /, ~, .): resolve as path
- * - Otherwise: ~/.agents-{name}/
- */
 function resolveRepoPath(target?: string): string {
   if (!target) return path.join(HOME, '.agents');
   const trimmed = target.trim();
@@ -83,12 +65,6 @@ import { syncAllMarketplaces } from '../lib/plugins/plugin-marketplace.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 
-/**
- * After a repo add/remove/enable/disable, reconcile each plugins-capable
- * agent's default version against the new marketplace set. Re-synthesizes
- * catalogs and known_marketplaces.json entries. Source-copy of plugins is
- * out of scope here — full sync still goes through `agents sync`.
- */
 function syncMarketplacesForDefaults(): void {
   for (const agent of capableAgents('plugins')) {
     const def = getGlobalDefault(agent);
@@ -96,16 +72,10 @@ function syncMarketplacesForDefaults(): void {
     if (!listInstalledVersions(agent).includes(def)) continue;
     try {
       syncAllMarketplaces(agent, getVersionHomePath(agent, def));
-    } catch { /* best-effort */ }
+    } catch {  }
   }
 }
 
-/**
- * Push the reserved auth bundle to peers whose last-received verdict says
- * `missing`. Daemon state (usage, verdicts, session digests) no longer rides the
- * user repo — it moves over SSH on the usage-sync tick (PHNX-4116) — so a repo
- * push/sync of human-authored resources only runs this credential half.
- */
 async function syncUserRepoAuthBundle(): Promise<void> {
   const { syncReservedAuthBundle } = await import('../lib/secrets-policy.js');
   const auth = await syncReservedAuthBundle();
@@ -115,7 +85,6 @@ async function syncUserRepoAuthBundle(): Promise<void> {
 
 const ALIAS_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
-/** Derive a default alias from a source URL (e.g. gh:foo/.agents-work -> agents-work). */
 function deriveAlias(source: string): string {
   const parsed = parseSource(source);
   let base: string;
@@ -125,23 +94,14 @@ function deriveAlias(source: string): string {
     const match = parsed.url.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/);
     base = match ? match[2] : parsed.url;
   }
-  // Strip leading dots and any "agents-" prefix so the alias is short and
-  // becomes ~/.agents-<alias>/ on disk (e.g. ".agents-work" -> "work").
   return base.replace(/^\.+/, '').replace(/^agents-/, '') || 'repo';
 }
 
-/**
- * These are DotAgent *resource* repos, so changes are reported at the resource
- * level ("2 skills, 1 hook") rather than the raw-file level. A resource is the
- * unit a user reasons about: one skill, one command, one plugin — even if it
- * spans several files on disk.
- */
 type RepoResourceKind =
   | 'skill' | 'command' | 'plugin' | 'hook' | 'mcp' | 'subagent'
   | 'rule' | 'workflow' | 'routine' | 'profile' | 'permission'
   | 'clis' | 'config' | 'other';
 
-/** Top-level dir -> resource kind. Directory-based resources collapse to one unit. */
 const RESOURCE_DIRS: Record<string, RepoResourceKind> = {
   skills: 'skill', commands: 'command', prompts: 'command', plugins: 'plugin',
   hooks: 'hook', mcp: 'mcp', subagents: 'subagent', rules: 'rule',
@@ -149,7 +109,6 @@ const RESOURCE_DIRS: Record<string, RepoResourceKind> = {
   permissions: 'permission', clis: 'clis',
 };
 
-/** [singular, plural] display labels per kind. */
 const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
   skill: ['skill', 'skills'], command: ['command', 'commands'],
   plugin: ['plugin', 'plugins'], hook: ['hook', 'hooks'], mcp: ['MCP', 'MCPs'],
@@ -160,7 +119,6 @@ const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
   other: ['other file', 'other files'],
 };
 
-/** Display order — the resources a user cares about most come first. */
 const RESOURCE_ORDER: RepoResourceKind[] = [
   'skill', 'command', 'plugin', 'hook', 'mcp', 'subagent', 'rule',
   'workflow', 'routine', 'profile', 'permission', 'clis', 'config', 'other',
@@ -168,11 +126,6 @@ const RESOURCE_ORDER: RepoResourceKind[] = [
 
 export type ChangeAction = 'new' | 'changed' | 'removed';
 
-/**
- * Map a repo-relative path to the resource unit it belongs to. Directory-based
- * resources (skills/foo/SKILL.md) collapse to `skills/foo` so all their files
- * count as one unit; flat config files (agents.yaml, hooks.yaml) count alone.
- */
 export function resourceUnit(file: string): { kind: RepoResourceKind; unit: string } {
   const parts = file.split('/');
   const top = parts[0];
@@ -182,29 +135,18 @@ export function resourceUnit(file: string): { kind: RepoResourceKind; unit: stri
   return { kind: 'other', unit: file };
 }
 
-/** One resource kind + action, collapsed to a unit count (e.g. 2 new skills). */
 export interface CountedResource {
   action: ChangeAction;
   kind: RepoResourceKind;
   count: number;
 }
 
-/** Resource-level summary of a changed-file set. */
 export interface ResourceDelta {
-  /** Counts in display order (grouped new -> changed -> removed, then RESOURCE_ORDER). */
   counts: CountedResource[];
-  /** Total distinct resource units changed. */
   total: number;
 }
 
-/**
- * Collapse a changed-file set to distinct resource units, then count them by
- * (action, kind). A skill whose three files all changed counts as one changed
- * skill; a unit with mixed add+modify reads as a single change. This is the
- * shared structured core behind every SYNC / CHANGES rendering.
- */
 export function resourceDelta(entries: { action: ChangeAction; file: string }[]): ResourceDelta {
-  // Gather every action seen across a unit's files, then collapse to one action.
   const units = new Map<string, { kind: RepoResourceKind; actions: Set<ChangeAction> }>();
   for (const { action, file } of entries) {
     const { kind, unit } = resourceUnit(file);
@@ -214,13 +156,13 @@ export function resourceDelta(entries: { action: ChangeAction; file: string }[])
     units.set(key, cur);
   }
 
-  const counts = new Map<string, number>(); // `${action} ${kind}` -> count
+  const counts = new Map<string, number>();
   for (const { kind, actions } of units.values()) {
     let action: ChangeAction;
     if (actions.size === 1) action = [...actions][0]!;
     else if ([...actions].every((a) => a === 'new')) action = 'new';
     else if ([...actions].every((a) => a === 'removed')) action = 'removed';
-    else action = 'changed'; // mixed add+modify within one unit reads as a change
+    else action = 'changed';
     const key = `${action} ${kind}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
@@ -239,7 +181,6 @@ const ACTION_COLOR: Record<ChangeAction, (s: string) => string> = {
   new: chalk.green, changed: chalk.yellow, removed: chalk.red,
 };
 
-/** One colored phrase per counted resource, e.g. `2 new skills`. */
 function deltaPhrases(delta: ResourceDelta): string[] {
   return delta.counts.map(({ action, kind, count }) => {
     const [singular, plural] = RESOURCE_LABELS[kind];
@@ -247,7 +188,6 @@ function deltaPhrases(delta: ResourceDelta): string[] {
   });
 }
 
-/** Join phrases with `, `, capping at `maxParts` and appending `+N more`. */
 function joinPhrases(parts: string[], maxParts: number): string {
   if (parts.length > maxParts) {
     const shown = parts.slice(0, maxParts);
@@ -257,12 +197,6 @@ function joinPhrases(parts: string[], maxParts: number): string {
   return parts.join(', ');
 }
 
-/**
- * Kind-only brief for the compact (wide-terminal) layout: `(24 skills, 9 commands, +20)`
- * — the top `maxKinds` kinds by display order, with a `+N` remainder. Drops the
- * new/changed verb (the arrow already carries direction) to stay short. Returns
- * '' when there is nothing to summarize.
- */
 export function deltaBrief(delta: ResourceDelta, maxKinds = 2): string {
   if (delta.total === 0) return '';
   const shown = delta.counts.slice(0, maxKinds);
@@ -276,13 +210,6 @@ export function deltaBrief(delta: ResourceDelta, maxKinds = 2): string {
   return chalk.gray(`(${kinds.join(', ')})`);
 }
 
-/**
- * Render a set of changed files as a resource-level summary, e.g.
- * `2 new skills, 1 changed hook`. Counts distinct resource units (a skill whose
- * three files all changed is "1 changed skill"), grouped by action then kind,
- * and colors each phrase green/yellow/red for new/changed/removed. Caps at
- * `maxParts` phrases, appending `+N more` so a big diff stays scannable.
- */
 export function formatResourceDelta(
   entries: { action: ChangeAction; file: string }[],
   maxParts = 5,
@@ -290,7 +217,6 @@ export function formatResourceDelta(
   return joinPhrases(deltaPhrases(resourceDelta(entries)), maxParts);
 }
 
-/** Parse `git diff --name-status <range>` into resource-delta entries. */
 async function diffResourceEntries(
   git: ReturnType<typeof simpleGit>,
   range: string,
@@ -299,14 +225,14 @@ async function diffResourceEntries(
   try {
     raw = await git.diff(['--name-status', range]);
   } catch {
-    return []; // no upstream resolvable / range invalid — caller falls back to counts
+    return [];
   }
   const out: { action: ChangeAction; file: string }[] = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     const cols = line.split('\t');
     const code = cols[0] ?? '';
-    const file = cols[cols.length - 1] ?? ''; // renames put the new path last
+    const file = cols[cols.length - 1] ?? '';
     if (!file) continue;
     const c = code[0];
     const action: ChangeAction = c === 'A' ? 'new' : c === 'D' ? 'removed' : 'changed';
@@ -315,36 +241,24 @@ async function diffResourceEntries(
   return out;
 }
 
-/** One side of a divergence: the resource delta plus the raw commit count (fallback). */
 interface RepoDivergence {
   delta: ResourceDelta;
   commits: number;
 }
 
-/**
- * Structured status for one repo. `raw` is a free-form trailer for special cases
- * (missing repo, no git remote, error) that don't fit the columns; otherwise the
- * fields feed whichever layout (table / cards) the terminal width selects.
- */
 export interface RepoRow {
   alias: string;
   raw?: string;
   branch?: string;
   tracking?: boolean;
-  pull?: RepoDivergence; // present only when behind > 0
-  push?: RepoDivergence; // present only when ahead > 0
+  pull?: RepoDivergence;
+  push?: RepoDivergence;
   clean?: boolean;
-  local?: ResourceDelta; // present only when the working tree is dirty
+  local?: ResourceDelta;
   url?: string;
   commit?: string;
 }
 
-/**
- * Read one repo's status into structured data: branch, resource-level sync (what
- * a pull/push would move), resource-level local edits, and remote URL + commit.
- * Formatting is deferred to the layout renderers so the same data can drive both
- * the wide table and the narrow cards.
- */
 async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
   if (!fs.existsSync(t.dir)) {
     return { alias: t.alias, raw: `${chalk.red('missing')} ${chalk.gray(t.dir)}` };
@@ -356,17 +270,13 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
   try {
     const git = simpleGit(t.dir);
     const status = await git.status();
-    // Show the local branch name; the upstream remote is already implied by URL.
     const branch = status.current || (status.tracking ? status.tracking.replace(/^origin\//, '') : '(detached)');
     const row: RepoRow = { alias: t.alias, branch, tracking: !!status.tracking };
 
-    // SYNC: what a pull brings in / a push sends out, described by resource.
     const ahead = status.ahead ?? 0;
     const behind = status.behind ?? 0;
     if (status.tracking) {
       if (behind > 0) {
-        // Three-dot isolates upstream's side via the merge-base, so a diverged
-        // branch reports exactly what a pull adds (not the inverse of local commits).
         row.pull = { delta: resourceDelta(await diffResourceEntries(git, 'HEAD...@{upstream}')), commits: behind };
       }
       if (ahead > 0) {
@@ -374,7 +284,6 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
       }
     }
 
-    // CHANGES: uncommitted working-tree edits, described by resource.
     const localEntries: { action: ChangeAction; file: string }[] = [
       ...status.created.map((f) => ({ action: 'new' as const, file: f })),
       ...status.not_added.map((f) => ({ action: 'new' as const, file: f })),
@@ -396,18 +305,15 @@ async function renderRepoRow(t: RepoTarget): Promise<RepoRow> {
   }
 }
 
-/** Terminal width at or above which `list` uses the wide table instead of cards. */
 const WIDE_COLS = 120;
 
 const commitsWord = (n: number): string => chalk.yellow(`${n} commit${n > 1 ? 's' : ''}`);
 
-/** `owner/repo` from a git URL, for the compact card header. Falls back to the raw URL. */
 export function repoSlug(url: string): string {
   const m = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
   return m ? m[1]! : url;
 }
 
-/** Full SYNC string: `24 new skills, ... to pull  ·  ... to push` (verbose table). */
 function syncFull(row: RepoRow): string {
   if (!row.tracking) return chalk.gray('no upstream');
   if (!row.pull && !row.push) return chalk.green('up to date');
@@ -423,7 +329,6 @@ function syncFull(row: RepoRow): string {
   return pieces.join(chalk.gray('  ·  '));
 }
 
-/** Compact SYNC for the wide table: `↓53 (24 skills, 9 commands, +20)  ↑13`. */
 function syncCompact(row: RepoRow): string {
   if (!row.tracking) return chalk.gray('no upstream');
   if (!row.pull && !row.push) return chalk.green('up to date');
@@ -440,24 +345,17 @@ function syncCompact(row: RepoRow): string {
   return pieces.join('  ');
 }
 
-/** Full CHANGES string for the verbose table. */
 function changesFull(row: RepoRow): string {
   if (row.clean) return chalk.green('clean');
   return joinPhrases(deltaPhrases(row.local!), 5);
 }
 
-/** Compact CHANGES for the wide table: `clean` or `~1 edit`. */
 function changesCompact(row: RepoRow): string {
   if (row.clean) return chalk.green('clean');
   const n = row.local!.total;
   return chalk.yellow(`~${n} edit${n === 1 ? '' : 's'}`);
 }
 
-/**
- * Print the aligned table. `compact` picks short (arrow-count) SYNC/CHANGES cells
- * that keep the table bounded; verbose passes `compact: false` for full detail.
- * Only the trailing REMOTE column is allowed to run long.
- */
 function renderTable(rows: RepoRow[], compact: boolean): void {
   const cells = new Map<string, [string, string, string, string]>();
   for (const r of rows) {
@@ -494,7 +392,6 @@ function renderTable(rows: RepoRow[], compact: boolean): void {
   }
 }
 
-/** Pack colored phrases into `, `-joined lines no wider than `width`. */
 export function wrapPhrases(parts: string[], width: number): string[] {
   const lines: string[] = [];
   let cur = '';
@@ -511,14 +408,9 @@ export function wrapPhrases(parts: string[], width: number): string[] {
   return lines;
 }
 
-/**
- * Print one block per repo, width-independent. The category list wraps under an
- * indented `↓ pull` / `↑ push` / `local` label instead of running off the edge,
- * so a narrow terminal stays readable.
- */
 function renderCards(rows: RepoRow[], cols: number): void {
-  const LABEL = '      '; // indent for detail labels
-  const detailWidth = Math.max(20, cols - LABEL.length - 9); // 9 ≈ "↓ pull   "
+  const LABEL = '      ';
+  const detailWidth = Math.max(20, cols - LABEL.length - 9);
   let first = true;
   for (const r of rows) {
     if (!first) console.log('');
@@ -556,41 +448,23 @@ function renderCards(rows: RepoRow[], cols: number): void {
   }
 }
 
-/** Options shared by `agents repo list` and the `agents repo status` alias. */
 export interface RepoStatusOptions {
   verbose?: boolean;
   json?: boolean;
-  /** Fan out across every reachable fleet device (`--devices-all`). */
   devicesAll?: boolean;
-  /** `all`, or a comma-separated device list (`--devices`). */
   devices?: string;
 }
 
-/**
- * Per-device repo status — the unit of the `--devices-all` fleet fan-out. One
- * entry per device: its parsed repo rows when reachable, or `reachable: false`
- * when the peer could not be queried (kept in the model so the table can mark it).
- */
 export interface DeviceRepoStatus {
   device: string;
   reachable: boolean;
   rows?: RepoRow[];
 }
 
-/**
- * Recursion guard for the fleet fan-out, passed as an env var (not a CLI flag)
- * so an OLDER remote `agents` that predates this feature ignores it harmlessly
- * instead of erroring on an unknown option. A peer new enough to fan out reads
- * it and answers only for itself. Mirrors `NO_FANOUT_ENV` in remote-active.ts.
- */
+// The recursion guard is an environment variable so older peers ignore it;
+// a new CLI flag would fail on mixed-version fleets before stopping fan-out.
 export const NO_REPO_FANOUT_ENV = 'AGENTS_REPO_LOCAL';
 
-/**
- * Parse one peer's `repo status --json` stdout (a RepoRow[]) into a single
- * device entry tagged with `machine`. Defensive against version skew: non-JSON
- * or a non-array yields no entry, and non-object rows are dropped rather than
- * throwing. Exported for unit testing without a live tailnet.
- */
 export function parseRemoteRepoRows(stdout: string, machine: string): DeviceRepoStatus[] {
   let parsed: unknown;
   try {
@@ -605,12 +479,6 @@ export function parseRemoteRepoRows(stdout: string, machine: string): DeviceRepo
   return [{ device: machine, reachable: true, rows }];
 }
 
-/**
- * Query repo status on the fleet. With an explicit `hosts` list, fan out to
- * exactly those; otherwise sweep every registered, online peer (excluding this
- * machine). Each peer runs `repo status [alias] --json` locally — never its own
- * fan-out — and unreachable peers are skipped with a gray note, never fatal.
- */
 async function gatherRemoteRepoStatus(
   alias: string | undefined,
   hosts?: string[],
@@ -625,13 +493,6 @@ async function gatherRemoteRepoStatus(
   return items;
 }
 
-/**
- * Render the fleet repo-status table: one row per (device, repo), with the
- * device name shown once per group. SYNC and CHANGES reuse the same compact
- * cells as the local wide table (`↓N (…)  ↑N` / `clean` / `~N edits`), and an
- * unreachable device collapses to a single `unreachable` marker row. Pure — no
- * I/O — so the aggregation/formatting is unit-testable without live devices.
- */
 export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
   interface Cell { device: string; repo: string; sync: string; changes: string }
   const cells: Cell[] = [];
@@ -649,7 +510,6 @@ export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
       const device = firstOfDevice ? r.device : '';
       firstOfDevice = false;
       if (row.raw) {
-        // missing / no-git-remote / error — the free-form trailer says it all.
         cells.push({ device, repo: row.alias, sync: row.raw, changes: '' });
       } else {
         cells.push({ device, repo: row.alias, sync: syncCompact(row), changes: changesCompact(row) });
@@ -675,15 +535,8 @@ export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
   return lines;
 }
 
-/** Where a `repo status` run should report: this machine only, or the fleet. */
 type DeviceIntent = { all: true } | { hosts: string[] };
 
-/**
- * Read the device-scope flags into an intent, or null for the default local-only
- * run. `--devices-all` (and `--devices all`) sweeps every reachable peer;
- * `--devices box1,box2` targets an explicit list. A peer carrying
- * {@link NO_REPO_FANOUT_ENV} never fans out again (recursion guard).
- */
 export function resolveDeviceIntent(opts: RepoStatusOptions): DeviceIntent | null {
   if (process.env[NO_REPO_FANOUT_ENV] === '1') return null;
   if (opts.devicesAll) return { all: true };
@@ -695,12 +548,6 @@ export function resolveDeviceIntent(opts: RepoStatusOptions): DeviceIntent | nul
   return hosts.length ? { hosts } : { all: true };
 }
 
-/**
- * `repo status`/`list` across the fleet: read THIS machine's rows locally, fan
- * out to peers, and render one aggregated table (device · repo · sync · changes).
- * The local box is always shown first; unreachable peers were already noted by
- * the fan-out and are simply absent from the table.
- */
 async function listReposAcrossDevices(
   alias: string | undefined,
   opts: RepoStatusOptions,
@@ -715,7 +562,6 @@ async function listReposAcrossDevices(
   const self = machineId();
   const hosts = 'hosts' in intent ? intent.hosts : undefined;
   const remote = (await gatherRemoteRepoStatus(alias, hosts))
-    // An explicit host list may name this box; the local rows already cover it.
     .filter((r) => normalizeHost(r.device) !== self);
 
   const combined: DeviceRepoStatus[] = [
@@ -740,13 +586,6 @@ async function listReposAcrossDevices(
   console.log('');
 }
 
-/**
- * Shared action body for `agents repo list` and the hidden `agents repo status`
- * alias. Responsive: a wide terminal gets an aligned table with compact SYNC /
- * CHANGES cells; a narrow one gets one card per repo with wrapping detail;
- * `--verbose` forces the full-detail table at any width. A device-scope flag
- * (`--devices-all` / `--devices <list>`) instead fans out across the fleet.
- */
 async function listRepos(alias: string | undefined, opts: RepoStatusOptions = {}): Promise<void> {
   const intent = resolveDeviceIntent(opts);
   if (intent) {
@@ -771,14 +610,10 @@ async function listRepos(alias: string | undefined, opts: RepoStatusOptions = {}
   const rows = await Promise.all(targets.map(renderRepoRow));
 
   if (opts.json) {
-    // Structured dump of the same rows so agents can enumerate repos + sync state.
-    // `raw` (the missing / no-git-remote human label) is the only colored field —
-    // strip ANSI so the JSON stays clean; every other field is already structured.
     const clean = rows.map((r) => (r.raw !== undefined ? { ...r, raw: stripAnsi(r.raw) } : r));
     console.log(JSON.stringify(clean, null, 2));
     return;
   }
-  // TTY width when interactive; fall back to $COLUMNS (honored when piped) then 80.
   const cols = process.stdout.columns || Number(process.env.COLUMNS) || 80;
 
   console.log('');
@@ -797,32 +632,18 @@ async function listRepos(alias: string | undefined, opts: RepoStatusOptions = {}
   console.log('');
 }
 
-/**
- * Label for push/pull spinners and results: alias + resolved dir + tracking ref.
- * e.g. `user (~/.agents → origin/main)`.
- */
 function formatRepoTarget(alias: string, dir: string, branch?: string): string {
   const ref = branch ? `origin/${branch}` : 'origin';
   return `${alias} (${displayHomePath(dir)} → ${ref})`;
 }
 
-/**
- * Register the fleet device-scope flags shared by `repo list` / `repo status`.
- * `--devices-all` sweeps every reachable device; `--devices <who>` takes `all`
- * or a comma-separated list. A single `--device` is handled upstream by
- * maybeRunOnHost, which streams that one box's `agents repo status` — these are
- * the aggregating forms.
- */
 function addDeviceStatusOptions(cmd: Command): Command {
   return cmd
     .option('--devices-all', 'Report repo sync state across ALL reachable fleet devices.')
     .option('--devices <who>', 'Fleet devices to report on: "all", or a comma-separated device list.');
 }
 
-/** Register the `agents repos` command tree (`repo` is a convenience alias). */
 export function registerRepoCommands(program: Command): void {
-  // addHostOption on the group so --help documents --device; remote
-  // routing is handled pre-parse by maybeRunOnHost (passthrough.ts).
   const repoCmd = addHostOption(
     program
       .command('repos')
@@ -941,7 +762,6 @@ export function registerRepoCommands(program: Command): void {
         try {
           fs.rmSync(targetDir, { recursive: true, force: true });
         } catch {
-          /* best-effort cleanup */
         }
         process.exitCode = 1;
       }
@@ -992,12 +812,6 @@ export function registerRepoCommands(program: Command): void {
       ensureAgentsDir();
       const targetDir = getExtraRepoDir(alias);
       if (fs.existsSync(targetDir)) {
-        // Adopt an existing checkout instead of hard-erroring. The common case:
-        // the user already cloned ~/.agents-<alias> by hand, then ran `repos add`
-        // and hit a dead end — which forced a second, inconsistent install method.
-        // If it's already a git repo whose origin matches the requested source,
-        // register it in place (no re-clone); adopt a mismatched/remoteless repo
-        // only with an explicit --adopt.
         if (isGitRepo(targetDir)) {
           const existingUrl = await getRemoteUrl(targetDir);
           const matches = sameGitRemote(existingUrl, parsed.url);
@@ -1042,7 +856,6 @@ export function registerRepoCommands(program: Command): void {
         try {
           fs.rmSync(targetDir, { recursive: true, force: true });
         } catch {
-          /* best-effort cleanup */
         }
         process.exitCode = 1;
         return;
@@ -1120,8 +933,6 @@ export function registerRepoCommands(program: Command): void {
       }
 
       const dir = resolveExtraRepoDir(alias, extras[alias]);
-      // Managed clones live at the default ~/.agents-<alias>/ — those we own
-      // and should delete on remove. Anything else is user-owned, leave alone.
       const isManagedClone = path.resolve(dir) === path.resolve(getExtraRepoDir(alias));
       try {
         if (isManagedClone && fs.existsSync(dir)) {
@@ -1169,12 +980,6 @@ export function registerRepoCommands(program: Command): void {
       let userPulled = false;
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
-          // A plain (never-cloned) user repo — setup makes ~/.agents a bare dir and
-          // never git-clones it (state.ts ensureAgentsDir), so a fresh/Windows box
-          // silently falls out of config sync. If a URL was passed, git-back it in
-          // place (keeping local files, backing up any that differ); else guide the
-          // user. Only the USER repo gets this — system is cloned by setup, extras
-          // by `repo add`.
           if (t.alias === 'user' && url) {
             const spinner = interruptibleSpinner(`Git-backing ${t.dir} from ${url}...`).start();
             const res = await adoptRepo(url, t.dir);
@@ -1188,7 +993,6 @@ export function registerRepoCommands(program: Command): void {
               console.log(chalk.yellow(`  backed up ${res.backedUp.length} locally-modified file(s) to ${res.backupDir}`));
               console.log(chalk.gray(`  (${res.backedUp.slice(0, 5).join(', ')}${res.backedUp.length > 5 ? ', …' : ''})`));
             }
-            // Now a git repo — fall through to the normal pull below.
           } else {
             console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
             if (t.alias === 'user') {
@@ -1198,7 +1002,6 @@ export function registerRepoCommands(program: Command): void {
           }
         }
         if (t.alias === 'system' && alias !== 'system') {
-          // Skip system repo unless explicitly requested
           continue;
         }
         const spinner = interruptibleSpinner(`Pulling ${formatRepoTarget(t.alias, t.dir)}...`).start();
@@ -1209,19 +1012,12 @@ export function registerRepoCommands(program: Command): void {
           if (t.alias === 'user') userPulled = true;
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
-          // A failed repo must fail the command. Without this, `agents fleet run
-          // "agents repo pull user"` reported 11 ok across a fleet that pulled
-          // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
           process.exitCode = 1;
         }
       }
 
-      // RUSH-1980: a pull rewrites the routine YAML on disk, but the daemon's
-      // scheduler froze its JobConfigs (device pins included) at load. Without a
-      // reload it keeps firing the pre-pull pins — a routine re-pinned to another
-      // host still fires here, double-firing across the fleet. SIGHUP the daemon
-      // so scheduler.reloadAll() re-reads the synced YAML and device pins refresh.
-      // No-op when the daemon isn't running (or on Windows, which has no SIGHUP).
+      // Pull may replace routine device pins. Reload the daemon so its frozen
+      // scheduler state cannot keep firing a job that moved to another host.
       if (anyPulled) {
         const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon/daemon.js');
         if (isDaemonRunning() && signalDaemonReload()) {
@@ -1251,7 +1047,6 @@ export function registerRepoCommands(program: Command): void {
           process.exitCode = 1;
         return;
       }
-      // Drop system-repo targets — read-only by design.
       const pushable: RepoTarget[] = [];
       for (const t of targets) {
         if (t.alias === 'system') {
@@ -1262,7 +1057,6 @@ export function registerRepoCommands(program: Command): void {
           console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
           continue;
         }
-          // Defense in depth: refuse if origin happens to be the system upstream.
         if (await isSystemRepoOrigin(t.dir)) {
           console.log(chalk.red(`  ${t.alias}: origin tracks the system repo — refusing to push.`));
           continue;
@@ -1283,17 +1077,11 @@ export function registerRepoCommands(program: Command): void {
           );
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
-          // A failed repo must fail the command. Without this, `agents fleet run
-          // "agents repo push user"` reported ok across a fleet that pushed
-          // nothing — the silence that hid RUSH-2056. Matches commands/sync.ts.
           process.exitCode = 1;
         }
       }
     });
 
-  // agents repo sync <name> — git-level sync for a single DotAgents repo.
-  // Replaces the git portion of the old `agents sync <repo>` verb.
-  // Semantics: system is pull-only (push: false); user and enabled extras push.
   repoCmd
     .command('sync <alias>')
     .description('Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.')
@@ -1316,10 +1104,6 @@ Examples:
       }
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
-          // The user repo self-heals in place instead of being skipped: adopt a
-          // non-git / partial checkout against its remote, preserving runtime
-          // state, then fall through to the normal sync (PHNX-3301). System is
-          // cloned by setup and extras by `repo add`, so those still skip.
           if (t.alias === 'user' && fs.existsSync(t.dir)) {
             const spinner = interruptibleSpinner(`Adopting ${formatRepoTarget(t.alias, t.dir)} in place...`).start();
             const adopted = await adoptUserRepoIfNeeded(t.dir);
@@ -1336,15 +1120,12 @@ Examples:
             if (adopted.agentsYamlBackup) {
               console.log(chalk.gray(`  saved the previous agents.yaml to ${adopted.agentsYamlBackup}`));
             }
-            // Now a git repo — fall through to the normal sync below.
           } else {
             console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
             continue;
           }
         }
         const push = t.alias !== 'system';
-        // A plain pull/rebase (+ push) of human-authored resources for every
-        // alias, the user repo included: daemon state left git (PHNX-4116).
         const spinner = interruptibleSpinner(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
         const result = await syncRepoGit(t.dir, { push });
         if (result.success) {
@@ -1381,10 +1162,6 @@ interface RepoTarget {
   dir: string;
 }
 
-/**
- * Resolve an alias (or undefined for "all") to a list of repo targets.
- * Returns null when a named alias isn't found (callers should set exit code).
- */
 function collectRepoTargets(alias: string | undefined): RepoTarget[] | null {
   const meta = readMeta();
   const extras = meta.extraRepos || {};
@@ -1408,12 +1185,6 @@ function collectRepoTargets(alias: string | undefined): RepoTarget[] | null {
   return [found];
 }
 
-/**
- * Keep already-installed versions' selectors in sync with an extra-repo change:
- * add `<alias>:*` when the repo is registered/enabled, strip it when removed.
- * Newly-installed versions inherit it from `defaultPatterns()` at scaffold time,
- * so without this a repo added after install is invisible to existing versions.
- */
 function syncExtraAliasAcrossVersions(alias: string, add: boolean): void {
   const n = applyExtraAliasToVersions(alias, add);
   if (n > 0) {
@@ -1436,8 +1207,6 @@ async function toggle(alias: string, enabled: boolean): Promise<void> {
   }
   extras[alias] = { ...extras[alias], enabled };
   updateMeta({ extraRepos: extras });
-  // Re-enabling backfills the alias into existing versions; disabling leaves the
-  // selectors (resolution skips disabled extras) so a later enable is a no-op.
   if (enabled) syncExtraAliasAcrossVersions(alias, true);
   syncMarketplacesForDefaults();
   console.log(chalk.green(`${enabled ? 'Enabled' : 'Disabled'} "${alias}"`));
