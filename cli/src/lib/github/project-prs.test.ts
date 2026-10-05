@@ -143,14 +143,9 @@ const REST = (() => {
 })();
 const NOW = Date.parse('2026-10-04T12:00:00Z');
 const CLOSED_PAGE = (n: number) => `repos/acme/mono/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${n}`;
-/** Recorded answers for the merge paths ({@link readRepoMergeAbility}, merge refusals). */
 const MERGE = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-merge.json', import.meta.url), 'utf-8')) as Record<string, string>;
 const ghError = (stderr: string) => Object.assign(new Error('Command failed: gh api'), { stderr });
-/**
- * `repos/{r}` answers canonicalization (`.full_name`), the default branch
- * (`.default_branch`), and the merge settings (a non-admin viewer, so no
- * protection read follows).
- */
+/** `repos/{r}` answers canonicalization, the default branch, and a non-admin's merge settings. */
 const repoRead = (args: string[]) => (args.includes('.default_branch')
   ? 'main\n'
   : args.some((a) => a.includes('allow_rebase_merge')) ? MERGE['repo-nonadmin'] : 'acme/mono\n');
@@ -521,7 +516,6 @@ describe('mergeProjectPr', () => {
 });
 
 const HEAD = 'abc1234def5678abc1234def5678abc1234def56';
-/** `GET pulls/{n}` projected to the head and author the approval reads. */
 const livePr = (sha: string, author: string) => `${JSON.stringify({ sha, author })}\n`;
 const viewer = (login: string | null) => async () => login;
 

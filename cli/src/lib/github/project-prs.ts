@@ -87,30 +87,18 @@ export interface ProjectPr {
   ciState: CiState | null;
   /** Names of the head commit's failing, errored, timed-out, cancelled or action-required checks. */
   failingChecks: string[];
-  /** GitHub auto-merge on this PR (it merges itself once its checks pass); null when off. */
   autoMerge: ProjectPrAutoMerge | null;
 }
 
-/** Who turned auto-merge on, and the method it will merge with (`rebase` | `squash` | `merge`). */
 export interface ProjectPrAutoMerge {
   enabledBy: string;
   method: string;
 }
 
-/**
- * What the authenticated viewer may do to land a PR in one repository.
- * `adminBypass` is true when the viewer is an admin and the default branch's
- * classic protection does not enforce its rules on admins (or there is none), so
- * an admin merge can land a PR whose required checks are pending or red.
- * Repository rulesets are not read: their bypass list is GitHub's to apply, and
- * a ruleset refusal comes back from the merge itself.
- */
 export interface RepoMergeAbility {
   viewerIsAdmin: boolean;
   adminBypass: boolean;
-  /** The repository allows auto-merge (`allow_auto_merge`), so `prs automerge` can turn it on. */
   autoMergeAllowed: boolean;
-  /** The merge methods the repository allows, in {@link MERGE_METHODS} order. */
   methods: MergeMethod[];
 }
 
@@ -148,7 +136,6 @@ export interface ProjectRepoPrs {
   /** Other project definitions attached to this same repository. */
   sharedWith: string[];
   pullRequests: ProjectPr[];
-  /** What the viewer may do to land a PR here; null when the repository or its protection could not be read. */
   merge: RepoMergeAbility | null;
   /** PRs merged in the last 7 days, newest first, at most 20; [] with `--number`. */
   recentlyMerged: MergedPr[];
@@ -814,7 +801,6 @@ export async function buildProjectPrs(
       const peer = shared.get(slug);
       const sharedWith = peer?.names ?? [];
       try {
-        // Settled into a value up front, so a list read that throws first never leaves it rejected unobserved.
         const mergeRead = readRepoMergeAbility(slug, gh).then(
           (merge) => ({ merge, error: null }),
           (err: unknown) => ({ merge: null, error: err }),
@@ -927,7 +913,6 @@ export interface ProjectPrMergeResult {
   message: string;
 }
 
-/** A repository's merge settings as the viewer sees them, from one `repos/{r}` read. */
 interface RepoMergeSettings {
   methods: MergeMethod[];
   viewerIsAdmin: boolean;
@@ -935,12 +920,7 @@ interface RepoMergeSettings {
   defaultBranch: string;
 }
 
-/**
- * The repository read behind {@link defaultMergeMethod} and {@link readRepoMergeAbility}:
- * the allowed methods, the viewer's admin permission, `allow_auto_merge`, and the
- * default branch. gh caches the response for an hour (the cache keys on the request,
- * not the jq), so this shares one HTTP read with the default-branch lookup.
- */
+/** gh caches by request, not jq, so this shares one HTTP read with the default-branch lookup. */
 async function readRepoMergeSettings(repo: string, gh: GhExec): Promise<RepoMergeSettings> {
   const row = JSON.parse((await gh([
     'api', `repos/${repo}`, '--cache', '1h',
@@ -962,13 +942,7 @@ export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Pro
   return method;
 }
 
-/**
- * What the viewer may do to land a PR in `repo` ({@link RepoMergeAbility}). One
- * cached repository read, plus, only for an admin, the default branch's classic
- * protection (`--cache 1h`): HTTP 404 means the branch is unprotected, so an admin
- * merge has nothing to bypass. Only an admin can read protection at all, which is
- * why a non-admin never pays for the call.
- */
+/** Only an admin can read protection; a 404 means the branch is unprotected. */
 export async function readRepoMergeAbility(repo: string, gh: GhExec = ghExec): Promise<RepoMergeAbility> {
   const settings = await readRepoMergeSettings(repo, gh);
   let adminBypass = false;
@@ -1005,19 +979,11 @@ export function ghFailure(err: unknown): string {
   return line.replace(/^gh:\s*/, '');
 }
 
-/** The refusal `prs merge` gives a blocked PR when `--admin` was not passed. */
 export const BLOCKED_WITHOUT_ADMIN = 'Blocked by branch protection; pass --admin to merge as an admin';
 
-/** `mergeable_state` values GitHub would merge without anyone bypassing anything. */
 const MERGEABLE_STATES = new Set(['clean', 'unstable', 'has_hooks']);
 
-/**
- * Why `prs merge` without `--admin` refuses a PR in `state`, or null when it may
- * merge. Fail closed: only {@link MERGEABLE_STATES} pass. GitHub computes the
- * state lazily, so right after a push it reads null/`unknown`, and an admin whose
- * protection does not enforce on admins would otherwise merge past checks that
- * have not even started.
- */
+// Fail closed: right after a push the state reads null/unknown, and an admin could merge past unstarted checks.
 export function mergeRefusalWithoutAdmin(state: string): string | null {
   if (MERGEABLE_STATES.has(state)) return null;
   switch (state) {
@@ -1029,11 +995,6 @@ export function mergeRefusalWithoutAdmin(state: string): string | null {
   }
 }
 
-/**
- * GitHub's merge refusal in words a person can act on. A 405 naming required
- * status checks says which ones have not passed; a 409 means the head moved since
- * the caller looked. Anything else is GitHub's own line, unchanged.
- */
 export function readableMergeRefusal(message: string): string {
   const checks = /Required status checks? (.+?) (?:is|are) expected/i.exec(message);
   if (checks && /\(HTTP 405\)/.test(message)) {
@@ -1045,18 +1006,7 @@ export function readableMergeRefusal(message: string): string {
   return message;
 }
 
-/**
- * Merge one PR over REST (`PUT repos/{repo}/pulls/{n}/merge`), pinned to `sha`:
- * GitHub refuses with 409 when the head moved since the caller looked, so a push
- * that landed after the menu rendered is never merged unseen.
- *
- * Without `admin`, the PR's live `mergeable_state` is read first and anything
- * but a mergeable state is refused before the PUT ({@link mergeRefusalWithoutAdmin}): an admin whose
- * branch protection does not enforce on admins would otherwise merge past pending
- * or red required checks without ever asking for it. With `admin`, the PUT runs
- * directly and GitHub decides whether the viewer can bypass. Any refusal comes
- * back as `merged: false` with {@link readableMergeRefusal}'s message.
- */
+// Pinned to `sha`: GitHub answers 409 if the head moved. Without `admin`, a non-mergeable state never reaches the PUT.
 export async function mergeProjectPr(
   repo: string,
   number: number,
@@ -1106,27 +1056,15 @@ function assertHeadIs(repo: string, number: number, live: string, seen: string):
   return live;
 }
 
-/** The result of one `projects prs automerge`. */
 export interface ProjectPrAutoMergeResult {
   repo: string;
   number: number;
-  /** True when auto-merge is on afterwards. */
   enabled: boolean;
-  /** The method auto-merge will merge with; null when it is off. */
   method: MergeMethod | null;
   message: string;
 }
 
-/**
- * Turn GitHub auto-merge on or off for one PR. GitHub has no REST endpoint for
- * it, so the write is ONE GraphQL mutation after a REST read of the node id and
- * live head (root AGENTS.md permits a single user-triggered mutation; a poll loop
- * would not be). Turning it on passes `expectedHeadOid` set to the full live SHA
- * the short `sha` names, so GitHub refuses if the branch moved, and the PR then
- * merges itself once its required checks pass. Turning it off takes no SHA:
- * cancelling never lands code. A PR that is closed, or already in the requested
- * state when turning off, is answered without a write.
- */
+// REST has no auto-merge endpoint; one user-triggered GraphQL mutation is allowed (root AGENTS.md).
 export async function setProjectPrAutoMerge(
   repo: string,
   number: number,
@@ -1236,7 +1174,6 @@ export async function markProjectPrReady(
   return { repo, number, ready: true, sha: head.sha, message: 'Marked ready for review' };
 }
 
-/** What `prs review --approve` answers on the viewer's own PR, without a call to GitHub. */
 export const OWN_PR_APPROVAL = "GitHub doesn't let you approve your own pull request";
 
 /** The result of one `projects prs review --approve`. */
@@ -1258,9 +1195,7 @@ export interface ProjectPrReviewResult {
  * accepts a review on an older commit instead of refusing it, so the live head is
  * read first and a moved head is refused; the review then carries `commit_id` set
  * to that full SHA, so a push racing the call cannot turn this into an approval
- * of code the caller never saw. GitHub never lets an author approve their own PR
- * (HTTP 422), so when the viewer ({@link cachedViewer}, a disk record) is the PR's
- * author it answers `submitted: false` without posting anything.
+ * of code the caller never saw. The viewer's own PR is answered without a POST.
  */
 export async function approveProjectPr(
   repo: string,
