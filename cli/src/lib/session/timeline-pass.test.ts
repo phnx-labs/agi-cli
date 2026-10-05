@@ -272,6 +272,29 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(result).toEqual({ computed: 0, reused: 0, skipped: 0 });
   });
 
+  it('projects the glance model, and an older extractor version is refolded', () => {
+    const file = path.join(tmpHome, 'glance.jsonl');
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant',
+      timestamp: '2026-10-02T22:13:00.000Z',
+      message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'hello' }], usage: { input_tokens: 1, output_tokens: 1 } },
+    }) + '\n');
+    expect(pass.runTimelinePassSync({ sessions: [row('glance-model', file)] })).toMatchObject({ computed: 1 });
+    expect(db.readSessionTimelineAny('glance-model')?.model).toBe('claude-opus-5-5');
+
+    const stored = db.readSessionTimelineEntry('glance-model')!;
+    stored.state.version = 1;
+    const stamp = fs.statSync(file);
+    db.writeSessionTimeline({
+      id: 'glance-model',
+      fileMtimeMs: Math.round(stamp.mtimeMs),
+      fileSize: stamp.size,
+      timeline: stored,
+    });
+    expect(pass.runTimelinePassSync({ sessions: [row('glance-model', file)] })).toMatchObject({ computed: 1, reused: 0 });
+    expect(db.readSessionTimelineEntry('glance-model')!.state.version).toBe(timeline.TIMELINE_EXTRACTOR_VERSION);
+  });
+
   it('does not fold a peer mirror\'s stored projection onto a local byte offset', () => {
     // A mirrored peer row carries a projection with an EMPTY resume state, so
     // this box can never resume-fold a transcript it does not have.

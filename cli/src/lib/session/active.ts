@@ -481,6 +481,16 @@ export interface ActiveSession {
   importantMessage?: SessionImportantMessage;
   /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
   activity?: SessionActivity;
+  /** Model id of the latest reply. Absent when the transcript has not named one. */
+  model?: string;
+  /** Newest 20 failed or policy-blocked calls. Absent on an older CLI. */
+  failures?: import('@phnx-labs/sessions-cli/reader').SessionFailure[];
+  /** 48-bucket tool activity for the sidebar seek bar. */
+  activityHistogram?: import('@phnx-labs/sessions-cli/reader').SessionActivityHistogram;
+  /** Genuine user turns, oldest first, capped at 50. */
+  userTurns?: import('@phnx-labs/sessions-cli/reader').SessionUserTurn[];
+  /** This session's own subagents, from its `subagents/` transcripts. */
+  subagents?: import('@phnx-labs/sessions-cli/reader').SessionSubagent[];
   /**
    * Output-token throughput (tokens/sec) over a rolling 60s window, from the
    * transcript tail. The number the Fleet shows next to a running agent;
@@ -1481,6 +1491,9 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     pidAlive,
     status: life ?? statusFromActivity(state.activity),
     activity: state.activity,
+    model: state.model,
+    failures: state.failures,
+    userTurns: state.userTurns,
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
