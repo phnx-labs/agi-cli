@@ -19,7 +19,7 @@ import { BRACKETED_PASTE_START, BRACKETED_PASTE_END } from '../terminal/inject.j
 import {
   blockIdForSession, confirmAnswerResolution, deriveBlockState, getAnswerRecord, getBlockReceipts,
   latestMessageReceipt, publishBlock, readBlock, readResolution, recordAnswer, recordMessageReceipt,
-  rollbackAnswerClaim,
+  rollbackAnswerClaim, RELEASE_TOKEN_STALE_MS,
   type OpenBlock,
 } from './feed.js';
 import { reconcileAttention } from './attention.js';
@@ -625,6 +625,38 @@ describe('claim release under REAL concurrency', () => {
     expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
       .toBe(true);
     expect(getAnswerRecord(blockId, feedRoot)).toBeUndefined();
+    expect(fs.existsSync(token)).toBe(false);
+  });
+
+  it('treats a token another process has created but not yet filled as held (PHNX-4131)', () => {
+    // The race behind the "two processes adopted one claim" failure: a peer that
+    // finds the token between its creation and its content read no owner, called
+    // it stale, deleted it and took the release too. A fresh, unreadable token
+    // belongs to a writer that is still mid-write.
+    const feedRoot = dir('feed');
+    const blockId = blockIdForSession('half-written-token');
+    const answeredDir = path.join(feedRoot, 'answered');
+    fs.mkdirSync(answeredDir, { recursive: true });
+    const answeredAt = '2026-09-13T10:00:00.000Z';
+    fs.writeFileSync(path.join(answeredDir, `${blockId}.json`), JSON.stringify({
+      answeredAt, answeredFrom: 'feed', answeredBy: 'killed-run',
+    }));
+    const block = questionBlock('half-written-token');
+    publishBlock(block, feedRoot);
+    const token = path.join(answeredDir, `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
+    fs.writeFileSync(token, '');
+
+    expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
+      .toBe(false);
+    expect(getAnswerRecord(blockId, feedRoot)).toBeDefined();
+    expect(fs.existsSync(token)).toBe(true);
+
+    // The same unreadable token, abandoned long enough, is reclaimed so the claim
+    // cannot wedge.
+    const old = new Date(Date.now() - RELEASE_TOKEN_STALE_MS - 5_000);
+    fs.utimesSync(token, old, old);
+    expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
+      .toBe(true);
     expect(fs.existsSync(token)).toBe(false);
   });
 

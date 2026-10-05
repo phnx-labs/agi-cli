@@ -618,20 +618,37 @@ export const RELEASE_TOKEN_STALE_MS = 60_000;
  */
 function acquireReleaseToken(release: string): boolean {
   const mine = { pid: process.pid, host: os.hostname(), at: Date.now() };
+  // Publish the token with its owner already in it: write a private temp file,
+  // then link() it into place. link fails with EEXIST atomically, like O_EXCL, but
+  // a peer can never observe the token empty. With O_EXCL-then-write, a peer that
+  // read between the two saw no owner, judged the token stale, deleted it and
+  // released the same claim too (PHNX-4131: two processes adopted one claim).
   const create = (): boolean => {
+    const staged = `${release}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    fs.writeFileSync(staged, JSON.stringify(mine), { mode: 0o644 });
     try {
-      const fd = fs.openSync(release, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644);
-      try { fs.writeSync(fd, Buffer.from(JSON.stringify(mine), 'utf-8')); } finally { fs.closeSync(fd); }
+      fs.linkSync(staged, release);
       return true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false;
       throw error;
+    } finally {
+      fs.unlinkSync(staged);
     }
   };
   if (create()) return true;
 
   const held = safeReadJson<{ pid?: number; host?: string; at?: number }>(release);
-  const ageMs = held?.at ? Date.now() - held.at : Number.POSITIVE_INFINITY;
+  // A token whose owner cannot be read (left by an older writer, or a crash
+  // mid-write) is aged by its mtime, never treated as infinitely old.
+  let ageMs: number;
+  if (held?.at) ageMs = Date.now() - held.at;
+  else {
+    try { ageMs = Date.now() - fs.statSync(release).mtimeMs; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return create();
+      throw error;
+    }
+  }
   let ownerGone = false;
   if (held?.host === mine.host && typeof held.pid === 'number') {
     // Signal 0 probes liveness without delivering anything.
