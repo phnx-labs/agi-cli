@@ -1,14 +1,3 @@
-/**
- * Minimal S3-compatible client for Cloudflare R2, built on aws4fetch (SigV4
- * over the platform `fetch` + WebCrypto — works identically under Bun and
- * Node >= 22). Only the verbs the backup target needs: put / get / head / list /
- * delete.
- *
- * No mounting, no FUSE: this is a plain object-store client driven on demand by
- * `agents sessions export --to-r2` / `import --from-r2`, which is the only
- * approach that is seamless on both macOS and Linux (Mountpoint for S3 is
- * Linux-only; rclone-mount needs macFUSE).
- */
 
 import { AwsClient } from 'aws4fetch';
 import type { R2Config } from './config.js';
@@ -38,7 +27,6 @@ export class R2Client {
     return `${this.base}/${encoded}`;
   }
 
-  /** Upload an object. Overwrites unconditionally. */
   async put(key: string, body: string | Uint8Array, contentType = 'application/octet-stream'): Promise<void> {
     const res = await this.aws.fetch(this.url(key), {
       method: 'PUT',
@@ -48,7 +36,6 @@ export class R2Client {
     if (!res.ok) throw new Error(`R2 PUT ${key} failed: ${res.status} ${await safeText(res)}`);
   }
 
-  /** Fetch an object as text, or null if it does not exist (404). */
   async get(key: string): Promise<string | null> {
     const res = await this.aws.fetch(this.url(key), { method: 'GET' });
     if (res.status === 404) return null;
@@ -56,7 +43,6 @@ export class R2Client {
     return await res.text();
   }
 
-  /** HEAD an object for size + etag, or null if it does not exist. */
   async head(key: string): Promise<HeadResult | null> {
     const res = await this.aws.fetch(this.url(key), { method: 'HEAD' });
     if (res.status === 404) return null;
@@ -67,7 +53,6 @@ export class R2Client {
     };
   }
 
-  /** Delete an object (no error if it is already absent). */
   async delete(key: string): Promise<void> {
     const res = await this.aws.fetch(this.url(key), { method: 'DELETE' });
     if (!res.ok && res.status !== 404) {
@@ -75,7 +60,6 @@ export class R2Client {
     }
   }
 
-  /** List immediate sub-prefixes under a prefix (delimiter '/'), e.g. machine dirs. */
   async listPrefixes(prefix: string): Promise<string[]> {
     const prefixes: string[] = [];
     let token: string | undefined;
@@ -94,9 +78,6 @@ export class R2Client {
     return prefixes;
   }
 
-  /** List all object keys under a prefix (handles pagination). An empty prefix
-   *  lists the whole bucket — the default so R2Client satisfies the shared
-   *  {@link SessionsBackupClient} interface (managed lists with no prefix). */
   async list(prefix = ''): Promise<string[]> {
     const keys: string[] = [];
     let token: string | undefined;
@@ -118,7 +99,6 @@ export class R2Client {
 
 const XML_ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&apos;': "'" };
 
-/** Single pass: sequential replaces would double-decode `&amp;lt;` into `<`. */
 export function decodeXml(s: string): string {
   return s.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => XML_ENTITIES[entity] ?? entity);
 }

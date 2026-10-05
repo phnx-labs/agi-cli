@@ -39,26 +39,11 @@ export type SessionWatchEnvelope =
 
 export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
   context: ActiveSession['context'] | 'recent';
-  /** Observer-local terminal/reply facts; never overwrite execution-owner state. */
   observerTerminals?: { device: string; terminalId?: string; launchId?: string; viewingIn: string | null; provenance?: ActiveSession['provenance'] }[];
-  /** Flat durable branch for history rows that are not currently in a worktree. */
   branch?: string;
   rowKey: string;
   sourceDevice: string;
-  /**
-   * The registered project this session's working directory belongs to, or
-   * `null` when the association is not confirmed (PHNX-3999 F08/F09).
-   *
-   * This is what a UI groups by. It is deliberately not `project`: that field is
-   * a bucket KEY derived from the path (the basename of the cwd, so it always
-   * answers something), which is how a loose or unrelated directory became its
-   * own project group. `null` means Uncategorized — the row is still listed, it
-   * just is not filed under a project nobody bound it to. Resolved on the device
-   * that owns the path, since a definition's root is a local path.
-   */
   confirmedProject: string | null;
-  /** Durable index rows are kept on the stream under a distinct identity so a
-   * live row can replace/disappear without erasing its recoverable history. */
   previous: boolean;
   resumable: boolean;
   unwatched: boolean;
@@ -66,7 +51,6 @@ export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'cont
   recovery: { command: 'agents'; args: string[]; cwd?: string } | null;
 }
 
-/** Stable, opaque identity for one row within one device scope. */
 export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
   const identity = activeSessionJournalIdentity(row);
   return createHash('sha256').update(`${scope}\0${identity}`).digest('base64url').slice(0, 22);
@@ -74,10 +58,6 @@ export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
 
 export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWatchRow {
   const rowKey = sessionWatchRowKey(scope, row);
-  // A dead, days-stale crash-orphan is folded OUT of the reconnectable set — it
-  // is not resumable, so the "Needs reconnecting" list stops ballooning with
-  // leaked --device tunnel sessions (RUSH-3011 / issue #3b). A live or
-  // recently-exited session stays resumable.
   const resumable = Boolean(row.sessionId) && !isReapableOrphan(row);
   const previous = row.status === 'closed'
     || row.status === 'crashed'
@@ -87,14 +67,7 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     : null;
   return {
     ...row,
-    // The summarizer's per-row state is delivered on the stream: a live row with
-    // no computed summary reads `pending` when the summarizer is on, `skipped`
-    // when it is off (PHNX-3939). goal/checkpoints/summaryChecklist rode `...row`.
     summaryState: resolveStreamSummaryState(row.summaryState),
-    // The CONFIRMED project this work belongs to, or null for Uncategorized
-    // (PHNX-3999 F08/F09). Only a registered project definition counts — a
-    // consumer must never group by a directory basename, which is how unrelated
-    // and unbound directories became their own "projects".
     confirmedProject: confirmedProjectForCwd(row.cwd) ?? null,
     rowKey,
     sourceDevice: scope,
@@ -113,26 +86,14 @@ function epochMs(value: string | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** Stable identity for a durable Previous row. It is deliberately distinct
- * from the live row key for the same session id: both may coexist on the one
- * stream, and the presentation layer lets the live row win while it exists. */
 function previousSessionWatchRowKey(scope: string, sessionId: string): string {
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
-/**
- * The headline for a durable history row, on the same ladder a live row uses
- * ({@link deriveSessionRecap}): an explicit `/rename` label, then the
- * daemon-generated title (PHNX-3797), then the daemon-folded request headline
- * (`request.headline` — the user's own sentence with attachment noise pulled
- * out, PHNX-3939) when the transcript cache has one, else the raw `topic`.
- */
 function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefined): string | undefined {
   return session.label || session.generatedTitle || foldedHeadline || session.topic || undefined;
 }
 
-/** Project one durable indexed session into the same canonical watch contract
- * as live sessions. This is the only history backfill consumed by AGI EXT. */
 export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, accounts = listNativeAccounts(readMeta())): SessionWatchRow {
   const resumable = sessionAgentSupportsResume(session.agent);
   const sourceDevice = normalizeHost(session.machine ?? scope);
@@ -141,10 +102,6 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
   const worktree = session.worktreeSlug && session.cwd
     ? { slug: session.worktreeSlug, path: session.cwd, ...(session.gitBranch ? { branch: session.gitBranch } : {}) }
     : undefined;
-  // Project the daemon-computed summary (PHNX-3939) onto the history row from the
-  // transcript-keyed cache — the same store the live merge reads, so a closed or
-  // fleet-mirrored session carries its goal/checkpoints/checklist with no
-  // transcript re-parse and no model call. Prefer a value already on the meta row.
   const summary = session.goal !== undefined || session.summaryState !== undefined
     ? {
         goal: session.goal,
@@ -153,9 +110,6 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
         summaryState: session.summaryState,
       }
     : readSessionSummaryAny(session.id);
-  // Project the daemon-folded timeline onto the history row from the same
-  // transcript-keyed cache the live merge reads (PHNX-3939), so a closed session
-  // still shows the request it was given and what the agent did — no re-parse.
   const folded = readSessionTimelineAny(session.id);
   const title = previousRowTitle(session, folded?.request?.headline);
   return {
@@ -164,14 +118,8 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(session.harness ? { harness: session.harness } : {}),
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
-    // `project` stays the historical bucket KEY rows are joined on; the grouping a
-    // person sees comes from the confirmed association (PHNX-3999 F08/F09).
     ...(session.project ? { project: session.project } : {}),
     confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
-    // Same headline ladder as a live row (`deriveSessionRecap`, PHNX-3797):
-    // `/rename` label → the daemon-generated title → `request.headline` (the
-    // user's own sentence with attachment noise pulled out, PHNX-3939) →
-    // the raw `topic`. See {@link previousRowTitle}.
     ...(session.label ? { label: session.label } : {}),
     ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
     ...(title ? { title } : {}),
@@ -250,7 +198,6 @@ function sameRow(a: SessionWatchRow, b: SessionWatchRow): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
-/** Stream-local sequencer and convergent row diff. */
 export class SessionWatchState {
   readonly streamId: string;
   private sequence = 0;
@@ -262,8 +209,6 @@ export class SessionWatchState {
     return { version: SESSION_WATCH_VERSION, type, streamId: this.streamId, sequence: ++this.sequence, capturedAt: Date.now() };
   }
 
-  /** Keep one visible Previous row per session and the newest bounded window.
-   * Returns removed keys so delta callers can converge already-connected clients. */
   private prunePrevious(scope: string, rows: Map<string, SessionWatchRow>): string[] {
     const removed: string[] = [];
     const bySession = new Map<string, SessionWatchRow>();
@@ -369,8 +314,6 @@ export class SessionWatchState {
   }
 
   scope(scope: string, status: SessionWatchScopeStatus, reason?: string): SessionWatchEnvelope {
-    // Deliberately retain rows while unavailable. A reconnecting scope replaces
-    // them with a reset; transient fleet loss must not look like session death.
     return { ...this.base('scope'), scope, status, ...(reason ? { reason } : {}) };
   }
 
@@ -391,18 +334,10 @@ export interface WatchLocalOptions {
   journalPollMs?: number;
 }
 
-/** One bounded index read when the watch starts. The stream then owns this
- * projection: active rows update through the journal, and removals demote into
- * Previous rows without another transcript/index poll. */
 export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   try {
     return querySessions({
       machine: normalizeHost(scope),
-      // Every harness that writes a discoverable transcript. The list used to be
-      // four, so a Kimi/Grok/Cursor/Droid session simply never appeared as a
-      // Previous row — and after PHNX-3939 it would also have been the only rows
-      // with no request/timeline. Kept explicit (not `SESSION_AGENTS`) so
-      // `openclaw`, which has no transcript to project, stays out.
       agents: SESSION_AGENTS.filter((agent) => agent !== 'openclaw'),
       sinceMs: Date.now() - 7 * 24 * 60 * 60 * 1000,
       excludeTeamOrigin: true,
@@ -414,10 +349,6 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   }
 }
 
-/**
- * Keep one local subscription alive. Startup reads one canonical reset snapshot;
- * steady state tails the canonical writer journal and never invokes a gather.
- */
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
@@ -425,16 +356,11 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   const journal = options.journalPath ?? activeSessionsJournalPath();
   const heartbeatMs = options.heartbeatMs ?? SESSION_WATCH_HEARTBEAT_MS;
   let offset = 0;
-  try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
+  try { offset = fs.statSync(journal).size; } catch {  }
   const initial = readCache('local');
   options.emit(state.reset(options.scope, initial?.sessions ?? [], readPrevious(options.scope)));
-  // Known gap (out of scope for RUSH-2484): a present cache alone marks
-  // 'available' with no staleness/age check, so a reconnect can briefly render
-  // a stale snapshot as live before the out-of-band gather this file triggers
-  // (see watchActiveSessionsReaderPresence in session-cache.ts) replaces it.
   options.emit(state.scope(options.scope, initial ? 'available' : 'unavailable', initial ? undefined : 'awaiting publisher'));
   if (options.signal.aborted) return;
-  // Signal the daemon that a consumer is live so it does not skip the gather.
   noteActiveSessionsJournalReader();
   await new Promise<void>((resolve) => {
     let partial = '';
@@ -460,10 +386,10 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
               if (record.version !== 1 || record.scope !== 'local' || !Array.isArray(record.upserts) || !Array.isArray(record.removes)) continue;
               for (const event of state.patch(options.scope, record.upserts, record.removes)) options.emit(event);
               options.emit(state.scope(options.scope, 'available'));
-            } catch { /* partial/corrupt journal lines are not state */ }
+            } catch {  }
           }
         } finally { fs.closeSync(fd); }
-      } catch { /* journal may not exist until the first publisher write */ }
+      } catch {  }
       finally { reading = false; }
     };
     fs.mkdirSync(path.dirname(journal), { recursive: true });
@@ -475,8 +401,6 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
     }, heartbeatMs);
     const stop = () => { fs.unwatchFile(journal, journalListener); clearInterval(heartbeatTimer); resolve(); };
     options.signal.addEventListener('abort', stop, { once: true });
-    // Close the offset/read/watch handoff: a publisher may append after the
-    // startup offset is captured but before watchFile is registered.
     readAppended();
   });
 }
@@ -494,11 +418,6 @@ function remoteWatchCommand(os: string): string {
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;
 }
 
-/**
- * Subscribe to every dialable compute device with one persistent SSH process.
- * A peer disconnect emits `scope: unavailable` but no removes; reconnecting
- * peer resets only its own scope. There is no recurring fleet list command.
- */
 export async function watchFleetSessions(options: WatchFleetOptions): Promise<void> {
   const projection = new SessionProjection();
   const emit = (event: SessionWatchEnvelope) => { for (const projected of projection.apply(event)) options.emit(projected); };
@@ -526,7 +445,7 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
           if (event.version !== SESSION_WATCH_VERSION || typeof event.sequence !== 'number') return false;
           emit(event);
           return true;
-        } catch { return false; /* incomplete/non-protocol peer output is not state */ }
+        } catch { return false;  }
       },
       onUnavailable: (reason) => emit(state.scope(scope, 'unavailable', reason)),
     });

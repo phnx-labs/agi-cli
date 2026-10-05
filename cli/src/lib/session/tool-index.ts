@@ -62,10 +62,6 @@ export interface ToolSessionEvidence {
   cwd?: string;
   topic?: string;
   label?: string;
-  /** The daemon-generated headline (PHNX-3797). Carried so a consumer of this
-   * envelope names a session the same way every other surface does; a
-   * projection that drops it silently degrades `sessionHeadline` to
-   * `label || topic`. */
   generatedTitle?: string;
   filePath?: string;
   calls: ToolCallEvidence[];
@@ -102,7 +98,6 @@ export interface ToolProgramCountEnvelope {
   }>;
 }
 
-/** Serialize once and enforce headroom below the fleet transport's 16 MiB cap. */
 export function serializeToolSearchEnvelope(envelope: ToolSearchEnvelope): string {
   const rendered = JSON.stringify(envelope, null, 2) + '\n';
   if (Buffer.byteLength(rendered) > TOOL_QUERY_MAX_SERIALIZED_BYTES) {
@@ -111,16 +106,10 @@ export function serializeToolSearchEnvelope(envelope: ToolSearchEnvelope): strin
   return rendered;
 }
 
-/** Exact UTF-8 size of the public pretty-JSON envelope. */
 export function serializedToolSearchEnvelopeBytes(envelope: ToolSearchEnvelope): number {
   return Buffer.byteLength(JSON.stringify(envelope, null, 2) + '\n');
 }
 
-/**
- * Reserve the exact local JSON plus coordinator headroom before retaining peer
- * stdout. Peer envelopes repeat metadata that disappears during merge, so
- * charging their full wire bytes against the remainder is conservative.
- */
 export function toolSearchRemoteReceiveBudget(envelope: ToolSearchEnvelope): number {
   const localBytes = serializedToolSearchEnvelopeBytes(envelope);
   return Math.max(
@@ -154,12 +143,6 @@ interface ToolLedgerRow {
   parsed_offset: number | null;
 }
 
-/**
- * The ledger columns every candidate session is judged on. Deliberately NOT
- * `parser_state`: this runs once per session in the scan's warm path, and that
- * column holds a serialized collector snapshot that can reach a megabyte. It is
- * read separately, only for the sessions that turn out to need indexing.
- */
 function readToolLedger(db: Database.Database, sessionId: string): ToolLedgerRow | undefined {
   return db.prepare(`
     SELECT file_path, file_mtime_ms, file_size, extractor_version, parsed_offset
@@ -183,22 +166,6 @@ function needsIndex(
     || row.extractor_version !== TOOL_INDEX_VERSION;
 }
 
-/**
- * Where to start reading a session whose transcript changed.
- *
- * A live session's transcript is append-only, so re-reading it from byte 0 on
- * every scan re-parses the entire history to discover the handful of records
- * that are new — the cost that makes a large session's tool index quadratic in
- * the number of scans. When the ledger carries a resume point that the current
- * file still agrees with, the scan reads only the appended bytes and merges the
- * result (`append`); anything else re-reads the whole file (`replace`).
- *
- * Each check below rejects a case where the stored prefix may no longer describe
- * the file: a harness the streaming parser cannot resume, a different extractor,
- * no recorded resume point, a source path the ledger row does not describe, a
- * file that shrank below what was already parsed (a rewrite or truncation, not
- * an append), or a snapshot that does not read back.
- */
 function planToolScan(
   db: Database.Database,
   sessionId: string,
@@ -225,7 +192,6 @@ function planToolScan(
   return { mode: 'append', startOffset: row.parsed_offset, snapshot };
 }
 
-/** Read index completeness from SQLite only; never stat or parse transcripts. */
 export function readToolIndexCoverage(sessions: SessionMeta[]): ToolIndexCoverage {
   const db = getDB();
   const sessionIds = [...new Set(sessions
@@ -271,17 +237,11 @@ function backfillLimitCall(session: SessionMeta, reason: string): IndexedToolCal
   };
 }
 
-/**
- * One parse of a transcript: the calls to persist, plus where a later scan may
- * resume. `resume` is null when the parse could not be trusted to have covered
- * its whole prefix — the next scan then re-reads from byte 0.
- */
 interface ToolParseResult {
   calls: IndexedToolCall[];
   resume: ToolScanResumePoint | null;
 }
 
-/** Stream Claude/Codex JSONL without ever retaining an oversized record. */
 async function streamJsonlToolCalls(
   session: SessionMeta,
   from: { startOffset: number; snapshot?: ToolCallCollectorSnapshot } = { startOffset: 0 },
@@ -296,11 +256,7 @@ async function streamJsonlToolCalls(
   let pendingBytes = 0;
   let droppingOversizedLine = false;
   let skippedOversizedLine = false;
-  // Byte offset just past the last complete record applied. Only a complete,
-  // newline-terminated record advances it, so resuming here can never re-apply a
-  // record (which would mint a second ordinal for it) nor skip a partial tail.
   let parsedOffset = from.startOffset;
-  /** Bytes of the record currently being assembled, across chunk boundaries. */
   let lineBytes = 0;
 
   const applyLine = (line: string): void => {
@@ -322,11 +278,6 @@ async function streamJsonlToolCalls(
       const end = newline >= 0 ? newline : text.length;
       const segment = text.slice(start, end);
       const segmentBytes = Buffer.byteLength(segment);
-      // Counted outside the drop guard and across chunk boundaries: this is the
-      // record's true size on disk, which is what the resume offset is measured
-      // in. `pendingBytes` cannot stand in for it — that one resets when an
-      // oversized record is dropped, and a record split over two 64 KiB reads
-      // would lose the part carried in from the previous chunk.
       lineBytes += segmentBytes;
       if (!droppingOversizedLine) {
         if (pendingBytes + segmentBytes <= BACKFILL_MAX_JSONL_RECORD_BYTES) {
@@ -341,7 +292,7 @@ async function streamJsonlToolCalls(
       }
       if (newline < 0) break;
       if (!droppingOversizedLine) applyLine(pending);
-      parsedOffset += lineBytes + 1; // + the newline itself
+      parsedOffset += lineBytes + 1;
       lineBytes = 0;
       pending = '';
       pendingBytes = 0;
@@ -353,14 +304,7 @@ async function streamJsonlToolCalls(
   for await (const chunk of stream) consume(decoder.write(chunk as Buffer));
   consume(decoder.end());
 
-  // Snapshot BEFORE the unterminated trailing record, and pair it with an offset
-  // that stops short of that record. The writer may be mid-append, so the record
-  // is indexed now (its evidence is real) but is re-read by the next scan — which
-  // resumes with the same next-ordinal and so re-derives the same ordinals,
-  // making the re-read an idempotent upsert rather than a duplicate.
   const resume = skippedOversizedLine
-    // A dropped oversized record left the ordinals and the pending map out of
-    // step with the file; nothing here can be resumed from.
     ? null
     : { parserState: JSON.stringify(collector.snapshot()), parsedOffset };
   if (!droppingOversizedLine && pending.length > 0) applyLine(pending);
@@ -375,7 +319,6 @@ async function streamJsonlToolCalls(
   return { calls, resume };
 }
 
-/** True for the harnesses whose transcript the streaming parser can resume. */
 function isResumableToolSource(agent: string): boolean {
   return agent === 'claude' || agent === 'codex';
 }
@@ -406,16 +349,9 @@ async function toolCallsForBackfill(
       resume: null,
     };
   }
-  // Every other harness is parsed whole into memory by parseSession, which
-  // exposes no byte offset to resume from — so these stay full replaces and
-  // record no resume point, rather than storing one this path cannot honour.
   return { calls: toolCallsFromEvents(parseSession(session.filePath, session.agent)), resume: null };
 }
 
-/**
- * Fill one bounded chunk of the independent tool index. A warm call performs
- * only stat + ledger checks; it never opens or parses unchanged transcripts.
- */
 export async function ensureToolIndex(
   sessions: SessionMeta[],
   limits: { maxFiles?: number; maxBytes?: number; verifySourceStamps?: boolean } = {},
@@ -427,7 +363,6 @@ export async function ensureToolIndex(
     session: SessionMeta;
     stamp: { fileMtimeMs: number; fileSize: number };
     plan: ReturnType<typeof planToolScan>;
-    /** Bytes this scan will actually read — the whole file, or just the tail. */
     readBytes: number;
   }> = [];
   let skippedFiles = 0;
@@ -471,12 +406,6 @@ export async function ensureToolIndex(
   let attemptedFiles = 0;
   for (const item of pending) {
     if (attemptedFiles >= maxFiles) break;
-    // The byte budget is a batch boundary, not a correctness boundary. Admit
-    // one oversized transcript by itself so it can never wedge the ledger or
-    // silently disappear from results; the next invocation resumes afterward.
-    // Budgeted on the bytes this scan reads, not the file's size: a resumed
-    // session costs only its appended tail, so a batch can cover far more
-    // growing sessions than it could when every one was re-read whole.
     if (attemptedFiles > 0 && consumedBytes + item.readBytes > maxBytes) break;
     attemptedFiles++;
     consumedBytes += item.readBytes;
@@ -489,9 +418,6 @@ export async function ensureToolIndex(
       skippedFiles++;
     }
   }
-  // The scan just wrote a batch of FTS segments; pay a bounded slice of the
-  // merge they need so the index converges here instead of degrading until
-  // someone runs `agents sessions optimize` by hand (RUSH-2208).
   if (indexedFiles > 0) maintainSessionSearchIndex(db);
 
   const remainingFiles = Math.max(0, pending.length - attemptedFiles);
@@ -551,7 +477,6 @@ function tokenizeClause(source: string): string[] {
   return tokens;
 }
 
-/** Parse one same-call clause. Unprefixed terms search every evidence field. */
 function parseToolQueryClause(source: string): QueryTerm[] {
   const fields = new Set(['tool', 'program', 'input', 'output', 'status', 'exit', 'error']);
   return tokenizeClause(source).map((token) => {
@@ -566,7 +491,6 @@ function parseToolQueryClause(source: string): QueryTerm[] {
   }).filter((term) => term.value.length > 0);
 }
 
-/** A count has one unambiguous subject: one exact `program:<name>` term. */
 export function parseToolProgramCountClause(source: string): string {
   const terms = parseToolQueryClause(source);
   if (terms.length !== 1 || terms[0].field !== 'program') {
@@ -585,9 +509,6 @@ function matchesTerm(call: ToolCallEvidence, term: QueryTerm): boolean {
     case 'tool': return includes(call.tool, value);
     case 'program': return call.programs.some((program) => program.toLocaleLowerCase() === value);
     case 'input': return includes(call.input, value);
-    // A harness can mark the returned bytes as an error while they are still
-    // the command's output. Keep `error:` available for explicit diagnostics,
-    // but let `output:` match either bounded result channel.
     case 'output': return includes(call.output, value) || includes(call.error, value);
     case 'status': return call.outcome === value || String(call.statusCode ?? '') === value;
     case 'exit': return String(call.exitCode ?? '') === value;
@@ -653,7 +574,6 @@ function ftsCandidateRows(
   `).all(JSON.stringify(sessionIds), expression, TOOL_QUERY_MAX_CALL_ROWS + 1) as Array<{ call_key: string }>;
 }
 
-/** Use indexed typed columns and trigram FTS; final matching remains exact in JS. */
 function candidateKeysForClause(
   db: Database.Database,
   sessionIds: string[],
@@ -914,7 +834,6 @@ function readCallsByKeys(db: Database.Database, keys: Set<string>): Map<string, 
   return out;
 }
 
-/** Count exact, pre-indexed static program sites without reading transcripts. */
 export function countToolProgramOccurrences(
   sessions: SessionMeta[],
   program: string,
@@ -1024,7 +943,6 @@ export function countToolProgramOccurrences(
   };
 }
 
-/** Query cached evidence; every repeated clause must select a distinct call. */
 export function searchToolCalls(
   sessions: SessionMeta[],
   clauseSources: string[],

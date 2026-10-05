@@ -28,7 +28,6 @@ export function canonicalToolLedgerPath(filePath: string): string {
   }
 }
 
-/** Resolve the transcript that actually carries tool events for split-file harnesses. */
 export function toolEvidenceSourcePath(filePath: string, agent: string): string {
   if (agent === 'kimi' && path.basename(filePath) === 'state.json') {
     return path.join(path.dirname(filePath), 'agents', 'main', 'wire.jsonl');
@@ -44,8 +43,6 @@ function deleteSessionCalls(db: Database.Database, sessionId: string): void {
     .all(sessionId) as Array<{ rowid: number; call_key: string }>;
   const deletePrograms = db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`);
   const deleteOccurrences = db.prepare(`DELETE FROM tool_program_occurrences WHERE call_key = ?`);
-  // Addressed by rowid, never by the UNINDEXED call_key — see the tool_call_text
-  // schema comment in db.ts. A call_key predicate scans the whole FTS index.
   const deleteText = db.prepare(`DELETE FROM tool_call_text WHERE rowid = ?`);
   for (const { rowid, call_key } of rows) {
     deletePrograms.run(call_key);
@@ -55,7 +52,6 @@ function deleteSessionCalls(db: Database.Database, sessionId: string): void {
   db.prepare(`DELETE FROM tool_calls WHERE session_id = ?`).run(sessionId);
 }
 
-/** Remove cached tool evidence when its source transcript no longer exists. */
 export function purgeToolCalls(
   db: Database.Database,
   sessionId: string,
@@ -64,7 +60,6 @@ export function purgeToolCalls(
   db.prepare(`DELETE FROM tool_scan_ledger WHERE session_id = ?`).run(sessionId);
 }
 
-/** Purge deleted direct children when a transcript directory's stamp changes. */
 export function purgeMissingToolCallsInDirectory(
   db: Database.Database,
   dirPath: string,
@@ -88,40 +83,17 @@ export function purgeMissingToolCallsInDirectory(
   return purged;
 }
 
-/** The resume point a later incremental scan starts from. */
 export interface ToolScanResumePoint {
-  /** Serialized ToolCallCollector snapshot at `parsedOffset`. */
   parserState: string;
-  /**
-   * Where a later scan may resume. For the streaming (claude/codex) path this is
-   * a BYTE offset just past the last complete record consumed. For the full-file
-   * harness path (`planEventToolResume`) it is instead the COUNT of normalized
-   * events already folded — the two never share a session (a session is one
-   * agent, and the streaming path is claude/codex only), so the column carries
-   * whichever meaning that agent's resumer wrote.
-   */
   parsedOffset: number;
 }
 
 interface PersistToolCallsOptions {
-  /**
-   * `replace` drops the session's stored evidence first — correct for a parse
-   * that started at byte 0. `append` merges the batch into what is already
-   * stored and requires an existing ledger row; use it only for a parse that
-   * resumed from that row's `parsedOffset`.
-   */
   mode?: 'replace' | 'append';
-  /**
-   * Where a later scan may resume. Omitted (or null) clears any stored resume
-   * point, which forces the next scan of this session to re-read from byte 0 —
-   * the correct outcome whenever the parse could not cover the whole prefix
-   * (an oversized record, a size-capped transcript, a non-streaming harness).
-   */
   resume?: ToolScanResumePoint | null;
   maxSessionBytes?: number;
 }
 
-/** Persist one parser batch, its file stamp, and its resume point atomically. */
 export function persistToolCalls(
   db: Database.Database,
   session: SessionMeta,
@@ -159,8 +131,6 @@ export function persistToolCalls(
     INSERT INTO tool_program_occurrences (call_key, occurrence_ordinal, program, role)
     VALUES (?, ?, ?, ?)
   `);
-  // tool_call_text rows are addressed by the rowid of the tool_calls row they
-  // describe (db.ts schema comment): its UNINDEXED call_key cannot be seeked.
   const insertText = db.prepare(`INSERT INTO tool_call_text (rowid, call_key, tool, input, output, error) VALUES (?, ?, ?, ?, ?, ?)`);
   const callRowid = db.prepare(`SELECT rowid FROM tool_calls WHERE call_key = ?`);
   const deletePrograms = db.prepare(`DELETE FROM tool_call_programs WHERE call_key = ?`);
@@ -273,8 +243,6 @@ export function persistToolCalls(
         call.statusCode ?? null, call.errorCode ?? null, call.output ?? null,
         call.error ?? null, call.parseError ?? null, toolCallEvidenceBytes(call),
       );
-      // The upsert above preserves the rowid of a call it updated, so this is
-      // the same rowid the existing text row (if any) was written under.
       const { rowid } = callRowid.get(key) as { rowid: number };
       deletePrograms.run(key);
       deleteOccurrences.run(key);
@@ -294,26 +262,6 @@ export function persistToolCalls(
   txn();
 }
 
-/**
- * Decide whether a changed full-file-harness session can RESUME its tool index
- * from the last scan instead of re-deriving every call (PHNX-3411).
- *
- * The warm-tick indexer re-derives tool calls for a changed session on every
- * tick, and for an ACTIVE large session that means re-sanitizing tens of
- * thousands of calls each time — the synchronous work that wedged the daemon
- * event loop. Streaming harnesses (claude/codex) already resume from a byte
- * offset; every other harness re-parses the whole file, so this brings them the
- * same benefit at the EVENT level: the ledger stores how many events were folded
- * (`parsed_offset`) plus the collector snapshot (`parser_state`), and a later
- * scan folds only the newly appended events.
- *
- * Returns the prior resume point when it is safe to append, or `null` (full
- * re-scan) whenever the stored prefix may no longer describe the current file:
- * a different extractor, no recorded resume point, a source the ledger row does
- * not describe, a transcript that shrank below what was already parsed (a
- * truncation/rewrite, not an append), more events already folded than the file
- * now yields, or a snapshot that does not read back.
- */
 export function planEventToolResume(
   db: Database.Database,
   sessionId: string,
@@ -336,8 +284,6 @@ export function planEventToolResume(
   if (row.parsed_offset === null || !Number.isSafeInteger(row.parsed_offset) || row.parsed_offset < 0) return null;
   if (row.file_path !== canonicalToolLedgerPath(sourcePath)) return null;
   if (stamp.fileSize < row.file_size) return null;
-  // The file grew but reports fewer events than were already folded — the prefix
-  // was rewritten, not appended to. Re-scan from scratch.
   if (row.parsed_offset > currentEventCount) return null;
   if (row.parser_state === null) return null;
   let snapshot: ToolCallCollectorSnapshot;

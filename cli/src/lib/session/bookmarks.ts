@@ -1,29 +1,8 @@
-/**
- * Bookmarked sessions — the durable "keep this one handy" mark a human puts on a
- * session, deliberately kept OUT of the session index.
- *
- * `sessions.db` is a rebuildable CACHE: a reindex or a schema bump throws its
- * rows away and re-derives them from the transcripts on disk. A bookmark is not
- * derivable from a transcript — it is a human's choice — so a column there would
- * be silently lost on the next rebuild. It lives in `~/.agents/.history/` instead,
- * next to the actor sidecars, which is never pruned.
- *
- * One flat set of session ids. The id is the transcript's own uuid, so it is
- * stable and machine-independent — but the file is NOT synced today: session sync
- * carries `.history/backups/` (`lib/session/sync/agents.ts`), not this. Bookmarks
- * are therefore per-machine; carrying them across the fleet would mean adding
- * them to the sync manifest, which this does not do.
- *
- * Reads are memoized against the file's mtime — the picker asks `isBookmarked` once
- * per rendered row, and re-reading a JSON file per row on every keystroke is the
- * kind of cost that makes a TUI feel broken.
- */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { getHistoryDir } from '../state.js';
 
-/** The on-disk shape. Versioned so a later format can migrate rather than guess. */
 interface BookmarksFile {
   version: 1;
   sessionIds: string[];
@@ -33,8 +12,6 @@ export function bookmarksFilePath(): string {
   return path.join(getHistoryDir(), 'bookmarks.json');
 }
 
-/** Memoized parse, invalidated by the file's mtime+size (another process — or
- *  another machine's sync — can rewrite it under us). */
 let cache: { key: string; ids: Set<string> } | null = null;
 
 function statKey(file: string): string {
@@ -46,17 +23,10 @@ function statKey(file: string): string {
   }
 }
 
-/** Drop the memoized read. Tests that write the file directly need this; nothing
- *  in the CLI does, because every mutation here refreshes the cache itself. */
 export function clearBookmarksCache(): void {
   cache = null;
 }
 
-/**
- * Every bookmarked session id. Empty (never throws) when the file is absent,
- * unreadable, or malformed — a corrupt bookmarks file must not take down
- * `agents sessions`.
- */
 export function listBookmarks(): Set<string> {
   const file = bookmarksFilePath();
   const key = statKey(file);
@@ -68,7 +38,6 @@ export function listBookmarks(): Set<string> {
       ids = new Set(parsed.sessionIds.filter((id): id is string => typeof id === 'string' && id.length > 0));
     }
   } catch {
-    // absent / unreadable / malformed — an empty set is the honest answer
   }
   cache = { key, ids };
   return ids;
@@ -79,7 +48,6 @@ export function isBookmarked(sessionId: string | undefined): boolean {
   return listBookmarks().has(sessionId);
 }
 
-/** Atomic write (tmp + rename) so a concurrent reader never sees a half file. */
 function writeBookmarks(ids: Set<string>): void {
   const file = bookmarksFilePath();
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -90,11 +58,6 @@ function writeBookmarks(ids: Set<string>): void {
   cache = { key: statKey(file), ids };
 }
 
-/**
- * Set (or clear) the bookmark mark on a session. Returns the resulting state, so
- * a caller can report it without a second read. A no-op write is skipped, which
- * keeps the file's mtime — and every other process's memoized read — untouched.
- */
 export function setBookmark(sessionId: string, on: boolean): boolean {
   const ids = new Set(listBookmarks());
   if (ids.has(sessionId) === on) return on;
@@ -104,7 +67,6 @@ export function setBookmark(sessionId: string, on: boolean): boolean {
   return on;
 }
 
-/** Flip the mark; returns the new state (`true` = now bookmarked). */
 export function toggleBookmark(sessionId: string): boolean {
   return setBookmark(sessionId, !isBookmarked(sessionId));
 }
