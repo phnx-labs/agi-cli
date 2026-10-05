@@ -10,6 +10,7 @@ let root: string;
 let repo: string;
 
 function git(args: string[], dateIso?: string, identity?: { email: string; name: string }): void {
+  // Fixture identity overrides ambient Git variables, including in release-attestation runs.
   const env = { ...process.env } as Record<string, string>;
   if (dateIso) {
     env.GIT_AUTHOR_DATE = dateIso;

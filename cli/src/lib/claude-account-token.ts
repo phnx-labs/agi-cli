@@ -103,6 +103,7 @@ export function readClaudeAccountEmail(home?: string): string | null {
 }
 
 export function resolveClaudeSetupToken(home?: string): string | null {
+  // Reserved auth is per-account, file-backed, and must never trigger Touch ID.
   const email = readClaudeAccountEmail(home)
     ?? (home ? discoverClaudeAccountEmailFromOauthToken(home) : null);
   if (!email) return null;
@@ -112,6 +113,7 @@ export function resolveClaudeSetupToken(home?: string): string | null {
 const discoveryCache = new Map<string, { fingerprint: string; email: string | null }>();
 
 function discoverClaudeAccountEmailFromOauthToken(home: string): string | null {
+  // Discovery may rewrite identity only inside the explicit worker home.
   try {
     const tokenPath = path.join(home, '.claude', '.oauth_token');
     const fingerprint = credentialFingerprint(tokenPath);
@@ -148,6 +150,7 @@ function discoverEmailUncached(home: string, tokenPath: string): string | null {
 }
 
 function emailFromTokenKey(key: string): string | null {
+  // Only a canonical per-email token key may reach an Authorization header.
   const prefix = 'CLAUDE_CODE_OAUTH_TOKEN_';
   if (!key.startsWith(prefix)) return null;
   const slug = key.slice(prefix.length);
@@ -160,6 +163,7 @@ function emailFromTokenKey(key: string): string | null {
 }
 
 export function resolveClaudeSetupTokenForEmail(email: string, cacheKey?: string): string | null {
+  // Memoization includes both caller/home and account so tokens cannot cross identities.
   try {
     const trimmed = email.trim();
     if (!trimmed) return null;
@@ -324,6 +328,7 @@ export function isClaudeWorkerHomeSeeded(home: string): boolean {
 }
 
 export function seedClaudeWorkerHomeIdentity(versionHome: string, email?: string): void {
+  // Follow an existing config symlink; replacing it would split Claude's configuration.
   const trimmed = email?.trim() || undefined;
   const targets = new Set<string>();
   for (const p of [

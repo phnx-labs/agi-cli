@@ -54,6 +54,7 @@ describe('namespacedServiceLabel', () => {
 });
 
 describe('every generated service manifest carries the caller HOME (RUSH-2639)', () => {
+  // Redirect both HOME seams or launchd/systemd children escape into the operator home.
   it('the daemon launchd plist bakes HOME and a namespaced Label', () => {
     withRedirectedHome((home) => {
       const plist = generateLaunchdPlist('/usr/local/bin/agents');

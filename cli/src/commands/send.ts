@@ -77,6 +77,7 @@ async function runSend(
     const raw = flagged || positional;
     const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
     if (raw && !bothDiffer) {
+      // Owner sends share the important-feed composer; trace sync makes its console link resolvable, while dry-run stays inert.
       ownerCompose = ownerMessageComposer(raw);
       input = { ...input, text: ownerCompose('plain'), positionalText: undefined };
       fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });

@@ -61,6 +61,7 @@ export function formatAccountLimits(candidate: RotateCandidate): string {
 }
 
 function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness): string | undefined {
+  // Only throttling disables a row: signed-out or revoked accounts stay selectable because the harness TUI is their login surface.
   if (readiness.ready) return undefined;
   if (isSignInRecoverable(readiness)) return undefined;
   if (readiness.reason === 'out_of_credits') return 'out of credits';
@@ -259,6 +260,7 @@ export function signInLaunchDecision(
 export function noVerifiedUsageDecision(
   input: { tty: boolean; json: boolean; headless: boolean },
 ): 'picker' | 'fail-loud' {
+  // Stale or absent usage may prompt only an attended non-JSON TTY; automation must fail loud rather than guess.
   const humanPresent = input.tty && !input.json && !input.headless;
   return humanPresent ? 'picker' : 'fail-loud';
 }
@@ -268,6 +270,7 @@ export async function pickSignInLaunchVersion(
   recoverable: RotateCandidate[],
   quiet = false,
 ): Promise<string | null> {
+  // An all-throttled candidate set must never reach the harness login flow.
   if (recoverable.length === 0) return null;
 
   if (recoverable.length > 1) {

@@ -118,6 +118,7 @@ export function gcMailbox(
   activeBoxIds: Set<string>,
   options: GcOptions = {},
 ): GcResult {
+  // Archive expired live-box messages and retain bounced dead-box blocks through the prune window.
   const root = options.root ?? getMailboxRootDir();
   const feedRoot = options.feedRoot;
   const now = options.now ?? new Date();

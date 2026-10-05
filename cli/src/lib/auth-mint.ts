@@ -107,6 +107,7 @@ export function stripAnsi(text: string): string {
 }
 
 export function extractClaudeSetupToken(screen: string): string | null {
+  // Capture exactly one clean token; terminal output must never be guessed into a credential.
   const text = stripAnsi(screen);
   const matches = text.match(new RegExp(CLAUDE_SETUP_TOKEN_CAPTURE_RE.source, 'g')) ?? [];
   const unique = [...new Set(matches.filter(isValidClaudeSetupToken))];
@@ -166,6 +167,7 @@ export interface ResolvedMintIdentity {
 }
 
 export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMintIdentity {
+  // Worker credentials are per-account, so minting requires a concrete email identity.
   const accountRaw = input.account?.trim();
   const emailRaw = input.email?.trim();
   const fromHome = readClaudeAccountEmail(input.home);
@@ -287,6 +289,7 @@ export function seedReservedStoreKey(
   key: string,
   value: string,
 ): { bundle: string; key: string } {
+  // Reserved worker bundles are real file-backed policy-never stores, never rotating OAuth/session credentials.
   assertStorableCredentialKind(kind, harness);
   const name = reservedStoreName(harness);
   const cleaned = value.trim();
@@ -339,6 +342,7 @@ export interface AdoptLegacyReservedItemsResult {
 export function adoptLegacyReservedStoreItems(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
 ): AdoptLegacyReservedItemsResult {
+  // Adopt without overwriting a different auth kind; partial failures remain visible.
   const result: AdoptLegacyReservedItemsResult = { adopted: [], errors: [] };
   for (const account of listNativeAccounts(meta)) {
     const cred = account.workerCredential;
@@ -358,6 +362,7 @@ export function adoptLegacyReservedStoreItems(
 }
 
 export function seedNamedAccount(name: string, token: string, flow: MintFlow): CredentialAccount {
+  // Never replace an existing account whose provider or auth kind differs.
   const cleaned = assertValidSetupToken(token);
   const existing = findAccount(name);
   if (!existing) return addAccount(name, flow.provider, flow.auth, cleaned);
@@ -390,6 +395,7 @@ export interface DriveSetupTokenMintOpts extends MintDriveHooks {
 }
 
 function emitMintProgress(line: string, json?: boolean): void {
+  // Machine-readable stdout stays clean.
   if (!json) console.log(line);
 }
 
@@ -398,6 +404,7 @@ export async function driveSetupTokenMint(
   flow: MintFlow,
   opts: DriveSetupTokenMintOpts = {},
 ): Promise<DriveMintResult> {
+  // The terminal is torn down on every path, and its token is returned only in memory, never logged.
   if (flow.auth !== 'setup-token' || !flow.tokenCapture) {
     throw new Error(`Harness '${flow.harness}' has no interactive mint command.`);
   }
@@ -520,6 +527,7 @@ export interface MintAndSeedResult {
 }
 
 export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedResult> {
+  // Claude alone mints a durable setup token interactively; API-key flows collect keys and tokenless harnesses log in per box.
   const flow = getMintFlow(input.harness);
   const json = input.json === true;
   const install = input.token

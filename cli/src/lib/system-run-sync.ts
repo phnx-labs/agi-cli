@@ -59,6 +59,7 @@ export function applySystemResourcesAtRun(
   version: string,
   versionHome: string,
 ): SystemRunSyncResult {
+  // Refresh only system skills/subagents under normal precedence; failures never block launch and leave the sentinel stale for retry.
   const result: SystemRunSyncResult = { skills: [], subagents: [] };
   const stored = loadSentinel(agent, version);
   const next: SystemRunSentinel = { ...stored };

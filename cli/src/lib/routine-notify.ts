@@ -88,6 +88,7 @@ export function routineStartFailedNotification(
   config: Pick<JobConfig, 'name' | 'agent' | 'workflow' | 'command'>,
   error: string,
 ): DesktopNotification {
+  // Pre-spawn failure needs its own finish signal because no run record will emit one later.
   return {
     title: 'Routine failed',
     subtitle: config.name,
@@ -101,6 +102,7 @@ export function routineFinishNotification(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'duration' | 'agent' | 'workflow' | 'command'>,
   opts: { report?: string | null; artifactPath?: string | null } = {},
 ): DesktopNotification | null {
+  // Agent/workflow runs get one start and finish; successful command housekeeping is quiet, but failures always report.
   const kind = routineKind(meta);
   const ok = meta.status === 'completed';
   if (kind === 'command' && ok) return null;

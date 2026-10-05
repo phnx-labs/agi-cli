@@ -55,6 +55,7 @@ function formatHourMinute(iso: string): string {
 }
 
 export function buildRunDeviceChoices(rows: RunDeviceRow[], accountLabel?: string): RunDeviceChoice[] {
+  // A device without a published account catalog is unknown, not proof that the account is absent.
   const byHeadroomLoadName = (a: RunDeviceRow, b: RunDeviceRow): number =>
     HEADROOM_ORDER[a.headroom] - HEADROOM_ORDER[b.headroom]
     || (a.loadPercent ?? Number.POSITIVE_INFINITY) - (b.loadPercent ?? Number.POSITIVE_INFINITY)
@@ -128,6 +129,7 @@ function resolveAccountDevices(
 }
 
 export function readRunDeviceRows(opts: { agent: AgentId; accountLabel?: string }): { rows: RunDeviceRow[]; snapshotAgeMs?: number } {
+  // Picker reads are cache/disk-only: never add SSH, probes, refresh, or other network work to this path.
   const registry = loadDevicesSync();
   const statsCache = readStatsCache();
   const names = Object.keys(registry);
@@ -184,6 +186,7 @@ function formatSnapshotAge(ageMs: number): string {
 }
 
 export async function pickRunDevice(opts: { agent: AgentId; accountLabel?: string }): Promise<string | null> {
+  // Off-TTY selection fails loud, and cancellation must launch nothing.
   const { rows, snapshotAgeMs } = readRunDeviceRows(opts);
   if (rows.length === 0) {
     throw new Error('No devices are registered. Add one with: agents devices add <name>');
