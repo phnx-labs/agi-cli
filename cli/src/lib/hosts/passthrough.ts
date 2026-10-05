@@ -104,6 +104,8 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   // lifecycle
   teams: {},
   message: {},
+  // `send --channel session --to <id>` types into a session that runs on that box.
+  send: {},
   routines: {},
   jobs: {},
   cron: {},
@@ -127,6 +129,7 @@ export const OWN_HOST_COMMANDS = new Set([
   'harness', // `--host <agent>` names the host CLI to run under (not a device routing flag)
   'harnesses',
   'sessions',
+  'ps', // fans out to the named devices itself (old peers answer `sessions --active`)
   'feed',
   'computer',
   'browser', // `--device` on start binds the task; later verbs resolve it from the task

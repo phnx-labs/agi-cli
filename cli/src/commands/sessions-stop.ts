@@ -25,7 +25,7 @@ import { stopInteractive } from './detach.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { setHelpSections } from '../lib/help.js';
 
-export function registerSessionsStopCommand(program: Command): void {
+export function registerSessionsStopCommand(program: Command, group: 'sessions' | 'ps' = 'sessions'): void {
   const cmd = program
     .command('stop')
     .argument('<id>', 'Short or full id of the live session to stop')
@@ -37,14 +37,14 @@ export function registerSessionsStopCommand(program: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Stop a live session by a short id prefix
-      agents sessions stop 4b2f1a9c
+      agents ${group} stop 4b2f1a9c
 
       # Only look on this machine (skip the fleet sweep)
-      agents sessions stop 4b2f1a9c --local
+      agents ${group} stop 4b2f1a9c --local
     `,
     notes: `
       stop ENDS the session; it does not background it. To keep an agent working
-      unattended instead, use \`agents sessions detach <id>\`, and bring it back
+      unattended instead, use \`agents ${group} detach <id>\`, and bring it back
       with \`agents sessions resume <id>\`.
 
       A session that lives on another machine is stopped THERE over SSH — its pid

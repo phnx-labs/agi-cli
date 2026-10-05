@@ -411,6 +411,21 @@ describe('selectImpact policy', () => {
     }
   });
 
+  test('a session-tracker live scenario is not queued on the required check', () => {
+    const plan = selectImpact({
+      files: ['packages/session-tracker/tests/scenarios/kill-restart.test.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.tests.map((t) => t.file)).not.toContain(
+      'packages/session-tracker/tests/scenarios/kill-restart.test.ts',
+    );
+    expect(plan.checks).toContain('session-tracker');
+    expect(plan.zero_selection).toEqual([]);
+    expect(plan.unmapped).toEqual([]);
+    expect(planIsFailing(plan)).toBe(false);
+  });
+
   test('static imports select the importing test', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agents-ci-related-'));
     try {

@@ -11,17 +11,8 @@ import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { deriveShortId } from '../lib/session/short-id.js';
 import type { SessionMeta, SessionAgentId } from '@phnx-labs/sessions-cli/reader';
-import {
-  dedupeByMachineSession,
-  mergeLocalFirst,
-  pickSessionInteractive,
-  matchesLiveStatus,
-  filterSessionsByQuery,
-  formatPickerLabel,
-  pickerColumnsFor,
-  isUniqueEnoughSelector,
-  type LiveStatusFilter,
-} from './sessions.js';
+import { mergeLocalFirst, pickSessionInteractive, filterSessionsByQuery, formatPickerLabel, pickerColumnsFor, isUniqueEnoughSelector } from './sessions.js';
+import { dedupeByMachineSession, matchesLiveStatus, type LiveStatusFilter } from './ps-roster.js';
 import { buildPreview } from './sessions-picker.js';
 import { multiItemPicker } from '../lib/picker.js';
 import { isPromptCancelled } from './utils.js';

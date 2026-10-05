@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 65,
-  "commands": 480,
+  "groups": 66,
+  "commands": 486,
   "root": {
     "name": "agents",
     "path": "",
@@ -12070,6 +12070,596 @@
       ]
     },
     {
+      "name": "ps",
+      "path": "ps",
+      "aliases": [],
+      "description": "List running agents on this machine and across the fleet; stop, focus, detach, or migrate one",
+      "args": [],
+      "options": [
+        {
+          "flags": "--json",
+          "description": "Print the roster as JSON (one row per live session)",
+          "long": "--json",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--local",
+          "description": "Only this machine; skip the fleet fan-out",
+          "long": "--local",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "-D, --device <target...>",
+          "description": "Only these devices (alias from `agents devices`, user@host, or `all`; repeatable)",
+          "short": "-D",
+          "long": "--device",
+          "required": true,
+          "optional": false,
+          "variadic": true,
+          "negate": false
+        },
+        {
+          "flags": "--status <state...>",
+          "description": "Only these live states: working, idle, waiting, orphaned, crashed, closed, abandoned, queued, unknown (repeatable or comma-separated)",
+          "long": "--status",
+          "required": true,
+          "optional": false,
+          "variadic": true,
+          "negate": false
+        },
+        {
+          "flags": "--no-interactive",
+          "description": "Print the roster instead of opening the picker on a TTY",
+          "long": "--no-interactive",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": true
+        },
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "# What is running right now, here and on every reachable device\nagents ps\n\n# Machine-readable roster for this box only\nagents ps --json --local\n\n# One peer's running agents, over SSH\nagents ps --json -D yosemite-s0\n\n# Only agents waiting on you (exits 1 when any are waiting)\nagents ps --status waiting\n\n# Act on one row by its 8-character id\nagents ps focus 4b2f1a9c\nagents ps detach 4b2f1a9c\nagents ps stop 4b2f1a9c\nagents ps migrate 4b2f1a9c --auto",
+      "notes": "- On a TTY with no --status, ps opens the session picker filtered to running\n  sessions: r toggles that filter, f focuses, enter resumes, y copies the command.\n- Type into a running agent with: agents send --channel session --to <id> --text \"continue\"\n- Resume an ended session with: agents run --resume <id>\n- A session on another device is stopped, detached, or focused there over SSH.\n- Put -D and --status after the verb or after the roster flags, never before a\n  verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.",
+      "subcommands": [
+        {
+          "name": "detach",
+          "path": "ps detach",
+          "aliases": [],
+          "description": "Send a live agent to the background — stop its terminal, keep it working headless",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false,
+              "description": "Short or full id of the live session to background"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents ps detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents sessions resume 4b2f1a9c",
+          "subcommands": []
+        },
+        {
+          "name": "focus",
+          "path": "ps focus",
+          "aliases": [],
+          "description": "Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones",
+          "args": [
+            {
+              "name": "selector",
+              "required": false,
+              "variadic": false,
+              "description": "Session id/prefix, agent@version, or topic/path search"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--launch-id <id>",
+              "description": "Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine's hook records)",
+              "long": "--launch-id",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--attach-only",
+              "description": "Attach only — never open a new tab / resume a copy (the old `go` behavior)",
+              "long": "--attach-only",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--reconnect-reattach",
+              "description": "(internal) Set by the reconnect loop — warns when the expected pane is dead and a fresh copy starts instead",
+              "long": "--reconnect-reattach",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": false
+            },
+            {
+              "flags": "-D, --device <target...>",
+              "description": "Scope the picker to live sessions on these devices (device alias from `agents devices`, user@host; repeatable)",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--active",
+              "description": "Only sessions present in the live roster",
+              "long": "--active",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-a, --agent <agent>",
+              "description": "Filter by harness and recorded version (for example claude@latest)",
+              "short": "-a",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--claude",
+              "description": "Shorthand for --agent claude",
+              "long": "--claude",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--codex",
+              "description": "Shorthand for --agent codex",
+              "long": "--codex",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--kimi",
+              "description": "Shorthand for --agent kimi",
+              "long": "--kimi",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--antigravity",
+              "description": "Shorthand for --agent antigravity",
+              "long": "--antigravity",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--grok",
+              "description": "Shorthand for --agent grok",
+              "long": "--grok",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--opencode",
+              "description": "Shorthand for --agent opencode",
+              "long": "--opencode",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--all",
+              "description": "Include every directory and all time",
+              "long": "--all",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--teams",
+              "description": "Include team-spawned sessions",
+              "long": "--teams",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--in-team <name>",
+              "description": "Only one team lineage",
+              "long": "--in-team",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--routine",
+              "description": "Only routine-run sessions",
+              "long": "--routine",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-p, --project <name>",
+              "description": "Only a named project",
+              "short": "-p",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--skill <name>",
+              "description": "Only sessions that invoked this skill",
+              "long": "--skill",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--plugin <name>",
+              "description": "Only sessions that used this plugin",
+              "long": "--plugin",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only sessions newer than this (for example 7d)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--until <time>",
+              "description": "Only sessions older than this timestamp",
+              "long": "--until",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-n, --limit <n>",
+              "description": "Maximum candidates to load",
+              "short": "-n",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "500"
+            },
+            {
+              "flags": "--bookmarks",
+              "description": "Only bookmarked sessions",
+              "long": "--bookmarks",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--unmanaged",
+              "description": "Also include native-home sessions outside managed versions",
+              "long": "--unmanaged",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--sort <field>",
+              "description": "Order candidates by recent, cost, or duration",
+              "long": "--sort",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "recent"
+            },
+            {
+              "flags": "--working",
+              "description": "Only live sessions currently doing work",
+              "long": "--working",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--idle",
+              "description": "Only live sessions that have stopped between turns",
+              "long": "--idle",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--waiting",
+              "description": "Only live sessions waiting on your input",
+              "long": "--waiting",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--orphan",
+              "description": "Only sessions whose process outlived its terminal client",
+              "long": "--orphan",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--orphaned",
+              "description": "Alias for --orphan",
+              "long": "--orphaned",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--crashed",
+              "description": "Only sessions whose terminal disappeared with the process",
+              "long": "--crashed",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--closed",
+              "description": "Only recently observed sessions whose process exited normally",
+              "long": "--closed",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--abandoned",
+              "description": "Only sessions with no transcript progress for the abandonment window",
+              "long": "--abandoned",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--queued",
+              "description": "Only queued sessions that have not started running",
+              "long": "--queued",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--unknown",
+              "description": "Only sessions whose live state cannot be determined",
+              "long": "--unknown",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Focus a session directly (attach a living pane, otherwise recover it)\nagents ps focus a1b2c3d4\n\n# Multi-select live sessions; each opens as a tab in this terminal\nagents ps focus\n\n# Scope the picker to one device's orphaned sessions\nagents ps focus --orphan --device yosemite-s0\n\n# Resolve latest on yosemite-s0, then pick from that version's sessions\nagents ps focus claude@latest --device yosemite-s0\n\n# Attach only — refuse if nothing is joinable\nagents ps focus a1b2c3d4 --attach-only\n\n# Pick from live sessions on this machine only\nagents ps focus --local",
+          "notes": "- space toggles a session, enter opens the selected set; a single check + enter opens just one.\n- With no selector/filter, the picker shows the live fleet. An id focuses directly; agent@version and text selectors always show the preview picker.\n- A living tmux pane is JOINED (a second client, no fork). Dead/missing panes recover on the origin device: exact healthy origin uses native resume; otherwise a healthy version of the same harness receives /continue <id>.\n- An id/identity selector resolves across the whole reachable fleet on its own — you do NOT need --device to focus a session that lives on another box (same as resume/preview). --device only narrows the browsable picker and the agent/version resolution.\n- --device and the sessions-browser filters compose. latest/oldest resolve against each selected device's installed versions.\nLifecycle siblings (not synonyms):\n  focus              attach if alive, otherwise recover (default \"take me there\")\n  focus --attach-only  attach only; never fork (replaces go)\n  detach / attach    interactive ↔ headless presence\n  resume             multi-select history → tabs\n  run --resume       single scripted continue",
+          "subcommands": []
+        },
+        {
+          "name": "migrate",
+          "path": "ps migrate",
+          "aliases": [
+            "relocate"
+          ],
+          "description": "Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.",
+          "args": [
+            {
+              "name": "session-id",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--auto",
+              "description": "Pick the best target host automatically (idle fleet worker preferred)",
+              "long": "--auto",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Explicit target: an enrolled host, device, or a warm ephemeral box slug",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--lease",
+              "description": "Provision a fresh ephemeral crabbox box as the target",
+              "long": "--lease",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--mode <mode>",
+              "description": "rehydrate (default: the target agent reads the transported transcript) or resume (best-effort native --resume)",
+              "long": "--mode",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "rehydrate"
+            },
+            {
+              "flags": "--keep",
+              "description": "Copy, not move — do NOT stop the source after resuming on the target",
+              "long": "--keep",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--agent-wrapup",
+              "description": "Delegate the dirty-tree wrap-up to the running agent instead of a mechanical WIP-PR",
+              "long": "--agent-wrapup",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Move the session in THIS pane onto the least-busy fleet worker\nagents ps migrate --auto\n\n# Move a specific session onto a named host\nagents ps migrate a1b2c3d4 --device yosemite-s1\n\n# Spin up a fresh ephemeral box and move onto it\nagents ps migrate --lease\n\n# Copy (don't stop the source), letting the agent wrap up its own dirty tree\nagents ps migrate --device box-a --keep --agent-wrapup",
+          "notes": "- Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).\n- Default --mode rehydrate: the transcript is shipped to the target and the agent reads it there\n  with 'agents sessions <id>' (its own judgment on --last/--include so long tool output can't\n  blow context), then continues. Robust across every harness.\n- --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:\n  the target agent must have the session registered, so migrate falls back to rehydrate when it can't.\n- The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).\n- Every migrate appends to the ledger — see 'agents sessions migrations' for where each session went.",
+          "subcommands": []
+        },
+        {
+          "name": "stop",
+          "path": "ps stop",
+          "aliases": [],
+          "description": "Stop a live agent outright — end its process and tear down its tmux/mux session",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false,
+              "description": "Short or full id of the live session to stop"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Stop a live session by a short id prefix\nagents ps stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents ps stop 4b2f1a9c --local",
+          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents sessions resume <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "subcommands": []
+        }
+      ]
+    },
+    {
       "name": "registry",
       "path": "registry",
       "aliases": [],
@@ -16085,7 +16675,7 @@
       "name": "send",
       "path": "send",
       "aliases": [],
-      "description": "Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.",
+      "description": "Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.",
       "args": [
         {
           "name": "text",
@@ -16196,8 +16786,8 @@
           "negate": false
         }
       ],
-      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path. Agent resume / PTY inject stay on message and\nsessions inject.",
+      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
+      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.",
       "subcommands": []
     },
     {
@@ -17032,6 +17622,7 @@
               "negate": false
             }
           ],
+          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents sessions detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents sessions resume 4b2f1a9c",
           "subcommands": []
         },
         {
@@ -18697,7 +19288,7 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\nagents setup\n\n# Re-run after corruption or to repair ~/.agents/.system/\nagents setup --force\n\n# Set up a specific capability on its own\nagents setup browser\nagents setup computer\nagents setup secrets\nagents setup term\nagents setup accounts\nagents setup fleet\nagents setup watchdog\nagents setup alias add teams\nagents setup beta enable factory",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\nagents setup\n\n# Re-run after corruption or to repair ~/.agents/.system/\nagents setup --force\n\n# Set up a specific capability on its own\nagents setup browser\nagents setup computer\nagents setup secrets\nagents setup term\nagents setup tools\nagents setup accounts\nagents setup fleet\nagents setup watchdog\nagents setup alias add teams\nagents setup beta enable factory",
       "notes": "What it does:\n  1. Clones the system repo into ~/.agents/.system/\n  2. Imports any unmanaged agent installations it finds\n  3. Opens a re-runnable capability menu with live ready/missing status\n  4. Delegates each selection to its existing setup wizard\n\nCapability setup can also be run any time on its own:\n  agents setup browser    # detect a browser + create the default profile\n  agents setup computer    # install the signed macOS helper + grant permissions\n  agents setup secrets     # choose secrets backend/policy defaults + import\n  agents setup term        # install the standalone term CLI (PTY engine agents accounts add/login spawn)\n  agents setup accounts    # mint a Claude setup-token for unattended usage/probe\n  agents setup fleet       # discover Tailscale devices + configure SSH access\n  agents setup watchdog    # choose which devices run the daemon watchdog pass\n  agents setup alias add teams  # PATH shorthand: teams runs agents teams\n  agents setup beta enable factory  # opt into preview features\n\nTo install CLIs from agents.yaml and sync resources into version homes:\n  agents sync --local -y",
       "subcommands": [
         {
@@ -19412,6 +20003,55 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "tools",
+          "path": "setup tools",
+          "aliases": [],
+          "description": "Install or upgrade the standalone sessions, browser, secrets, computer, and term CLIs to the versions this release pins",
+          "args": [],
+          "options": [
+            {
+              "flags": "--tool <name...>",
+              "description": "Only these tools: sessions, browser, secrets, computer, term (repeatable or comma-separated)",
+              "long": "--tool",
+              "required": true,
+              "optional": false,
+              "variadic": true,
+              "negate": false
+            },
+            {
+              "flags": "--dry-run",
+              "description": "Report what is below its pin without installing anything",
+              "long": "--dry-run",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Print one row per tool as JSON (installer output goes to stderr)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# See which tools are below the pinned release, without installing\nagents setup tools --dry-run\n\n# Bring every tool up to its pin (npm install -g <pkg>@<pin>)\nagents setup tools\n\n# Just one tool, machine-readable\nagents setup tools --tool sessions --json\n\n# Every reachable device, one at a time\nagents ssh yosemite-s1 'agents setup tools'",
+          "notes": "- A tool already at or above its pin is never downgraded or reinstalled.\n- Exit 1 when any tool is still below its pin (dry run, failed install, or an\n  older copy earlier on PATH shadowing the new one).",
           "subcommands": []
         },
         {

@@ -25,28 +25,8 @@ import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '@phnx-l
 import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview, setRemotePreviewRepaint } from './sessions-picker.js';
-import {
-  formatPickerLabel,
-  pickerColumnsFor,
-  type SshOriginTag,
-  ticketLabel,
-  mergeLocalFirst,
-  gatherActiveSessions,
-  liveHostLabel,
-  LIVE_ROW_PREFIX,
-  cleanPreview,
-  handlePickedSession,
-  shouldIncludeLocal,
-  remoteHostsToDial,
-  matchesTeam,
-  formatLiveStatusHeadline,
-  isRunningLiveSession,
-  matchesLiveStatus,
-  parseAgentFilter,
-  resolveRoutineName,
-  type LiveStatusFilter,
-  type PickerColumns,
-} from './sessions.js';
+import { formatPickerLabel, pickerColumnsFor, type SshOriginTag, ticketLabel, mergeLocalFirst, liveHostLabel, LIVE_ROW_PREFIX, handlePickedSession, matchesTeam, formatLiveStatusHeadline, isRunningLiveSession, parseAgentFilter, type PickerColumns } from './sessions.js';
+import { gatherActiveSessions, cleanPreview, shouldIncludeLocal, remoteHostsToDial, matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
 
 /**
  * The single canonical filter state. Every field has a flag equivalent, so the

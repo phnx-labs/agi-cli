@@ -3,7 +3,7 @@
  * orders and cloud/unknown bucket rules for isolated testing. */
 
 import { describe, it, expect } from 'vitest';
-import { groupActiveSessions } from '../sessions.js';
+import { groupActiveSessions } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 
 function mk(overrides: Partial<ActiveSession>): ActiveSession {

@@ -2141,7 +2141,7 @@ export async function registerMcp(
       const commandArgs = splitCommandLine(command);
       args = ['mcp', 'add', name, '--', ...commandArgs];
     }
-    // When home is specified, override HOME so MCP config writes to the version's config dir
+    // HOME selects the version-owned MCP config for CLI-backed registration.
     const env = options?.home ? { ...process.env, HOME: options.home } : undefined;
     // On Windows a bare command or `.cmd` wrapper needs shell:true; off Windows this is false and
     // the argv path is unchanged. RUSH-1752: when a shell is needed, compose a fully-quoted line
@@ -2154,7 +2154,6 @@ export async function registerMcp(
   }
 }
 
-/** Unregister (remove) a named MCP server from an agent's CLI config. */
 export async function unregisterMcp(
   agentId: AgentId,
   name: string,
@@ -2178,9 +2177,9 @@ export async function unregisterMcp(
 
   try {
     const bin = options?.binary || agent.cliCommand;
+    // HOME selects the version-owned MCP config for CLI-backed removal.
     const env = options?.home ? { ...process.env, HOME: options.home } : undefined;
-    // RUSH-1752: same shell-safe path as registerMcp — attacker-controlled MCP
-    // `name` must not reach cmd.exe unescaped when shell:true is required.
+    // Keep attacker-controlled names on the same quoted Windows wrapper path.
     const spec = execFileShellSpec(bin, ['mcp', 'remove', name]);
     await execFileAsync(spec.command, spec.args, { ...(env ? { env } : {}), shell: spec.shell });
     return { success: true };
@@ -2189,7 +2188,6 @@ export async function unregisterMcp(
   }
 }
 
-/** Result of an MCP registration or removal operation targeting a specific agent and optional version. */
 export interface McpTargetOperationResult {
   agentId: AgentId;
   version?: string;
@@ -2254,10 +2252,8 @@ export async function unregisterMcpFromTargets(
   return results;
 }
 
-/** Scope at which an MCP server is registered: user-global or per-project. */
 type McpScope = 'user' | 'project';
 
-/** Describes an MCP server discovered in an agent's config, with its scope and command. */
 interface InstalledMcp {
   name: string;
   scope: McpScope;
@@ -2369,12 +2365,9 @@ function removeMcpFromConfig(agentId: AgentId, name: string, home?: string): voi
 /** Extract the version from an npm package spec (`@scope/package@1.2.3` -> 1.2.3, `@latest` ->
  * latest, `some-package` -> undefined). */
 function extractNpmVersion(args: string[]): string | undefined {
-  // Find npm package argument (looks like @scope/package@version or package@version)
   for (const arg of args) {
-    // Match @scope/package@version or package@version
     const match = arg.match(/@([^@]+)$|^([^@]+)@(.+)$/);
     if (match) {
-      // @scope/package@version pattern
       const versionMatch = arg.match(/@([^@/]+)$/);
       if (versionMatch) {
         return versionMatch[1];
@@ -2388,6 +2381,7 @@ function extractNpmVersion(args: string[]): string | undefined {
  * needs the same parser as the reader: a naive `//` regex eats the `//` in `"$schema":
  * "https://opencode.ai/config.json"`. */
 export function stripJsonComments(content: string): string {
+  // Strip comments only outside strings so schema and MCP URLs survive JSONC parsing.
   let result = '';
   let inString = false;
   let escape = false;
@@ -2419,21 +2413,18 @@ export function stripJsonComments(content: string): string {
     }
 
     if (!inString) {
-      // Check for single-line comment
       if (char === '/' && next === '/') {
-        // Skip until end of line
         while (i < content.length && content[i] !== '\n') {
           i++;
         }
         continue;
       }
-      // Check for multi-line comment
       if (char === '/' && next === '*') {
         i += 2;
         while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) {
           i++;
         }
-        i += 2; // Skip */
+        i += 2;
         continue;
       }
     }
@@ -2445,9 +2436,6 @@ export function stripJsonComments(content: string): string {
   return result;
 }
 
-/**
- * Parse MCP servers from a JSON/JSONC config file.
- */
 function parseMcpFromJsonConfig(configPath: string): Record<string, McpConfigEntry> {
   if (!fs.existsSync(configPath)) {
     return {};
@@ -2455,16 +2443,13 @@ function parseMcpFromJsonConfig(configPath: string): Record<string, McpConfigEnt
 
   try {
     let content = fs.readFileSync(configPath, 'utf-8');
-    // Handle JSONC (JSON with comments)
     if (configPath.endsWith('.jsonc')) {
       content = stripJsonComments(content);
     }
     const config = JSON.parse(content);
 
-    // Claude uses mcpServers, others may use mcp_servers or mcp
     return config.mcpServers || config.mcp_servers || config.mcp || {};
   } catch {
-    /* JSON config corrupt or unreadable */
     return {};
   }
 }
@@ -2480,11 +2465,9 @@ function parseMcpFromTomlConfig(configPath: string): Record<string, McpConfigEnt
     const content = fs.readFileSync(configPath, 'utf-8');
     const config = TOML.parse(content) as Record<string, unknown>;
 
-    // Codex uses mcp_servers as a table with server names as keys
     const mcpServers = config.mcp_servers as Record<string, McpConfigEntry> | undefined;
     return mcpServers || {};
   } catch {
-    /* TOML config corrupt or unreadable */
     return {};
   }
 }
@@ -2499,7 +2482,6 @@ function parseMcpFromYamlConfig(configPath: string): Record<string, McpConfigEnt
     const mcpServers = config.mcp_servers as Record<string, McpConfigEntry> | undefined;
     return mcpServers || {};
   } catch {
-    /* YAML config corrupt or unreadable */
     return {};
   }
 }
@@ -2523,17 +2505,14 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
 
     if (!mcpConfig) return {};
 
-    // Convert OpenCode format to our McpConfigEntry format
     const result: Record<string, McpConfigEntry> = {};
     for (const [name, entry] of Object.entries(mcpConfig)) {
       if (entry.type === 'local' && entry.command) {
-        // Local MCP: command is an array like ["npx", "-y", "@pkg@version"]
         result[name] = {
           command: entry.command[0],
           args: entry.command.slice(1),
         };
       } else if (entry.type === 'remote' && entry.url) {
-        // Remote MCP: HTTP URL
         result[name] = {
           url: entry.url,
         };
@@ -2541,7 +2520,6 @@ function parseMcpFromOpenCodeConfig(configPath: string): Record<string, McpConfi
     }
     return result;
   } catch {
-    /* OpenCode JSONC config corrupt or unreadable */
     return {};
   }
 }
@@ -2553,18 +2531,12 @@ export function getUserMcpConfigPath(agentId: AgentId): string {
   return getMcpConfigPathForHome(agentId, HOME);
 }
 
-/**
- * Get MCP config path for a specific HOME directory (used for version-managed agents).
- */
 export function getMcpConfigPathForHome(agentId: AgentId, home: string): string {
   const target = MCP_TARGETS[agentId];
   if (target) return target.home(home);
   return path.join(home, agentConfigDirName(agentId), 'settings.json');
 }
 
-/**
- * Get project-scoped MCP config path for an agent.
- */
 export function getProjectMcpConfigPath(agentId: AgentId, cwd: string = process.cwd()): string {
   const target = MCP_TARGETS[agentId];
   if (target) return target.project(cwd);
@@ -2581,7 +2553,6 @@ function parseMcpFromOpenClawConfig(configPath: string): Record<string, McpConfi
     const content = fs.readFileSync(configPath, 'utf-8');
     const config = JSON.parse(content);
 
-    // OpenClaw uses mcp.servers for MCP configuration
     const mcpServers = config.mcp?.servers as Record<string, {
       command?: string;
       args?: string[];
@@ -2609,18 +2580,12 @@ function parseMcpFromOpenClawConfig(configPath: string): Record<string, McpConfi
     }
     return result;
   } catch {
-    /* OpenClaw JSON config corrupt or unreadable */
     return {};
   }
 }
 
-/**
- * Parse MCP config based on agent type.
- */
 export function parseMcpConfig(agentId: AgentId, configPath: string): Record<string, McpConfigEntry> {
-  // Dispatch on the registry's declared format, not the agent id, so the parser
-  // can never disagree with the writer about a file's serialization -- grok's
-  // TOML config was previously read as JSON and always came back empty.
+  // Path, writer, parser, and staleness dispatch share MCP_TARGETS' format declaration.
   switch (MCP_TARGETS[agentId]?.format) {
     case 'toml':
       return parseMcpFromTomlConfig(configPath);
@@ -2631,9 +2596,7 @@ export function parseMcpConfig(agentId: AgentId, configPath: string): Record<str
     case 'yaml':
       return parseMcpFromYamlConfig(configPath);
     default:
-      // claude-json / antigravity-json / muse-json all live in a JSON object;
-      // parseMcpFromJsonConfig accepts mcpServers | mcp_servers | mcp. Agents
-      // with no declared format fall here too, matching prior behavior.
+      // JSON owns declared Claude/Antigravity/Muse formats and legacy undeclared agents.
       return parseMcpFromJsonConfig(configPath);
   }
 }
@@ -2647,7 +2610,6 @@ export function listInstalledMcpsWithScope(
 ): InstalledMcp[] {
   const results: InstalledMcp[] = [];
 
-  // Helper to build full command string
   const buildCommand = (config: McpConfigEntry): string | undefined => {
     if (config.command && config.args?.length) {
       return `${config.command} ${config.args.join(' ')}`;
@@ -2655,7 +2617,6 @@ export function listInstalledMcpsWithScope(
     return config.command || (config.args ? config.args.join(' ') : undefined);
   };
 
-  // User-scoped MCPs (version-aware when home is provided)
   const userConfigPath = options?.home
     ? getMcpConfigPathForHome(agentId, options.home)
     : getUserMcpConfigPath(agentId);
@@ -2669,11 +2630,9 @@ export function listInstalledMcpsWithScope(
     });
   }
 
-  // Project-scoped MCPs
   const projectConfigPath = getProjectMcpConfigPath(agentId, cwd);
   const projectMcps = parseMcpConfig(agentId, projectConfigPath);
   for (const [name, config] of Object.entries(projectMcps)) {
-    // Skip if already in user scope (project can override, but we show both)
     results.push({
       name,
       scope: 'project',
@@ -2685,7 +2644,6 @@ export function listInstalledMcpsWithScope(
   return results;
 }
 
-/** Map of agent name aliases and shorthand identifiers to canonical AgentId values. */
 const AGENT_NAME_ALIASES: Record<string, AgentId> = {
   claude: 'claude',
   'claude-code': 'claude',
@@ -2738,6 +2696,7 @@ const AGENT_NAME_ALIASES: Record<string, AgentId> = {
  * one typo (`cladue` -> claude) only when all distance-1 candidates agree on one agent; two-letter
  * shorthands are excluded as fuzzy candidates. */
 export function resolveAgentName(input: string): AgentId | null {
+  // Resolve exact names first; fuzzy 3+ character matches must be one edit and one target.
   const lower = input.toLowerCase();
   const exact = AGENT_NAME_ALIASES[lower] ?? (AGENTS[lower as AgentId] ? (lower as AgentId) : null);
   if (exact || lower.length < 3) return exact;
@@ -2752,7 +2711,6 @@ export function resolveAgentName(input: string): AgentId | null {
   return hits.size === 1 ? hits.values().next().value! : null;
 }
 
-/** Check whether the input string matches any known agent name or alias. */
 export function isAgentName(input: string): boolean {
   return resolveAgentName(input) !== null;
 }
@@ -2763,6 +2721,7 @@ export function isAgentName(input: string): boolean {
 export function parseAgentVersionSpec(
   raw: string,
 ): { agent: AgentId; version?: string; label?: string } | { error: string } {
+  // This parses one run target, not the diagnostic selector grammar with @all/@latest.
   const labelParts = raw.split('#');
   if (labelParts.length > 2) {
     return { error: `Invalid agent spec '${raw}': at most one '#label' is allowed` };
@@ -2833,7 +2792,6 @@ export function warnAgentDeprecated(agent: AgentId): void {
   for (const line of lines) console.log(chalk.yellow(line));
 }
 
-/** Format an error message for an unrecognized agent name, listing valid options. */
 export function formatAgentError(agentName: string, validAgents: AgentId[] = ALL_AGENT_IDS): string {
   return `Unknown agent '${agentName}'. Valid agents: ${validAgents.join(', ')}`;
 }

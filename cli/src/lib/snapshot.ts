@@ -137,13 +137,14 @@ export async function computeSnapshot(
   // local: false (from --all-hosts) → full sessions --active fan-out.
   const localOnly = opts.hosts?.length ? false : opts.local !== false;
 
-  const [{ collectAgentsJson }, sessionsMod] = await Promise.all([
+  const [{ collectAgentsJson }, rosterMod, { serializeActiveSessionsForJson }] = await Promise.all([
     import('../commands/view.js'),
-    import('../commands/sessions.js'),
+    import('../commands/ps-roster.js'),
+    import('./session/active.js'),
   ]);
 
   const inventoryP = collectAgentsJson(opts.agent);
-  const sessionsP = sessionsMod.gatherActiveSessions({
+  const sessionsP = rosterMod.gatherActiveSessions({
     local: localOnly,
     hosts: opts.hosts,
   });
@@ -163,7 +164,7 @@ export async function computeSnapshot(
     syncP,
   ]);
 
-  const sessions = sessionsMod.serializeActiveSessionsForJson(
+  const sessions = serializeActiveSessionsForJson(
     gathered.sessions,
   ) as SnapshotSessionRow[];
 

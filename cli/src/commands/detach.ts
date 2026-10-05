@@ -16,9 +16,10 @@ import { writeDetachRecord } from '../lib/session/detached.js';
 import { getLogsDir } from '../lib/state.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { buildBackgroundArgv, resolveDetachTarget, resolveOne } from './detach-core.js';
+import { setHelpSections } from '../lib/help.js';
 
-export function registerDetachCommand(program: Command): void {
-  program
+export function registerDetachCommand(program: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+  const cmd = program
     .command('detach')
     .argument('<id>', 'Short or full id of the live session to background')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
@@ -26,6 +27,15 @@ export function registerDetachCommand(program: Command): void {
     .action(async (id: string, opts: { local?: boolean }) => {
       await detachAction(id, opts);
     });
+  setHelpSections(cmd, {
+    examples: `
+      # Background a live session: its terminal closes, the agent keeps working headless
+      agents ${group} detach 4b2f1a9c
+
+      # Bring it back into a terminal later
+      agents sessions resume 4b2f1a9c
+    `,
+  });
 }
 
 /** Stop a live agent's interactive process and tear down its mux: tmux sessions are killed by

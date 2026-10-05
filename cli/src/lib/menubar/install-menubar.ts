@@ -42,12 +42,10 @@ function onDarwin(): boolean {
   return process.platform === 'darwin';
 }
 
-/** ~/Library/Application Support/agents-cli */
 function installDir(): string {
   return path.join(os.homedir(), 'Library', 'Application Support', INSTALL_DIR_NAME);
 }
 
-/** ~/Library/Application Support/agents-cli/MenubarHelper.app */
 function installedAppPath(): string {
   return path.join(installDir(), APP_BUNDLE_NAME);
 }
@@ -84,11 +82,10 @@ function readInstalledMenubarStamp(): MenubarStamp | null {
   try {
     const parsed = JSON.parse(raw) as MenubarStamp;
     if (parsed && (parsed.source === 'release' || parsed.source === 'local')) return parsed;
-  } catch { /* fall through to legacy */ }
+  } catch {  }
   return { source: 'legacy', raw };
 }
 
-/** Executable inside the installed bundle. */
 function installedExecutablePath(): string {
   return path.join(installedAppPath(), 'Contents', 'MacOS', MENUBAR_HELPER_EXECUTABLE_NAME);
 }
@@ -102,22 +99,19 @@ export function resolveInstalledMenubarExecutable(): string | null {
   return fs.existsSync(exec) ? exec : null;
 }
 
-/** ~/Library/LaunchAgents/com.phnx-labs.agents-menubar.plist */
 function servicePlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${serviceLabel()}.plist`);
 }
 
-/** Sticky opt-out marker written by `agents menubar disable`. */
 function disabledSentinelPath(): string {
   return path.join(getRuntimeStateDir(), 'menubar.disabled');
 }
 
-/** True if the user explicitly disabled the menu bar (don't auto-enable on upgrade). */
 function menubarDisabledByUser(): boolean {
+  // The opt-out sentinel is sticky across upgrades until the user explicitly enables it.
   return fs.existsSync(disabledSentinelPath());
 }
 
-/** True if the launchd plist for the menu-bar service is installed. */
 function menubarServiceInstalled(): boolean {
   return onDarwin() && fs.existsSync(servicePlistPath());
 }
@@ -126,6 +120,7 @@ function menubarServiceInstalled(): boolean {
  * install's dist/ (Bun binary, virtual `/$bunfs/` URL); 4) the verified download cache for the
  * resolved release (tarball ships none, PHNX-4036), network-free. `shippedAppPath` is 1-3 only. */
 function sourceAppPath(): string | null {
+  // The independently versioned helper comes only from a shipped or verified cached bundle.
   const shipped = shippedAppPath();
   if (shipped) return shipped;
   const cached = cachedReleaseBundlePath();
@@ -140,7 +135,6 @@ function shippedAppPath(): string | null {
     candidates.push(path.join(here, APP_BUNDLE_NAME));
     candidates.push(path.resolve(here, '..', '..', '..', 'bin', APP_BUNDLE_NAME));
   } catch {
-    /* import.meta.url unavailable */
   }
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -156,7 +150,6 @@ function shippedAppPath(): string | null {
   return null;
 }
 
-/** Where a downloaded copy of the floor release sits once fetched and verified. */
 export function cachedFloorBundlePath(): string {
   return path.join(menubarHelperCacheDir(helperFloor('menubar')), APP_BUNDLE_NAME);
 }
@@ -172,19 +165,17 @@ export function cachedReleaseBundlePath(): string {
 async function menubarVersionToInstall(opts: { force?: boolean } = {}): Promise<string> {
   const resolved = await resolveMenubarVersion({ force: opts.force });
   const installed = readInstalledMenubarStamp();
+  // This independently versioned helper never rolls back to an older resolved floor.
   if (installed?.source === 'release' && compareVersions(installed.helperVersion, resolved) > 0) return installed.helperVersion;
   return resolved;
 }
 
-/** Resolve the compiled CLI entry (dist/index.js) so the helper can exec node directly. */
 function resolveCliEntry(): string | null {
   try {
     const here = path.dirname(fileURLToPath(import.meta.url));
-    // dist/lib/menubar/install-menubar.js -> dist/index.js
     const entry = path.resolve(here, '..', '..', 'index.js');
     if (fs.existsSync(entry)) return entry;
   } catch {
-    /* ignore */
   }
   return null;
 }
@@ -198,11 +189,9 @@ function refreshBundleIconRegistration(appPath: string): void {
   const bin = fs.existsSync(lsregister) ? lsregister : 'lsregister';
   const r = spawnSync(bin, ['-f', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
   if (r.error) {
-    /* lsregister missing / moved — advisory only, ignore. */
   }
 }
 
-/** True when the bundle carries a signature the kernel will accept at launch. */
 export function codesignVerifies(appPath: string): boolean {
   const r = spawnSync('codesign', ['--verify', '--strict', appPath], { stdio: ['ignore', 'ignore', 'ignore'] });
   return r.status === 0;
@@ -216,7 +205,6 @@ export function gatekeeperAssesses(appPath: string): boolean {
   return r.status === 0;
 }
 
-/** True when the bundle carries a Developer ID TeamIdentifier (not ad-hoc). */
 export function hasDeveloperIdSignature(appPath: string): boolean {
   const r = spawnSync('codesign', ['-dv', '--verbose=4', appPath], {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -238,14 +226,11 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean; sour
   const src = opts.sourceAppPath ?? sourceAppPath();
   if (!src) return null;
   const dest = installedAppPath();
-  // Heal an older install that was ad-hoc re-signed over a Developer ID source:
-  // that unstable identity made Accessibility re-prompt on every upgrade.
   const needsInstall = (): boolean => {
     if (opts.forceReinstall) return true;
     if (!fs.existsSync(dest)) return true;
     return hasDeveloperIdSignature(src) && !hasDeveloperIdSignature(dest);
   };
-  // Fast path: nothing to do.
   if (!needsInstall()) return installedExecutablePath();
   // Serialize the atomic install so concurrent `agents` invocations (darwin startup path) don't
   // race the swap or re-copy; that stampede transiently corrupted MenubarHelper.app and tripped
@@ -253,10 +238,7 @@ export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean; sour
   withInstallLock(dest, (heartbeat) => {
     if (!needsInstall()) return;
     copyAppBundle(src, dest);
-    heartbeat(); // cp -R done; keep the lock fresh across lsregister
-    // A fresh copy is exactly when the bundle's icon can be new (first install) or
-    // superseded (upgrade) — register it so LaunchServices knows the bundle and can
-    // resolve its AppIcon for the left-hand slot of daemon notifications.
+    heartbeat();
     refreshBundleIconRegistration(dest);
   });
   return installedExecutablePath();
@@ -337,9 +319,9 @@ export function restartMenubarLaunchAgent(
 
   const serviceTarget = `gui/${uid}/${serviceLabel()}`;
   const opts: { stdio: ['ignore', 'ignore', 'ignore'] } = { stdio: ['ignore', 'ignore', 'ignore'] };
-  try { exec('launchctl', ['bootout', serviceTarget], opts); } catch { /* may not be loaded */ }
-  try { exec('launchctl', ['bootstrap', `gui/${uid}`, plist], opts); } catch { /* best effort */ }
-  try { exec('launchctl', ['kickstart', serviceTarget], opts); } catch { /* best effort */ }
+  try { exec('launchctl', ['bootout', serviceTarget], opts); } catch {  }
+  try { exec('launchctl', ['bootstrap', `gui/${uid}`, plist], opts); } catch {  }
+  try { exec('launchctl', ['kickstart', serviceTarget], opts); } catch {  }
 }
 
 /** Forces a running helper off a just-swapped binary. `restartMenubarLaunchAgent` fails silently
@@ -397,16 +379,13 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
  * startup self-heal never routes here. */
 export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
   if (!onDarwin()) return false;
-  // A shipped bundle wins; otherwise fetch the newest published build (a cache
-  // hit when the background prefetch already has it), never below what runs.
   let src = shippedAppPath();
   if (!src) src = await downloadMenubarHelperApp(await menubarVersionToInstall());
   return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
 }
 
-/** Drop the sticky `agents menubar disable` sentinel. */
 function clearMenubarOptOut(): void {
-  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch { /* already gone */ }
+  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch {  }
 }
 
 /** Writes the plist for `exec`, restarts the job, stamps the installed version. Shared by
@@ -419,7 +398,7 @@ function installAndStartService(exec: string, stamp: MenubarStamp): void {
   restartMenubarLaunchAgent(process.getuid?.() ?? 0, plist);
   try {
     fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stamp));
-  } catch { /* best effort */ }
+  } catch {  }
 }
 
 /** Renders a stamp as a comparable version string. A local build reports `local`, which the
@@ -432,7 +411,6 @@ export function stampVersionLabel(stamp: MenubarStamp | null): string | null {
   return LOCAL_BUILD_LABEL;
 }
 
-/** What this install would put on disk right now, as a stamp. */
 function availableStamp(): MenubarStamp {
   const src = sourceAppPath();
   // No local bundle means the release path: the newest published helper this machine has resolved
@@ -441,7 +419,6 @@ function availableStamp(): MenubarStamp {
   return src ? stampFor(src) : { source: 'release', helperVersion: cachedMenubarVersion() };
 }
 
-/** The helper version this install would put on disk right now, for display. */
 function availableHelperLabel(): string {
   return stampVersionLabel(availableStamp()) ?? LOCAL_BUILD_LABEL;
 }
@@ -453,7 +430,7 @@ export function stampFor(resolvedSourceAppPath: string): MenubarStamp {
   const version = releaseVersionOfCachedBundle(resolvedSourceAppPath);
   if (version) return { source: 'release', helperVersion: version };
   let mtime = 0;
-  try { mtime = fs.statSync(resolvedSourceAppPath).mtimeMs; } catch { /* best effort */ }
+  try { mtime = fs.statSync(resolvedSourceAppPath).mtimeMs; } catch {  }
   return { source: 'local', sourceStamp: `${resolvedSourceAppPath}@${mtime}` };
 }
 
@@ -510,7 +487,6 @@ function menubarSetupStale(): boolean {
 export function menubarHelperPrefetchNeeded(opts: {
   darwin: boolean;
   disabledByUser: boolean;
-  /** `sourceAppPath()` found a bundle (shipped or already cached). */
   hasSource: boolean;
   serviceInstalled: boolean;
   stale: boolean;
@@ -554,7 +530,7 @@ export function menubarPlistNeedsRepoint(opts: {
   activeEntry: string | null;
   activeNode: string | null;
 }): boolean {
-  if (!opts.activeEntry) return false; // can't resolve the running install — don't churn
+  if (!opts.activeEntry) return false;
   if (opts.plistEntry !== opts.activeEntry) return true;
   // The entry path owns the helper. The same CLI may run through several valid Node interpreters;
   // repointing on those differences would replace and relaunch the shared helper on every
@@ -563,7 +539,6 @@ export function menubarPlistNeedsRepoint(opts: {
   return false;
 }
 
-/** Read one EnvironmentVariables value from the installed service plist. */
 function readPlistEnvValue(key: string): string | null {
   try {
     const xml = fs.readFileSync(servicePlistPath(), 'utf-8');
@@ -574,7 +549,6 @@ function readPlistEnvValue(key: string): string | null {
   }
 }
 
-/** True when the installed plist points at a different install than the active one. */
 function menubarSetupNeedsRepoint(): boolean {
   const plistNode = readPlistEnvValue('AGENTS_NODE');
   return menubarPlistNeedsRepoint({
@@ -595,49 +569,37 @@ export function disableMenubarService(): void {
   if (reg.allowed) {
     const uid = process.getuid?.() ?? 0;
     try { execFileSync('launchctl', ['bootout', `gui/${uid}/${serviceLabel()}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
-    catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+    catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch {  } }
   } else {
     process.stderr.write(`[agents] ${reg.reason}\n`);
   }
-  try { fs.unlinkSync(plist); } catch { /* already gone */ }
+  try { fs.unlinkSync(plist); } catch {  }
   try {
     fs.mkdirSync(path.dirname(disabledSentinelPath()), { recursive: true });
     fs.writeFileSync(disabledSentinelPath(), `disabled ${new Date().toISOString()}\n`);
-  } catch { /* best effort */ }
+  } catch {  }
 }
 
 /** Which install may (re)install the shared helper (#2109). Every agents-cli copy reads the others'
  * stamp as drift and recopies, killing the live helper in a loop. No content comparison (each
  * release is re-notarized): installed version decides; cooldown bounds legacy takeover. */
 export function mayInstallMenubarHelper(opts: {
-  /** `AGENTS_ENTRY` baked into the installed plist — the recorded owner. */
   plistEntry: string | null;
-  /** `resolveCliEntry()` for the install now running `agents`. */
   activeEntry: string | null;
-  /** Whether `plistEntry` still exists on disk. */
   ownerEntryExists: boolean;
-  /** The App Support helper executable is absent — a repair, not a contest. */
   helperExecMissing: boolean;
-  /** Installed copy is ad-hoc while the shipped source is Developer ID. */
   needsDevIdHeal: boolean;
-  /** Version stamped beside the installed helper, or null for legacy state. */
   installedVersion: string | null;
-  /** Version of the agents-cli install now attempting the heal. */
   currentVersion: string | null;
-  /** ms since the last self-heal reinstall, or null if none is recorded. */
   msSinceLastHeal: number | null;
-  /** How long a non-owner waits before it may take over. */
   cooldownMs: number;
-  /** This install's OWN shipped bundle is Developer-ID signed (not ad-hoc/dev). */
   sourceIsDeveloperId: boolean;
 }): boolean {
   // Repairs are never gated: a missing binary or broken signing identity leaves the menu bar dead
   // or re-prompting, and no other install can be fighting over a bundle that isn't there. Gating
   // them made the first version a silent stuck state.
   if (opts.helperExecMissing || opts.needsDevIdHeal) return true;
-  // Can't resolve which install we are (a dev/tsx run) — never churn the plist.
   if (!opts.activeEntry) return false;
-  // No owner recorded yet (fresh or pre-`AGENTS_ENTRY` plist) — adopt it.
   if (!opts.plistEntry) return true;
   // Owner entry gone: this install may adopt the helper, but a non-Developer-ID source may NOT
   // seize a healthy one (ad-hoc fails the Accessibility grant's code requirement and Gatekeeper,
@@ -667,7 +629,6 @@ export function mayInstallMenubarHelper(opts: {
  * installs gets their upgrade. */
 const MENUBAR_TAKEOVER_COOLDOWN_MS = 60 * 60 * 1000;
 
-/** Timestamp of the last self-heal reinstall, next to the version stamp. */
 function lastHealMarkerPath(): string {
   return path.join(installDir(), '.menubar-last-heal');
 }
@@ -686,10 +647,9 @@ function stampMenubarHeal(): void {
   try {
     fs.mkdirSync(installDir(), { recursive: true });
     fs.writeFileSync(lastHealMarkerPath(), String(Date.now()));
-  } catch { /* best effort */ }
+  } catch {  }
 }
 
-/** Whether this install may (re)install the helper (see `mayInstallMenubarHelper`). */
 function mayHealMenubar(needsDevIdHeal: boolean): boolean {
   const plistEntry = readPlistEnvValue('AGENTS_ENTRY');
   const src = sourceAppPath();
@@ -725,18 +685,12 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     const needsDevIdHeal = installedNeedsDevIdHeal();
     const stale = menubarSetupStale();
     if (!(stale || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
-    // ...but a copy that does not own the helper only gets to act on that drift
-    // once per cooldown. Without the gate every coexisting install recopies the
-    // bundle on every invocation, killing the live helper on a loop (#2109).
     if (!mayHealMenubar(needsDevIdHeal)) return;
     // Stamp only a heal that actually happened: `enableMenubarService` returns false on a
     // Gatekeeper failure, and stamping first would spend the shared cooldown on a no-op, locking
     // non-owners out for another hour with nothing fixed.
     if (startMenubarServiceFromSource({ clearOptOut: false })) {
       stampMenubarHeal();
-      // One-time: the ad-hoc -> Developer ID transition leaves a dead TCC row
-      // under the old identity (tccutil on zion reset it 11 times across
-      // machines that made this jump) — clear it so the fresh grant sticks.
       if (shouldMigrateMenubarTcc({ needsDevIdHeal, alreadyMigrated: menubarTccAlreadyMigrated() })) {
         resetMenubarAccessibilityTcc();
       }
@@ -748,11 +702,9 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
       }
     }
   } catch {
-    /* never block startup on the menu bar */
   }
 }
 
-/** True when App Support still has an ad-hoc copy but the npm bundle is Developer ID. */
 function installedNeedsDevIdHeal(): boolean {
   const src = sourceAppPath();
   if (!src || !fs.existsSync(installedAppPath())) return false;
@@ -760,8 +712,6 @@ function installedNeedsDevIdHeal(): boolean {
   return hasDeveloperIdSignature(src);
 }
 
-/** Marker written once the one-time ad-hoc -> Developer ID TCC migration has
- *  run on this machine, next to the version/heal stamps. */
 function tccMigrationMarkerPath(): string {
   return path.join(installDir(), '.menubar-tcc-migrated');
 }
@@ -788,26 +738,21 @@ export function resetMenubarAccessibilityTcc(
 ): void {
   try {
     exec('tccutil', ['reset', 'Accessibility', SERVICE_LABEL_BASE], { stdio: ['ignore', 'ignore', 'ignore'] });
-  } catch { /* best effort — a missing/failing tccutil must not block the heal */ }
+  } catch {  }
   try {
     fs.mkdirSync(installDir(), { recursive: true });
     fs.writeFileSync(tccMigrationMarkerPath(), new Date().toISOString());
-  } catch { /* best effort */ }
+  } catch {  }
 }
 
-/** One step of `agents menubar setup`, and how it came out. */
 export interface SetupStep {
-  /** What was configured. */
   name: string;
-  /** `ok` — already correct or now correct; `changed` — this run fixed it;
-   *  `failed` — could not be configured (setup reports and exits nonzero). */
   outcome: 'ok' | 'changed' | 'failed';
   detail: string;
 }
 
 export interface SetupResult {
   steps: SetupStep[];
-  /** Every step landed on `ok`/`changed` and exactly one helper is running. */
   configured: boolean;
   status: MenubarStatus;
 }
@@ -820,7 +765,7 @@ export function processesToEnd(status: Pick<MenubarStatus, 'instances' | 'foreig
 }
 
 function endProcess(pid: number): void {
-  try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+  try { process.kill(pid, 'SIGTERM'); } catch {  }
 }
 
 /** `agents menubar setup`: configures the menu bar end-to-end and idempotently: one status item
@@ -852,9 +797,6 @@ export async function runMenubarSetup(): Promise<SetupResult> {
     }
   }
 
-  // 3 before 1: end the running copies BEFORE swapping the bundle underneath
-  // them, so no helper keeps a status item alive on a binary that no longer
-  // exists on disk.
   const doomed = processesToEnd(before);
   for (const p of doomed) endProcess(p.pid);
   if (doomed.length > 1) {
@@ -891,17 +833,12 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   }
   step('signature', 'ok', 'valid + notarized');
 
-  // Clear the sticky opt-out: running `setup` is an explicit request for the
-  // menu bar, so a stale `menubar disable` must not silently win.
   clearMenubarOptOut();
 
   installAndStartService(exec, stampFor(src ?? undefined));
   step('login item', before.serviceInstalled ? 'ok' : 'changed',
     `${serviceLabel()} — starts at login, restarts if it dies`);
 
-  // launchd's bootstrap+kickstart is asynchronous; give the status item a beat
-  // to claim the lock before counting instances, or `setup` reports zero on a
-  // machine that is in fact coming up correctly.
   const after = waitForSingleInstance();
   if (after.instances.length === 1 && after.foreignInstances.length === 0) {
     step('single instance', 'ok', `pid ${after.instances[0].pid}`);
@@ -931,14 +868,11 @@ function waitForSingleInstance(): MenubarStatus {
   return status;
 }
 
-/** A live MenubarHelper process: its pid and the executable it is running. */
 export interface MenubarProcess {
   pid: number;
   executable: string;
 }
 
-/** Parse `ps -axo pid=,<field>=` into pid -> field. The field is the rest of the
- *  line, so a path containing spaces (App Support does) survives intact. */
 function parsePsLines(psOutput: string): Map<number, string> {
   const out = new Map<number, string>();
   for (const line of psOutput.split('\n')) {
@@ -961,8 +895,6 @@ export function classifyMenubarProcesses(
   const foreign: MenubarProcess[] = [];
   for (const [pid, executable] of parsePsLines(commOutput)) {
     if (path.basename(executable) !== MENUBAR_HELPER_EXECUTABLE_NAME) continue;
-    // `--notify` is a one-shot that posts a notification and exits; it runs the
-    // installed binary but never claims the status item or the chords.
     if ((commands.get(pid) || '').includes('--notify')) continue;
     if (executable === installedExec) own.push({ pid, executable });
     else foreign.push({ pid, executable });
@@ -974,23 +906,17 @@ export interface MenubarStatus {
   platform: string;
   source: string | null;
   installedApp: string | null;
-  /** The installed HELPER's version — not the CLI's. `local` for a dev build. */
   installedVersion: string | null;
-  /** The helper version this install would put on disk right now. */
   currentVersion: string;
-  /** The CLI's own version, reported separately so the two are never conflated. */
   cliVersion: string;
   stale: boolean;
   serviceInstalled: boolean;
   running: boolean;
-  /** Live processes of the INSTALLED bundle. More than one is the duplicate. */
   instances: MenubarProcess[];
-  /** Live MenubarHelper processes that are NOT the installed bundle. */
   foreignInstances: MenubarProcess[];
   disabledByUser: boolean;
 }
 
-/** Live MenubarHelper processes, split by whether they are the installed bundle. */
 function liveMenubarProcesses(): { own: MenubarProcess[]; foreign: MenubarProcess[] } {
   if (!onDarwin()) return { own: [], foreign: [] };
   const ps = (format: string) =>
@@ -1021,30 +947,19 @@ export function getMenubarStatus(): MenubarStatus {
   };
 }
 
-/** Read-only diagnostic for `agents menubar doctor` — probes, never mutates. */
 export interface MenubarDoctorReport {
   platform: string;
   installPath: string | null;
-  /** The installed HELPER's version — not the CLI's. `local` for a dev build. */
   installedVersion: string | null;
-  /** The helper version this install would put on disk right now. */
   currentVersion: string;
-  /** The CLI's own version, reported separately so the two are never conflated. */
   cliVersion: string;
-  /** installed helper vs available helper. Never compares the CLI's version. */
   versionMatches: boolean;
-  /** `unknown` on non-darwin or when nothing is installed to inspect. */
   signingIdentity: 'developer-id' | 'ad-hoc' | 'unknown';
   running: boolean;
-  /** A live helper pid started before the installed bundle's on-disk mtime —
-   *  it is running the binary that has since been swapped underneath it. */
   staleRunningProcess: PidStaleness[];
-  /** Grant likely needs to be re-made: an ad-hoc identity breaks on every
-   *  update, or a live process is confirmed to predate the current bundle. */
   accessibilityHintNeeded: boolean;
 }
 
-/** One live pid checked against the bundle's on-disk mtime. */
 export interface PidStaleness {
   pid: number;
   stale: boolean;
@@ -1057,7 +972,6 @@ export function isMenubarProcessStaleAgainstBundle(pidStartedAtMs: number, bundl
   return pidStartedAtMs < Math.floor(bundleMtimeMs / 1000) * 1000;
 }
 
-/** Wall-clock start time of a live pid via `ps`, or null if it can't be read. */
 function pidStartTimeMs(pid: number): number | null {
   const r = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -1106,7 +1020,7 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
             : { pid: p.pid, stale: isMenubarProcessStaleAgainstBundle(startedAt, bundleMtimeMs) };
         })
         .filter((p): p is PidStaleness => p !== null);
-    } catch { /* exec vanished mid-check — report no staleness rather than throw */ }
+    } catch {  }
   }
 
   return {
@@ -1115,9 +1029,6 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
     installedVersion: status.installedVersion,
     currentVersion: status.currentVersion,
     cliVersion: status.cliVersion,
-    // Two local builds are not a version "mismatch" — neither carries a version.
-    // Reporting one told the user to run `setup` for a difference that does not
-    // exist, which is what made the old hint fire forever.
     versionMatches:
       status.installedVersion === LOCAL_BUILD_LABEL && status.currentVersion === LOCAL_BUILD_LABEL
         ? true
@@ -1129,7 +1040,6 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
   };
 }
 
-/** Outcome of one auto-update pass (`updateMenubarHelperIfNewer`). */
 interface MenubarUpdateResult {
   outcome: 'updated' | 'current' | 'skipped' | 'failed';
   installed: string | null;
@@ -1159,7 +1069,6 @@ export function menubarUpdateSkipReason(opts: {
   return null;
 }
 
-/** Pure (no I/O): what the pass does given the installed and available versions. */
 export function menubarUpdateOutcome(installed: string, available: string): 'current' | 'updated' {
   return compareVersions(available, installed) > 0 ? 'updated' : 'current';
 }
@@ -1190,7 +1099,7 @@ export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force
     const src = await downloadMenubarHelperApp(available);
     const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
     if (!exec) return { outcome: 'failed', installed, available, detail: 'the verified bundle could not be installed' };
-    try { fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src))); } catch { /* best effort */ }
+    try { fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src))); } catch {  }
     stampMenubarHeal();
     restartMenubarHelperAfterSwap(process.getuid?.() ?? 0, liveMenubarProcesses().own);
     return { outcome: 'updated', installed, available, detail: `AGI Menu ${installed} → ${available}` };

@@ -311,3 +311,7 @@ testless:
   - scripts/ci-runner/cli.ts
   - scripts/ci-runner/janitor.sh
   - scripts/ci-runner/src/types.ts
+  # Live scenarios spawn the installed `agents` binary. The required check runs
+  # state-file.test.ts for this package; these files cannot run on the hosted runner.
+  - packages/session-tracker/tests/scenarios/cold-spawn.test.ts
+  - packages/session-tracker/tests/scenarios/kill-restart.test.ts

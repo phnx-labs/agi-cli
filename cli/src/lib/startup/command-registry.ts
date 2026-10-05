@@ -8,7 +8,7 @@ const LOADED_COMMAND_NAMES = [
   'refresh-rules', 'factory', 'insights', 'trace', 'reminders',
   'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
-  'teams', 'cloud', 'message', 'send', 'feed',
+  'teams', 'cloud', 'message', 'ps', 'send', 'feed',
   'mailboxes', 'mailbox', 'webhooks',
   'humans', 'daemon', 'traces',
 ] as const;

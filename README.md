@@ -50,6 +50,7 @@
 npm install -g @phnx-labs/agents-cli   # or: curl -fsSL agi-cli.sh | sh
 agents setup                           # first-time setup, or re-open the capability hub
 agents setup status                    # readiness for browser, computer, fleet, and more
+agents setup tools                     # install/upgrade the standalone sessions, browser, secrets, computer, term CLIs to their pins
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
@@ -360,7 +361,17 @@ Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` wit
 
 ### Live state, and catching up fast
 
-Search is the past tense. `--active` is the present -- it infers what each running session is *doing right now* from the tail of its transcript.
+Search is the past tense. `agents ps` is the present -- it infers what each running session is *doing right now* from the tail of its transcript, on this machine and every reachable device.
+
+```bash
+agents ps                           # the live roster (opens the picker on a TTY)
+agents ps --json --local            # this machine only, machine-readable
+agents ps --json -D box-a           # one peer, over SSH
+agents ps --status waiting          # only agents waiting on you (exit 1 if any)
+agents ps stop|focus|detach|migrate <id>   # act on one running agent
+```
+
+`agents sessions --active` and its status flags still answer with the same roster; `agents ps` is where the live verbs live from here on ([PHNX-4227](https://linear.app/getrush/issue/PHNX-4227)).
 
 ```bash
 agents sessions --active            # every live run across the fleet, with state
@@ -495,6 +506,12 @@ agents message tester "also cover the null case"
 ```
 
 `agents message <target> <text>` reaches any running agent by name or id -- a live local run, a teammate, a loop agent, or a cloud task -- and the text lands at its next tool call. Tag the sender with `--from <who>`.
+
+To type straight into an agent's terminal instead -- a "continue" for one that stalled at a prompt -- use the `session` channel of `agents send`. The id is anything `agents ps` shows (session id or prefix, the `<shortid>` of an `ag-<agent>-<shortid>` tmux name, or a `%pane`); add `--device <name>` for a session on another box.
+
+```bash
+agents send --channel session --to 4b2f1a9c --text "continue"
+```
 
 ### See every open block
 
@@ -1256,7 +1273,7 @@ Secrets are the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). agi-cli
 # Install (pick one — no extra env vars)
 agents clis install secrets
 # or
-npm i -g @phnx-labs/secrets-cli@0.1.2
+npm i -g @phnx-labs/secrets-cli@0.1.8
 # or, after agents is installed:
 agents setup secrets
 ```

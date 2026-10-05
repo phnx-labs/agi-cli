@@ -11,19 +11,8 @@ import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type Active
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 export { looksLikeTmuxAlias, resolveTmuxAliasState, shouldAttachLocalTmuxAliasBeforeFleet, type TmuxAliasState } from '../lib/session/local-tmux-attach.js';
-import {
-  buildSessionRecoveryCommand,
-  filterSessionsByQuery,
-  formatLiveStatusHeadline,
-  formatPickerLabel,
-  isRunningLiveSession,
-  pickerColumnsFor,
-  resumeSessionInPlace,
-  resolveSessionMetadataValue,
-  resolveSessionAgentName,
-  requestedLiveStatuses,
-  type LiveStatusFilter,
-} from './sessions.js';
+import { buildSessionRecoveryCommand, filterSessionsByQuery, formatLiveStatusHeadline, formatPickerLabel, isRunningLiveSession, pickerColumnsFor, resumeSessionInPlace, resolveSessionMetadataValue, resolveSessionAgentName } from './sessions.js';
+import { requestedLiveStatuses, type LiveStatusFilter } from './ps-roster.js';
 import { resolveBackend, CONFIRM_THRESHOLD } from './sessions-resume.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { discoverSessions, resolveIndexedSessionById } from '../lib/session/discover.js';
@@ -122,12 +111,16 @@ function statusWord(status: LiveStatusFilter): string {
   return status === 'orphaned' ? 'orphaned' : status;
 }
 
-export function registerFocusCommand(program: Command): void {
+export function registerFocusCommand(
+  program: Command,
+  opts: { group?: 'sessions' | 'ps'; hidden?: boolean } = {},
+): void {
+  const group = opts.group ?? 'sessions';
   const cmd = program
     // Hidden but deliberately not warned: `sessions resume <id>` spawns `agents sessions focus
     // <id>` (buildSessionLifecycleArgs), so a deprecation notice would print on every resume. Do
     // not add a warning without removing that delegation.
-    .command('focus', { hidden: true })
+    .command('focus', { hidden: opts.hidden ?? true })
     .argument('[selector]', 'Session id/prefix, agent@version, or topic/path search')
     .option('--launch-id <id>', 'Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine\'s hook records)')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
@@ -173,22 +166,22 @@ export function registerFocusCommand(program: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Focus a session directly (attach a living pane, otherwise recover it)
-      agents sessions focus a1b2c3d4
+      agents ${group} focus a1b2c3d4
 
       # Multi-select live sessions; each opens as a tab in this terminal
-      agents sessions focus
+      agents ${group} focus
 
       # Scope the picker to one device's orphaned sessions
-      agents sessions focus --orphan --device yosemite-s0
+      agents ${group} focus --orphan --device yosemite-s0
 
       # Resolve latest on yosemite-s0, then pick from that version's sessions
-      agents sessions focus claude@latest --device yosemite-s0
+      agents ${group} focus claude@latest --device yosemite-s0
 
       # Attach only — refuse if nothing is joinable
-      agents sessions focus a1b2c3d4 --attach-only
+      agents ${group} focus a1b2c3d4 --attach-only
 
       # Pick from live sessions on this machine only
-      agents sessions focus --local
+      agents ${group} focus --local
     `,
     notes: `
       - space toggles a session, enter opens the selected set; a single check + enter opens just one.

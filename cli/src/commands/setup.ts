@@ -21,6 +21,7 @@ import { registerSetupBrowserCommand, runBrowserWizard } from './setup-browser.j
 import { registerSetupComputerCommand, runComputerWizard } from './setup-computer.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
+import { registerSetupToolsCommand } from './setup-tools.js';
 import { registerSetupTermCommand, runTermWizard, isTermCliInstalled } from './setup-term.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupAccountsCommand, runAccountsSetupWizard } from './setup-accounts.js';
@@ -415,6 +416,7 @@ export function registerSetupCommand(program: Command): void {
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
   registerSetupTermCommand(setupCmd);
+  registerSetupToolsCommand(setupCmd);
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
   registerSetupAccountsCommand(setupCmd);
@@ -479,6 +481,7 @@ export function registerSetupCommand(program: Command): void {
       agents setup computer
       agents setup secrets
       agents setup term
+      agents setup tools
       agents setup accounts
       agents setup fleet
       agents setup watchdog

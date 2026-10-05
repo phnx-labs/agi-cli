@@ -13,17 +13,15 @@ import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
  * `fd::`) run arbitrary commands at clone time, `file://`/`git://` are unauthenticated, and a
  * leading `-` is parsed as a flag (option injection). */
 export function assertSafeGitTransport(source: string): void {
+  // Only HTTPS, SSH/SCP, and local paths reach git; remote helpers can execute commands.
   const s = source.trim();
 
-  // A leading dash is interpreted by git as an option, not a source.
   if (s.startsWith('-')) {
     throw new Error(
       `Refusing to use git source "${source}": a source starting with "-" is interpreted as a git option.`,
     );
   }
 
-  // Remote-helper transports look like "<name>::…" (ext::, fd::, …). SCP-style
-  // "git@host:path" uses a single ":" and is intentionally not matched here.
   const helper = s.match(/^[a-zA-Z][a-zA-Z0-9+.-]*::/);
   if (helper) {
     throw new Error(
@@ -31,7 +29,6 @@ export function assertSafeGitTransport(source: string): void {
     );
   }
 
-  // Explicit "<scheme>://" URLs: permit only https and ssh.
   const scheme = s.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
   if (scheme) {
     const name = scheme[1].toLowerCase();
@@ -41,7 +38,6 @@ export function assertSafeGitTransport(source: string): void {
       );
     }
   }
-  // No scheme -> SCP-style SSH ("git@host:path") or a local path; both safe.
 }
 
 /** Validates a branch name before `git push`/`git pull`: a leading `-` is parsed as an option
@@ -69,6 +65,7 @@ export async function pushOrigin(
   branch: string,
   targetBranch?: string,
 ): Promise<void> {
+  // Branch validation and raw `--` jointly prevent option injection; keep them paired.
   assertValidBranchName(branch);
   if (targetBranch && targetBranch !== branch) {
     assertValidBranchName(targetBranch);
@@ -82,6 +79,7 @@ export async function pushOrigin(
  * commit/checkout/merge, and a repo added via `agents repo add` is untrusted, so auto-install
  * would be remote code execution; explicit opt-in via `AGENTS_ENABLE_GITHOOKS=1`. */
 function githooksEnabled(): boolean {
+  // Cloned hooks execute code, so installation is explicit opt-in for trusted repos.
   const v = process.env.AGENTS_ENABLE_GITHOOKS;
   return v === '1' || v === 'true';
 }
@@ -101,6 +99,7 @@ function installGithooksSymlinks(repoDir: string): void {
     return;
   }
 
+  // Repo-local symlinks preserve the sandbox boundary; never set core.hooksPath.
   const hooksDir = path.join(repoDir, '.git', 'hooks');
   fs.mkdirSync(hooksDir, { recursive: true });
 
@@ -117,13 +116,11 @@ function installGithooksSymlinks(repoDir: string): void {
     try {
       fs.symlinkSync(target, dest);
     } catch (err) {
-      // Windows requires Developer Mode or elevated privileges for symlinks; skip gracefully.
       if ((err as NodeJS.ErrnoException).code !== 'EPERM') throw err;
     }
   }
 }
 
-/** Parsed representation of a git source string (GitHub, generic URL, or local path). */
 interface GitSource {
   type: 'github' | 'url' | 'local';
   url: string;
@@ -132,14 +129,11 @@ interface GitSource {
 
 /** Parses a source string into a GitSource. */
 export function parseSource(source: string): GitSource {
-  // Split off @ref suffix (but not from URLs with @ in them like git@)
   let ref: string | undefined;
   let cleanSource = source;
 
-  // Handle @ref suffix (only if it's at the end and not part of git@)
   const atIndex = source.lastIndexOf('@');
   if (atIndex > 0 && !source.startsWith('git@') && !source.slice(0, atIndex).includes('://')) {
-    // Check if what's after @ looks like a ref (no slashes, no dots except in branch names)
     const possibleRef = source.slice(atIndex + 1);
     if (possibleRef && !possibleRef.includes('/') && !possibleRef.includes(':')) {
       ref = possibleRef;
@@ -147,7 +141,6 @@ export function parseSource(source: string): GitSource {
     }
   }
 
-  // gh:owner/repo shorthand
   if (cleanSource.startsWith('gh:')) {
     const repo = cleanSource.slice(3).replace(/\.git$/, '');
     return {
@@ -157,7 +150,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // git@github.com:owner/repo.git (SSH URL)
   if (cleanSource.startsWith('git@github.com:')) {
     const repo = cleanSource.slice(15).replace(/\.git$/, '');
     return {
@@ -167,7 +159,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // github.com:owner/repo.git (SSH-style without git@)
   if (cleanSource.startsWith('github.com:')) {
     const repo = cleanSource.slice(11).replace(/\.git$/, '');
     return {
@@ -177,7 +168,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // github.com/owner/repo (domain without protocol)
   if (cleanSource.startsWith('github.com/')) {
     const repo = cleanSource.slice(11).replace(/\.git$/, '');
     return {
@@ -187,9 +177,7 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // https:// or http:// URLs
   if (cleanSource.startsWith('http://') || cleanSource.startsWith('https://')) {
-    // Check if it's a GitHub URL
     const githubMatch = cleanSource.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+?)(?:\.git)?$/);
     if (githubMatch) {
       return {
@@ -199,8 +187,6 @@ export function parseSource(source: string): GitSource {
       };
     }
 
-    // Generic URL -- must be an encrypted, authenticated transport
-    // (rejects http://, file://, git://, ext::, and leading "-").
     assertSafeGitTransport(cleanSource);
     return {
       type: 'url',
@@ -209,8 +195,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // Local path (absolute or relative). On Windows also recognize drive-letter
-  // (C:\…) and UNC (\\…) roots, which the POSIX prefixes miss.
   if (
     cleanSource.startsWith('/') || cleanSource.startsWith('./') || cleanSource.startsWith('../')
     || (IS_WINDOWS && isWindowsAbsolutePath(cleanSource))
@@ -223,7 +207,6 @@ export function parseSource(source: string): GitSource {
     }
   }
 
-  // Check if it exists as a local path (could be a directory name without ./)
   if (fs.existsSync(cleanSource)) {
     return {
       type: 'local',
@@ -231,7 +214,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // Bare owner/repo format (assumes GitHub)
   if (cleanSource.includes('/') && !cleanSource.includes(':') && !cleanSource.includes('.')) {
     const repo = cleanSource.replace(/\.git$/, '');
     return {
@@ -241,7 +223,6 @@ export function parseSource(source: string): GitSource {
     };
   }
 
-  // Last attempt: treat as GitHub if it looks like owner/repo (with possible .git)
   if (/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(cleanSource)) {
     const repo = cleanSource.replace(/\.git$/, '');
     return {
@@ -254,7 +235,6 @@ export function parseSource(source: string): GitSource {
   throw new Error(`Invalid source: ${source}. Supported formats: gh:owner/repo, owner/repo, github.com/owner/repo, https://github.com/owner/repo, or local path`);
 }
 
-/** Clone a remote repo or pull updates if it already exists locally. */
 async function cloneOrPull(
   source: GitSource,
   targetDir: string
@@ -290,7 +270,6 @@ async function cloneOrPull(
   return { isNew: true, commit: log.latest?.hash.slice(0, 8) || 'unknown' };
 }
 
-/** Clone a repository from a source string, returning the local path and commit hash. */
 export async function cloneRepo(source: string): Promise<{
   localPath: string;
   commit: string;
@@ -316,14 +295,12 @@ export async function cloneRepo(source: string): Promise<{
   };
 }
 
-/** Get the short commit hash (8 chars) of the latest commit in a repo. */
 export async function getRepoCommit(repoPath: string): Promise<string> {
   try {
     const git = simpleGit(repoPath);
     const log = await git.log({ maxCount: 1 });
     return log.latest?.hash.slice(0, 8) || 'unknown';
   } catch {
-    /* not a git repo or no commits */
     return 'unknown';
   }
 }
@@ -337,9 +314,6 @@ interface RepoStateSnapshot {
   dirty: boolean;
 }
 
-/** Read {@link RepoStateSnapshot} for `repoPath` using plumbing commands so the
- *  result is stable across git versions and never mutates the tree. Returns null
- *  when the path is not a git worktree. */
 export function readRepoState(repoPath: string): RepoStateSnapshot | null {
   const runGit = (args: string[]): string | null => {
     try {
@@ -352,11 +326,9 @@ export function readRepoState(repoPath: string): RepoStateSnapshot | null {
       return null;
     }
   };
-  // Gate on a real worktree first; `rev-parse --is-inside-work-tree` prints
-  // `true` only inside one, and returns non-zero (→ null) otherwise.
   if (runGit(['rev-parse', '--is-inside-work-tree']) !== 'true') return null;
   const branchRaw = runGit(['rev-parse', '--abbrev-ref', 'HEAD']);
-  const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : null; // detached → null
+  const branch = branchRaw && branchRaw !== 'HEAD' ? branchRaw : null;
   const headRaw = runGit(['rev-parse', 'HEAD']);
   const head = headRaw ? headRaw.slice(0, 8) : null;
   const porcelain = runGit(['status', '--porcelain']);
@@ -364,9 +336,6 @@ export function readRepoState(repoPath: string): RepoStateSnapshot | null {
   return { branch, head, dirty };
 }
 
-/** Memoized per repoRoot — a resolveResource()/listResources()/plugin-discovery
- *  call that touches many resources from the SAME DotAgents repo must not shell
- *  out to git once per resource. */
 const _snapshotShaCache = new Map<string, string | undefined>();
 
 /** The short HEAD sha of the repo at `repoRoot`, for provenance of which commit a
@@ -387,14 +356,10 @@ export function resolveSnapshotSha(repoRoot: string): string | undefined {
   return sha;
 }
 
-/** Test seam: clear the memoized snapshot-sha cache between test cases. */
 export function _resetSnapshotShaCacheForTest(): void {
   _snapshotShaCache.clear();
 }
 
-/**
- * Get the remote URL for origin in a git repo.
- */
 export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   try {
     const git = simpleGit(repoPath);
@@ -402,7 +367,6 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
     const origin = remotes.find(r => r.name === 'origin');
     return origin?.refs?.fetch || origin?.refs?.push || null;
   } catch {
-    /* not a git repo or no remotes */
     return null;
   }
 }
@@ -413,14 +377,12 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
 export function canonicalGitRemote(url: string): string {
   const canonical = url
     .trim()
-    .replace(/\/+$/, '') // trailing slashes first, so a trailing-slash-after-.git still strips
+    .replace(/\/+$/, '')
     .replace(/\.git$/i, '')
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '') // strip scheme (https://, ssh://, git://)
-    .replace(/^[^@/]+@/, '') // strip user@ (git@, ssh user)
-    .replace(':', '/') // scp-style host:owner/repo → host/owner/repo (first colon only)
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+    .replace(/^[^@/]+@/, '')
+    .replace(':', '/')
     .toLowerCase();
-  // Fold a renamed repo's old name onto its new one so both compare equal
-  // everywhere (see RENAMED_REMOTE_ALIASES).
   return RENAMED_REMOTE_ALIASES[canonical] ?? canonical;
 }
 
@@ -444,12 +406,10 @@ export function isSystemRepoRemote(remote: string | null | undefined): boolean {
  * `AGENTS_SYSTEM_REPO` override. Every system-repo auto-pull checks this: its hooks run as shell,
  * so fast-forwarding from a repointed origin or fork is remote code execution (PHNX-2957). */
 export function isExpectedSystemRepoRemote(remote: string | null | undefined): boolean {
+  // Automatic pulls are trusted only from the canonical or operator-selected system origin.
   if (!remote) return false;
   const override = process.env.AGENTS_SYSTEM_REPO?.trim();
   if (override) {
-    // The override is a source spec (`gh:owner/repo`) or a full clone URL. Match
-    // the GitHub-slug form the setup path clones, and the raw spec itself, so a
-    // non-GitHub override URL still verifies.
     return (
       sameGitRemote(remote, `https://github.com/${systemRepoSlug(override)}`) ||
       sameGitRemote(remote, override.replace(/^gh:/, ''))
@@ -458,17 +418,14 @@ export function isExpectedSystemRepoRemote(remote: string | null | undefined): b
   return isSystemRepoRemote(remote);
 }
 
-/** True when two git remote URLs point at the same repo across transport forms. */
 export function sameGitRemote(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
   return canonicalGitRemote(a) === canonicalGitRemote(b);
 }
 
-/** Result of {@link commitAndPush}. */
 type CommitAndPushResult = {
   success: boolean;
   error?: string;
-  /** Human detail for success: "already up to date", "pushed abc..def", "committed and pushed …". */
   detail?: string;
   branch?: string;
   committed?: boolean;
@@ -488,8 +445,6 @@ export async function commitAndPush(
     const branch = status.current || 'main';
     assertValidBranchName(branch);
     if (targetBranch) assertValidBranchName(targetBranch);
-    // The branch the commit ends up on remotely — the checked-out branch unless
-    // an explicit target was requested.
     const pushedBranch = targetBranch || branch;
 
     let committed = false;
@@ -501,9 +456,6 @@ export async function commitAndPush(
     }
 
     const ahead = status.ahead ?? 0;
-    // A same-branch push short-circuits when there is nothing new; a push to a
-    // different target branch must still run even from a clean, non-ahead tree,
-    // since the target may not carry these commits yet.
     if (!committed && ahead === 0 && pushedBranch === branch) {
       return {
         success: true,
@@ -514,12 +466,10 @@ export async function commitAndPush(
       };
     }
 
-    // Capture remote tip before push for a real ref range in the detail string.
     let before = '';
     try {
       before = (await git.raw(['rev-parse', '--short=8', `origin/${pushedBranch}`])).trim();
     } catch {
-      /* origin/<branch> may not exist yet (first push) */
     }
 
     await pushOrigin(git, branch, targetBranch);
@@ -555,16 +505,12 @@ export async function commitAndPush(
   }
 }
 
-/**
- * Check if repo has uncommitted changes.
- */
 export async function hasUncommittedChanges(repoPath: string): Promise<boolean> {
   try {
     const git = simpleGit(repoPath);
     const status = await git.status();
     return status.files.length > 0;
   } catch {
-    /* not a git repo */
     return false;
   }
 }
@@ -591,9 +537,6 @@ export async function getMainRepoRoot(dir: string): Promise<string> {
   return toNativePath(path.dirname(common.trim()));
 }
 
-/**
- * Initialize a git repo in an existing directory.
- */
 export async function initRepo(dir: string): Promise<void> {
   const git = simpleGit(dir);
   await git.init();
@@ -615,7 +558,6 @@ export async function cloneIntoExisting(
 
   try {
     assertSafeGitTransport(parsed.url);
-    // Clone to temp directory
     fs.mkdirSync(tempDir, { recursive: true });
     await git.clone(parsed.url, tempDir);
 
@@ -624,7 +566,6 @@ export async function cloneIntoExisting(
       await repoGit.checkout(parsed.ref);
     }
 
-    // Move .git directory to target
     const gitDir = path.join(tempDir, '.git');
     const targetGitDir = path.join(targetDir, '.git');
     if (fs.existsSync(targetGitDir)) {
@@ -632,10 +573,8 @@ export async function cloneIntoExisting(
     }
     fs.renameSync(gitDir, targetGitDir);
 
-    // Clean up temp
     fs.rmSync(tempDir, { recursive: true });
 
-    // Checkout tracked files from git (restores repo files, respects .gitignore)
     const targetGit = simpleGit(targetDir);
     await targetGit.checkout('.');
 
@@ -648,7 +587,6 @@ export async function cloneIntoExisting(
       commit: log.latest?.hash.slice(0, 8) || 'unknown',
     };
   } catch (err) {
-    // Clean up temp on error
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true });
     }
@@ -677,7 +615,7 @@ export async function adoptRepo(
     let cloneUrl: string;
     let ref: string | undefined;
     if (isSsh) {
-      cloneUrl = trimmed; // SSH stays SSH; clone the remote's default HEAD.
+      cloneUrl = trimmed;
     } else {
       const parsed = parseSource(source);
       if (parsed.type === 'local') {
@@ -688,7 +626,6 @@ export async function adoptRepo(
     }
     assertSafeGitTransport(cloneUrl);
     fs.mkdirSync(targetDir, { recursive: true });
-    // Idempotency: clear a stale temp left by an interrupted prior run.
     if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
 
     // Clone to temp, then move its .git in so index equals remote HEAD.
@@ -701,9 +638,6 @@ export async function adoptRepo(
 
     const targetGit = simpleGit(targetDir);
 
-    // Back up any TRACKED file whose local copy differs from the remote before the
-    // checkout clobbers it. `diff --name-only` (worktree vs the moved-in index) is
-    // exactly that set; a deleted-locally file has nothing to preserve.
     const diff = await targetGit.diff(['--name-only']);
     const clobbered = diff.split('\n').map((s) => s.trim()).filter(Boolean);
     let backupDir: string | undefined;
@@ -720,8 +654,6 @@ export async function adoptRepo(
       }
     }
 
-    // Materialize the remote's tracked files (respects .gitignore, so
-    // .cache/.history/.system stay put), overwriting the now-backed-up locals.
     await targetGit.checkout('.');
     installGithooksSymlinks(targetDir);
 
@@ -741,7 +673,6 @@ function userRepoRemoteRecordPath(dir: string): string {
   return path.join(dir, '.history', 'user-repo-remote.json');
 }
 
-/** Read an origin remote URL from a git dir, or null when there is none. */
 export function readOriginUrl(dir: string): string | null {
   if (!isGitRepo(dir)) return null;
   try {
@@ -762,7 +693,6 @@ export function recordUserRepoRemote(dir: string, url: string): void {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ url }, null, 2) + '\n', { mode: 0o600 });
   } catch {
-    /* runtime cache write is best-effort */
   }
 }
 
@@ -781,7 +711,6 @@ export function resolveUserRepoRemoteUrl(dir: string): string | null {
     const url = (JSON.parse(raw) as { url?: string }).url?.trim();
     if (url) return url;
   } catch {
-    /* no record yet */
   }
   return null;
 }
@@ -801,9 +730,7 @@ export function isStaleAgentsYamlStub(local: string, committed: string): boolean
 interface AdoptInPlaceResult {
   success: boolean;
   commit: string;
-  /** Tracked files that were absent locally and materialized from origin/main. */
   materialized: number;
-  /** True when the stale-stub top-level agents.yaml was restored from origin. */
   reconciledAgentsYaml: boolean;
   /** The path the pre-reconcile local agents.yaml was saved to first, so even a false-positive
    * stub match (e.g. a deliberately removed block) is recoverable. */
@@ -837,8 +764,6 @@ export async function adoptRepoInPlace(
     if (!fs.existsSync(dir)) {
       return { ...empty, error: `Target directory does not exist: ${dir}` };
     }
-    // Non-interactive git — fail fast on a missing credential instead of hanging
-    // on a prompt (same rationale as adoptRepo).
     process.env.GIT_TERMINAL_PROMPT = '0';
 
     const git = simpleGit(dir);
@@ -848,18 +773,15 @@ export async function adoptRepoInPlace(
     if (!isGitRepo(dir)) await git.init();
     await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
 
-    // 2. origin — add only when absent, so a re-run keeps the existing remote.
     const remotes = await git.getRemotes(true);
     if (!remotes.some((r) => r.name === 'origin')) {
       await git.raw(['remote', 'add', 'origin', trimmed]);
     }
 
-    // 3-4. fetch, plant the local main on origin/main, set upstream.
     await git.raw(['fetch', 'origin', 'main']);
     await git.raw(['update-ref', 'refs/heads/main', 'origin/main']);
     await git.raw(['branch', '--set-upstream-to=origin/main', 'main']);
 
-    // 5. index = origin/main, working tree untouched.
     await git.raw(['read-tree', 'origin/main']);
 
     // Materialize only the tracked files missing on disk. Passing the explicit missing set (never
@@ -871,8 +793,6 @@ export async function adoptRepoInPlace(
       await git.raw(['checkout-index', '-f', '--', ...missing.slice(i, i + 500)]);
     }
 
-    // 7. Reconcile a stale-stub top-level agents.yaml from origin/main. `restore`
-    //    is plumbing the git-guard allows; it rewrites only this one path.
     let reconciledAgentsYaml = false;
     let agentsYamlBackup: string | undefined;
     if (tracked.includes('agents.yaml')) {
@@ -893,8 +813,6 @@ export async function adoptRepoInPlace(
       }
     }
 
-    // Surface — never silently keep — any tracked path whose local copy still
-    // differs from origin/main after the reconcile (real un-gitignored edits).
     const dirty = (await git.raw(['status', '--porcelain', '--untracked-files=no']))
       .split('\n')
       .map((l) => l.slice(3).trim())
@@ -951,7 +869,6 @@ export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
     const origin = remotes.find(r => r.name === 'origin');
     return isSystemRepoRemote(origin?.refs?.fetch);
   } catch {
-    /* not a git repo or no remotes */
     return false;
   }
 }
@@ -1013,9 +930,6 @@ export async function pullRepo(
     }
 
     const status = await git.status();
-    // Strict mode (projects pull): refuse a dirty tree immediately — no fetch
-    // needed to know the answer, and the caller must not risk touching staged
-    // or modified files with an incoming fast-forward.
     const isDirty = !status.isClean();
     if (strict && isDirty) {
       return {
@@ -1050,8 +964,6 @@ export async function pullRepo(
         tracking = `origin/${branch}`;
       }
     }
-    // Strict: the checkout must be on the remote default branch — never pull a
-    // feature branch across the fleet unattended.
     if (strict) {
       const sep = tracking.indexOf('/');
       const expectedBranch = sep > 0 ? tracking.slice(sep + 1) : tracking;
@@ -1069,8 +981,6 @@ export async function pullRepo(
     // <remote> <branch>`, so a multi-entry FETCH_HEAD cannot break a clean fast-forward.
     const sep = tracking.indexOf('/');
     const remoteBranch = sep > 0 ? tracking.slice(sep + 1) : branch;
-    // Keep branch-name validation on the ref we would have passed to pull —
-    // rejects traversal / flag-smuggling shapes before any integrate command.
     assertValidBranchName(remoteBranch);
 
     // Bare fetch updates every remote so the revparse sees a fresh ref whichever the branch tracks.
@@ -1117,8 +1027,6 @@ export async function pullRepo(
 
     const canFastForward = aheadCount === 0 && behindCount > 0;
 
-    // Strict: block if HEAD has local commits not on the remote — fast-forward
-    // requires the local tip to be an ancestor of the remote tip.
     if (strict && aheadCount > 0) {
       return {
         success: false,
@@ -1127,9 +1035,6 @@ export async function pullRepo(
       };
     }
 
-    // Dirty tree (preserve-local only): same rule `syncRepoGit` applies —
-    // a fast-forward that touches nothing the author is holding may proceed; a
-    // rebase or a colliding path may not. Strict mode already refused above.
     if (!strict && isDirty) {
       const refusal = await dirtyTreeRefusal(git, status, tracking);
       if (refusal) {
@@ -1143,7 +1048,6 @@ export async function pullRepo(
 
     try {
       if (canFastForward) {
-        // Integrate the already-fetched tracking ref. No network, no FETCH_HEAD.
         await git.raw(['merge', '--ff-only', tracking]);
       } else {
         // Diverged or local-only commits: rebase onto the tracking tip without re-fetching.
@@ -1164,8 +1068,7 @@ export async function pullRepo(
       };
     }
 
-    // Strict mode never installs git hook symlinks — the command is a read-model
-    // operation (update pointers only; never reconfigure the checkout).
+    // Strict/read-model pulls must never mutate executable hook wiring.
     if (!strict) installGithooksSymlinks(dir);
 
     const log = await git.log({ maxCount: 1 });
@@ -1245,8 +1148,6 @@ export async function syncRepoGit(
     if (status.isClean()) {
       await git.pull('origin', branch, { '--rebase': 'true' });
     } else {
-      // Dirty tree: a rebase would refuse outright, so fast-forward instead —
-      // but only when nothing local can be lost. One shared rule, see above.
       const refusal = await dirtyTreeRefusal(git, status, `origin/${branch}`);
       if (refusal) {
         return {
@@ -1276,19 +1177,13 @@ export async function syncRepoGit(
 
 /** Git status for sync display: files categorized by status relative to HEAD. */
 interface GitSyncStatus {
-  /** Tracked and unchanged files. */
   synced: string[];
-  /** Modified but not staged files. */
   modified: string[];
-  /** Untracked files. */
   new: string[];
-  /** Staged for commit. */
   staged: string[];
-  /** Deleted files. */
   deleted: string[];
 }
 
-/** Compute the sync status of a git repo, optionally scoped to a subdirectory. */
 export async function getGitSyncStatus(dir: string, subdir?: string): Promise<GitSyncStatus | null> {
   if (!isGitRepo(dir)) {
     return null;
@@ -1306,21 +1201,17 @@ export async function getGitSyncStatus(dir: string, subdir?: string): Promise<Gi
       deleted: [],
     };
 
-    // Filter to subdir if specified
     const filterPath = (file: string) => {
       if (!subdir) return true;
       return file.startsWith(subdir + '/') || file === subdir;
     };
 
-    // Get all tracked files in the subdir
     const trackedOutput = await git.raw(['ls-files', subdir || '.']);
     const trackedFiles = new Set(trackedOutput.split('\n').filter(Boolean));
 
-    // Get untracked files in the subdir
     const untrackedOutput = await git.raw(['ls-files', '--others', '--exclude-standard', subdir || '.']);
     const untrackedFiles = untrackedOutput.split('\n').filter(Boolean);
 
-    // Working tree changes (not staged)
     const changedFiles = new Set<string>();
     for (const file of status.modified.filter(filterPath)) {
       result.modified.push(file);
@@ -1331,7 +1222,6 @@ export async function getGitSyncStatus(dir: string, subdir?: string): Promise<Gi
       changedFiles.add(file);
     }
 
-    // Staged changes (in index, ready to commit)
     for (const file of status.created.filter(filterPath)) {
       result.staged.push(file);
       changedFiles.add(file);
@@ -1343,12 +1233,10 @@ export async function getGitSyncStatus(dir: string, subdir?: string): Promise<Gi
       }
     }
 
-    // Untracked files (new/local-only)
     for (const file of untrackedFiles.filter(filterPath)) {
       result.new.push(file);
     }
 
-    // Synced = tracked and not changed
     for (const file of trackedFiles) {
       if (filterPath(file) && !changedFiles.has(file)) {
         result.synced.push(file);
@@ -1357,14 +1245,10 @@ export async function getGitSyncStatus(dir: string, subdir?: string): Promise<Gi
 
     return result;
   } catch {
-    /* git status failed */
     return null;
   }
 }
 
-/**
- * Get list of files tracked by git in a directory.
- */
 export async function getTrackedFiles(dir: string, subdir?: string): Promise<string[]> {
   if (!isGitRepo(dir)) {
     return [];
@@ -1375,7 +1259,6 @@ export async function getTrackedFiles(dir: string, subdir?: string): Promise<str
     const result = await git.raw(['ls-files', subdir || '.']);
     return result.split('\n').filter(Boolean);
   } catch {
-    /* git ls-files failed */
     return [];
   }
 }
@@ -1383,7 +1266,6 @@ export async function getTrackedFiles(dir: string, subdir?: string): Promise<str
 /** Auto-pulls a git repo if it is clean and has a remote, using --ff-only so divergence fails
  * instead of creating merge commits. Silent on success; returns an error message on failure. */
 async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: string }> {
-  // Must be a git repo
   if (!isGitRepo(dir)) {
     return { pulled: false };
   }
@@ -1391,36 +1273,30 @@ async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: stri
   try {
     const git = simpleGit(dir);
 
-    // Must have origin remote
     const remotes = await git.getRemotes(true);
     const origin = remotes.find(r => r.name === 'origin');
     if (!origin?.refs?.fetch) {
       return { pulled: false };
     }
 
-    // Must be clean (no uncommitted changes)
     const status = await git.status();
     if (!status.isClean()) {
       return { pulled: false, error: 'Has local changes' };
     }
 
-    // Fetch and try fast-forward pull
     await git.fetch('origin');
 
-    // Check if we're behind
     const localRef = await git.revparse(['HEAD']);
     const trackingBranch = status.tracking;
     if (!trackingBranch) {
       return { pulled: false };
     }
 
-    const remoteRef = await git.revparse([trackingBranch]).catch(() => null /* remote ref unavailable */);
+    const remoteRef = await git.revparse([trackingBranch]).catch(() => null );
     if (!remoteRef || localRef === remoteRef) {
-      // Already up to date
       return { pulled: false };
     }
 
-    // Try fast-forward only pull
     await git.pull(['--ff-only']);
 
     return { pulled: true };
@@ -1429,15 +1305,10 @@ async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error?: stri
   }
 }
 
-/** Result of {@link tryAutoPullSystemRepo}. `refused` is set only when the pull
- *  was blocked because origin is not the expected system remote. */
 interface SystemRepoPullResult {
   pulled: boolean;
   error?: string;
-  /** True when origin is present but is NOT the expected system remote; no
-   *  fast-forward was attempted. `actualRemote` names what was found. */
   refused?: boolean;
-  /** The origin fetch URL that was examined (present when a remote exists). */
   actualRemote?: string;
 }
 
@@ -1480,10 +1351,8 @@ export function commitsBehindUpstream(dir: string): { behind: number; branch: st
       return null;
     }
   };
-  // Name of the upstream ref (e.g. `origin/main`) for the human-readable message.
   const branch = run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
   if (!branch) return null;
-  // `--count HEAD..@{upstream}` = commits on upstream not yet in HEAD = behind.
   const raw = run(['rev-list', '--count', 'HEAD..@{upstream}']);
   if (raw === null) return null;
   const behind = parseInt(raw, 10);

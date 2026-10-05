@@ -27,31 +27,23 @@ function isSamePath(a: string, b: string): boolean {
   }
 }
 
-// ─── Root directories ─────────────────────────────────────────────────────────
 
-/** User repo — user-authored resources and agents.yaml. Always-on. */
 const USER_AGENTS_DIR = path.join(HOME, '.agents');
 
-/** System repo — npm-shipped, read-only from user commands. Lives inside the user repo. */
 const SYSTEM_AGENTS_DIR = path.join(USER_AGENTS_DIR, '.system');
 
 /** Legacy system-repo location (pre-fold), exported only so the migrator can fold it into
  * SYSTEM_AGENTS_DIR. Runtime code must use SYSTEM_AGENTS_DIR. */
 const LEGACY_SYSTEM_AGENTS_DIR = path.join(HOME, '.agents-system');
 
-// ─── Meta file (agents.yaml lives in the user repo) ──────────────────────────
 
 const META_FILE = path.join(USER_AGENTS_DIR, 'agents.yaml');
-/** Legacy location — used only for one-shot migration in readMeta(). */
 const SYSTEM_META_FILE = path.join(SYSTEM_AGENTS_DIR, 'agents.yaml');
 
-/** Canonical path for the humans.yaml owner-identity/channel config. */
 const HUMANS_FILE = path.join(USER_AGENTS_DIR, 'humans.yaml');
 
-/** Return the absolute path to the humans.yaml file. */
 export function getHumansFilePath(): string { return process.env.AGENTS_HUMANS_FILE ?? HUMANS_FILE; }
 
-// ─── System resource dirs ─────────────────────────────────────────────────────
 
 const SYSTEM_COMMANDS_DIR = path.join(SYSTEM_AGENTS_DIR, 'commands');
 const SYSTEM_HOOKS_DIR = path.join(SYSTEM_AGENTS_DIR, 'hooks');
@@ -62,9 +54,6 @@ const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
-// Built-in routines shipped in the system repo (gh:phnx-labs/.agents-system).
-// Unioned under user routines by listJobs()/readJob() so a routine shipped here
-// fires for every install, while a user routine of the same name overrides it.
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
 // Built-in monitors shipped in the system repo (gh:phnx-labs/.agents-system), unioned under user
 // monitors by listMonitors()/readMonitor(). A same-named user monitor overrides it; a built-in
@@ -75,37 +64,23 @@ const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
 
-// ─── User repo operational buckets ────────────────────────────────────────────
 
-/** Durable runtime data (sessions, versions, runs, teams history, trash, backups). */
 const HISTORY_DIR = path.join(USER_AGENTS_DIR, '.history');
 
-/** Regenerable runtime data (shims, packages, helpers, terminals, cloud, drive, logs, browser). */
 const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
-// Top-level user dirs (config/definitions only — runtime moves into .history/.cache).
 const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
 const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
-// Monitor definitions (event-triggered watchers). Sibling of ROUTINES_DIR: a
-// monitor is a routine whose trigger is a watched source instead of a clock.
 const MONITORS_DIR = path.join(USER_AGENTS_DIR, 'monitors');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
-// Named project definitions (the layer above the --project convention). Sibling
-// of ROUTINES_DIR/TEAMS_DIR: hand-editable YAML, synced across machines by push/pull.
 const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
-// Daemon service toggles and persistent daemon config. Top-level config/definitions
-// dir like routines/webhooks; runtime state (pid/heartbeat/logs) stays in .cache.
 const DAEMON_CONFIG_DIR = path.join(USER_AGENTS_DIR, 'daemon');
 
-// History bucket (durable).
 const SESSIONS_DIR = path.join(HISTORY_DIR, 'sessions');
 const SESSIONS_DB_PATH = path.join(SESSIONS_DIR, 'sessions.db');
 const ANALYTICS_DIR = path.join(HISTORY_DIR, 'analytics');
 const VERSIONS_DIR = path.join(HISTORY_DIR, 'versions');
 const RUNS_DIR = path.join(HISTORY_DIR, 'runs');
-// Durable per-monitor state-diff store + fire history (last-seen value/hash,
-// fires/<id>/). Sibling of RUNS_DIR — the native diff store that replaces the
-// hand-rolled markdown memory files monitors used to need.
 const MONITORS_HISTORY_DIR = path.join(HISTORY_DIR, 'monitors');
 const TEAMS_AGENTS_DIR = path.join(HISTORY_DIR, 'teams', 'agents');
 const BACKUPS_DIR = path.join(HISTORY_DIR, 'backups');
@@ -114,19 +89,15 @@ const MAILBOX_DIR = path.join(HISTORY_DIR, 'mailbox');
 const FEED_DIR = path.join(HISTORY_DIR, 'feed');
 const ACTIVITY_DIR = path.join(HISTORY_DIR, 'activity');
 
-// Cache bucket (regenerable).
 const SHIMS_DIR = path.join(CACHE_DIR, 'shims');
 const HOOK_SHIMS_DIR = path.join(SHIMS_DIR, 'hooks');
 const HOOK_CACHE_DIR = path.join(CACHE_DIR, 'state', 'hooks');
 const BIN_DIR = path.join(CACHE_DIR, 'bin');
 const PACKAGES_DIR = path.join(CACHE_DIR, 'packages');
-// Plugins are user-authored resources, alongside skills/, commands/, hooks/.
-// They live at the user-root so they're git-tracked as source of truth.
 const PLUGINS_DIR = path.join(USER_AGENTS_DIR, 'plugins');
 const CLOUD_DIR = path.join(CACHE_DIR, 'cloud');
 const TERMINALS_DIR = path.join(CACHE_DIR, 'terminals');
 const LOGS_DIR = path.join(CACHE_DIR, 'logs');
-/** Disposable performance samples (~/.agents/.cache/perf/) — safe to wipe. */
 const PERF_DIR = path.join(CACHE_DIR, 'perf');
 const RUNTIME_STATE_DIR = path.join(CACHE_DIR, 'state');
 const COMPANION_CACHE_DIR = path.join(CACHE_DIR, 'companion');
@@ -140,7 +111,6 @@ const MODELS_CACHE_FILE = path.join(CACHE_DIR, '.models-cache.json');
 const UPDATE_CHECK_FILE = path.join(CACHE_DIR, '.update-check');
 const MIGRATED_SENTINEL_FILE = path.join(CACHE_DIR, '.migrated');
 
-// ─── User resource dirs ───────────────────────────────────────────────────────
 
 const USER_COMMANDS_DIR = path.join(USER_AGENTS_DIR, 'commands');
 const USER_HOOKS_DIR = path.join(USER_AGENTS_DIR, 'hooks');
@@ -163,24 +133,19 @@ export const META_HEADER = `# agents-cli metadata
 
 `;
 
-// ─── Root getters ─────────────────────────────────────────────────────────────
 
-/** Root of the system data directory (~/.agents/.system/). */
 export function getAgentsDir(): string {
   return SYSTEM_AGENTS_DIR;
 }
 
-/** Root of the system data directory (~/.agents/.system/). */
 export function getSystemAgentsDir(): string {
   return SYSTEM_AGENTS_DIR;
 }
 
-/** Legacy system-repo location (~/.agents-system/). Exported for migration only. */
 export function getLegacySystemAgentsDir(): string {
   return LEGACY_SYSTEM_AGENTS_DIR;
 }
 
-/** Root of the user repo (~/.agents/). Always present after ensureAgentsDir(). */
 export function getUserAgentsDir(): string {
   return USER_AGENTS_DIR;
 }
@@ -196,7 +161,7 @@ export function getOptionalUserAgentsDir(): string | null {
           if (fs.realpathSync(USER_AGENTS_DIR) === fs.realpathSync(SYSTEM_AGENTS_DIR)) return null;
         } catch { return null; }
       }
-    } catch { /* dir may not exist yet */ }
+    } catch {  }
   }
   return USER_AGENTS_DIR;
 }
@@ -218,7 +183,6 @@ function gitOriginSlug(dir: string): string | null {
   return m ? m[1].toLowerCase() : null;
 }
 
-/** Slugs of the user + system DotAgents repos — a checkout of any of these is not a project layer. */
 function canonicalDotAgentsRepoSlugs(): Set<string> {
   const slugs = new Set<string>([systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase()]);
   for (const dir of [USER_AGENTS_DIR, SYSTEM_AGENTS_DIR]) {
@@ -247,7 +211,6 @@ export function isReservedAgentsDir(agentsPath: string): boolean {
     || isUserOrSystemRepoCheckout(agentsPath);
 }
 
-/** Walk up from startPath to find a project-scoped .agents/ directory (skipping both roots). */
 export function getProjectAgentsDir(startPath: string = process.cwd()): string | null {
   let dir = path.resolve(startPath);
 
@@ -269,7 +232,6 @@ export function getProjectAgentsDir(startPath: string = process.cwd()): string |
   return null;
 }
 
-/** Return all .agents/ directories in scope: project, user, then system. */
 export function getScopedAgentsDirs(startPath: string = process.cwd()): Array<{ scope: 'project' | 'user' | 'system'; path: string }> {
   const dirs: Array<{ scope: 'project' | 'user' | 'system'; path: string }> = [];
   const projectDir = getProjectAgentsDir(startPath);
@@ -281,33 +243,23 @@ export function getScopedAgentsDirs(startPath: string = process.cwd()): Array<{ 
   return dirs;
 }
 
-// ─── System resource getters (legacy aliases for read/sync paths) ─────────────
 
-/** Path to slash command markdown files — system repo. */
 export function getCommandsDir(): string { return SYSTEM_COMMANDS_DIR; }
 
-/** Path to hook script directories — system repo. */
 export function getHooksDir(): string { return SYSTEM_HOOKS_DIR; }
 
-/** Path to skill bundles — system repo. */
 export function getSkillsDir(): string { return SYSTEM_SKILLS_DIR; }
 
-/** Path to the canonical rules directory — system repo. */
 export function getRulesDir(): string { return SYSTEM_RULES_DIR; }
 
-/** Read-side resolution for the canonical rules dir — system repo. */
 export function getResolvedRulesDir(): string { return SYSTEM_RULES_DIR; }
 
-/** Path to MCP server YAML configs — system repo. */
 export function getMcpDir(): string { return SYSTEM_MCP_DIR; }
 
-/** Path to permission group YAML files — system repo. */
 export function getPermissionsDir(): string { return process.env.AGENTS_SYSTEM_PERMISSIONS_DIR ?? SYSTEM_PERMISSIONS_DIR; }
 
-/** Path to subagent definition directories — system repo. */
 export function getSubagentsDir(): string { return SYSTEM_SUBAGENTS_DIR; }
 
-/** Path to ~/.agents/.system/hooks/promptcuts.yaml (system defaults). */
 export function getPromptcutsPath(): string { return SYSTEM_PROMPTCUTS_FILE; }
 
 /** Resolve the effective promptcuts file: the user file if it exists, else the system file. For
@@ -332,19 +284,15 @@ export function readMergedPromptcuts(): Record<string, unknown> {
         merged[key] = value;
       }
     } catch {
-      // Skip unreadable file, keep going
     }
   }
   return merged;
 }
 
-/** Path to the legacy MCP config JSON. */
 export function getMcpConfigPath(): string { return SYSTEM_MCP_CONFIG_FILE; }
 
-/** Path to the global instructions file. */
 export function getInstructionsPath(): string { return SYSTEM_INSTRUCTIONS_FILE; }
 
-// ─── System-specific getters ───────────────────────────────────────────────────
 
 export function getSystemCommandsDir(): string { return SYSTEM_COMMANDS_DIR; }
 export function getSystemHooksDir(): string { return SYSTEM_HOOKS_DIR; }
@@ -355,7 +303,6 @@ export function getSystemPermissionsDir(): string { return SYSTEM_PERMISSIONS_DI
 export function getSystemSubagentsDir(): string { return SYSTEM_SUBAGENTS_DIR; }
 export function getSystemPromptcutsPath(): string { return SYSTEM_PROMPTCUTS_FILE; }
 
-// ─── User resource getters ────────────────────────────────────────────────────
 
 export function getUserCommandsDir(): string { return USER_COMMANDS_DIR; }
 export function getUserHooksDir(): string { return USER_HOOKS_DIR; }
@@ -388,25 +335,18 @@ export function getUserPromptcutsPath(): string { return USER_PROMPTCUTS_FILE; }
 // User operational path getters. Top-level dirs hold definitions and configs only; runtime data
 // lives under .history/ (durable) or .cache/ (regenerable). See the file header.
 
-/** Canonical home anchor (HOME env override or os.homedir()). */
 export function getHomeDir(): string { return HOME; }
 
-/** Bucket root for durable runtime data (~/.agents/.history/). */
 export function getHistoryDir(): string { return HISTORY_DIR; }
 
-/** Bucket root for regenerable runtime data (~/.agents/.cache/). */
 export function getCacheDir(): string { return CACHE_DIR; }
 
-/** Path to cloned packages (~/.agents/.cache/packages/). */
 export function getPackagesDir(): string { return PACKAGES_DIR; }
 
-/** Path to routine YAML definitions (~/.agents/routines/). */
 export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
 
-/** Path to named project definitions (~/.agents/projects/). */
 export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
 
-/** Path to daemon config directory (~/.agents/daemon/). Holds service toggles. */
 export function getDaemonConfigDir(): string { return process.env.AGENTS_DAEMON_CONFIG_DIR ?? DAEMON_CONFIG_DIR; }
 
 /** Path to webhook handler YAML definitions (~/.agents/webhooks/): one-off triggers for agents,
@@ -439,10 +379,8 @@ export function getProjectWebhooksDir(cwd: string = process.cwd()): string | nul
   return path.join(projectAgentsDir, 'webhooks');
 }
 
-/** Path to routine execution logs (~/.agents/.history/runs/). */
 export function getRunsDir(): string { return RUNS_DIR; }
 
-/** Path to monitor YAML definitions (~/.agents/monitors/). */
 export function getMonitorsDir(): string { return process.env.AGENTS_MONITORS_DIR ?? MONITORS_DIR; }
 
 /** Built-in monitor definitions shipped in the system repo (`~/.agents/.system/monitors/`).
@@ -450,23 +388,16 @@ export function getMonitorsDir(): string { return process.env.AGENTS_MONITORS_DI
  * via `device:` for shared inputs (SING-9). The directory need not exist. */
 export function getSystemMonitorsDir(): string { return process.env.AGENTS_SYSTEM_MONITORS_DIR ?? SYSTEM_MONITORS_DIR; }
 
-/** Path to the durable per-monitor state-diff store + fire history
- * (~/.agents/.history/monitors/). */
 export function getMonitorsHistoryDir(): string { return MONITORS_HISTORY_DIR; }
 
-/** Root for per-agent mailboxes (~/.agents/.history/mailbox/). */
 export function getMailboxRootDir(): string { return MAILBOX_DIR; }
 
-/** Root for open-block feed records (~/.agents/.history/feed/). */
 export function getFeedDir(): string { return FEED_DIR; }
 
-/** Append-only per-session agent-activity event logs (~/.agents/.history/activity/). */
 export function getActivityDir(): string { return ACTIVITY_DIR; }
 
-/** Path to installed agent CLI binaries (~/.agents/.history/versions/). */
 export function getVersionsDir(): string { return VERSIONS_DIR; }
 
-/** Path to version-switching shim scripts (~/.agents/.cache/shims/). */
 export function getShimsDir(): string { return SHIMS_DIR; }
 
 /** Generated hook shim dir (~/.agents/.cache/shims/hooks/), read at CALL time.
@@ -482,48 +413,36 @@ export function getHookCacheDir(): string {
   return process.env.AGENTS_HOOK_CACHE_DIR ?? HOOK_CACHE_DIR;
 }
 
-/** Path to per-agent installed CLI binaries (~/.agents/.cache/bin/). */
 export function getBinDir(): string { return BIN_DIR; }
 
-/** Path to config backups (~/.agents/.history/backups/). */
 export function getBackupsDir(): string { return BACKUPS_DIR; }
 
-/** Path to plugin bundles (~/.agents/plugins/) — user-authored resource. */
 export function getPluginsDir(): string { return PLUGINS_DIR; }
 
-/** Path to system plugin bundles (~/.agents/.system/plugins/) — npm-shipped, read-only defaults. */
 export function getSystemPluginsDir(): string { return SYSTEM_PLUGINS_DIR; }
 
-/** Path to an extra repo's plugin bundles (~/.agents-<alias>/plugins/). */
 export function getExtraPluginsDir(alias: string): string {
   return path.join(getExtraRepoDir(alias), 'plugins');
 }
 
-/** Path to a project-scoped plugins directory (<project>/.agents/plugins/), or null when none. */
 export function getProjectPluginsDir(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);
   if (!projectAgentsDir) return null;
   return path.join(projectAgentsDir, 'plugins');
 }
 
-/** Path to soft-deleted resources (~/.agents/.history/trash/). */
 export function getTrashDir(): string { return TRASH_DIR; }
 
-/** Path to local session indexer storage (~/.agents/.history/sessions/). */
 export function getSessionsDir(): string { return SESSIONS_DIR; }
 
-/** Path to the session index database (~/.agents/.history/sessions/sessions.db). */
 export function getSessionsDbPath(): string {
   return process.env.AGENTS_SESSIONS_DB ?? SESSIONS_DB_PATH;
 }
 
-/** Path to teams config + registry (~/.agents/teams/). */
 export function getTeamsDir(): string { return TEAMS_DIR; }
 
-/** Path to teams execution history (~/.agents/.history/teams/agents/). */
 export function getTeamsAgentsDir(): string { return TEAMS_AGENTS_DIR; }
 
-/** Path to the team registry — list of named teams with timestamps. Durable runtime, per-machine. */
 export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, 'teams', 'registry.json'); }
 
 /** Devices dir holding the registry (the ignore-list is `fleet.ignored`, RUSH-3062).
@@ -533,13 +452,10 @@ function getDevicesDir(): string {
   return process.env.AGENTS_DEVICES_DIR ?? path.join(HISTORY_DIR, 'devices');
 }
 
-/** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
 export function getDevicesRegistryPath(): string { return path.join(getDevicesDir(), 'registry.json'); }
 
-/** Path to the LEGACY per-machine device ignore-list — superseded by the tracked `fleet.ignored` list in central agents.yaml (RUSH-3062); only lib/devices/config-migration.ts still reads it (to fold + remove it). */
 export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir(), 'ignored.json'); }
 
-/** Path to the LEGACY device auto-launch preference file — which registered devices are eligible/preferred for the ext's auto-host selection. Superseded by the per-device doc `config:` block; only lib/devices/config-migration.ts still reads it (to fold + remove it). */
 export function getDevicesAutoLaunchPath(): string { return path.join(getDevicesDir(), 'auto-launch.json'); }
 
 /** Path to THIS machine's agent pins (`agents:` and `isolatedAgents:`). Machine-local and
@@ -547,13 +463,10 @@ export function getDevicesAutoLaunchPath(): string { return path.join(getDevices
  * on every `agents use` / install. Read at call time. */
 export function getDevicePinsPath(): string { return path.join(getDevicesDir(), `pins-${machineId()}.json`); }
 
-/** Dir of "pending device" sentinels (~/.agents/.cache/state/devices-pending/) — one empty-ish file per newly-discovered, not-yet-approved tailnet node. Written by the daemon probe, read by the menu-bar helper (mirrors the attention sentinel dir). */
 export function getDevicesPendingDir(): string { return path.join(getRuntimeStateDir(), 'devices-pending'); }
 
-/** Path to cloud dispatch cache (~/.agents/.cache/cloud/). */
 export function getCloudDir(): string { return CLOUD_DIR; }
 
-/** Path to terminal session metadata (~/.agents/.cache/terminals/). */
 export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
 /** Path to runtime logs (~/.agents/.cache/logs/), read at CALL time. AGENTS_LOGS_DIR
@@ -569,10 +482,8 @@ export function getPerfDir(): string {
   return process.env.AGENTS_PERF_DIR ?? PERF_DIR;
 }
 
-/** Path to the perf SQLite warehouse (~/.agents/.cache/perf/perf.db). */
 export function getPerfDbPath(): string { return path.join(getPerfDir(), 'perf.db'); }
 
-/** Path to the hook-shim NDJSON spool drained into perf.db on open. */
 export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spool.jsonl'); }
 
 /** Per-process runtime state dir (~/.agents/.cache/state/), resolved at call time.
@@ -580,10 +491,8 @@ export function getPerfSpoolPath(): string { return path.join(getPerfDir(), 'spo
  * into the real `devices-pending/` via `reconcilePendingSentinels`. */
 export function getRuntimeStateDir(): string { return process.env.AGENTS_STATE_DIR ?? RUNTIME_STATE_DIR; }
 
-/** Path to companion-extension scratch (~/.agents/.cache/companion/). */
 export function getCompanionDir(): string { return COMPANION_CACHE_DIR; }
 
-/** Path to browser runtime data — chrome-data, pids (~/.agents/.cache/browser/). */
 export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
 
 /** DURABLE browser-profile data (~/.agents/.history/browser-profiles/), the `--user-data-dir`
@@ -591,7 +500,6 @@ export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
  * and cache wipes keep sign-ins; the local driver's ownership guard compares against it. */
 export function getBrowserDurableDir(): string { return path.join(HISTORY_DIR, 'browser-profiles'); }
 
-/** Path to helper subprocess scratch (~/.agents/.cache/helpers/). */
 export function getHelpersDir(): string { return HELPERS_DIR; }
 
 /** Scheduler daemon scratch (~/.agents/.cache/helpers/daemon/): pid, heartbeat, start lock, log.
@@ -599,40 +507,28 @@ export function getHelpersDir(): string { return HELPERS_DIR; }
  * time. Never set in production code. */
 export function getDaemonDir(): string { return process.env.AGENTS_DAEMON_DIR ?? DAEMON_DIR; }
 
-/** Path to tmux scratch (~/.agents/.cache/helpers/tmux/) — shared server socket + per-session meta JSONs. */
 export function getTmuxDir(): string { return TMUX_DIR; }
 
-/** Path to remote-resource auto-pull cache (~/.agents/.cache/.fetch/). */
 export function getFetchCacheDir(): string { return FETCH_CACHE_DIR; }
 
-/** Path to the CLI version cache file (~/.agents/.cache/.cli-version-cache.json). */
 export function getCliVersionCachePath(): string { return CLI_VERSION_CACHE_FILE; }
 
-/** Path to the models cache file (~/.agents/.cache/.models-cache.json). */
 export function getModelsCachePath(): string { return MODELS_CACHE_FILE; }
 
-/** Path to the daily update-check sentinel (~/.agents/.cache/.update-check). */
 export function getUpdateCheckPath(): string { return UPDATE_CHECK_FILE; }
 
-/** Path to the migration sentinel (~/.agents/.cache/.migrated). */
 export function getMigratedSentinelPath(): string { return MIGRATED_SENTINEL_FILE; }
 
-/** Path to soft-deleted version dirs (~/.agents/trash/versions/). */
 export function getTrashVersionsDir(): string { return path.join(TRASH_DIR, 'versions'); }
 
-/** Path to soft-deleted skills (~/.agents/trash/skills/). */
 export function getTrashSkillsDir(): string { return path.join(TRASH_DIR, 'skills'); }
 
-/** Path to soft-deleted commands (~/.agents/trash/commands/). */
 export function getTrashCommandsDir(): string { return path.join(TRASH_DIR, 'commands'); }
 
-/** Path to soft-deleted hooks (~/.agents/trash/hooks/). */
 export function getTrashHooksDir(): string { return path.join(TRASH_DIR, 'hooks'); }
 
-/** Path to soft-deleted plugins (~/.agents/trash/plugins/). */
 export function getTrashPluginsDir(): string { return path.join(TRASH_DIR, 'plugins'); }
 
-/** Path to soft-deleted subagents (~/.agents/trash/subagents/). */
 export function getTrashSubagentsDir(): string { return path.join(TRASH_DIR, 'subagents'); }
 export function getTrashWorkflowsDir(): string { return path.join(TRASH_DIR, 'workflows'); }
 
@@ -642,7 +538,6 @@ export function getExtraRepoDir(alias: string): string {
   return path.join(HOME, `.agents-${alias}`);
 }
 
-/** Resolve the on-disk path for an extra repo, whether managed or user-owned. */
 export function resolveExtraRepoDir(alias: string, config?: { path?: string }): string {
   if (config?.path) {
     return path.resolve(config.path);
@@ -650,9 +545,6 @@ export function resolveExtraRepoDir(alias: string, config?: { path?: string }): 
   return getExtraRepoDir(alias);
 }
 
-/**
- * Return enabled extra repos that exist on disk, in insertion order.
- */
 export function getEnabledExtraRepos(): Array<{ alias: string; dir: string; url: string }> {
   const meta = readMeta();
   const extras = meta.extraRepos || {};
@@ -666,19 +558,15 @@ export function getEnabledExtraRepos(): Array<{ alias: string; dir: string; url:
   return out;
 }
 
-// ─── Directory setup ───────────────────────────────────────────────────────────
 
-/** Create both the system and user directory trees if any subdirectories are missing. */
 export function ensureAgentsDir(): void {
   const opts = { recursive: true, mode: 0o700 } as const;
 
-  // User repo — minimal scaffold (sub-dirs created on first write)
   if (!fs.existsSync(USER_AGENTS_DIR)) {
     fs.mkdirSync(USER_AGENTS_DIR, opts);
   }
   try { fs.chmodSync(USER_AGENTS_DIR, 0o700); } catch {}
 
-  // System repo plus user-level operational state
   if (!fs.existsSync(SYSTEM_AGENTS_DIR)) {
     fs.mkdirSync(SYSTEM_AGENTS_DIR, opts);
   }
@@ -698,9 +586,7 @@ export function ensureAgentsDir(): void {
   try { fs.chmodSync(SYSTEM_AGENTS_DIR, 0o700); } catch {}
 }
 
-// ─── Meta (agents.yaml) ────────────────────────────────────────────────────────
 
-/** Return an empty Meta object used when no agents.yaml exists yet. */
 export function createDefaultMeta(): Meta {
   return {};
 }
@@ -708,7 +594,6 @@ export function createDefaultMeta(): Meta {
 let metaCache: { stamp: string; meta: Meta } | null = null;
 let metaLockDepth = 0;
 
-/** Return mtimeMs for a file path, or 0 if the file is absent or unreadable. */
 function safeMtimeMs(filePath: string): number {
   try {
     return fs.statSync(filePath).mtimeMs;
@@ -740,7 +625,6 @@ function currentMetaStamp(): string {
     + '|' + safeMtimeMs(getVersionResourcesPath());
 }
 
-/** Memoize a parsed Meta against the current file mtimes. */
 function rememberMeta(meta: Meta): Meta {
   metaCache = { stamp: currentMetaStamp(), meta };
   return meta;
@@ -771,7 +655,7 @@ export function withMetaLock<T>(fn: () => T): T {
  * cache. Returns whether it wrote, so callers can react only to a real change. */
 function writeIfChanged(filePath: string, content: string): boolean {
   let current: string | null = null;
-  try { current = fs.readFileSync(filePath, 'utf-8'); } catch { /* absent */ }
+  try { current = fs.readFileSync(filePath, 'utf-8'); } catch {  }
   if (current === content) return false;
   atomicWriteFileSync(filePath, content);
   return true;
@@ -785,19 +669,14 @@ export function commitCentralConfig(userDir: string): boolean {
   try {
     execFileSync('git', ['-C', userDir, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
   } catch {
-    return false; // plain ~/.agents with no git repo — leave it a loose write.
+    return false;
   }
   try {
     execFileSync('git', ['-C', userDir, 'add', '--', rel], { stdio: 'ignore' });
-    // Nothing staged for agents.yaml (its bytes matched HEAD after all) → no
-    // empty commit. `diff --cached --quiet` exits 0 when the index equals HEAD
-    // for this path, 1 when it differs.
     try {
       execFileSync('git', ['-C', userDir, 'diff', '--cached', '--quiet', '--', rel], { stdio: 'ignore' });
       return false;
-    } catch { /* exit 1 → staged changes present, commit them */ }
-    // Pathspec-scoped commit: records ONLY agents.yaml even if other paths are
-    // staged, so a config write never sweeps unrelated staged work into its commit.
+    } catch {  }
     execFileSync(
       'git',
       ['-C', userDir, '-c', 'commit.gpgsign=false', 'commit', '--no-verify',
@@ -806,7 +685,7 @@ export function commitCentralConfig(userDir: string): boolean {
     );
     return true;
   } catch {
-    return false; // fail open — see the doc comment.
+    return false;
   }
 }
 
@@ -870,15 +749,12 @@ void _metaKeysAreExhaustive;
  * everything else. This drives the generic device-doc router, and an unclassified key
  * lands in the safe per-box file. */
 function metaKeyScope(key: string): 'central' | 'device' {
+  // Central sync is an explicit allowlist; every other key remains machine-local.
   return CENTRAL_KEY_SET.has(key) ? 'central' : 'device';
 }
 
-/** Bespoke device keys as a runtime Set (the generic router skips these). */
 const BESPOKE_DEVICE_KEY_SET: ReadonlySet<string> = new Set<string>([
   ...BESPOKE_DEVICE_KEYS,
-  // The `browser` tombstone is device-scoped but bespoke: lib/browser/registry.ts
-  // drains it (collision-checked) into deviceBrowser, so the generic router must
-  // never blindly relocate it.
   'browser',
 ]);
 
@@ -894,8 +770,6 @@ const BESPOKE_DEVICE_DOC_KEYS: ReadonlySet<string> = new Set<string>([
   'hosts',
   'accounts',
   'projectRoot',
-  // Legacy top-level doc key the config migration folds into `config:`; never
-  // surfaced onto Meta before, so keep the generic overlay from doing so.
   'defaultBrowserProfile',
 ]);
 
@@ -905,8 +779,6 @@ const BESPOKE_DEVICE_DOC_KEYS: ReadonlySet<string> = new Set<string>([
 const KNOWN_META_KEYS: ReadonlySet<string> = new Set<string>([
   ...CENTRAL_META_KEYS,
   ...BESPOKE_DEVICE_KEYS,
-  // Removed browser-profile store. Kept only as a serializer tombstone so the
-  // first registry read can migrate it into this device's file and delete it.
   'browser',
 ]);
 
@@ -942,7 +814,7 @@ export function readTopLevelUserMeta(): Record<string, unknown> | null {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-  } catch { /* malformed — nothing to report */ }
+  } catch {  }
   return null;
 }
 
@@ -956,12 +828,12 @@ function readCentralKeys(): ReadonlySet<string> {
  * Plain `yaml.stringify` drops them, so the byte compare rewrites on every write and wedges
  * `agents sync`. We edit a parsed Document in place; with no central change, bytes are unchanged. */
 function serializeCentral(central: Record<string, unknown>): string {
+  // Preserve unknown central keys so an older binary cannot sync away newer data.
   const isEmpty = Object.keys(central).length === 0;
   let existing: string | null = null;
   try {
     existing = fs.readFileSync(META_FILE, 'utf-8');
   } catch {
-    /* first write — no file yet */
   }
   if (existing == null) {
     // Empty central: write the header only. `yaml.stringify({})` emits a flow `{}` that would make
@@ -993,8 +865,6 @@ function serializeCentral(central: Record<string, unknown>): string {
   // A device-only write must not rewrite the shared file, nor heal the header; that churn wedges
   // `agents sync` and blocks fleet pulls.
   if (!changed) return existing;
-  // Everything cleared → header only (never leave a flow `{}` behind). Byte-stable
-  // when the file is already exactly the current header.
   if (isEmpty) return existing === META_HEADER ? existing : META_HEADER;
   // A central key changed: serialize the edited doc and heal a frozen header. stringifyDoc
   // normalizes a legacy flow root `{}` to block but does not force block elsewhere, which
@@ -1018,8 +888,6 @@ export function writeMetaUnlocked(meta: Meta): boolean {
   // the shared file. Keep the lists in lockstep.
   const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, deviceFleet, deviceHosts, deviceAccounts, projectRoot, ...central } = meta;
 
-  // Write the machine-local files FIRST, then strip central — so a crash mid-write
-  // never removes pins/versions from central before they're persisted elsewhere.
   const hasAgents = !!agents && Object.keys(agents).length > 0;
   // The isolated pointer names a version installed on THIS machine, like a global pin, so it
   // belongs in the pins file, not the synced central doc where other machines would inherit it.
@@ -1035,9 +903,6 @@ export function writeMetaUnlocked(meta: Meta): boolean {
     fs.mkdirSync(path.dirname(pinsPath), { recursive: true });
     writeIfChanged(pinsPath, JSON.stringify(pins, null, 2) + '\n');
   } else if (fs.existsSync(pinsPath)) {
-    // Every pin was cleared. Persist the emptied file instead of skipping the
-    // write — otherwise the stale pins file survives and overlayMachineLocal
-    // re-applies the removed pin on the next read.
     writeIfChanged(pinsPath, '{}\n');
   }
 
@@ -1052,7 +917,7 @@ export function writeMetaUnlocked(meta: Meta): boolean {
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         doc = parsed as Record<string, unknown>;
       }
-    } catch { /* preserve the existing tolerance for malformed legacy device YAML */ }
+    } catch {  }
   }
   delete doc.agents;
   delete doc.isolatedAgents;
@@ -1084,11 +949,8 @@ export function writeMetaUnlocked(meta: Meta): boolean {
     ? deviceAccounts.native : undefined;
   const accountsBindings = deviceAccounts?.bindings && Object.keys(deviceAccounts.bindings).length > 0
     ? deviceAccounts.bindings : undefined;
-  // This box's account⇄home map (PHNX-3940) is device-scoped, so it round-trips
-  // through the device doc alongside native/bindings, never the synced central file.
   const accountsHomes = deviceAccounts?.homes && Object.keys(deviceAccounts.homes).length > 0
     ? deviceAccounts.homes : undefined;
-  // In-flight connect attempts (PHNX-3940), device-scoped like homes.
   const accountsPending = deviceAccounts?.pendingConnects && Object.keys(deviceAccounts.pendingConnects).length > 0
     ? deviceAccounts.pendingConnects : undefined;
   const accountsSlots = deviceAccounts?.slots && Object.keys(deviceAccounts.slots).length > 0
@@ -1112,9 +974,9 @@ export function writeMetaUnlocked(meta: Meta): boolean {
   const centralRecord = central as Record<string, unknown>;
   const onDiskCentralKeys = readCentralKeys();
   for (const k of Object.keys(centralRecord)) {
-    if (metaKeyScope(k) !== 'device') continue;            // fleet-shared: stays central
-    if (BESPOKE_DEVICE_KEY_SET.has(k)) continue;           // bespoke (incl. browser tombstone)
-    if (!KNOWN_META_KEYS.has(k) && onDiskCentralKeys.has(k)) continue; // foreign — preserve
+    if (metaKeyScope(k) !== 'device') continue;
+    if (BESPOKE_DEVICE_KEY_SET.has(k)) continue;
+    if (!KNOWN_META_KEYS.has(k) && onDiskCentralKeys.has(k)) continue;
     doc[k] = centralRecord[k];
     delete centralRecord[k];
   }
@@ -1123,12 +985,10 @@ export function writeMetaUnlocked(meta: Meta): boolean {
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(doc));
   } else if (fs.existsSync(devicePath)) {
-    // Nothing operator-owned remains — remove the doc rather than leaving an
-    // empty tracked file behind.
     fs.rmSync(devicePath, { force: true });
     try {
       fs.rmdirSync(path.dirname(devicePath));
-    } catch { /* not empty — other files live in the device dir */ }
+    } catch {  }
   }
 
   if (versions && Object.keys(versions).length > 0) {
@@ -1155,7 +1015,7 @@ function overlayMachineLocal(meta: Meta): Meta {
       };
       if (pins?.agents) meta.agents = { ...meta.agents, ...pins.agents };
       if (pins?.isolatedAgents) meta.isolatedAgents = { ...meta.isolatedAgents, ...pins.isolatedAgents };
-    } catch { /* ignore malformed pins file */ }
+    } catch {  }
   }
   const devicePath = getDeviceMetaPath();
   if (fs.existsSync(devicePath)) {
@@ -1165,11 +1025,8 @@ function overlayMachineLocal(meta: Meta): Meta {
         routines?: unknown;
         browser?: unknown;
       };
-    } catch { /* preserve the existing tolerance for malformed legacy device YAML */ }
+    } catch {  }
     if (dm) {
-      // Pre-migration pins may still live in the tracked doc — honor them until
-      // migrateDeviceConfigStores strips them. Pins-file values already applied
-      // above win on key conflict.
       if (dm?.agents) meta.agents = { ...dm.agents, ...meta.agents };
       if (dm?.isolatedAgents) meta.isolatedAgents = { ...dm.isolatedAgents, ...meta.isolatedAgents };
       if (typeof dm?.projectRoot === 'string') meta.projectRoot = dm.projectRoot;
@@ -1246,7 +1103,7 @@ function overlayMachineLocal(meta: Meta): Meta {
     try {
       const vr = JSON.parse(fs.readFileSync(vrPath, 'utf-8')) as Meta['versions'];
       if (vr) meta.versions = vr;
-    } catch { /* ignore malformed history file */ }
+    } catch {  }
   }
   return meta;
 }
@@ -1263,7 +1120,6 @@ function migrateSystemMetaToUser(): void {
     fs.renameSync(SYSTEM_META_FILE, META_FILE);
     console.log('Migrated agents.yaml to ~/.agents/');
   } catch {
-    // Best-effort; proceed with fresh state if it fails.
   }
 }
 
@@ -1273,12 +1129,8 @@ function migrateSystemMetaToUser(): void {
 export function readMeta(options: { migrate?: boolean } = {}): Meta {
   const migrate = options.migrate !== false;
   if (migrate) ensureAgentsDir();
-  // A preview must not suppress a later real migration by populating its cache.
   const remember = (meta: Meta): Meta => migrate ? rememberMeta(meta) : meta;
 
-  // Fast path: serve from cache when both source files are byte-identical to
-  // what we last parsed. Reduces N readMeta calls per CLI invocation to ~2 stat
-  // syscalls plus an in-memory object spread.
   if (migrate && metaCache) {
     if (currentMetaStamp() === metaCache.stamp) {
       return metaCache.meta;
@@ -1289,7 +1141,6 @@ export function readMeta(options: { migrate?: boolean } = {}): Meta {
   // migrate.ts (postinstall and a bootstrap step). Calling it here would mutate real
   // filesystem state in tests that import this module.
 
-  // Legacy migration: check for old meta.yaml in system dir
   const oldMetaFile = path.join(SYSTEM_AGENTS_DIR, 'meta.yaml');
   if (fs.existsSync(oldMetaFile) && !fs.existsSync(META_FILE)) {
     try {
@@ -1316,15 +1167,13 @@ export function readMeta(options: { migrate?: boolean } = {}): Meta {
       // lock. This legacy migration self-heals on the next daemon publish or central write.
       if (migrate) {
         withMetaLock(() => writeMetaUnlocked(meta));
-        try { fs.unlinkSync(oldMetaFile); } catch { /* non-critical */ }
+        try { fs.unlinkSync(oldMetaFile); } catch {  }
       }
       return remember(meta);
     } catch {
-      /* meta.yaml migration failed */
     }
   }
 
-  // Merge agents.yaml from both system and user repos. User repo wins on conflicts.
   let systemMeta: Meta | null = null;
   let userMeta: Meta | null = null;
 
@@ -1332,18 +1181,17 @@ export function readMeta(options: { migrate?: boolean } = {}): Meta {
     try {
       const content = fs.readFileSync(SYSTEM_META_FILE, 'utf-8');
       systemMeta = yaml.parse(content) as Meta;
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   if (fs.existsSync(META_FILE)) {
     try {
       const content = fs.readFileSync(META_FILE, 'utf-8');
       userMeta = yaml.parse(content) as Meta;
-    } catch { /* ignore */ }
+    } catch {  }
   }
 
   if (systemMeta || userMeta) {
-    // Merge: system as base, user overwrites
     const base = createDefaultMeta();
     const meta: Meta = {
       ...base,
@@ -1351,7 +1199,6 @@ export function readMeta(options: { migrate?: boolean } = {}): Meta {
       ...userMeta,
       agents: { ...systemMeta?.agents, ...userMeta?.agents },
     };
-    // Merge registries carefully to preserve type
     if (systemMeta?.registries || userMeta?.registries) {
       meta.registries = {
         ...base.registries,
@@ -1369,13 +1216,11 @@ export function readMeta(options: { migrate?: boolean } = {}): Meta {
   return remember(meta);
 }
 
-/** Serialize and write agents.yaml to the user repo, invalidating the in-memory cache. */
 export function writeMeta(meta: Meta): void {
   const centralChanged = withMetaLock(() => writeMetaUnlocked(meta));
   commitCentralConfigAfterWrite(centralChanged);
 }
 
-/** Update agents.yaml under lock and return the new state. */
 export function updateMeta(updates: Partial<Meta> | ((meta: Meta) => Meta)): Meta {
   let centralChanged = false;
   const newMeta = withMetaLock(() => {
@@ -1397,7 +1242,6 @@ export function commitCentralConfigAfterWrite(centralChanged: boolean): void {
   if (centralChanged) commitCentralConfig(USER_AGENTS_DIR);
 }
 
-/** Derive a filesystem-safe local clone path for a package source URL. */
 export function getPackageLocalPath(source: string): string {
   const sanitized = source
     .replace(/^gh:/, '')
@@ -1407,7 +1251,6 @@ export function getPackageLocalPath(source: string): string {
   return path.join(PACKAGES_DIR, sanitized);
 }
 
-// ─── Version resource tracking ────────────────────────────────────────────────
 
 import type { AgentId, ResourceType, VersionResources, ResourcePattern } from './types.js';
 
@@ -1464,7 +1307,6 @@ export function withAlias(list: ResourcePattern[], alias: string): ResourcePatte
   return next;
 }
 
-/** Strip every reference to `<alias>:...` / `!<alias>:...` from a selector list. */
 export function withoutAlias(list: ResourcePattern[], alias: string): ResourcePattern[] {
   const prefix = `${alias}:`;
   const next = list.filter(p => !(p.startsWith(prefix) || p.startsWith(`!${prefix}`)));
@@ -1508,13 +1350,11 @@ export function getVersionResources(
   return meta.versions?.[agent]?.[version] || null;
 }
 
-/** Active rules preset for an agent@version. Defaults to "default" when unset. */
 export function getActiveRulesPreset(agent: AgentId, version: string): string {
   const meta = readMeta();
   return meta.versions?.[agent]?.[version]?.rulesPreset || 'default';
 }
 
-/** Persist the active rules preset for an agent@version. */
 export function setActiveRulesPreset(
   agent: AgentId,
   version: string,

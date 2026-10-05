@@ -3,7 +3,8 @@
  * local box from first place, or merging two machines' identically-numbered sessions. */
 
 import { describe, it, expect } from 'vitest';
-import { groupSessionsByMachine, dedupeByMachineSession, mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
+import { mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
+import { groupSessionsByMachine, dedupeByMachineSession } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 

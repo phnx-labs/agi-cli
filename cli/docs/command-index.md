@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 480 commands._
+_66 command groups · 486 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -487,6 +487,16 @@ agents prune <specs...>        Uninstall agent CLI versions. Moves version data 
 agents prune cleanup [target]  Remove orphan resources, old versions, or routine runs
 ```
 
+## ps: List running agents on this machine and across the fleet; stop, focus, detach, or migrate one
+
+```
+agents ps                       List running agents on this machine and across the fleet; stop, focus, detach, or migrate one
+agents ps detach <id>           Send a live agent to the background — stop its terminal, keep it working headless
+agents ps focus [selector]      Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
+agents ps migrate [session-id]  Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
+agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
+```
+
 ## registry: Manage package registries
 
 ```
@@ -600,10 +610,10 @@ agents search <query>  Find packages (MCP servers, skills) across configured reg
 agents secrets  Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
 ```
 
-## send: Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.
+## send: Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
 
 ```
-agents send [text]  Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.
+agents send [text]  Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
 ```
 
 ## sessions: Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
@@ -662,6 +672,7 @@ agents setup mine toggle <name>               Enable/disable features for a bran
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
 agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.
 agents setup term                             Install the standalone `term` CLI (the PTY engine `agents accounts add`/`login` spawn) if missing.
+agents setup tools                            Install or upgrade the standalone sessions, browser, secrets, computer, and term CLIs to the versions this release pins
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.
