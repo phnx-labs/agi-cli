@@ -44,7 +44,6 @@ function parseHarnessOverlay(raw: unknown, agent: string): PackageHarnessOverlay
   };
 }
 
-/** Parse and shape-validate the `execution` block of a schema-v3 agent.yaml already read into memory. */
 export function parseAgentPackageManifest(raw: unknown, sourceLabel: string): AgentPackageManifest {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
     fail(`${sourceLabel}: expected a YAML mapping at the document root`);
@@ -135,7 +134,6 @@ export function parseAgentPackageManifest(raw: unknown, sourceLabel: string): Ag
   };
 }
 
-/** Read + parse `<packageDir>/agent.yaml`. Fails closed on missing file or malformed YAML. */
 export function loadAgentPackageManifest(packageDir: string): AgentPackageManifest {
   const manifestPath = path.join(packageDir, 'agent.yaml');
   let raw: string;

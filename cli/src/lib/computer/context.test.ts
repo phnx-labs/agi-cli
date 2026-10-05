@@ -40,8 +40,6 @@ describe('buildComputerContext', () => {
     const context = await buildComputerContext({ computerBin: '/usr/local/bin/computer' });
     expect(Array.isArray(context.permissions!.allow)).toBe(true);
     expect(context.permissions!.allow.every((id) => typeof id === 'string')).toBe(true);
-    // The standalone's own path is always a peer — it is the process that opens
-    // the daemon socket now.
     expect(context.peers.allow).toContain('/usr/local/bin/computer');
   });
 

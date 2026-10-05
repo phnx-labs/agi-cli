@@ -45,8 +45,6 @@ describe('buildMenubarNotifyArgs', () => {
   });
 
   it('omits --agent when no single harness owns the event', () => {
-    // A daemon heal or a fan-out across agents has no one agent to depict; the
-    // companion then leaves the right slot empty rather than repeating the left.
     expect(buildMenubarNotifyArgs({ title: 'T', body: 'B' })).not.toContain('--agent');
     expect(buildMenubarNotifyArgs({ title: 'T', body: 'B', agent: '' })).not.toContain('--agent');
   });
@@ -110,8 +108,6 @@ describe('buildMenubarNotifyArgs', () => {
   });
 
   it('passes title/body verbatim as separate argv (no shell interpolation)', () => {
-    // The one-shot receives each field as its own argv entry, so quotes and
-    // shell metacharacters are inert — no escaping needed, no injection surface.
     const args = buildMenubarNotifyArgs({ title: 'a "b" $c', body: 'x; rm -rf /' });
     expect(args[args.indexOf('--title') + 1]).toBe('a "b" $c');
     expect(args[args.indexOf('--body') + 1]).toBe('x; rm -rf /');
@@ -153,7 +149,6 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
     expect(() =>
       notifyDesktop({ title: 'T', body: 'B', action: 'routines:list' }),
     ).not.toThrow();
-    // Let the async spawn 'error' event fire on the next libuv turn.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(true).toBe(true);
   });
@@ -185,8 +180,6 @@ describe('spawnDetachedQuiet — bounded lifetime', () => {
     expect(child.killed).toBe(true);
   });
 
-  // The common path: a fast child that exits on its own is NOT signalled — the
-  // watchdog is cleared on 'exit', so `killed` stays false.
   it('leaves a child that self-exits before the timeout untouched', async () => {
     const child = spawnDetachedQuiet('true', [], 2000);
     const result = await new Promise<{ code: number | null; signal: string | null }>(

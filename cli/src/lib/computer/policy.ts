@@ -1,5 +1,3 @@
-/** Resolve Agents permission groups and caller identities for the standalone
- * engine. The engine alone writes helper policy and peer files. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,7 +25,6 @@ export function loadComputerAllowList(): string[] {
       if (!entry.isFile()) continue;
       if (!entry.name.endsWith('.yml') && !entry.name.endsWith('.yaml')) continue;
 
-      // User dir wins on filename collision.
       const stem = entry.name.replace(/\.(yaml|yml)$/, '');
       if (seenFiles.has(stem)) continue;
       seenFiles.add(stem);
@@ -40,9 +37,6 @@ export function loadComputerAllowList(): string[] {
         continue;
       }
 
-      // Strict regex: optional whitespace, dash, quoted Computer(<id>).
-      // Only honors `allow:` lines — `deny:` Computer patterns would be a
-      // contradiction (everything is deny-by-default already).
       let inAllow = false;
       for (const rawLine of content.split('\n')) {
         const line = rawLine.replace(/\r$/, '');
@@ -77,16 +71,10 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
     }
   };
 
-  // The standalone engine — the process that actually opens the socket now.
   if (opts.computerBin) add(opts.computerBin);
 
-  // The runtime currently running this CLI. Still a possible proc_pidpath when
-  // the engine is a .js bin executed through it.
   if (process.execPath) add(process.execPath);
 
-  // Rush.app — the consumer Electron client. Both the helper-binary and
-  // the main app binary are possible callers depending on how Rush wires
-  // the RPC client.
   const rushCandidates = [
     '/Applications/Rush.app/Contents/MacOS/Rush',
     '/Applications/Rush.app/Contents/MacOS/Electron',

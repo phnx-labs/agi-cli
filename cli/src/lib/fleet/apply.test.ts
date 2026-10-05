@@ -40,7 +40,6 @@ describe('diffFleet', () => {
     expect(kinds).toContain('install-cli');
     expect(kinds.filter((k) => k === 'add-agent')).toHaveLength(2);
     expect(kinds).toContain('sync-config');
-    // Both login:sync agents surface as needs-login (log in per box).
     expect(kinds.filter((k) => k === 'needs-login')).toHaveLength(2);
     expect(plan.devices[0].loginBlocked.sort()).toEqual(['claude', 'codex']);
   });
@@ -74,8 +73,6 @@ describe('diffFleet', () => {
       ['mac', { device: 'mac', reachable: true, platform: 'macos', cliVersion: CLI, installedAgents: ['claude', 'codex'] }],
     ]);
     const plan = diffFleet(macDesired, probes, { targetCliVersion: CLI, sourceAuth: srcAuth(['claude', 'codex']) });
-    // Both claude and codex are surfaced as needs-login — a native OAuth login is
-    // never copied, on any platform.
     for (const id of ['claude', 'codex']) {
       const acts = plan.actions.filter((a) => a.agent === id);
       expect(acts.some((a) => a.kind === 'needs-login')).toBe(true);
@@ -96,8 +93,6 @@ describe('diffFleet', () => {
   });
 
   it('surfaces a portable-file agent as needs-login regardless of source sign-in (nothing is pushed anyway)', () => {
-    // grok has a portable file; the source sign-in state is now irrelevant because
-    // apply never copies a login — the device is told to log in on the box.
     const macDesired: DeviceDesired[] = [
       { device: 'mac', agents: ['grok@latest'], sync: [], login: 'sync' },
     ];
@@ -171,16 +166,11 @@ describe('diffFleet — secrets surfacing', () => {
     const secretActs = plan.actions.filter((a) => a.kind === 'needs-secret');
     expect(secretActs).toHaveLength(2);
     expect(plan.devices[0].secretsNeeded).toEqual(['attio', 'ssh-keys']);
-    // sync-config still fires (scopes declared) but there is nothing executable
-    // beyond it — needs-secret must be excluded from the "actions to run" count.
     const executable = plan.actions.filter((a) => a.kind !== 'needs-login' && a.kind !== 'needs-secret');
     expect(executable.map((a) => a.kind)).toEqual(['sync-config']);
   });
 
   it('pushes nothing without --provision-secrets, and SAYS the capability exists', () => {
-    // Off by default. The reason string has to name the flag: an operator who
-    // reads only "recreate manually" concludes there is no supported path, which
-    // is how a master key got hand-exported across the fleet (RUSH-1968).
     const plan = diffFleet(desired, converged, {
       targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['attio'],
     });
@@ -200,12 +190,10 @@ describe('diffFleet — secrets surfacing', () => {
     const push = plan.actions.filter((a) => a.kind === 'push-secret');
     expect(push).toHaveLength(1);
     expect(push[0].bundle).toBe('attio');
-    // A push IS executable, unlike the needs-* reminders.
     expect(plan.devices[0].secretsNeeded).toEqual([]);
   });
 
   it('refuses an UNPINNED host even with the flag — credential values need a pinned key', () => {
-    // Same bar as `exec --copy-creds` (EXEC-34).
     const plan = diffFleet(desired, converged, {
       targetCliVersion: CLI,
       sourceAuth: srcAuth(['codex']),
@@ -225,8 +213,6 @@ describe('diffFleet — secrets surfacing', () => {
   });
 
   it('skips a bundle the device already has, and --force overrides', () => {
-    // Without this every apply re-resolves the bundle, and a resolve can prompt
-    // for Touch ID — a converged fleet would nag on every run.
     const withBundle = new Map<string, DeviceProbe>([
       ['s1', { ...converged.get('s1')!, remoteBundles: { attio: '2026-08-01T00:00:00Z' } }],
     ]);
@@ -243,9 +229,6 @@ describe('diffFleet — secrets surfacing', () => {
   });
 
   it('does NOT skip a prototype-named bundle the device lacks', () => {
-    // `bundle in remoteBundles` returned true for 'toString' against an EMPTY
-    // listing, so that bundle was silently never provisioned. The gate uses an
-    // own-property check now.
     const emptyListing = new Map<string, DeviceProbe>([
       ['s1', { ...converged.get('s1')!, remoteBundles: parseRemoteBundles('[]') }],
     ]);
@@ -277,9 +260,6 @@ describe('diffFleet — secrets surfacing', () => {
   });
 
   it('picks file on linux and keychain on macos — the unshared-key default', () => {
-    // A headless Linux box has no keychain, and its file store auto-provisions
-    // its OWN machine-local key. That per-box key is the alternative to the
-    // fleet-wide shared secret RUSH-1968 is about.
     const probe = (platform: string): DeviceProbe =>
       ({ device: 's1', reachable: true, platform, cliVersion: CLI, installedAgents: ['codex'] });
     const ctx = { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['attio'], provisionSecrets: true, isHostPinned: () => true };
@@ -439,9 +419,6 @@ describe('diffFleet — version-aware add-agent', () => {
 
 describe('parseRemoteBundles — a remote secrets listing, metadata only', () => {
   it('reads name -> updatedAt from the REAL payload shape', () => {
-    // Verified against live `agents secrets list --json`: a bare array of rows
-    // whose timestamp field is `updatedAt`. The first draft of this parser read
-    // `updated_at` and would have recorded an empty timestamp for every bundle.
     const real = '[{"name":"claude-getrush","keys":1,"backend":"file","createdAt":"2026-08-02T10:12:09.610Z","updatedAt":"2026-08-03T01:02:03.000Z"}]';
     expect(parseRemoteBundles(real)).toEqual({ 'claude-getrush': '2026-08-03T01:02:03.000Z' });
   });
@@ -457,17 +434,12 @@ describe('parseRemoteBundles — a remote secrets listing, metadata only', () =>
   });
 
   it('degrades to {} on junk — unknown must mean PUSH, never skip', () => {
-    // Returning a populated map on a parse failure would silently leave a device
-    // unprovisioned, which is the worse of the two errors.
     for (const junk of ['', 'not json', 'null', '3', '{"bundles":"nope"}']) {
       expect(parseRemoteBundles(junk)).toEqual({});
     }
   });
 
   it('a name that collides with an Object prototype key is an OWN property', () => {
-    // `{}` inherits toString/constructor/valueOf, and assigning `__proto__` on it
-    // hits the prototype setter instead of creating a key. A null-prototype map
-    // makes every remote-supplied name a plain own property.
     const out = parseRemoteBundles('[{"name":"toString"},{"name":"__proto__","updatedAt":"t"}]');
     expect(Object.prototype.hasOwnProperty.call(out, 'toString')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(out, '__proto__')).toBe(true);
@@ -475,8 +447,6 @@ describe('parseRemoteBundles — a remote secrets listing, metadata only', () =>
   });
 
   it('an EMPTY listing claims nothing — not even inherited names', () => {
-    // The bug this closes: `'toString' in {}` is true, so a bundle named
-    // toString read as already-present on a device that has nothing.
     const empty = parseRemoteBundles('[]');
     for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty']) {
       expect(Object.prototype.hasOwnProperty.call(empty, name)).toBe(false);

@@ -12,11 +12,8 @@ import { resolveInstalledMenubarExecutable } from './install-menubar.js';
 const NOTIFY_TIMEOUT_MS = 4000;
 
 export interface DesktopNotification {
-  /** Bold first line. */
   title: string;
-  /** Notification body text. */
   body: string;
-  /** Secondary line under the title (macOS only). */
   subtitle?: string;
   /** Deep-link run when the notification is clicked, `<verb>:<arg>`: `open:/abs/path` opens a file,
    * `routines:list` opens the runs folder in Finder. macOS-only, best-effort. See
@@ -32,7 +29,6 @@ export interface DesktopNotification {
   /** The attention key (`AttentionItem.key`) the companion passes to `agents feed answer <key>`
    * when a choice is picked; the stable handle for the reply rail, carried verbatim in argv. */
   key?: string;
-  /** Session this banner belongs to, so the companion can open/focus it. */
   sessionId?: string;
   /** Ordered answerable choices (max 6). `id` is `[a-z0-9-]+` and is echoed to `agents feed answer
    * --choice <id>`; `label` is the button caption. Carried as one `--choice <id>=<label>` per
@@ -40,7 +36,6 @@ export interface DesktopNotification {
   choices?: { id: string; label: string }[];
 }
 
-/** Argv for the "AGI Menu" one-shot notify mode. Exported for tests. */
 export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   const args = ['--notify', '--title', n.title, '--body', n.body];
   if (n.subtitle) args.push('--subtitle', n.subtitle);
@@ -49,14 +44,10 @@ export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   if (n.category) args.push('--category', n.category);
   if (n.key) args.push('--key', n.key);
   if (n.sessionId) args.push('--session', n.sessionId);
-  // Each choice is one argv pair `id=label`. ids are `[a-z0-9-]+` and labels are
-  // plain text; every field is its own argv entry (the child never sees a shell),
-  // so an `=` inside a label is inert — the companion splits on the FIRST `=`.
   for (const c of n.choices ?? []) args.push('--choice', `${c.id}=${c.label}`);
   return args;
 }
 
-/** AppleScript for the osascript degradation path. Exported for tests. */
 export function buildOsascriptNotifyArgs(n: DesktopNotification): string[] {
   const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   let script = `display notification "${esc(n.body)}" with title "${esc(n.title)}"`;
@@ -73,13 +64,10 @@ export function spawnDetachedQuiet(
   timeoutMs: number = NOTIFY_TIMEOUT_MS,
 ): ChildProcess {
   const child = spawn(command, args, { detached: true, stdio: 'ignore' });
-  // Bound the lifetime: a stalled notifier is hard-killed after the timeout. The
-  // timer is unref'd so it never keeps a short-lived caller's event loop alive.
   const watchdog = setTimeout(() => {
     try {
       child.kill('SIGKILL');
     } catch {
-      /* already gone */
     }
   }, timeoutMs);
   watchdog.unref();
@@ -87,7 +75,6 @@ export function spawnDetachedQuiet(
   // process never started, so cancel the watchdog. Without a listener Node re-throws ENOENT and
   // crashes the daemon.
   child.on('error', () => clearTimeout(watchdog));
-  // Fast, self-driven exit (the common path) — cancel the watchdog.
   child.on('exit', () => clearTimeout(watchdog));
   child.unref();
   return child;
@@ -101,22 +88,15 @@ export function notifyDesktop(n: DesktopNotification): void {
     if (platform === 'darwin') {
       const exec = resolveInstalledMenubarExecutable();
       if (exec) {
-        // Branded path: the notification is attributed to MenubarHelper.app
-        // ("AGI Menu" on disk), so it shows the agents-cli mark and its click
-        // action is handled by the running helper's UNUserNotificationCenter delegate.
         spawnDetachedQuiet(exec, buildMenubarNotifyArgs(n));
         return;
       }
-      // Companion app absent — degrade to osascript so delivery is preserved
-      // (generic icon; no click action). See the module header.
       spawnDetachedQuiet('osascript', buildOsascriptNotifyArgs(n));
       return;
     }
     if (platform === 'linux') {
       spawnDetachedQuiet('notify-send', [n.title, n.body]);
     }
-    // Other platforms: no native desktop notifier wired — no-op.
   } catch {
-    // Notification is best-effort; nothing to do.
   }
 }

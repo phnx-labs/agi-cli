@@ -1,15 +1,11 @@
-// Pure version primitives for the agent-spec engine — zero dependencies, so the
-// whole module (and versions.ts, which re-uses these) stays trivially testable.
 
 /** The only shape a version string may take before it reaches an exec/shim/path boundary: the
  * literal `latest` or 1-64 chars of `[A-Za-z0-9._+-]` with no `..`. Every resolver funnels
  * exact-version tokens through it. */
 export const VERSION_RE = /^(?:latest|(?!.*\.\.)[A-Za-z0-9._+-]{1,64})$/;
 
-/** Canonical qualifier set, in help/display order. `pinned` ≡ `default`. */
 export const AGENT_QUALIFIERS = ['latest', 'oldest', 'pinned', 'default', 'all'] as const;
 
-/** Split a version into numeric `.`-segments (non-numeric tail → 0), e.g. `2026.2.19-2` → [2026,2,19]. */
 function numericParts(v: string): number[] {
   return v.split('.').map((n) => parseInt(n, 10) || 0);
 }

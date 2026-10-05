@@ -45,13 +45,10 @@ function validateDefaults(v: unknown, where: string): FleetDefaults {
     agents: o.agents as string[] | undefined,
     sync: o.sync as string[] | undefined,
     login: validateLogin(o.login, where),
-    // `config:` is operator config (`agents devices config`); inert to the
-    // reconcile engine but part of the manifest shape.
     config: o.config as Record<string, unknown> | undefined,
   };
 }
 
-/** Validate a raw `fleet:` object (already YAML-parsed) into a typed manifest. */
 export function parseFleetManifest(raw: unknown): FleetManifest {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('fleet: block must be a mapping with a `devices:` key.');
@@ -94,7 +91,6 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
     manifest.discovery = discovery;
   }
 
-  // Additive, backward-compatible extras (captured by `agents fleet capture`).
   if (o.secrets !== undefined) {
     if (typeof o.secrets !== 'object' || o.secrets === null || Array.isArray(o.secrets)) {
       throw new Error('fleet: secrets must be a mapping with a `bundles:` list.');
@@ -115,7 +111,6 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
   return manifest;
 }
 
-/** Read a YAML file and extract + validate its `fleet:` block. */
 export function readFleetFile(filePath: string): FleetManifest {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Manifest not found: ${filePath}`);
@@ -136,7 +131,6 @@ export function readFleetFile(filePath: string): FleetManifest {
   return parseFleetManifest(fleet);
 }
 
-/** Merge a per-device override over defaults into a concrete desired state. */
 function mergeDesired(device: string, defaults: FleetDefaults, override: FleetDeviceOverride): DeviceDesired {
   return {
     device,
@@ -147,11 +141,8 @@ function mergeDesired(device: string, defaults: FleetDefaults, override: FleetDe
 }
 
 interface ResolveContext {
-  /** Device names currently online (used to expand `devices: all`). */
   onlineDevices: string[];
-  /** All registered device names (used to validate explicit entries). */
   registeredDevices: string[];
-  /** The source machine, always excluded from the target set. */
   source: string;
   /** Names the bootstrap could not resolve from Tailscale (off-tailnet, ignored, or a typo).
    * They are skipped with a warning so one asleep laptop does not fail every other device.
@@ -177,8 +168,6 @@ export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): De
   const unresolved = new Set(ctx.unresolved ?? []);
   for (const [name, override] of Object.entries(manifest.devices)) {
     if (name === ctx.source) continue;
-    // Bootstrap couldn't register this name (off-tailnet / ignored / typo) —
-    // skip it (the caller already surfaced it) instead of aborting the run.
     if (unresolved.has(name)) continue;
     if (!ctx.registeredDevices.includes(name)) {
       throw new Error(`fleet: device '${name}' is not a registered device. Run \`agents devices add ${name}\` or fix the manifest.`);

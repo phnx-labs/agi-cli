@@ -27,11 +27,9 @@ const RED: StatusCheck[] = [
   { conclusion: 'FAILURE', status: 'COMPLETED' },
 ];
 
-/** Live #2847 comment body (truncated to the verdict line + one paragraph). */
 const APPROVE_COMMENT_2847 =
   '**Non-author review verdict: APPROVE**\n\nIndependent subagent review (checked out the branch, ran `git diff origin/main...HEAD`).';
 
-/** Live #2802 comment: a bare APPROVE line, also a fleet-convention verdict. */
 const APPROVE_COMMENT_2802 =
   'APPROVE\n\nNon-author review (subagent-based, this repo\'s automated `prix/code-reviewer` is paused per #1767).';
 

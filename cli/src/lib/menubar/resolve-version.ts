@@ -10,13 +10,10 @@ import { helperFloor } from '../helper-versions.js';
 import { getCliVersion } from '../version.js';
 import { MENUBAR_HELPER_ASSET } from './download-menubar.js';
 
-/** The repo whose releases carry `menubar/v*` tags (same as the download URL). */
 const MENUBAR_RELEASES_API = 'https://api.github.com/repos/phnx-labs/agi-cli/releases?per_page=100';
 
-/** How long a resolved answer is trusted before the release list is re-read. */
 const MENUBAR_RESOLVE_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** One release as the resolver sees it — the subset of the GitHub shape it reads. */
 export interface ReleaseCandidate {
   tagName: string;
   assets: string[];
@@ -25,9 +22,7 @@ export interface ReleaseCandidate {
 }
 
 interface MenubarResolveCache {
-  /** Epoch ms of the release-list read this answer came from. */
   checkedAt: number;
-  /** The newest published helper version at that time (never below the floor then). */
   version: string;
 }
 
@@ -48,7 +43,6 @@ export function pickNewestMenubarVersion(candidates: ReleaseCandidate[], floor: 
   return best;
 }
 
-/** Where the resolved answer lives: beside the helper's own download cache. */
 function menubarResolveCachePath(): string {
   return path.join(getCacheDir(), 'menubar', 'latest.json');
 }
@@ -59,7 +53,7 @@ export function readMenubarResolveCache(file: string): MenubarResolveCache | nul
     if (typeof parsed.checkedAt === 'number' && typeof parsed.version === 'string' && /^\d+\.\d+\.\d+$/.test(parsed.version)) {
       return { checkedAt: parsed.checkedAt, version: parsed.version };
     }
-  } catch { /* absent or unreadable: no cache */ }
+  } catch {  }
   return null;
 }
 
@@ -69,7 +63,7 @@ function writeMenubarResolveCache(file: string, cache: MenubarResolveCache): voi
     const tmp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(cache));
     fs.renameSync(tmp, file);
-  } catch { /* a cache that cannot be written is just a cache miss next time */ }
+  } catch {  }
 }
 
 /** The cached answer when usable offline: at or above the floor, of any age. Sync and network-free;
@@ -84,7 +78,6 @@ type FetchLike = (input: string, init?: { headers?: Record<string, string>; sign
   ok: boolean; status: number; json(): Promise<unknown>;
 }>;
 
-/** Read the release list. Unauthenticated: release metadata is public and this runs at most once a day per machine. */
 async function fetchMenubarReleaseCandidates(fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<ReleaseCandidate[]> {
   const res = await fetchImpl(MENUBAR_RELEASES_API, {
     headers: {

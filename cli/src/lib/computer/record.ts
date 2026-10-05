@@ -32,10 +32,8 @@ export function recordComputerAction(event: ComputerActionEvent, opts: { device?
     ...rest
   } = event;
 
+  // The engine owns invocation/host/session identity; agents-cli alone writes feed/session state.
   const runId = invocationId || COMPUTER_INVOCATION_ID;
-  // The driven machine. `host` is the field `sessions-list.ts` reads for a
-  // remote run; `opts.device` is the fallback for an engine that drove the
-  // device this CLI resolved but did not stamp it.
   const drivenHost = host ?? opts.device;
 
   // The task preview is bounded here, not upstream: agents-cli owns the ledger and its
@@ -44,6 +42,7 @@ export function recordComputerAction(event: ComputerActionEvent, opts: { device?
   const extra = typeof rest.task === 'string'
     ? { ...rest, task: truncate(rest.task, TASK_PREVIEW_MAX_CHARS) }
     : rest;
+  // Bookkeeping is best-effort because the desktop action has already succeeded.
   try {
     emitEvent('computer.action', {
       command,
@@ -54,7 +53,6 @@ export function recordComputerAction(event: ComputerActionEvent, opts: { device?
       ...extra,
     });
   } catch {
-    // Feed emission is best-effort; the action is already done.
   }
   try {
     recordComputerSession({
@@ -66,6 +64,5 @@ export function recordComputerAction(event: ComputerActionEvent, opts: { device?
       taskPreview: typeof extra.task === 'string' ? extra.task : undefined,
     });
   } catch {
-    // Recording is best-effort; the action and its event are already done.
   }
 }

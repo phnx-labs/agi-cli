@@ -22,7 +22,6 @@ import type {
   AuthFilePayload,
 } from './types.js';
 
-/** Strip a version suffix from an agent spec: `claude@latest` -> `claude`. */
 export function agentIdOf(spec: string): string {
   return spec.split('@')[0].trim();
 }
@@ -37,7 +36,6 @@ export function pinnedVersion(spec: string): string | undefined {
   return v;
 }
 
-/** True when any spec in the roster pins an explicit version (needs a version probe). */
 export function rosterNeedsVersions(desired: DeviceDesired[]): boolean {
   return desired.some((d) => d.agents.some((s) => pinnedVersion(s) !== undefined));
 }
@@ -84,13 +82,9 @@ export function parseInstalledVersions(stdout: string): Record<string, string[]>
   }
 }
 
-/** Source-side auth availability, computed once from `snapshotAuth`. */
 export interface SourceAuth {
-  /** Agent ids the source has a readable, propagatable credential file for. */
   available: Set<string>;
-  /** Agent ids whose source auth is device-bound (macOS keychain). */
   bound: Set<string>;
-  /** The captured file payloads, keyed by agent. */
   filesByAgent: Map<string, AuthFilePayload[]>;
 }
 
@@ -107,24 +101,17 @@ export function fleetSecretsBundles(declared: string[] | undefined): string[] {
 }
 
 interface DiffContext {
-  /** agents-cli version the source is on — the fleet target version. */
   targetCliVersion: string;
   sourceAuth: SourceAuth;
-  /** Secrets-bundle names the profile declares. */
   secretsBundles?: string[];
   /** `--provision-secrets`. OFF by default: pushing a bundle moves credential
    *  VALUES to another machine, so it is opted into per invocation and never
    *  defaulted from the shared `agents.yaml` (RUSH-1968). */
   provisionSecrets?: boolean;
-  /** Is this device's host key pinned? Injected so `decideSecretPush` stays pure
-   *  and its refusals are testable against real known_hosts fixtures with no
-   *  network. Absent = treated as unpinned, i.e. refuse. */
   isHostPinned?: (device: string) => boolean;
-  /** `--force`: push a declared bundle even when the device already has it. */
   forceSecrets?: boolean;
 }
 
-/** Pure: desired vs probed -> per-device diff + flat action list. */
 export function diffFleet(desired: DeviceDesired[], probes: Map<string, DeviceProbe>, ctx: DiffContext): FleetPlan {
   const devices: DeviceDiff[] = [];
   const actions: FleetAction[] = [];
@@ -141,7 +128,6 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
     const secretsNeeded: string[] = [];
 
     if (probe.reachable) {
-      // agents-cli presence.
       if (!probe.cliVersion) {
         rowActions.push({ device: d.device, kind: 'install-cli', detail: `install agents-cli ${ctx.targetCliVersion}` });
       } else if (probe.cliVersion !== ctx.targetCliVersion) {
@@ -160,12 +146,9 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
           rowActions.push({ device: d.device, kind: 'add-agent', agent: id, spec, detail: `install ${spec}` });
         }
       }
-      // config.
       if (d.sync.length > 0) {
         rowActions.push({ device: d.device, kind: 'sync-config', detail: `sync config (${d.sync.join(', ')})` });
       }
-      // login — per agent id, not per spec: `claude@all` names one id many times,
-      // but a login is established once per agent (its credential is version-shared).
       if (d.login === 'sync') {
         for (const id of [...new Set(d.agents.map(agentIdOf))]) {
           // SING-1b: a native OAuth/session login must not be copied between devices; a rotating
@@ -209,12 +192,9 @@ export function diffFleet(desired: DeviceDesired[], probes: Map<string, DevicePr
   return { devices, actions };
 }
 
-/** Why a declared bundle is or is not pushed to one device. */
 interface SecretPushDecision {
   push: boolean;
-  /** Where it would land on the remote. Only meaningful when `push`. */
   backend: RemoteBackend;
-  /** Set when `push` is false — rendered as the `needs-secret` reminder. */
   reason: string;
 }
 
@@ -247,8 +227,6 @@ export function decideSecretPush(
   }
 
   if (!ctx.isHostPinned?.(device)) {
-    // Same bar as `exec --copy-creds`: never ship credential values to a host
-    // whose key we have not pinned.
     return {
       push: false,
       backend,
@@ -258,29 +236,20 @@ export function decideSecretPush(
   return { push: true, backend, reason: '' };
 }
 
-// ---- execution (real SSH; verified end-to-end, not unit-mocked) ----
 
 function osHint(platform: string | undefined): string | undefined {
   return platform === 'windows' ? 'windows' : undefined;
 }
 
-/** POSIX login shells often miss the shims dir; inject it (mirrors doctor). */
 function remoteEnv(platform: string | undefined): Record<string, string> | undefined {
   return platform === 'windows' ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
 }
 
 interface ProbeOptions {
-  /** Also fetch per-agent installed versions (one extra `agents view --json`
-   * round-trip). Enable only when the plan has a version-pinned spec. */
   withVersions?: boolean;
-  /** Also fetch which secrets bundles the device already has (one extra
-   *  `agents secrets list --json`). Enable only when the manifest declares
-   *  bundles and provisioning is on — same cost discipline as `withVersions`. */
   withSecrets?: boolean;
 }
 
-/** Probe one device: reachability + agents-cli version + installed agent ids
- * (and, when `withVersions`, the installed version strings per agent). */
 export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceProbe {
   let target: string;
   try {
@@ -302,7 +271,6 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
       const map = JSON.parse(res.stdout) as Record<string, TeamsDoctorEntry>;
       installed = Object.entries(map).filter(([, e]) => e?.installed).map(([k]) => k);
     } catch {
-      /* agents-cli present but doctor output unparsable — treat as no agents */
     }
   }
   let installedVersions: Record<string, string[]> | undefined;
@@ -313,8 +281,6 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
   }
   let remoteBundles: Record<string, string> | undefined;
   if (opts?.withSecrets) {
-    // Metadata only — `secrets list --json` returns names + timestamps and never
-    // values, which is why this is safe to run across the fleet.
     const listCmd = buildRemoteAgentsInvocation(['secrets', 'list', '--json'], undefined, hint, remoteEnv(device.platform));
     const lres = sshExec(target, listCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs });
     if (lres.code === 0) remoteBundles = parseRemoteBundles(lres.stdout);
@@ -350,9 +316,6 @@ export function parseRemoteBundles(stdout: string): Record<string, string> {
       const r = row as Record<string, unknown>;
       const name = typeof r.name === 'string' ? r.name : undefined;
       if (!name) continue;
-      // `updatedAt` is the real field name in `secrets list --json` — verified
-      // against a live payload, not assumed. `updated_at` is accepted too so an
-      // older remote is not silently recorded with an empty timestamp.
       const ts = typeof r.updatedAt === 'string' ? r.updatedAt
         : typeof r.updated_at === 'string' ? r.updated_at
           : '';
@@ -381,11 +344,9 @@ interface ExecContext {
   targetCliVersion: string;
   source: string;
   sourceAuth: SourceAuth;
-  /** Set for a dry run — probe + plan only, execute nothing. */
   dryRun?: boolean;
 }
 
-/** Execute one device's planned actions in order. Real SSH — no mocks. */
 async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: ExecContext): Promise<DeviceApplyResult> {
   if (!row.probe.reachable) {
     return { device: row.device, ok: false, steps: [], note: row.probe.note ?? 'unreachable' };
@@ -405,7 +366,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
   const sshAgents = (args: string[], input?: string) =>
     sshExec(target, buildRemoteAgentsInvocation(args, undefined, hint, env), { timeoutMs: 300000, multiplex: true, input, extraSshArgs });
 
-  // 1. agents-cli install/upgrade.
   const cliAction = row.actions.find((a) => a.kind === 'install-cli' || a.kind === 'upgrade-cli');
   if (cliAction) {
     const r = bootstrapAgentsCli(target, ctx.targetCliVersion, hint, extraSshArgs);
@@ -413,8 +373,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
     ok = ok && r.ok;
   }
 
-  // 2. agents. Every add-agent action carries the full spec (set in diffFleet);
-  // install it directly rather than re-parsing the human-readable detail string.
   for (const a of row.actions.filter((x) => x.kind === 'add-agent')) {
     const spec = a.spec!;
     const r = sshAgents(['add', spec, '--yes']);
@@ -422,9 +380,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
     ok = ok && r.code === 0;
   }
 
-  // 3. config sync — one `agents sync <scope>` per declared scope. Each scope is
-  // a positional repo target (system/user/project/alias); a bare `agents sync`
-  // would ignore the profile's declared scopes entirely.
   if (row.actions.some((a) => a.kind === 'sync-config')) {
     const scopes = row.desired.sync.length > 0 ? row.desired.sync : [''];
     let syncOk = true;
@@ -436,8 +391,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
     ok = ok && syncOk;
   }
 
-  // 4. Native login materialization does not exist. Every agent that needs a login is surfaced as
-  // `needs-login` (per-box login / portable-account guidance) in the diff above.
 
   // Secrets provisioning runs last: it is the most sensitive mutation (credential values crossing
   // machines), so every lower-risk step is already recorded and a failure never obscures what
@@ -446,8 +399,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
   for (const action of pushSecrets) {
     const bundle = action.bundle;
     if (!bundle) {
-      // A push-secret action without a bundle name is a planner bug, not a
-      // recoverable state — fail loud rather than push nothing and report ok.
       steps.push({ kind: 'push-secret', ok: false, detail: 'push-secret action carried no bundle name' });
       ok = false;
       continue;
@@ -470,19 +421,14 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
       });
       ok = ok && out.ok;
     } catch (e) {
-      // A local resolve failure (locked store, missing bundle, multi-line value)
-      // is reported per bundle rather than aborting the whole device.
       steps.push({ kind: 'push-secret', ok: false, detail: `secrets '${bundle}': ${(e as Error).message}` });
       ok = false;
     }
   }
 
-  // Surface blocked logins as (non-fatal) informational steps.
   for (const blocked of row.loginBlocked) {
     steps.push({ kind: 'needs-login', ok: false, detail: `${blocked} needs a manual login (\`agents ssh ${row.device} -- ${blocked}\`)` });
   }
-  // Surface declared secrets bundles as (non-fatal) manual-recreate reminders —
-  // values are keychain-local, never captured or pushed.
   for (const bundle of row.secretsNeeded) {
     steps.push({ kind: 'needs-secret', ok: false, detail: `secrets bundle '${bundle}' must exist on ${row.device} (\`agents ssh ${row.device} -- secrets create ${bundle}\`)` });
   }
@@ -490,7 +436,6 @@ async function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exec
   return { device: row.device, ok, steps };
 }
 
-/** Run a pool of async tasks with a concurrency cap, preserving input order. */
 export async function pool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
@@ -505,7 +450,6 @@ export async function pool<T, R>(items: T[], limit: number, fn: (item: T, index:
   return results;
 }
 
-/** Reconcile every device row in parallel (capped). */
 export async function runFleetApply(
   rows: DeviceDiff[],
   nameToProfile: Map<string, DeviceProfile>,
@@ -519,7 +463,6 @@ export async function runFleetApply(
   });
 }
 
-/** Default home for source snapshots (overridable in tests). */
 export function sourceHome(): string {
   return os.homedir();
 }

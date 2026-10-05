@@ -237,7 +237,7 @@ describe('applyRowDisplayLimit', () => {
   });
 
   it('keeps the newest rows — grouping already sorts newest-run-first', () => {
-    const rows = manyRows(5); // pids 0..4, tsMs 0..4 -> newest (pid 4) first
+    const rows = manyRows(5);
     const { shown } = applyRowDisplayLimit(rows, 2);
     expect(shown.map((r) => r.pid)).toEqual([4, 3]);
   });
@@ -291,7 +291,6 @@ describe('listComputerActions + buildComputerSessionRows (real event log)', () =
     expect(ledgerRows[0].task).toBe('open Notes and write a haiku');
     expect(ledgerRows[0].bundle).toBe('com.apple.notes');
     expect(ledgerRows[0].counts).toEqual({ describe: 1, click: 1 });
-    // No AGENT_SESSION_ID/AGENT_LAUNCH_ID at emit time → no identity recorded.
     expect(ledgerRows[0].linkStatus).toBe('unlinked');
   });
 

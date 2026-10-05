@@ -5,7 +5,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AuthFilePayload, AuthSnapshotResult } from './types.js';
 
-/** A portable credential file location, relative to $HOME. */
 interface AuthFileSpec {
   rel: string;
   mode: number;
@@ -26,7 +25,6 @@ export const FLEET_AUTH_FILES: Record<string, AuthFileSpec[]> = {
   antigravity: [{ rel: '.gemini/antigravity-cli/antigravity-oauth-token', mode: 0o600 }],
 };
 
-/** Agents whose macOS credentials live in the ACL-bound login keychain. */
 export const KEYCHAIN_BOUND_ON_MAC: ReadonlySet<string> = new Set(['claude', 'antigravity']);
 
 /** Agents whose OAuth uses single-use refresh tokens rotated server-side on every exchange.
@@ -40,21 +38,16 @@ export function isCredentialSafeToPropagate(_agent: string): boolean {
   return false;
 }
 
-/** True when the agent stores credentials in portable files we can read. This
- *  does NOT mean it is safe to propagate — check {@link isCredentialSafeToPropagate}. */
 export function hasPortableAuthFiles(agent: string): boolean {
   return agent in FLEET_AUTH_FILES;
 }
 
-/** Which agents `apply` can propagate auth for at all. */
 export function isPropagatableAgent(agent: string): boolean {
   return hasPortableAuthFiles(agent) && isCredentialSafeToPropagate(agent);
 }
 
 export interface SnapshotOptions {
-  /** Home directory to read credential files from. */
   home: string;
-  /** Platform of the source machine (`process.platform`). */
   platform: NodeJS.Platform;
 }
 
@@ -67,8 +60,8 @@ export function snapshotAuth(agents: string[], opts: SnapshotOptions): AuthSnaps
 
   for (const agent of agents) {
     const specs = FLEET_AUTH_FILES[agent];
-    if (!specs) continue; // no portable file — caller surfaces separately if desired
-    if (!isCredentialSafeToPropagate(agent)) continue; // single-use rotating refresh tokens are never copied
+    if (!specs) continue;
+    if (!isCredentialSafeToPropagate(agent)) continue;
     if (opts.platform === 'darwin' && KEYCHAIN_BOUND_ON_MAC.has(agent)) {
       bound.push(agent);
       continue;
@@ -79,10 +72,10 @@ export function snapshotAuth(agents: string[], opts: SnapshotOptions): AuthSnaps
       try {
         stat = fs.statSync(abs);
       } catch {
-        continue; // not signed in for this agent — nothing to carry
+        continue;
       }
       if (!stat.isFile()) continue;
-      const content = fs.readFileSync(abs); // follows symlinks into version homes
+      const content = fs.readFileSync(abs);
       files.push({
         agent,
         rel: spec.rel,

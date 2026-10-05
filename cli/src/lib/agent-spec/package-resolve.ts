@@ -27,7 +27,7 @@ function assertRealSourceWithin(abs: string, packageReal: string, label: string)
   try {
     lst = fs.lstatSync(abs);
   } catch {
-    return; // does not exist — requireFile/requireDir reports the specific error
+    return;
   }
   if (lst.isSymbolicLink()) {
     throw new AgentPackageError(`${label}: '${abs}' is a symlink; symlinked package sources are not allowed`, 'path-escape');
@@ -58,7 +58,6 @@ function sha256OfBytes(data: Buffer | string): string {
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-/** Deterministic combined hash of every file under `dir`, sorted by relative path. */
 function sha256OfDir(dir: string): string {
   const files: string[] = [];
   const walk = (base: string) => {
@@ -188,9 +187,6 @@ function resolveHookResource(
   if (!hook || typeof hook.name !== 'string' || hook.name.length === 0) {
     throw new AgentPackageError(`${label}: '${relPath}' must declare a 'name'`, 'invalid-resource');
   }
-  // The hook name becomes a filename in the materialized home, so a traversing
-  // name ('../../foo') would write a hook script outside the output home. Reject
-  // anything but a single safe path segment at the source.
   if (!isSafeSegmentName(hook.name)) {
     throw new AgentPackageError(`${label}: hook name '${hook.name}' is not a safe single path segment`, 'invalid-resource');
   }
@@ -240,13 +236,11 @@ function resolveScope(
   for (const p of paths.subagents) resources.push(resolveDirResource(packageDir, p, 'subagents', 'AGENT.md', provenance, scopeLabel, packageReal));
   for (const p of paths.mcp) resources.push(resolveMcpResource(packageDir, p, provenance, scopeLabel, packageReal));
   for (const p of paths.hooks) resources.push(resolveHookResource(packageDir, p, provenance, scopeLabel, packageReal));
-  // Sort deterministically — resolution order in agent.yaml must not affect output.
   resources.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind.localeCompare(b.kind)));
   assertNoDuplicates(resources, scopeLabel);
   return resources;
 }
 
-/** Deterministic package identity digest — independent of which harness later materializes it. */
 function computeDigest(portable: ResolvedResource[], overlays: Partial<Record<AgentId, ResolvedResource[]>>): string {
   const hash = crypto.createHash('sha256');
   const record = (label: string, resources: ResolvedResource[]) => {
@@ -257,14 +251,10 @@ function computeDigest(portable: ResolvedResource[], overlays: Partial<Record<Ag
   return hash.digest('hex');
 }
 
-/** Parse, validate, and resolve every declared resource of a package directory into one canonical result. */
 export function resolveAgentPackage(packageDir: string): ResolvedAgentPackage {
   const manifest: AgentPackageManifest = loadAgentPackageManifest(packageDir);
   const ex = manifest.execution;
 
-  // The package's REAL root — every resource source must realpath-resolve under
-  // this, so a symlinked ancestor can't smuggle in bytes from outside. The
-  // manifest already loaded from packageDir, so it exists and realpath succeeds.
   const packageReal = fs.realpathSync(path.resolve(packageDir));
 
   const portable = resolveScope(

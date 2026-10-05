@@ -5,21 +5,16 @@
 import { ghExec, type GhExec } from './pr-mergeable.js';
 import type { StatusCheck } from './pr-verdict.js';
 
-/** A rollup item shaped like `gh pr checks --json`, built from REST. */
 export interface RollupItem extends StatusCheck {
-  /** Check name / status context. */
   name: string;
-  /** html_url (check-run) or target_url (legacy status); may be empty. */
   link?: string;
 }
 
-/** PR head identity — the SHA every check query must anchor to. */
 interface PrHead {
   number: number;
   sha: string;
 }
 
-/** Parse newline-delimited JSON (gh `--jq` streams one object per line/page). */
 function parseNdjson(out: string): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
   for (const line of out.split('\n')) {
@@ -67,7 +62,6 @@ export async function rollupForSha(
   ]);
 
   const byName = new Map<string, RollupItem>();
-  // Legacy statuses first; check-runs override on a name collision.
   for (const s of parseNdjson(statusRaw)) {
     byName.set(String(s.name), { name: String(s.name), state: str(s.state), link: str(s.link) });
   }
@@ -99,11 +93,9 @@ export async function pendingCheckSuites(
   return Number.isFinite(n) ? n : 0;
 }
 
-/** The exact GitHub GraphQL primary rate-limit signal (never the bare noun). */
 const RATE_LIMIT_SIGNAL =
   /GraphQL: API rate limit (?:already )?exceeded|You have exceeded a secondary rate limit/i;
 
-/** True when gh stderr is the rate-limit outcome the shim should switch to REST on. */
 export function isRateLimitError(stderr: string): boolean {
   return RATE_LIMIT_SIGNAL.test(stderr);
 }

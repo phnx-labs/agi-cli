@@ -78,7 +78,6 @@ describe('resolveAgentPackage', () => {
 
   it('fails closed on a duplicate resource name within the same scope', () => {
     const dir = copyFixture();
-    // Two distinct mcp files declaring the same server name — a (kind, name) collision.
     fs.writeFileSync(path.join(dir, 'mcp', 'browser-2.yaml'), 'name: browser\ntransport: stdio\ncommand: npx\n');
     const manifestPath = path.join(dir, 'agent.yaml');
     fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').replace('- mcp/browser.yaml', '- mcp/browser.yaml\n    - mcp/browser-2.yaml'));
@@ -94,12 +93,9 @@ describe('resolveAgentPackage', () => {
 
   it('rejects a FILE source that is a symlink pointing outside the package', () => {
     const dir = copyFixture();
-    // A secret outside the package tree.
     const secret = path.join(os.tmpdir(), `pkg-secret-${process.pid}-${Date.now()}.txt`);
     fs.writeFileSync(secret, 'TOP SECRET');
     tempDirs.push(secret);
-    // Replace the instructions file with a symlink to it — textually still inside
-    // the package, but its bytes come from /tmp.
     const instr = path.join(dir, 'instructions.md');
     fs.rmSync(instr);
     fs.symlinkSync(secret, instr);
@@ -109,12 +105,10 @@ describe('resolveAgentPackage', () => {
 
   it('rejects a DIRECTORY source that is a symlink pointing outside the package', () => {
     const dir = copyFixture();
-    // A directory of secrets outside the package tree, shaped like a valid skill.
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-outside-skill-'));
     tempDirs.push(outside);
     fs.writeFileSync(path.join(outside, 'SKILL.md'), '# exfiltrated\n');
     fs.writeFileSync(path.join(outside, 'id_rsa'), 'PRIVATE KEY');
-    // Point the declared skill dir at it via a symlink.
     const skillDir = path.join(dir, 'skills', 'web-research');
     fs.rmSync(skillDir, { recursive: true, force: true });
     fs.symlinkSync(outside, skillDir);

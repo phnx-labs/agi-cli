@@ -16,9 +16,6 @@ describe('generated shim — bash execution', () => {
 
   beforeEach(() => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shim-integ-'));
-    // Explicit per-test path bag — state.ts captures HOME at module load,
-    // so mutating process.env.HOME won't redirect getHookCacheDir(). The
-    // shim accepts overrides for exactly this reason.
     paths = {
       shimsDir: path.join(tmpHome, 'shims'),
       cacheDir: path.join(tmpHome, 'cache'),
@@ -26,9 +23,6 @@ describe('generated shim — bash execution', () => {
       perfDir: path.join(tmpHome, 'perf'),
     };
 
-    // A real bash script the shim will invoke. It increments a counter file
-    // and prints the current count — lets the test distinguish hits (cache
-    // serves old output) from misses (counter advances).
     callCounterFile = path.join(tmpHome, 'counter');
     fs.writeFileSync(callCounterFile, '0');
     scriptPath = path.join(tmpHome, 'real-hook.sh');
@@ -72,7 +66,6 @@ echo "call=$count"
 
     const second = runShim(shim, '{}');
     expect(second.stdout.trim()).toBe('call=1');
-    // Counter did NOT advance — proves the real script was not re-invoked.
     expect(fs.readFileSync(callCounterFile, 'utf-8').trim()).toBe('1');
   });
 
@@ -87,7 +80,6 @@ echo "call=$count"
     const first = runShim(shim, '{}');
     expect(first.stdout.trim()).toBe('call=1');
 
-    // Backdate the cache file to force a TTL miss without waiting.
     const cacheFile = path.join(paths.cacheDir!, 'short-ttl-hook.out');
     expect(fs.existsSync(cacheFile)).toBe(true);
     const past = new Date(Date.now() - 5 * 60_000);
@@ -153,13 +145,11 @@ echo "call=$count"
       paths,
     });
 
-    // Two different cwds → two cache files → two real invocations.
     const a = runShim(shim, JSON.stringify({ cwd: '/some/repo/a' }));
     const b = runShim(shim, JSON.stringify({ cwd: '/some/repo/b' }));
     expect(a.stdout.trim()).toBe('call=1');
     expect(b.stdout.trim()).toBe('call=2');
 
-    // Same cwd again → cache hit, no advance.
     const a2 = runShim(shim, JSON.stringify({ cwd: '/some/repo/a' }));
     expect(a2.stdout.trim()).toBe('call=1');
     expect(fs.readFileSync(callCounterFile, 'utf-8').trim()).toBe('2');
@@ -182,8 +172,6 @@ echo "call=$count"
   });
 
   it('carries cwd/session_id through the pass-through (no-cache, matcher-only) tail too', () => {
-    // No `cache:` — mirrors a matcher-only hook like git-guard, which gets the
-    // gate-only PASSTHROUGH_TAIL, not the CACHE_TAIL exercised above.
     const shim = generateHookShim({
       name: 'guard-like-hook',
       scriptPath,
@@ -201,9 +189,6 @@ echo "call=$count"
     expect(line.session_id).toBe('sess-guard');
   });
 
-  // RUSH-2259: an orphaned bg lockdir (from a refresh hard-killed before its
-  // EXIT trap ran) must not stop bg refresh forever. Poll for the detached
-  // child's effect since the shim returns before its bg refresh finishes.
   function waitFor(pred: () => boolean, timeoutMs = 3000): boolean {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -223,19 +208,13 @@ echo "call=$count"
     const cacheFile = path.join(paths.cacheDir!, 'stale-lock-hook.out');
     const lockDir = `${cacheFile}.bg.lck`;
 
-    // Populate the cache (call=1), then backdate it past ttl so the next fire
-    // takes the stale-while-revalidate (bg refresh) branch.
     expect(runShim(shim, '{}').stdout.trim()).toBe('call=1');
     const past = new Date(Date.now() - 5 * 60_000);
     fs.utimesSync(cacheFile, past, past);
 
-    // Simulate the orphaned lock: a leftover dir from a bg refresh that was
-    // hard-killed before its trap removed it, backdated well past LOCK_TTL_SEC.
     fs.mkdirSync(lockDir, { recursive: true });
     fs.utimesSync(lockDir, past, past);
 
-    // Fire: serves stale (call=1) synchronously, and the bg child must reclaim
-    // the stale lock and refresh the cache to call=2.
     const fire = runShim(shim, '{}');
     expect(fire.stdout.trim()).toBe('call=1');
 
@@ -244,7 +223,6 @@ echo "call=$count"
       catch { return false; }
     });
     expect(refreshed).toBe(true);
-    // The bg subshell's EXIT trap removes the lock it (re)acquired.
     expect(waitFor(() => !fs.existsSync(lockDir))).toBe(true);
   });
 
@@ -262,12 +240,9 @@ echo "call=$count"
     const past = new Date(Date.now() - 5 * 60_000);
     fs.utimesSync(cacheFile, past, past);
 
-    // A freshly-held lock (age ~0) stands in for an in-flight refresh: it must
-    // survive and the second refresh must be skipped, so the counter stays at 1.
     fs.mkdirSync(lockDir, { recursive: true });
 
     expect(runShim(shim, '{}').stdout.trim()).toBe('call=1');
-    // Give any (incorrectly-spawned) bg child a chance to advance the counter.
     execFileSync('bash', ['-c', 'sleep 0.3']);
     expect(fs.readFileSync(callCounterFile, 'utf-8').trim()).toBe('1');
     expect(fs.existsSync(lockDir)).toBe(true);

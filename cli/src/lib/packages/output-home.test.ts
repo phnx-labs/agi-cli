@@ -64,7 +64,6 @@ describe('resolveOutputHome', () => {
   it('refuses the live home ROOT itself (materializer appends the config dir)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-home-root-'));
     tempDirs.push(home);
-    // Passing HOME as the output home would land the harness config dir in ~/.claude.
     expect(() => resolveOutputHome(home, process.cwd(), home)).toThrow(MaterializeGuardError);
     expect(() => resolveOutputHome(home, process.cwd(), home)).toThrow(/must not be the live home directory/);
   });
@@ -76,7 +75,6 @@ describe('resolveOutputHome', () => {
     tempDirs.push(linkParent);
     const link = path.join(linkParent, 'alias');
     fs.symlinkSync(home, link);
-    // The symlink resolves to HOME, so writing under it aliases ~/.claude.
     expect(() => resolveOutputHome(link, process.cwd(), home)).toThrow(/must not be the live home directory/);
   });
 
@@ -87,7 +85,6 @@ describe('resolveOutputHome', () => {
     tempDirs.push(linkParent);
     const link = path.join(linkParent, 'alias');
     fs.symlinkSync(home, link);
-    // alias -> HOME, so alias/.claude/x is the live ~/.claude tree.
     const escaped = path.join(link, '.claude', 'nested');
     expect(() => resolveOutputHome(escaped, process.cwd(), home)).toThrow(/live \.claude directory/);
   });
@@ -97,14 +94,10 @@ describe('resolveOutputHome', () => {
     tempDirs.push(home);
     const realClaude = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-realclaude-'));
     tempDirs.push(realClaude);
-    // ~/.claude is a symlink pointing at the operator's real claude config dir.
     fs.symlinkSync(realClaude, path.join(home, '.claude'));
 
-    // The symlink's real target IS the live home — must be refused.
     expect(() => resolveOutputHome(realClaude, process.cwd(), home)).toThrow(/live \.claude directory/);
-    // Passing ~/.claude (the symlink) itself resolves to the same real target.
     expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
-    // A path inside the real target too.
     expect(() => resolveOutputHome(path.join(realClaude, 'nested'), process.cwd(), home)).toThrow(/live \.claude directory/);
   });
 
@@ -117,11 +110,8 @@ describe('resolveOutputHome', () => {
     const absentTarget = path.join(home, 'not-there-yet');
     fs.symlinkSync(absentTarget, path.join(home, '.claude'));
 
-    // The literal alias itself.
     expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
-    // The absent target the dangling link points at.
     expect(() => resolveOutputHome(absentTarget, process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
-    // AND an UNRELATED, obviously-safe output home — fail closed refuses it too.
     const unrelated = path.join(home, 'ephemeral-out');
     expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(MaterializeGuardError);
     expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(/\.claude home is a dangling symlink/);
@@ -132,14 +122,12 @@ describe('resolveOutputHome', () => {
     tempDirs.push(parent);
     const home = path.join(parent, 'home');
     fs.mkdirSync(home);
-    // ~/.codex -> hop1 (relative) -> ../evil (relative), and ../evil is absent.
     fs.symlinkSync('hop1', path.join(home, '.codex'));
     fs.symlinkSync('../evil', path.join(home, 'hop1'));
-    const chainEnd = path.join(parent, 'evil'); // resolves from home/../evil
+    const chainEnd = path.join(parent, 'evil');
 
     expect(() => resolveOutputHome(path.join(home, '.codex'), process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
     expect(() => resolveOutputHome(chainEnd, process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
-    // The dangling ~/.codex chain also refuses a wholly unrelated output home.
     const unrelated = path.join(parent, 'ephemeral-out');
     expect(() => resolveOutputHome(unrelated, process.cwd(), home)).toThrow(/\.codex home is a dangling symlink/);
   });
@@ -147,9 +135,6 @@ describe('resolveOutputHome', () => {
   it('accepts a distinct output home when the protected homes are NOT dangling (PHNX-3838)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-live-ok-'));
     tempDirs.push(home);
-    // A real, existing ~/.claude (plain dir) plus a live ~/.codex symlink to an
-    // EXISTING target — neither dangles, so fail-closed does not trigger and an
-    // unrelated output home resolves normally through exact realpath identity.
     fs.mkdirSync(path.join(home, '.claude'));
     const realCodex = path.join(home, 'real-codex');
     fs.mkdirSync(realCodex);
@@ -157,7 +142,6 @@ describe('resolveOutputHome', () => {
 
     const out = path.join(home, 'ephemeral');
     expect(resolveOutputHome(out, process.cwd(), home)).toBe(path.resolve(out));
-    // The live homes themselves are still refused (exact realpath identity).
     expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
     expect(() => resolveOutputHome(realCodex, process.cwd(), home)).toThrow(/live \.codex directory/);
   });

@@ -8,35 +8,24 @@ import type { GhExec } from './pr-mergeable.js';
 
 const execFileAsync = promisify(execFile);
 
-/** What npm serves for the package the latest tag released. */
 export interface NpmVersion {
   name: string;
-  /** The `latest` dist-tag version; null when npm could not be read. */
   version: string | null;
-  /** Why `version` is null; null when it was read. */
   error: string | null;
 }
 
-/** The latest version tag of a repository and what has happened since. */
 export interface RepoRelease {
-  /** The highest `vX.Y.Z` / `X.Y.Z` tag (prefixed tags such as `menubar/v1.2.0` are another train and ignored). */
   latestTag: string;
-  /** When the tagged commit was committed. */
   latestTagAt: string;
-  /** PRs in `recentlyMerged` merged into the default branch after `latestTagAt`. */
   mergesSince: number;
-  /** False when `mergesSince` may be short: the tag predates the merged window, the merged list was truncated or unread, or the default branch is unknown. */
   mergesSinceComplete: boolean;
-  /** Null when no package.json in the tagged commit (or at the root) is public and carries the tag's version. */
   npm: NpmVersion | null;
 }
 
-/** A tag read: the latest version tag, its time, and npm's view of its package. `mergesSince` is filled by the caller. */
 export type TagRead = Omit<RepoRelease, 'mergesSince' | 'mergesSinceComplete'>;
 
 const SEMVER_TAG = /^v?(\d+)\.(\d+)\.(\d+)$/;
 
-/** The highest plain semver tag name, or null. Pre-releases and prefixed tags never count. */
 export function latestVersionTag(names: readonly string[]): string | null {
   let best: { name: string; parts: number[] } | null = null;
   for (const name of names) {
@@ -48,13 +37,11 @@ export function latestVersionTag(names: readonly string[]): string | null {
   return best?.name ?? null;
 }
 
-/** The package.json paths a release commit could have bumped: every package.json it changed, then the root one. */
 export function packageJsonCandidates(changedFiles: readonly string[]): string[] {
   const changed = changedFiles.filter((f) => f === 'package.json' || f.endsWith('/package.json'));
   return [...new Set([...changed, 'package.json'])];
 }
 
-/** The public package a package.json describes at `version`, or null (private, nameless, or another version). */
 export function releasedPackage(manifest: unknown, version: string): string | null {
   if (typeof manifest !== 'object' || manifest === null) return null;
   const m = manifest as { name?: unknown; version?: unknown; private?: unknown };
@@ -62,25 +49,20 @@ export function releasedPackage(manifest: unknown, version: string): string | nu
   return m.name;
 }
 
-/** How long an npm version read is trusted. */
 export const NPM_VERSION_TTL_MS = 60 * 60 * 1000;
 
-/** The `npm view` runner; injected by tests that must not reach the registry. */
 export type NpmView = (name: string) => Promise<string>;
 
-/** `npm view <name> version` with a 5 s timeout. Throws on a non-zero exit or a timeout. */
 export const npmView: NpmView = async (name) => {
   const { stdout } = await execFileAsync('npm', ['view', name, 'version'], { timeout: 5000, encoding: 'utf-8' });
   return stdout.trim();
 };
 
-/** The npm version cache: package name → the version read and when. */
 export interface NpmVersionCache {
   get(name: string): { version: string | null; error: string | null; readAt: number } | undefined;
   set(name: string, value: { version: string | null; error: string | null; readAt: number }): void;
 }
 
-/** True for gh's "not found" failure, the normal answer for a repository with no root package.json. */
 const isNotFound = (err: unknown) => /\(HTTP 404\)|Not Found/i.test(String((err as { stderr?: unknown })?.stderr ?? err));
 
 /** Reads a repo's latest version tag, the tagged commit's time, and npm's version of the package
@@ -91,7 +73,6 @@ export async function readLatestTag(
   gh: GhExec,
   npm: { view: NpmView; cache: NpmVersionCache; nowMs: number },
 ): Promise<TagRead | null> {
-  // Every page: the highest version is computed here, not taken from GitHub's listing order.
   const tags = (await gh(['api', `repos/${slug}/tags?per_page=100`, '--paginate', '--cache', '1h', '--jq', '.[] | [.name, .commit.sha] | @tsv']))
     .split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.split('\t') as [string, string]);
   const latestTag = latestVersionTag(tags.map(([name]) => name));
@@ -118,7 +99,6 @@ export async function readLatestTag(
   return { latestTag, latestTagAt: commit.date, npm: name ? await readNpmVersion(name, npm) : null };
 }
 
-/** npm's version of `name`, from the cache within {@link NPM_VERSION_TTL_MS}, else one `npm view`. */
 async function readNpmVersion(name: string, npm: { view: NpmView; cache: NpmVersionCache; nowMs: number }): Promise<NpmVersion> {
   const hit = npm.cache.get(name);
   const age = hit ? npm.nowMs - hit.readAt : -1;
@@ -132,7 +112,6 @@ async function readNpmVersion(name: string, npm: { view: NpmView; cache: NpmVers
     const killed = (err as { killed?: boolean })?.killed;
     read = { version: null, error: killed ? 'npm view timed out after 5 s' : (stderr.split('\n').find(Boolean) ?? String(err)) };
   }
-  // Only an answer is cached: a timeout or a missing npm must not blank the version for an hour.
   if (read.version !== null) npm.cache.set(name, { ...read, readAt: npm.nowMs });
   return { name, ...read };
 }
@@ -146,7 +125,6 @@ export function withMergesSince(
   window: { sinceMs: number; truncated: boolean; base: string | null },
 ): RepoRelease {
   const tagMs = Date.parse(tag.latestTagAt);
-  // Without the default branch's name every base counts, and the count is not complete.
   const since = (merged ?? []).filter((m) => Date.parse(m.mergedAt) > tagMs && (window.base === null || m.baseRefName === window.base)).length;
   return {
     ...tag,

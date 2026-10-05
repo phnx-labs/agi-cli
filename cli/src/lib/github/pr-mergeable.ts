@@ -34,7 +34,6 @@ function ghEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** Default runner: `gh` with a 30s timeout (or `timeoutMs`). Non-zero exit throws. */
 export async function ghExec(args: string[], opts: { timeoutMs?: number } = {}): Promise<string> {
   const { stdout } = await execFileAsync('gh', args, {
     timeout: opts.timeoutMs ?? 30_000,
@@ -45,7 +44,6 @@ export async function ghExec(args: string[], opts: { timeoutMs?: number } = {}):
   return String(stdout ?? '');
 }
 
-/** Unique GitHub slugs declared on project definitions. */
 export function projectRepoSlugs(defs: readonly ProjectDef[]): string[] {
   const slugs = new Set<string>();
   for (const d of defs) {
@@ -120,7 +118,6 @@ export async function selectListedMergeable(
       const extra = await fetchVerdict(repo, row.number, gh);
       candidates.push({ ...base, ...extra });
     } catch {
-      // A single PR's reviews/comments probe failed — skip it, keep the rest.
       continue;
     }
   }
@@ -129,7 +126,6 @@ export async function selectListedMergeable(
   );
 }
 
-/** List mergeable `owner/repo#n` refs, space-separated. Empty string if none. */
 export async function listMergeableRefs(opts?: {
   gh?: GhExec;
   defs?: ProjectDef[];

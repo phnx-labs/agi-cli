@@ -13,8 +13,6 @@ import {
 
 const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdata', name), 'utf-8');
 
-// Recorded from phnx-labs/agi-cli on 2026-10-04: v1.22.121 is tagged on the
-// release commit a752915, which bumped cli/package.json; npm still served 1.22.120.
 const REPO = 'phnx-labs/agi-cli';
 const TAG_SHA = 'a7529150a0e1adc9b3fa2135b063a6bbf726f3be';
 const tagNames = () => testdata('agi-cli-tags.tsv').trim().split('\n').map((l) => l.split('\t')[0]);
@@ -97,7 +95,6 @@ describe('readLatestTag', () => {
     });
     expect(viewed).toEqual(['@phnx-labs/agents-cli']);
 
-    // Within the hour npm is not asked again; after it, it is.
     await readLatestTag(REPO, gh, { view: async (n) => { viewed.push(n); return '1.22.120'; }, cache, nowMs: nowMs + 60_000 });
     expect(viewed).toHaveLength(1);
     await readLatestTag(REPO, gh, { view: async (n) => { viewed.push(n); return '1.22.121'; }, cache, nowMs: nowMs + NPM_VERSION_TTL_MS });

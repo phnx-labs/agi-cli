@@ -12,7 +12,6 @@ import {
   rollupForSha,
 } from './rest.js';
 
-/** A gh that routes by endpoint substring and returns recorded REST payloads. */
 function ghRoutes(routes: {
   head?: string;
   checkRuns?: string;
@@ -60,7 +59,6 @@ describe('rollupForSha', () => {
       conclusion: 'SUCCESS',
     });
     expect(rollup.find((c) => c.name === 'ci/external')).toMatchObject({ state: 'SUCCESS' });
-    // Head-exact, terminal, all success/skipped -> green (reuses isCiGreen).
     expect(isCiGreen(rollup)).toBe(true);
   });
 

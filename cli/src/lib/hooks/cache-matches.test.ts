@@ -27,8 +27,6 @@ describe('generated shim — matches: gate', () => {
     counterFile = path.join(tmpHome, 'counter');
     fs.writeFileSync(counterFile, '0');
     scriptPath = path.join(tmpHome, 'real-hook.sh');
-    // Increments the counter and echoes it. A cache hit or a gate skip means
-    // this never runs, so the counter does not advance.
     fs.writeFileSync(
       scriptPath,
       `#!/usr/bin/env bash
@@ -66,7 +64,6 @@ echo "call=$count"
     });
 
     const res = runShim(shim, JSON.stringify({ tool_name: 'Read' }));
-    // Predicate failed → hook skipped → exit 0, no stdout, counter untouched.
     expect(res.exit).toBe(0);
     expect(res.stdout.trim()).toBe('');
     expect(counter()).toBe(0);
@@ -127,13 +124,11 @@ echo "call=$count"
       paths,
     });
 
-    // Non-matching event → skipped, nothing cached.
     const skipped = runShim(shim, JSON.stringify({ tool_name: 'Read' }));
     expect(skipped.stdout.trim()).toBe('');
     expect(counter()).toBe(0);
     expect(fs.existsSync(path.join(paths.cacheDir!, 'gated-cached.out'))).toBe(false);
 
-    // Matching event → fires and caches; second matching call hits cache.
     const first = runShim(shim, JSON.stringify({ tool_name: 'Bash' }));
     expect(first.stdout.trim()).toBe('call=1');
     const second = runShim(shim, JSON.stringify({ tool_name: 'Bash' }));
@@ -169,9 +164,6 @@ echo "call=$count"
       { name: 'mode-array-hit', matches: { permission_mode: ['plan', 'acceptEdits'] }, input: { permission_mode: 'acceptEdits' } },
       { name: 'mode-camel-hit', matches: { permission_mode: 'plan' }, input: { permissionMode: 'plan' } },
       { name: 'mode-camel-miss', matches: { permission_mode: 'plan' }, input: { permissionMode: 'bypassPermissions' } },
-      // permission_mode_not — the negative form. Shipped in match.ts without a
-      // mirror in the shim's Python gate, so `permission_mode_not: plan` fired
-      // anyway and the predicate was silently inert on every hook. These pin it.
       { name: 'mode-not-hit-skips', matches: { permission_mode_not: 'plan' }, input: { permission_mode: 'plan' } },
       { name: 'mode-not-miss-fires', matches: { permission_mode_not: 'plan' }, input: { permission_mode: 'default' } },
       { name: 'mode-not-absent-fires', matches: { permission_mode_not: 'plan' }, input: { prompt: 'no mode field' } },

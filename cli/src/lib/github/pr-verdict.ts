@@ -2,12 +2,10 @@
  * merge-guard.sh: accept an APPROVED review or an APPROVE comment on this PR; reject one citing
  * another PR (#2736 laundering). No third rule; change with the hook's regexes in one delivery. */
 
-/** A GitHub pull-request review, shaped after `GET .../pulls/{n}/reviews`. */
 export interface PrReview {
   state?: string;
 }
 
-/** An issue comment on a PR, shaped after `GET .../issues/{n}/comments`. */
 export interface PrComment {
   body?: string;
 }
@@ -20,10 +18,8 @@ export interface StatusCheck {
   status?: string;
 }
 
-/** One open PR with the fields the mergeable selector reads. */
 export interface MergeablePrInput {
   number: number;
-  /** `owner/repo`. Required so a daemon with no git cwd can still merge. */
   repo: string;
   reviewDecision?: string | null;
   statusCheckRollup?: StatusCheck[] | null;
@@ -45,7 +41,6 @@ export function hasApproveVerdict(
   for (const c of comments) {
     const body = c?.body ?? '';
     if (!/\bAPPROVE\b/.test(body)) continue;
-    // A verdict that only points at another PR is laundering, not review.
     if (/\bcarried\s+(?:over\s+)?from\b|\bAPPROVE\s+(?:on|from)\s+#\d+/.test(body)) {
       continue;
     }
@@ -76,7 +71,6 @@ export function selectMergeablePrs(prs: readonly MergeablePrInput[]): MergeableP
   });
 }
 
-/** `owner/repo#n` — the poll observation the merge action can parse without a cwd. */
 export function formatMergeableRef(pr: Pick<MergeablePrInput, 'repo' | 'number'>): string {
   return `${pr.repo}#${pr.number}`;
 }

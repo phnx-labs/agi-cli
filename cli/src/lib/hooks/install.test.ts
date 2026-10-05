@@ -16,8 +16,6 @@ beforeEach(() => {
   userDir = path.join(testHome, '.agents');
   systemDir = path.join(userDir, '.system');
   fs.mkdirSync(systemDir, { recursive: true });
-  // A concrete agents.yaml keeps the migrator from firing on a missing legacy
-  // state (mirrors doctor-diff.test.ts).
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
 });
 
@@ -113,8 +111,6 @@ function plantCodexBinary(version: string): void {
   fs.writeFileSync(stub, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 }
 
-/** Seed a system-layer hook manifest + a version-home hooks dir carrying the
- *  hook script, so the inspector resolves a command it expects to be wired. */
 function seedClaudeVersionWithHook(version: string, hookName: string, event: string): string {
   plantClaudeBinary(version);
   fs.writeFileSync(
@@ -141,8 +137,6 @@ function seedClaudeVersionWithGeneratedShim(version: string, hookName: string, e
   return home;
 }
 
-/** Run checkVersionHookWiring (optionally after registerHooksToSettings) in a
- *  subprocess rooted at testHome, returning its JSON report. */
 function runWiring(agent: string, version: string, opts: { register?: boolean } = {}): WiringReport {
   const modulePath = path.resolve(process.cwd(), 'src/lib/hooks/install.ts');
   const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
@@ -165,8 +159,6 @@ function runWiring(agent: string, version: string, opts: { register?: boolean } 
     env: {
       ...process.env,
       HOME: testHome,
-      // Keep generated shims inside the planted home — do not inherit the
-      // vitest hermetic AGENTS_HOOK_SHIMS_DIR (and never write the user's cache).
       AGENTS_HOOK_SHIMS_DIR: path.join(testHome, 'hook-shims'),
       AGENTS_HOOK_CACHE_DIR: path.join(testHome, 'hook-cache'),
       AGENTS_LOGS_DIR: path.join(testHome, 'logs'),
@@ -184,8 +176,6 @@ function shimPathInTestHome(hookName: string): string {
 describe('checkVersionHookWiring', () => {
   it('flags a hook present on disk but absent from settings.json as UNWIRED (the bug)', () => {
     seedClaudeVersionWithHook('2.0.0', 'demo-guard', 'PreToolUse');
-    // settings.json exists but does NOT reference the hook — exactly the
-    // yosemite-s1 case (file byte-identical to source, never wired).
     const configDir = path.join(userDir, '.history', 'versions', 'claude', '2.0.0', 'home', '.claude');
     fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({ hooks: {} }, null, 2));
 
@@ -198,8 +188,6 @@ describe('checkVersionHookWiring', () => {
 
   it('reports no unwired hooks once the real registrar has wired settings.json', () => {
     seedClaudeVersionWithHook('2.0.0', 'demo-guard', 'PreToolUse');
-    // Let registerHooksToSettings (the same call `agents sync` makes) write the
-    // wiring, then verify the inspector agrees the hook is wired.
     const report = runWiring('claude', '2.0.0', { register: true });
     expect(report.supported).toBe(true);
     expect(report.unwired).toHaveLength(0);
@@ -207,7 +195,6 @@ describe('checkVersionHookWiring', () => {
 
   it('surfaces a missing settings.json when hooks are declared', () => {
     seedClaudeVersionWithHook('2.0.0', 'demo-guard', 'PreToolUse');
-    // No settings.json written at all.
     const report = runWiring('claude', '2.0.0');
     expect(report.supported).toBe(true);
     expect(report.settingsMissing).toBe(true);
@@ -215,8 +202,6 @@ describe('checkVersionHookWiring', () => {
   });
 
   it('reports unsupported for an agent outside the settings.json family (codex)', () => {
-    // codex hooks live in config.toml with a different schema — the inspector
-    // must not claim to verify it (no false "wired").
     fs.mkdirSync(path.join(userDir, '.history', 'versions', 'codex', '0.130.0', 'home', '.codex'), { recursive: true });
     const report = runWiring('codex', '0.130.0');
     expect(report.supported).toBe(false);
@@ -251,7 +236,6 @@ describe('checkVersionHookWiring', () => {
   });
 });
 
-// ─── bounded repair (shared self-heal routine) ───────────────────────────────
 
 interface RuntimeRepairReport {
   brokenBefore: Array<{ name: string; shimPath: string; reason: string }>;
@@ -290,7 +274,6 @@ function runRuntime(scriptBody: string): string {
 
 describe('removeVersion re-points the global shims', () => {
   it('a shim whose SOURCE was inside the removed version resolves to the survivor afterwards', () => {
-    // Two installations share one shim; the default (2.0.0) owns SOURCE.
     seedClaudeVersionWithGeneratedShim('2.0.0', 'runtime-guard', 'PreToolUse');
     seedClaudeVersionWithGeneratedShim('2.1.0', 'runtime-guard', 'PreToolUse');
     const versionsPath = path.resolve(process.cwd(), 'src/lib/installations/versions.ts');
@@ -304,7 +287,6 @@ describe('removeVersion re-points the global shims', () => {
       const after = shim ? fs.readFileSync(shim, 'utf-8').match(/^SOURCE='([^']*)'/m)?.[1] : null;
       console.log(JSON.stringify({ shim, before, removed, after, afterExists: after ? fs.existsSync(after) : false }));
     `);
-    // removeVersion prints its own status lines; the JSON report is the last line.
     const r = JSON.parse(out.trim().split('\n').pop() ?? '{}') as { shim: string | null; before: string | null; removed: boolean; after: string | null; afterExists: boolean };
     expect(r.shim).toBeTruthy();
     expect(r.before).toContain(`${path.sep}2.0.0${path.sep}`);
@@ -411,13 +393,10 @@ describe('repairManagedHookRuntimeArtifacts', () => {
     expect(r.pass1.attempts[0].repaired).toBe(false);
     expect(r.pass1.fixed).toEqual([]);
     expect(r.pass1.needsAttention).toHaveLength(1);
-    // errno differs by platform (EISDIR / EPERM / EEXIST); never bake one in.
-    // Must stay free of absolute paths and randomized temp UUIDs.
     expect(r.pass1.needsAttention[0]).toMatch(
       /^hook shim runtime-guard: repair failed \[[A-Z0-9_]+\]: .+$/,
     );
     expect(r.pass1.needsAttention[0]).not.toMatch(/[/\\]Users[/\\]|[/\\]tmp[/\\]|\.tmp|[0-9a-f]{8}-[0-9a-f]{4}/i);
-    // Independent second pass: identical needsAttention (stable for fleet aggregation).
     expect(r.pass2.attempts).toHaveLength(1);
     expect(r.pass2.attemptedPaths).toHaveLength(1);
     expect(r.pass2.needsAttention).toEqual(r.pass1.needsAttention);
@@ -452,15 +431,12 @@ describe('repairManagedHookRuntimeArtifacts', () => {
   });
 
   it('picks the global-default version source when multiple versions share a shim path', () => {
-    // Older version first alphabetically so a naive sort would pick 1.0.0.
     seedClaudeVersionWithGeneratedShim('1.0.0', 'runtime-guard', 'PreToolUse');
     seedClaudeVersionWithGeneratedShim('2.0.0', 'runtime-guard', 'PreToolUse');
-    // Distinct script contents so the embedded SOURCE is observable.
     const v1 = path.join(userDir, '.history', 'versions', 'claude', '1.0.0', 'home', '.claude', 'hooks', 'runtime-guard.sh');
     const v2 = path.join(userDir, '.history', 'versions', 'claude', '2.0.0', 'home', '.claude', 'hooks', 'runtime-guard.sh');
     fs.writeFileSync(v1, '#!/bin/sh\necho OLD\nexit 0\n', { mode: 0o755 });
     fs.writeFileSync(v2, '#!/bin/sh\necho NEW\nexit 0\n', { mode: 0o755 });
-    // agents.yaml already pins claude: "2.0.0" from beforeEach.
     const out = runRuntime(`
       const fs = await import('node:fs');
       const pass = mod.repairManagedHookRuntimeArtifacts({ filter: { agent: 'claude' } });
@@ -483,7 +459,6 @@ describe('repairManagedHookRuntimeArtifacts', () => {
     };
     expect(r.attempts).toBe(1);
     expect(r.fixed).toEqual(['hook shim runtime-guard']);
-    // SOURCE embeds the default version's script, not the older 1.0.0 copy.
     expect(r.body).toContain(r.defaultScript);
     expect(r.body).not.toContain(r.oldScript);
   });
@@ -661,14 +636,12 @@ describe('installSessionTrackerHookSync — failure reasons are never empty', ()
 // used to diff against the registered manifest, but sync copies unregistered helper/test/benchmark
 // scripts into every home, so `agents prune cleanup` offered to trash ~1000 in-use files.
 
-/** Write a hook script into a source root's hooks dir (user or system). */
 function seedSourceHook(root: string, relative: string): void {
   const scriptPath = path.join(root, 'hooks', relative);
   fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
   fs.writeFileSync(scriptPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 }
 
-/** Write a file into a claude version home's hooks dir. */
 function seedHomeHookFile(version: string, relative: string): void {
   const hooksDir = path.join(userDir, '.history', 'versions', 'claude', version, 'home', '.claude', 'hooks');
   const p = path.join(hooksDir, relative);
@@ -692,55 +665,45 @@ function runUnmanagedHooks(agent: string, version: string): string[] {
 
 describe('listUnmanagedHooksInVersionHome — source-based orphan detection', () => {
   it('does NOT flag source-present helper/test/benchmark scripts, but DOES flag a genuine orphan', () => {
-    // Source set: one registered hook plus the helper/test/benchmark scripts sync
-    // copies alongside it. Only `git-guard` is in the manifest; the rest are not.
     fs.writeFileSync(
       path.join(systemDir, 'agents.yaml'),
       'hooks:\n  git-guard:\n    script: git-guard.sh\n    events: [PreToolUse]\n',
     );
-    for (const f of [
-      'git-guard.sh',            // registered + source
-      'permission-handler.sh',   // source-present helper, unregistered
-      'verify-work-state.py',    // source-present helper, unregistered
-      'run_tests.sh',            // source-present test, unregistered
-      'benchmark_x.py',          // source-present benchmark, unregistered
-    ]) {
-      seedSourceHook(systemDir, f);
-    }
-
-    // Version home carries every source file (sync copies them) plus one file
-    // that exists in NO source root — the only genuine orphan.
     for (const f of [
       'git-guard.sh',
       'permission-handler.sh',
       'verify-work-state.py',
       'run_tests.sh',
       'benchmark_x.py',
-      'dead-hook.sh',            // absent from every source → orphan
+    ]) {
+      seedSourceHook(systemDir, f);
+    }
+
+    for (const f of [
+      'git-guard.sh',
+      'permission-handler.sh',
+      'verify-work-state.py',
+      'run_tests.sh',
+      'benchmark_x.py',
+      'dead-hook.sh',
     ]) {
       seedHomeHookFile('2.0.0', f);
     }
 
     const orphans = runUnmanagedHooks('claude', '2.0.0');
-    // Pre-fix (manifest-based) this returned permission-handler, verify-work-state,
-    // run_tests, benchmark_x AND dead-hook. Now only the true orphan remains.
     expect(orphans).toEqual(['dead-hook']);
   });
 
   it('flags a home file once its source is removed (no over-suppression)', () => {
-    // Same helper present in source and home → not an orphan.
     seedSourceHook(userDir, 'permission-handler.sh');
     seedHomeHookFile('2.0.0', 'permission-handler.sh');
     expect(runUnmanagedHooks('claude', '2.0.0')).toEqual([]);
 
-    // Remove it from source only: the home copy is now genuinely orphaned.
     fs.rmSync(path.join(userDir, 'hooks', 'permission-handler.sh'));
     expect(runUnmanagedHooks('claude', '2.0.0')).toEqual(['permission-handler']);
   });
 
   it('resolves a source hook nested in an event-group subdir', () => {
-    // Sync materializes event-group hooks (hooks/<event>/<script>) flat into the
-    // home; the source resolver descends one level, so they are not orphans.
     seedSourceHook(systemDir, 'stop/00-agent-verify-work-complete.sh');
     seedHomeHookFile('2.0.0', '00-agent-verify-work-complete.sh');
     expect(runUnmanagedHooks('claude', '2.0.0')).toEqual([]);

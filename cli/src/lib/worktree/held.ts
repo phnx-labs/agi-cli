@@ -8,7 +8,6 @@ import * as path from 'path';
 
 const execFileAsync = promisify(execFile);
 
-/** Worktree dir names are slugs; anything else is refused rather than shelled. */
 const WORKTREE_NAME_RE = /^[A-Za-z0-9._-]+$/;
 
 /** Coarse bucket of a held worktree. `unmerged-commits`: real work nobody can see; push or open a
@@ -24,29 +23,19 @@ export type HeldReason =
   | 'status-unreadable'
   | 'merge-state-unknown';
 
-/** One classified held worktree — the structured record the sweep threw away. */
 export interface HeldWorktree {
-  /** Repo root that owns this worktree (the dir holding `.agents/worktrees`). */
   repo: string;
-  /** basename(repo), for compact tables. */
   repoName: string;
-  /** Worktree slug (the dir under `.agents/worktrees`). */
   name: string;
-  /** Absolute path to the worktree. */
   path: string;
-  /** Checked-out branch, or null for a detached HEAD. */
   branch: string | null;
   bucket: HeldBucket;
   reason: HeldReason;
   /** Commits with no patch-equivalent upstream (`git cherry`); -1 means it could not be established. */
   unmergedCommits: number;
-  /** `git status --porcelain` line count; -1 means it could not be read. */
   dirtyFiles: number;
-  /** True when `<branch>` already exists on `origin` (so the work is visible). */
   hasRemoteBranch: boolean;
-  /** Whole days since the worktree dir was last modified. */
   ageDays: number;
-  /** Disk footprint of the worktree dir in bytes, or -1 if it could not be read. */
   sizeBytes: number;
 }
 
@@ -62,14 +51,12 @@ export async function resolveDefaultRef(repoRoot: string): Promise<string | null
     const head = await git(repoRoot, ['symbolic-ref', '--short', '-q', 'refs/remotes/origin/HEAD']);
     if (head) return head;
   } catch {
-    /* fall through to the probes below */
   }
   for (const ref of ['origin/main', 'origin/master']) {
     try {
       await git(repoRoot, ['rev-parse', '--verify', '--quiet', ref]);
       return ref;
     } catch {
-      /* try the next candidate */
     }
   }
   return null;
@@ -92,7 +79,6 @@ async function countUnmergedCommits(
   }
 }
 
-/** One `git worktree list --porcelain` record. */
 interface PorcelainEntry {
   path: string;
   branch: string | null;
@@ -125,13 +111,9 @@ export function isInside(child: string, parent: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
 }
 
-/** Everything the bucket decision depends on, gathered once. */
 interface HeldFacts {
-  /** null for detached HEAD. */
   branch: string | null;
-  /** `git status --porcelain` line count; -1 = could not read. */
   dirtyFiles: number;
-  /** `git cherry` count; -1 = could not determine. */
   unmergedCommits: number;
 }
 
@@ -139,19 +121,13 @@ interface HeldFacts {
  * surfacing, not deletion: a determinable `unmerged-commits` wins even if the tree is dirty, since
  * recoverable work is the priority. `undeterminable` only when merge state itself is unreadable. */
 export function classifyHeld(facts: HeldFacts): { bucket: HeldBucket; reason: HeldReason } | null {
-  // Fail closed first: if we could not establish the merge state, we cannot
-  // claim the work is safe, so it is undeterminable — never silently "clean".
   if (facts.unmergedCommits < 0) return { bucket: 'undeterminable', reason: 'merge-state-unknown' };
-  // The bucket that matters: commits on no upstream. Reported even over a dirty
-  // tree, since the branch carries recoverable work regardless of the worktree.
   if (facts.unmergedCommits > 0) return { bucket: 'unmerged-commits', reason: 'unmerged-commits' };
-  // Merge state is clean; now an unreadable status is its own broken-checkout case.
   if (facts.dirtyFiles < 0) return { bucket: 'undeterminable', reason: 'status-unreadable' };
   if (facts.dirtyFiles > 0) return { bucket: 'uncommitted-changes', reason: 'uncommitted-changes' };
   return null;
 }
 
-/** Recursively total the byte size of a directory tree; -1 if it can't be read. */
 async function dirSize(dir: string): Promise<number> {
   let total = 0;
   let entries: import('fs').Dirent[];
@@ -171,7 +147,6 @@ async function dirSize(dir: string): Promise<number> {
         total += st.size;
       }
     } catch {
-      /* a file that vanished mid-walk contributes nothing */
     }
   }
   return total;
@@ -194,8 +169,6 @@ export async function collectHeldWorktrees(repoRoot: string): Promise<HeldWorktr
 
   const held: HeldWorktree[] = [];
   for (const e of entries) {
-    // Only the PR-bound agent worktrees the sweep governs — not the primary
-    // checkout and not any ad-hoc worktree elsewhere on disk.
     if (!isInside(e.path, wtContainer)) continue;
 
     let dirtyFiles = -1;
@@ -266,15 +239,13 @@ async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<
       if (!e.isDirectory()) continue;
       if (PRUNE.has(e.name)) continue;
       const p = path.join(dir, e.name);
-      // A `.agents/worktrees` dir marks its grandparent as a repo root.
       if (e.name === '.agents') {
         try {
           const st = await fs.stat(path.join(p, 'worktrees'));
           if (st.isDirectory()) repos.add(dir);
         } catch {
-          /* no worktrees container here */
         }
-        continue; // never descend into a .agents dir
+        continue;
       }
       await walk(p, depth + 1);
     }
@@ -284,7 +255,6 @@ async function discoverWorktreeRepos(searchHome: string, maxDepth = 7): Promise<
   return [...repos].sort();
 }
 
-/** Discover + classify every held worktree beneath `searchHome`. Read-only. */
 export async function collectHeldWorktreesUnder(searchHome: string): Promise<HeldWorktree[]> {
   const repos = await discoverWorktreeRepos(searchHome);
   const all: HeldWorktree[] = [];
@@ -294,7 +264,6 @@ export async function collectHeldWorktreesUnder(searchHome: string): Promise<Hel
   return all;
 }
 
-/** A held set grouped by bucket, with the itemised entries kept. */
 interface HeldSummary {
   total: number;
   buckets: Record<HeldBucket, HeldWorktree[]>;
@@ -306,20 +275,17 @@ const EMPTY_BUCKETS = (): Record<HeldBucket, HeldWorktree[]> => ({
   'undeterminable': [],
 });
 
-/** Group a flat held list into its three buckets. Pure. */
 export function summarizeHeld(held: HeldWorktree[]): HeldSummary {
   const buckets = EMPTY_BUCKETS();
   for (const w of held) buckets[w.bucket].push(w);
   return { total: held.length, buckets };
 }
 
-/** One device's contribution to a fleet-wide roll-up. */
 export interface DeviceHeld {
   device: string;
   held: HeldWorktree[];
 }
 
-/** A fleet-wide roll-up: every device's held worktrees, still bucketed. Pure. */
 interface FleetHeldSummary extends HeldSummary {
   devices: { device: string; total: number }[];
 }
@@ -338,7 +304,6 @@ export function aggregateHeld(perDevice: DeviceHeld[]): FleetHeldSummary {
   return { total, buckets, devices };
 }
 
-/** Outcome of the safe recovery action on one stranded worktree. */
 interface PushResult {
   name: string;
   branch: string | null;
@@ -354,8 +319,6 @@ export async function pushStrandedBranch(repoRoot: string, wt: HeldWorktree): Pr
   if (!WORKTREE_NAME_RE.test(wt.name)) return { ...base, reason: 'unsafe worktree name' };
   if (!wt.branch) return { ...base, reason: 'detached HEAD — no branch to push' };
 
-  // Re-read the facts NOW: the collected snapshot may be stale, and pushing on
-  // a stale "unmerged" verdict is the one thing we must not get wrong.
   const defaultRef = await resolveDefaultRef(repoRoot);
   const unmerged = await countUnmergedCommits(wt.path, defaultRef);
   const fresh = classifyHeld({ branch: wt.branch, dirtyFiles: 0, unmergedCommits: unmerged });

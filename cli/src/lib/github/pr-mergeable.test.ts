@@ -147,7 +147,7 @@ describe('ghExec color env', () => {
         'pr', 'list', '--repo', 'phnx-labs/agi-cli', '--author', '@me',
         '--state', 'open', '--limit', '1', '--json', 'number',
       ]);
-      expect(raw.charCodeAt(0)).not.toBe(0x1b); // no ESC
+      expect(raw.charCodeAt(0)).not.toBe(0x1b);
       expect(Array.isArray(JSON.parse(raw))).toBe(true);
     } catch (err) {
       const msg = String((err as Error).message ?? err);
@@ -196,9 +196,8 @@ describe('live gh --repo from a non-repo cwd (RUSH-2848 defect 1)', () => {
       expect(Array.isArray(JSON.parse(String(stdout)))).toBe(true);
     } catch (err) {
       const msg = String((err as Error).message ?? err);
-      // This is the bug: without --repo, gh infers the repo from cwd and dies.
       expect(msg).not.toMatch(/not a git repository/);
-      if (/gh|auth|rate limit|network/i.test(msg)) return; // unauthenticated CI
+      if (/gh|auth|rate limit|network/i.test(msg)) return;
       throw err;
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });

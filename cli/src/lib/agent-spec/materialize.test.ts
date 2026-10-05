@@ -35,7 +35,6 @@ describe('materializeAgentPackage — native layouts', () => {
       const kinds = receipt.resources.map((r) => r.kind).sort();
       expect(kinds).toEqual(['hooks', 'instructions', 'mcp', 'skills', 'subagents']);
 
-      // Every listed target genuinely exists on disk under the output home.
       for (const entry of receipt.resources) {
         expect(fs.existsSync(path.join(outputHome, entry.target)), `${entry.kind}:${entry.name} -> ${entry.target}`).toBe(true);
       }
@@ -120,12 +119,10 @@ describe('materializeAgentPackage — stale pruning', () => {
     const skillDirOnDisk = path.join(outputHome, skillEntry.target);
     expect(fs.existsSync(skillDirOnDisk)).toBe(true);
 
-    // Plant an unmanaged file the materializer must never touch.
     const unmanagedFile = path.join(outputHome, '.claude', 'unmanaged-note.txt');
     fs.mkdirSync(path.dirname(unmanagedFile), { recursive: true });
     fs.writeFileSync(unmanagedFile, 'do not delete me');
 
-    // Remove the skill from the package and re-materialize into the SAME home.
     const manifestPath = path.join(dir, 'agent.yaml');
     fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').replace('  skills:\n    - skills/web-research\n', ''));
 
@@ -142,7 +139,6 @@ describe('materializeAgentPackage — stale pruning', () => {
 describe('materializeAgentPackage — refuses to write through a symlink out of the output home', () => {
   it('refuses when a symlink is planted at the harness-config-dir join point (outputHome/.claude -> live home)', () => {
     const resolved = resolveAgentPackage(FIXTURE);
-    // A stand-in for the operator's real ~/.claude, with a marker we must not touch.
     const fakeHome = tempHome();
     const liveClaude = path.join(fakeHome, '.claude');
     fs.mkdirSync(liveClaude, { recursive: true });
@@ -150,14 +146,11 @@ describe('materializeAgentPackage — refuses to write through a symlink out of 
     fs.writeFileSync(marker, 'LIVE-MARKER-DO-NOT-TOUCH');
 
     const outputHome = tempHome();
-    // resolveOutputHome would accept this output home (it's an ordinary dir);
-    // the escape is the child the materializer forms itself.
     fs.symlinkSync(liveClaude, path.join(outputHome, '.claude'));
 
     expect(() =>
       materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
     ).toThrow(/outside the output home/);
-    // The live marker is untouched — nothing was written through the symlink.
     expect(fs.readFileSync(marker, 'utf-8')).toBe('LIVE-MARKER-DO-NOT-TOUCH');
   });
 });
@@ -204,8 +197,6 @@ describe('materializeAgentPackage — refuses a preplanted symlink at each final
 describe('materializeAgentPackage — never GCs the process-global hook shim dir (PHNX-3838)', () => {
   it('leaves unrelated operator shims intact when a package with hooks is materialized', () => {
     const resolved = resolveAgentPackage(FIXTURE);
-    // The ONE process-global shim dir every harness's normal sync sweeps by
-    // manifest. Isolate it to a temp dir so the assertion is deterministic.
     const shimsDir = tempHome();
     const operatorShim = path.join(shimsDir, 'operator-hook.sh');
     fs.writeFileSync(operatorShim, '#!/bin/sh\n# operator hook, unrelated to any package\n');
@@ -217,15 +208,12 @@ describe('materializeAgentPackage — never GCs the process-global hook shim dir
     try {
       const outputHome = tempHome();
       const receipt = materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
-      // The hook really was registered (otherwise this test proves nothing).
       expect(receipt.resources.some((r) => r.kind === 'hooks')).toBe(true);
     } finally {
       if (prev === undefined) delete process.env.AGENTS_HOOK_SHIMS_DIR;
       else process.env.AGENTS_HOOK_SHIMS_DIR = prev;
     }
 
-    // The package manifest carried only its own hook — the default sweep would
-    // have deleted BOTH unrelated shims. They must survive.
     expect(fs.existsSync(operatorShim), 'operator-hook.sh survives materialization').toBe(true);
     expect(fs.existsSync(anotherShim), 'watchdog.sh survives materialization').toBe(true);
   });
@@ -246,7 +234,7 @@ describe('hookRegistrationTargets — the settings leaf the materializer guards,
       const victim = path.join(tempHome(), 'pwned.txt');
       const leaf = hookRegistrationTargets(harness, outputHome)[0];
       fs.mkdirSync(path.dirname(leaf), { recursive: true });
-      fs.symlinkSync(victim, leaf); // dangling
+      fs.symlinkSync(victim, leaf);
       expect(() =>
         materializeAgentPackage(resolved, { harness, harnessVersion: HARNESS_VERSIONS[harness], outputHome }),
       ).toThrow(/symlink|outside the output home/);
@@ -262,11 +250,8 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
     const victimDir = tempHome();
     const victim = path.join(victimDir, 'keep.txt');
     fs.writeFileSync(victim, 'do not delete me');
-    // A symlinked ancestor planted inside the output home.
     fs.symlinkSync(victimDir, path.join(outputHome, 'exfil'));
 
-    // A schema-valid receipt naming a path ONE LEVEL under the symlinked ancestor:
-    // textually contained (no '..', not absolute), but it realpaths outside.
     const planted = {
       schemaVersion: 1,
       agent: { ref: 'evil@000000000000', digest: 'sha256:0' },
@@ -283,10 +268,8 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
   it('ignores a planted receipt whose target escapes the output home (../victim, absolute)', () => {
     const resolved = resolveAgentPackage(FIXTURE);
     const outputHome = tempHome();
-    // A real prior run, so there is a home + receipt to overwrite.
     materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
 
-    // Victims OUTSIDE the output home that a traversal target would delete.
     const relVictim = path.join(path.dirname(outputHome), `victim-rel-${process.pid}.txt`);
     fs.writeFileSync(relVictim, 'do not delete me');
     tempDirs.push(relVictim);
@@ -295,7 +278,6 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
     const absVictim = path.join(absVictimDir, 'keep.txt');
     fs.writeFileSync(absVictim, 'do not delete me either');
 
-    // Plant a malicious, unsigned receipt claiming to "own" those outside paths.
     const planted = {
       schemaVersion: 1,
       agent: { ref: 'evil@000000000000', digest: 'sha256:0' },
@@ -308,7 +290,6 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
     };
     fs.writeFileSync(path.join(outputHome, 'materialization-receipt.json'), JSON.stringify(planted, null, 2) + '\n');
 
-    // Re-materialize: the pruner reads that receipt but must refuse the escaping targets.
     materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
 
     expect(fs.existsSync(relVictim), 'relative ../victim must survive').toBe(true);
@@ -319,7 +300,6 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
     const resolved = resolveAgentPackage(FIXTURE);
     const outputHome = tempHome();
     materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
-    // Corrupt the receipt into an invalid shape; a re-run must not throw and must re-materialize cleanly.
     fs.writeFileSync(path.join(outputHome, 'materialization-receipt.json'), JSON.stringify({ schemaVersion: 2, resources: 'nope' }));
     const receipt = materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome });
     expect(receipt.schemaVersion).toBe(1);
@@ -337,7 +317,6 @@ describe('materializeAgentPackage — fails closed', () => {
 
   it('blocks dispatch when the requested harness version lacks a declared capability', () => {
     const resolved = resolveAgentPackage(FIXTURE);
-    // Codex hooks require >= 0.116.0 — an older version must fail loud, not silently skip hooks.
     expect(() =>
       materializeAgentPackage(resolved, { harness: 'codex', harnessVersion: '0.100.0', outputHome: tempHome() }),
     ).toThrow(AgentPackageError);
@@ -361,7 +340,6 @@ describe('materializeAgentPackage — fails closed', () => {
   });
 });
 
-/** Copy the fixture into a fresh temp dir and rewrite its one mcp resource. */
 function tempPackageWithMcpServer(overrides: { transport: 'stdio' | 'http'; url?: string; headers?: Record<string, string> }): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-pkg-mcp-cap-'));
   tempDirs.push(dir);
@@ -434,14 +412,11 @@ describe('materializeAgentPackage — mcp config is a shared file, never blanket
     const configPath = path.join(outputHome, mcpEntry.target);
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers.browser).toBeDefined();
 
-    // Simulate the real harness (or a prior operator) having written unrelated
-    // top-level data into the SAME config file before this re-materialize.
     const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     config.oauthAccount = { email: 'someone@example.com' };
     config.projects = { '/workspace': { allowedTools: ['Bash'] } };
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
-    // Remove the package's only mcp resource and re-materialize into the SAME home.
     const manifestPath = path.join(dir, 'agent.yaml');
     fs.writeFileSync(manifestPath, fs.readFileSync(manifestPath, 'utf-8').replace('  mcp:\n    - mcp/browser.yaml\n', ''));
     const resolvedAfter = resolveAgentPackage(dir);

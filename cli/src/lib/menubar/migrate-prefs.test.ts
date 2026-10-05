@@ -12,10 +12,9 @@ describe('planMenubarPrefMigration', () => {
       'menubar.menu.showPreviews': false,
       'menubar.menu.defaultProject': 'rush',
       'menubar.menu.groupBy': 'agent',
-      workingRowsShown: 99, // a bare leaf key is NOT the stored name — ignored
+      workingRowsShown: 99,
       unknownLegacyKey: 'ignored',
     };
-    // groupBy is already set in config → must NOT be overridden.
     const setKeys = new Set(['menubar.menu.groupBy']);
     const plan = planMenubarPrefMigration(ud, (name) => !setKeys.has(name));
     const names = plan.map((p) => p.name).sort();

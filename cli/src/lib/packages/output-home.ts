@@ -7,7 +7,6 @@ import * as path from 'path';
 import { assertWithin, realpathExistingPrefix } from '../paths.js';
 import { VERSION_RE } from '../agent-spec/primitives.js';
 
-/** The three harness homes a portable schema-v3 package can be materialized into. */
 export const PORTABLE_HARNESSES = ['claude', 'codex', 'opencode'] as const;
 type PortableHarness = (typeof PORTABLE_HARNESSES)[number];
 
@@ -15,7 +14,6 @@ function isPortableHarness(value: string): value is PortableHarness {
   return (PORTABLE_HARNESSES as readonly string[]).includes(value);
 }
 
-/** Thrown for a bad front-door argument (harness / version / output home). Never `process.exit`. */
 export class MaterializeGuardError extends Error {
   constructor(message: string) {
     super(message);
@@ -23,7 +21,6 @@ export class MaterializeGuardError extends Error {
   }
 }
 
-/** Reject a harness that is not one of the three portable homes, with a message naming it. */
 export function assertPortableHarness(harness: string): PortableHarness {
   if (!isPortableHarness(harness)) {
     throw new MaterializeGuardError(
@@ -33,7 +30,6 @@ export function assertPortableHarness(harness: string): PortableHarness {
   return harness;
 }
 
-/** Reject a non-exact harness version (empty, malformed, or `@latest`). */
 export function assertExactHarnessVersion(version: string): string {
   if (!version || version === 'latest' || !VERSION_RE.test(version)) {
     throw new MaterializeGuardError(
@@ -43,7 +39,6 @@ export function assertExactHarnessVersion(version: string): string {
   return version;
 }
 
-/** True when `raw` still contains a `..` segment after splitting on both separators. */
 function outputHomeHasDotDot(raw: string): boolean {
   return raw.split(/[\\/]/).includes('..');
 }
@@ -109,13 +104,10 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
       throw new MaterializeGuardError(`Path escape: ${raw}`);
     }
   }
+  // Resolve existing ancestors before comparing with $HOME and live harness homes.
   const canonical = realpathExistingPrefix(resolved);
   const realHome = realpathExistingPrefix(home);
-  // Fail closed first: a dangling protected home makes EVERY output home unsafe,
-  // and its absent target has no realpath-canonical spelling to compare against.
   assertNoDanglingLiveHome(realHome);
-  // The materializer appends the harness config dir to outputHome, so the live
-  // home ROOT would write straight into ~/.claude etc.
   if (canonical === realHome) {
     throw new MaterializeGuardError('Path escape: output home must not be the live home directory');
   }

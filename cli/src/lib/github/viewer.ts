@@ -13,34 +13,25 @@ import { ghExec, type GhExec } from './pr-mergeable.js';
 export interface GithubViewer {
   login: string;
   name: string | null;
-  /** https URL of the profile picture, or null when GitHub returned none. */
   avatarUrl: string | null;
-  /** {@link emailDigest} of the account's public profile email, or null when it has none. */
   emailSha256: string | null;
 }
 
 interface ViewerCacheRecord {
-  /** Unix ms of the last `gh` attempt, successful or not. */
   checkedAt: number;
-  /** Whether that attempt succeeded. A failure keeps the previous `viewer`. */
   ok: boolean;
-  /** The last viewer gh named, or null when it never named one. */
   viewer: GithubViewer | null;
 }
 
 const VIEWER_JQ = '{login, avatar_url, name, email}';
-/** A successful read is good for a day, matching gh's own `--cache 24h`. */
 export const VIEWER_FRESH_MS = 24 * 60 * 60_000;
-/** A failed read (gh absent, signed out, offline) is retried hourly, not every poll. */
 export const VIEWER_RETRY_MS = 60 * 60_000;
-/** Cap on the refresh's `gh` spawn, well inside the menu's 30 s snapshot deadline. */
 export const VIEWER_REFRESH_TIMEOUT_MS = 5_000;
 
 export function viewerCachePath(cacheDir: string = getCacheDir()): string {
   return path.join(cacheDir, 'github-viewer.json');
 }
 
-/** Case- and whitespace-insensitive SHA-256 of an email, for comparing identities without storing one. */
 export function emailDigest(email: string): string {
   return createHash('sha256').update(email.trim().toLowerCase()).digest('hex');
 }
@@ -49,7 +40,6 @@ function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-/** Parse the `gh api user --jq '{login, avatar_url, name, email}'` output; null when it names no login. */
 export function parseViewer(raw: string): GithubViewer | null {
   let data: { login?: unknown; avatar_url?: unknown; name?: unknown; email?: unknown };
   try {
@@ -68,7 +58,6 @@ export function parseViewer(raw: string): GithubViewer | null {
   };
 }
 
-/** The authenticated user from a REST read gh caches for a day; null when gh cannot say. */
 export async function fetchViewerProfile(gh: GhExec = ghExec): Promise<GithubViewer | null> {
   try {
     return parseViewer(await gh(['api', 'user', '--cache', '24h', '--jq', VIEWER_JQ]));
@@ -77,7 +66,6 @@ export async function fetchViewerProfile(gh: GhExec = ghExec): Promise<GithubVie
   }
 }
 
-/** A stored viewer, or undefined when the value is not one (so the whole record is distrusted). */
 function storedViewer(v: unknown): GithubViewer | null | undefined {
   if (v === null) return null;
   if (!v || typeof v !== 'object') return undefined;
@@ -89,7 +77,6 @@ function storedViewer(v: unknown): GithubViewer | null | undefined {
   return { login, name, avatarUrl, emailSha256 };
 }
 
-/** The record on disk, or null when it is missing, corrupt, or not this shape. */
 function readRecord(file: string): ViewerCacheRecord | null {
   let rec: Record<string, unknown>;
   try {
@@ -103,7 +90,6 @@ function readRecord(file: string): ViewerCacheRecord | null {
   return { checkedAt: rec.checkedAt, ok: rec.ok, viewer };
 }
 
-/** True when the record is inside its window: a day after a success, an hour after a failure. */
 export function isViewerRecordFresh(rec: ViewerCacheRecord, nowMs: number = Date.now()): boolean {
   const age = nowMs - rec.checkedAt;
   return age >= 0 && age <= (rec.ok ? VIEWER_FRESH_MS : VIEWER_RETRY_MS);
@@ -132,7 +118,6 @@ export async function cachedViewer(opts: CachedViewerOptions = {}): Promise<Gith
     fs.mkdirSync(path.dirname(file), { recursive: true });
     atomicWriteJsonSync(file, next);
   } catch {
-    // An unwritable cache dir costs one gh spawn per call, never a wrong answer.
   }
   return next.viewer;
 }

@@ -9,10 +9,8 @@ import { assertValidValue, configKeySpec, getConfigValue, setConfigValue } from 
 import { getRuntimeStateDir } from '../state.js';
 import { MENUBAR_MENU_PROPERTIES } from '../config-keys.js';
 
-/** The production menu-bar UserDefaults domain (NOT the `.dev` bundle). */
 const USER_DEFAULTS_DOMAIN = 'com.phnx-labs.agents-menubar';
 
-/** Sentinel marking the one-shot done; its presence blocks every later run. */
 function sentinelPath(): string {
   return path.join(getRuntimeStateDir(), 'menubar-prefs-migrated');
 }
@@ -70,13 +68,10 @@ function readUserDefaultsDomain(): { ok: boolean; values: Record<string, unknown
           input: plist, encoding: 'utf8', timeout: 5_000, stdio: ['pipe', 'pipe', 'ignore'],
         }).trimEnd();
       } catch {
-        // Missing or non-scalar legacy keys are outside the preference contract.
       }
     }
     return { ok: true, values };
   } catch {
-    // `defaults`/`plutil` missing, a non-zero exit, or malformed output — a real
-    // failure. Do NOT claim an empty domain; the caller must retry.
     return { ok: false, values: {} };
   }
 }
@@ -89,16 +84,13 @@ export function migrateMenubarPreferencesFromUserDefaults(): void {
   if (fs.existsSync(sentinel)) return;
 
   const { ok, values } = readUserDefaultsDomain();
-  // A genuine read/convert failure must NOT mark the migration done — retry on a
-  // later run rather than silently skipping the user's real settings forever. An
-  // ABSENT domain reads ok with empty values and legitimately marks done.
   if (!ok) return;
 
   try {
     const plan = planMenubarPrefMigration(values, (name) => getConfigValue(name).value === undefined);
     for (const { name, value } of plan) {
       const coerced = coerceMenubarPrefValue(name, value);
-      if (coerced === undefined) continue; // unrepresentable — skip, never force
+      if (coerced === undefined) continue;
       try {
         assertValidValue(configKeySpec(name), coerced);
       } catch {
@@ -114,6 +106,5 @@ export function migrateMenubarPreferencesFromUserDefaults(): void {
     fs.mkdirSync(path.dirname(sentinel), { recursive: true });
     fs.writeFileSync(sentinel, new Date().toISOString() + '\n');
   } catch {
-    /* if we cannot mark it, a later run retries — still safe (idempotent) */
   }
 }

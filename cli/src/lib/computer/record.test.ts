@@ -44,8 +44,6 @@ describe('recordComputerAction', () => {
   });
 
   it('preserves the ENGINE\'s invocation id, so the row groups the run that happened', () => {
-    // Re-stamping our own id here would group by the CLI process instead of the
-    // engine run, and for `--device` those are different machines' work.
     useFreshLedger();
     recordComputerAction({ command: 'raise', invocationId: 'engine-run-2' });
     recordComputerAction({ command: 'click', invocationId: 'engine-run-2' });
@@ -67,8 +65,6 @@ describe('recordComputerAction', () => {
   });
 
   it('lands in the shape the sessions reader parses, not merely in the log', () => {
-    // `listComputerActions` drops any record without a string `command`, which
-    // is exactly how a `verb`-shaped event would vanish from the history.
     useFreshLedger();
     recordComputerAction({ command: 'screenshot', invocationId: 'engine-run-3', host: 'win-mini' });
     const actions = listComputerActions();
@@ -79,8 +75,6 @@ describe('recordComputerAction', () => {
   });
 
   it('bounds the task preview HERE, even when the engine reports an unbounded one', () => {
-    // The retention rule belongs to the ledger's owner. An engine that streamed
-    // a full --task string must not be able to write it into the session index.
     useFreshLedger();
     const longTask = 'describe every window in exhaustive detail '.repeat(20);
     expect(longTask.length).toBeGreaterThan(TASK_PREVIEW_MAX_CHARS);

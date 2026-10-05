@@ -58,12 +58,9 @@ describe('aggregateHookProfile', () => {
     expect(row.n).toBe(10);
     expect(row.maxMs).toBe(100);
     expect(row.meanMs).toBe(55);
-    // p50 (interpolated rank 4.5) → midway between 50 and 60
     expect(row.p50Ms).toBe(55);
-    // p95 (interpolated rank 8.55) → between 90 and 100, above p50 and below p99
     expect(row.p95Ms).toBeGreaterThan(row.p50Ms);
     expect(row.p95Ms).toBeLessThanOrEqual(100);
-    // p99 (interpolated rank 8.91) → near 99
     expect(row.p99Ms).toBeGreaterThanOrEqual(98);
     expect(row.p99Ms).toBeLessThanOrEqual(100);
     expect(row.p99Ms).toBeGreaterThanOrEqual(row.p95Ms);
@@ -90,9 +87,6 @@ describe('aggregateHookProfile', () => {
   });
 
   it('counts intentional exit 2 as blockCount, not errorCount (RUSH-2294)', () => {
-    // deny-by-design guards exit 2 on purpose; a high blockRate is healthy,
-    // a high errorRate is a crash. Conflating them made ask-user-question-guard
-    // look like a 92%-error hook.
     const [row] = aggregateHookProfile([
       { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 10, cache: 'miss', exit: 0 },
       { event: 'hook.fire', hook: 'ask-user-question-guard', ms: 12, cache: 'miss', exit: 2 },

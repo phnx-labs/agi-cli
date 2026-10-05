@@ -9,15 +9,10 @@ import type {
 } from './types.js';
 
 export interface CaptureInputs {
-  /** Registered device names to record (the roster — names only). */
   devices: string[];
-  /** Optional per-device agent specs (e.g. from `--from-pins`), keyed by name. */
   agentsByDevice?: Record<string, string[]>;
-  /** Fleet defaults to seed when the manifest has none (source's own agents). */
   defaults?: FleetDefaults;
-  /** Secrets-bundle NAMES to ensure exist (values stay in the keychain). */
   secretsBundles?: string[];
-  /** Routine NAMES that should be active on the fleet. */
   routines?: string[];
 }
 
@@ -33,8 +28,9 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
   // list fills in only when none is pinned. A device absent from `inputs.devices` drops out.
   // A legacy `config:` (#2458) is carried forward so capture cannot re-strip an unmigrated peer.
   const devices: Record<string, FleetDeviceOverride> = {};
+  // Preserve hand-authored config for absent peers and legacy manifests during migration.
   for (const [name, prevOverride] of Object.entries(prevDevices)) {
-    if (inputs.devices.includes(name)) continue; // handled by the roster loop below
+    if (inputs.devices.includes(name)) continue;
     const config = prevOverride?.config;
     if (config && Object.keys(config).length > 0) devices[name] = { config };
   }
@@ -49,7 +45,6 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
   }
 
   const manifest: FleetManifest = {
-    // Keep hand-authored defaults; otherwise seed from the source snapshot.
     defaults: prev?.defaults ?? inputs.defaults ?? {},
     devices,
   };
@@ -58,9 +53,7 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
     manifest.discovery = { ...prev.discovery };
   }
 
-  // Dismissals are operator state, not live state — a capture must never wipe
-  // them (fleet.ignored syncs; losing it re-suggests every dismissed node
-  // fleet-wide). Carry forward verbatim, same contract as `discovery`.
+  // Discovery dismissals are operator state, not disposable scan output.
   if (prev?.ignored && prev.ignored.length > 0) {
     manifest.ignored = prev.ignored.map((e) => ({ ...e }));
   }

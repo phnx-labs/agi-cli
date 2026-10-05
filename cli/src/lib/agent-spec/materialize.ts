@@ -53,7 +53,6 @@ function removePath(p: string): void {
     if (stat.isDirectory()) fs.rmSync(p, { recursive: true, force: true });
     else fs.unlinkSync(p);
   } catch {
-    /* already gone */
   }
 }
 
@@ -111,7 +110,7 @@ function assertLeafSafe(realOutputHome: string, leaf: string, label: string): vo
   try {
     lst = fs.lstatSync(leaf);
   } catch {
-    return; // leaf does not exist — nothing planted
+    return;
   }
   if (lst.isSymbolicLink()) {
     throw new AgentPackageError(`${label}: refusing to write through a symlink at '${leaf}'`, 'path-escape');
@@ -125,9 +124,6 @@ function materializeInstructions(resource: ResolvedResource, harness: AgentId, o
   }
   const agentDir = path.join(outputHome, agentConfigDirName(harness));
   const destFile = path.join(agentDir, cap.file);
-  // Ancestor guard BEFORE mkdir (else `mkdir -p` traverses a symlinked config
-  // dir into the live home); leaf guard AFTER mkdir (a symlink planted at the
-  // file itself, e.g. on a re-run into a reused home).
   assertTargetContained(realOutputHome, destFile, `${harness} instructions`);
   fs.mkdirSync(path.dirname(destFile), { recursive: true });
   assertLeafSafe(realOutputHome, destFile, `${harness} instructions`);
@@ -150,9 +146,6 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
     throw new AgentPackageError(`${harness} has no subagent target registered`, 'unsupported-capability');
   }
   const dir = target.dir(outputHome);
-  // Ancestor guard BEFORE the write's `mkdir -p` (a symlinked `.claude/agents`
-  // would otherwise be traversed); leaf guard on the concrete subagent file the
-  // writer forms itself, so a preplanted symlink AT that leaf can't redirect it.
   assertTargetContained(realOutputHome, dir, `${harness} subagent '${resource.name}'`);
   fs.mkdirSync(dir, { recursive: true });
   const occupied = target.occupied(dir, resource.name)[0];
@@ -178,9 +171,6 @@ function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputH
     headers: r.mcp!.headers,
   }));
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  // The shared config is a regular file the materializer (and, later, the harness
-  // itself) rewrites in place; a SYMLINK at that leaf is never something we wrote,
-  // so refuse it before writeMcpConfig follows it out of the output home.
   assertLeafSafe(realOutputHome, configPath, `${harness} mcp config`);
   try {
     writeMcpConfig(harness, configPath, servers, 'overwrite', { allowEmpty: true });
@@ -195,9 +185,6 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
   const targets = new Map<string, string>();
   if (resources.length === 0) return targets;
   const hooksDir = getHooksDirInHome(harness, outputHome);
-  // Guarding the hooks dir also protects the harness settings.json that
-  // registerHooksToSettings writes below — both live under the same
-  // agent-config-dir ancestor, so a symlink there is caught before either write.
   assertTargetContained(realOutputHome, hooksDir, `${harness} hooks dir`);
   fs.mkdirSync(hooksDir, { recursive: true });
   // The hooks-dir guard catches a symlinked ancestor, but registerHooksToSettings writes a
@@ -220,9 +207,6 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     if (!destScript.startsWith(hooksDirResolved + path.sep)) {
       throw new AgentPackageError(`${harness}: hook '${r.name}' resolves outside the hooks directory`, 'invalid-resource');
     }
-    // The check above is textual (name-traversal); this one refuses a preplanted
-    // symlink AT the script leaf, which both copyFileSync AND chmodSync would
-    // otherwise follow — chmod +x on a file outside the output home.
     assertLeafSafe(realOutputHome, destScript, `${harness} hook '${r.name}'`);
     fs.copyFileSync(scriptPath, destScript);
     fs.chmodSync(destScript, 0o755);
@@ -239,7 +223,6 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
   return targets;
 }
 
-/** Deterministic package ref used in the receipt — `<slug>@<manifest-digest-prefix>`, since packages carry no separate semver here. */
 function packageRef(resolved: ResolvedAgentPackage): string {
   return `${resolved.manifest.slug}@${resolved.digest.slice(0, 12)}`;
 }
@@ -255,18 +238,14 @@ function isSafeContainedTarget(realOutputHome: string, outputHome: string, rel: 
   return canonical.startsWith(realOutputHome + path.sep);
 }
 
-/** Delete any path this materializer owned in a PRIOR run of this exact output home that is no longer part of the current resource set. */
 function pruneStaleManagedPaths(realOutputHome: string, outputHome: string, previousTargets: Set<string>, currentTargets: Set<string>): void {
   for (const rel of previousTargets) {
     if (currentTargets.has(rel)) continue;
-    // The prior receipt is unsigned; never delete a target that escapes the
-    // output home — textually OR through a symlinked ancestor.
     if (!isSafeContainedTarget(realOutputHome, outputHome, rel)) continue;
     removePath(path.join(outputHome, rel));
   }
 }
 
-/** Structurally validate an untrusted, unsigned prior receipt before its targets are ever trusted for deletion. */
 function isValidReceipt(value: unknown): value is MaterializationReceipt {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
@@ -279,13 +258,10 @@ function isValidReceipt(value: unknown): value is MaterializationReceipt {
 
 function readPriorReceipt(outputHome: string): MaterializationReceipt | null {
   const receiptPath = path.join(outputHome, RECEIPT_FILE);
-  // A preplanted SYMLINK at the receipt is untrusted: reading through it slurps
-  // an arbitrary outside file as the "prior receipt". Treat it as no prior
-  // receipt (the write path refuses to follow it too — see assertLeafSafe below).
   try {
     if (fs.lstatSync(receiptPath).isSymbolicLink()) return null;
   } catch {
-    return null; // no receipt yet
+    return null;
   }
   let parsed: unknown;
   try {
@@ -318,9 +294,6 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
   // stale receipt can't escape.
   const realOutputHome = fs.realpathSync(outputHome);
   const prior = readPriorReceipt(outputHome);
-  // 'mcp' is excluded: it's a shared config file `materializeMcp` converges
-  // (including to empty) by editing its own section, not a path this generic
-  // delete-by-path pruner may ever remove wholesale — see materializeMcp's doc.
   const previousTargets = new Set((prior?.resources ?? []).filter((r) => r.kind !== 'mcp').map((r) => r.target));
 
   const entries: MaterializationReceiptEntry[] = [];
@@ -350,14 +323,11 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
     warnings: [],
   };
   const receiptPath = path.join(outputHome, RECEIPT_FILE);
-  // Final leaf guard: a symlink planted at the receipt (dangling or live) would
-  // redirect this write out of the output home; refuse it.
   assertLeafSafe(realOutputHome, receiptPath, 'materialization receipt');
   fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
   return receipt;
 }
 
-/** Lowercase hex sha256 of arbitrary bytes — exposed for callers that want to verify the receipt file's own digest (Factory's observed-digest record). */
 export function sha256OfReceiptFile(receiptPath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(receiptPath)).digest('hex');
 }

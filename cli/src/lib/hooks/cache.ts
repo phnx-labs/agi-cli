@@ -33,7 +33,6 @@ function parseShorthand(s: string): HookCacheConfig | null {
   return { ttl: ttlSec, key: 'global', prefetch };
 }
 
-/** Parse "30s" | "5m" | "1h" | "7d" | plain seconds. Returns seconds, or null on failure. */
 export function parseDuration(d: number | string | undefined): number | null {
   if (d == null) return null;
   if (typeof d === 'number') return Number.isFinite(d) && d > 0 ? Math.floor(d) : null;
@@ -61,7 +60,6 @@ export function isValidHookShimName(name: string): boolean {
   );
 }
 
-/** Resolve shimsDir + `${name}.sh` and assert the result stays inside shimsDir. */
 function resolveContainedHookShimPath(shimsDir: string, name: string): string {
   if (!isValidHookShimName(name)) {
     throw new Error(`Invalid hook shim name: ${name}`);
@@ -75,7 +73,6 @@ function resolveContainedHookShimPath(shimsDir: string, name: string): string {
   return resolved;
 }
 
-/** Absolute path of the generated shim for a hook name. */
 export function getHookShimPath(name: string): string {
   return resolveContainedHookShimPath(getHookShimsDir(), name);
 }
@@ -87,7 +84,6 @@ export interface HookShimPaths {
   shimsDir?: string;
   cacheDir?: string;
   logsDir?: string;
-  /** Directory for the disposable perf warehouse + spool (default ~/.agents/.cache/perf). */
   perfDir?: string;
 }
 
@@ -114,8 +110,9 @@ export function generateHookShim(args: {
 
   let existing: string | null = null;
   if (fs.existsSync(shimPath)) {
-    try { existing = fs.readFileSync(shimPath, 'utf-8'); } catch { /* rewrite */ }
+    try { existing = fs.readFileSync(shimPath, 'utf-8'); } catch {  }
   }
+  // Temp-write/chmod/rename keeps a concurrently firing hook from seeing a truncated shim.
   if (existing !== content) {
     // A hook may fire while a background self-heal repairs another stale shim. Write in the
     // destination directory and rename once mode and contents are complete, so observers see the
@@ -129,14 +126,10 @@ export function generateHookShim(args: {
       fs.chmodSync(tempPath, 0o755);
       fs.renameSync(tempPath, shimPath);
     } finally {
-      // Rename removes the temp path on success. On a failed write/rename this
-      // best-effort cleanup prevents a bounded repair failure from leaving
-      // growing debris behind for every periodic pass.
-      try { fs.unlinkSync(tempPath); } catch { /* already renamed or unavailable */ }
+      try { fs.unlinkSync(tempPath); } catch {  }
     }
   } else {
-    // Ensure exec bit even when content unchanged (file mode can drift).
-    try { fs.chmodSync(shimPath, 0o755); } catch { /* best effort */ }
+    try { fs.chmodSync(shimPath, 0o755); } catch {  }
   }
   return shimPath;
 }
@@ -342,7 +335,6 @@ function renderShim(
   const hasMatches = matches != null && Object.keys(matches).length > 0;
   const matchesJson = hasMatches ? JSON.stringify(matches) : '';
 
-  // sh-escape: wrap in single quotes, escape any embedded single quotes.
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
   const cacheHeader = cache
@@ -371,11 +363,6 @@ FAIL_CLOSED=${failClosed ? 1 : 0}
 
 mkdir -p "$CACHE_DIR" "$LOGS_DIR" "$PERF_DIR"
 
-# Resolve a real Python. On Windows, bare python3 is often a Microsoft Store
-# app-execution alias stub that prints to stderr and exits non-zero (0 bytes on
-# stdout) -- command -v finds it but it cannot run, which silently empties the
-# hash + mtime primitives below and makes EVERY call a cache miss (the hook
-# re-runs every time). Probe by executing, not by lookup, and fall back to python.
 PY=""
 for _cand in python3 python; do
   if command -v "$_cand" >/dev/null 2>&1 && "$_cand" -c 'import sys' >/dev/null 2>&1; then
@@ -384,15 +371,8 @@ for _cand in python3 python; do
 done
 [ -z "$PY" ] && PY=python3
 
-# Read stdin once (Claude/Codex/Gemini pass JSON on stdin to every hook).
 STDIN_PAYLOAD="$(cat || true)"
 
-# cwd + session_id from the hook's own stdin JSON, pre-escaped as a ready-to-
-# splice JSON fragment (e.g. ,"cwd":"/repo","session_id":"abc") so every
-# hook.fire perf-spool line below can carry them without re-parsing stdin per
-# site. This is what lets \`agents perf --project\` (project-key.ts resolves
-# cwd -> project) and session-scoped rollups work for hook.fire samples.
-# Fail-safe: any parse error yields an empty fragment, never breaks the write.
 HOOK_EXTRA_JSON="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c '
 import json, sys
 try:
@@ -409,13 +389,7 @@ if isinstance(sid, str) and sid:
 print("".join("," + json.dumps(k) + ":" + json.dumps(v) for k, v in out.items()))
 ' 2>/dev/null || true)"
 
-# --- matches: gate (issue #744 / RUSH-1506) -------------------------------
-# Enforce the hook's declared \`matches:\` predicates at fire time. Mirrors
-# shouldFire() in src/lib/hooks/match.ts: all declared predicates AND together;
-# an empty/absent block always fires. When the predicates don't hold we exit 0
-# WITHOUT running the script (a skipped hook is not an error). Fail-open: any
-# gate-eval error runs the script, so a broken predicate can never silently
-# disable a safety hook (e.g. git-guard).
+# Predicate failures default to FIRE so evaluation errors cannot silently disable a guard.
 if [ -n "$MATCHES_JSON" ]; then
   _GATE="$(printf '%s' "$STDIN_PAYLOAD" | MATCHES_JSON="$MATCHES_JSON" "$PY" -c ${q(GATE_PY)} 2>/dev/null || printf FIRE)"
   [ -z "$_GATE" ] && _GATE=FIRE
@@ -432,14 +406,7 @@ if [ -n "$MATCHES_JSON" ]; then
     exit 0
   fi
 fi
-# A source that is not on disk cannot be executed: bash exits 127, and the
-# harnesses that share the exit-2 deny contract (Claude Code, Codex, Droid)
-# read anything else as "allow" -- a guard silently disabled. Deny instead and
-# name the repair, but only for a PreToolUse firing that the matches: gate
-# above let through: one shim serves every event a hook declares, so a
-# SessionStart or Stop leg of the same hook must not wedge a session, and a
-# fire the predicates would have skipped must not turn into a denial. Other
-# shims keep their existing path (a cached hook still serves its cache).
+# PreToolUse exits 2: these harnesses interpret 127 as allow.
 if [ "$FAIL_CLOSED" = 1 ] && [ ! -f "$SOURCE" ]; then
   _EVT="$(printf '%s' "$STDIN_PAYLOAD" | "$PY" -c 'import json, sys
 try:
@@ -612,6 +579,6 @@ export function removeHookShim(name: string, shimsDir?: string): void {
   const dir = shimsDir ?? getHookShimsDir();
   const shimPath = resolveContainedHookShimPath(dir, name);
   if (fs.existsSync(shimPath)) {
-    try { fs.unlinkSync(shimPath); } catch { /* best effort */ }
+    try { fs.unlinkSync(shimPath); } catch {  }
   }
 }

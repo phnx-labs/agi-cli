@@ -41,7 +41,6 @@ interface MenubarDevice {
    * pool filter, so a `personal` box the user sits at reads as ineligible here as it behaves
    * there. */
   autoEligible: boolean;
-  /** Hardware facts and the current reading, or null when never observed. */
   stats: MenubarDeviceStats | null;
 }
 
@@ -107,7 +106,6 @@ interface MenubarSnapshot {
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
   devices: MenubarDevice[];
-  /** Who is signed in on this machine; see {@link MenubarMe}. */
   me: MenubarMe | null;
   /** AGI Menu preferences (PHNX-3999) by full `menubar.menu.*` name with the EFFECTIVE value
    * (stored, else default). `defaultProject` is omitted when unset. Writes stay `agents config
@@ -134,7 +132,6 @@ export function buildMenuPreferences(): Record<string, unknown> {
   return out;
 }
 
-/** The list-valued AGI Menu preferences, effective values, for `menuListPreferences`. */
 export function buildMenuListPreferences(): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const [name, value] of effectiveMenuPreferences()) {
@@ -149,7 +146,7 @@ function effectiveMenuPreferences(): Array<[string, unknown]> {
     const name = `menubar.menu.${prop}`;
     const entry = getConfigValue(name);
     const value = entry.value !== undefined ? entry.value : entry.spec.defaultValue;
-    if (value === undefined) continue; // unset defaultProject — no default to emit
+    if (value === undefined) continue;
     out.push([name, value]);
   }
   return out;
@@ -160,15 +157,9 @@ function effectiveMenuPreferences(): Array<[string, unknown]> {
 async function buildMenubarDevices(): Promise<MenubarDevice[]> {
   const reg = await loadDevices();
   const roster = Object.keys(reg);
-  // Pass the roster so a fleet-wide default (fleet.defaults.config) reaches
-  // devices that have no doc of their own.
   const prefs = loadAutoLaunchPreferences(roster);
   const roles = listConfiguredDeviceRoles(roster);
-  // The placement verdict from the one canonical filter — not a re-implementation
-  // of the role rule (`devices/pool.ts` owns it).
   const autoEligible = new Set(filterAutoPool(roster, { roles, autoLaunch: prefs }));
-  // Cache read only: no ssh, no probe, so this still rides the existing snapshot
-  // poll (docs/menubar.md: the menu bar must not probe the fleet per render).
   const stats = readStatsCache();
   const interactiveHost = getConfigValue('interactive.host').value as string | undefined;
   const self = machineId();
@@ -177,7 +168,6 @@ async function buildMenubarDevices(): Promise<MenubarDevice[]> {
     .map((name) => ({
       name,
       platform: reg[name].platform,
-      // Shared device-scope fact (readable for any device); `unknown` when unset.
       formFactor: (getConfigValue('formFactor', { device: name }).value as string | undefined) ?? 'unknown',
       interactive: name === interactiveHost,
       isLocal: name === self,
@@ -219,14 +209,8 @@ export function readLastWatchdogTick(
   }
 }
 
-/** One-process read model for AGI Menu's repeating three-minute refresh. */
 export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
-  // One-shot, sentinel-gated, macOS-only lift of legacy UserDefaults prefs into
-  // config before we read them. After the first run it is a cheap existsSync
-  // no-op; it never throws into the snapshot.
   migrateMenubarPreferencesFromUserDefaults();
-  // Started first so a due `gh` refresh (at most daily, capped at 5 s) overlaps
-  // the synchronous reads below instead of following them.
   const viewerRead = cachedViewer();
   const [routines, recent, devices, viewer] = await Promise.all([
     Promise.resolve(buildRoutineListJson()),

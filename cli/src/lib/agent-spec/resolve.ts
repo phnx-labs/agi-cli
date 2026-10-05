@@ -30,8 +30,6 @@ export function resolveAgentTargets(
     throw new AgentSpecError('Empty agent spec.', 'empty');
   }
 
-  // Expand the bare literal `all` (or `all@all`) into every available agent that
-  // has ≥1 installed version. Lenient: agents with nothing installed are skipped.
   const entries: string[] = [];
   for (const e of rawEntries) {
     if (e === 'all' || e === 'all@all') {
@@ -72,7 +70,6 @@ export function resolveAgentTargets(
     }
     const name = AGENTS[agent].name;
 
-    // ----- bare: project pin → global default → sole/ambiguous installed -----
     if (qualifier === null) {
       const proj = provider.getProjectVersion(agent, cwd);
       if (proj) { push(agent, proj, 'project-pin'); continue; }
@@ -93,12 +90,8 @@ export function resolveAgentTargets(
       );
     }
 
-    // ----- @pinned / @default: the configured default (global, else isolated) -----
     if (qualifier === 'pinned' || qualifier === 'default') {
       const glob = provider.getGlobalDefault(agent);
-      // Report which kind it was: an isolated default owns none of the launcher /
-      // shim / config-symlink machinery a global default does, and callers that log
-      // the source shouldn't claim otherwise.
       const def = glob ?? provider.getIsolatedDefault(agent);
       if (!def) {
         throw new AgentSpecError(
@@ -110,7 +103,6 @@ export function resolveAgentTargets(
       continue;
     }
 
-    // ----- @all: every installed version -----
     if (qualifier === 'all') {
       const installed = provider.listInstalled(agent);
       if (installed.length === 0) {
@@ -120,7 +112,6 @@ export function resolveAgentTargets(
       continue;
     }
 
-    // ----- @latest / @oldest: ends of the installed range -----
     if (qualifier === 'latest' || qualifier === 'oldest') {
       const installed = provider.listInstalled(agent);
       if (installed.length === 0) {
@@ -131,7 +122,6 @@ export function resolveAgentTargets(
       continue;
     }
 
-    // ----- exact version: validate then existence-check (no enumeration) -----
     if (!VERSION_RE.test(qualifier)) {
       throw new AgentSpecError(`Invalid version '${qualifier}' for ${name}. Allowed: latest or [A-Za-z0-9._+-]{1,64}.`, 'invalid-version', agent);
     }

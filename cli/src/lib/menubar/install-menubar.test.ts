@@ -41,12 +41,8 @@ import {
 // matching any process of that name, so a stray dev build held Cmd-Shift-V while status said
 // `running: yes`. Fixtures are real `ps` lines from that incident.
 describe('classifyMenubarProcesses', () => {
-  // Note the space in "Application Support" (and in "AGI Menu" itself) — the
-  // reason pid/field parsing takes the rest of the line rather than splitting
-  // on whitespace.
   const INSTALLED =
     '/Users/muqsit/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu';
-  // Orphaned SwiftPM debug build from a deleted worktree, started over ssh.
   const ORPHAN =
     '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/cli/menubar/.build/arm64-apple-macosx/debug/AGI Menu';
 
@@ -88,8 +84,6 @@ describe('classifyMenubarProcesses', () => {
     expect(r.foreign).toEqual([]);
   });
 
-  // A --notify one-shot running alongside the real status item must not be
-  // mistaken for the duplicate — setup would then kill a healthy single helper.
   it('does not count a --notify one-shot as a second copy', () => {
     const comm = `43244 ${INSTALLED}\n91002 ${INSTALLED}`;
     const command = `43244 ${INSTALLED}\n91002 ${INSTALLED} --notify --title Done`;
@@ -97,8 +91,6 @@ describe('classifyMenubarProcesses', () => {
     expect(r.own.map((p) => p.pid)).toEqual([43244]);
   });
 
-  // The false positive that a command-line substring match produced: this
-  // shell is not a helper, it merely mentions one.
   it('does not flag a shell whose command line merely mentions the helper name', () => {
     const r = classifyMenubarProcesses(
       '18933 /bin/zsh',
@@ -158,8 +150,6 @@ describe('isMenubarStale', () => {
   });
 
   it('is NOT stale when the installed helper is newer than the floor', () => {
-    // The resolver may legitimately have installed ahead of the floor; a lower
-    // available version must never trigger a downgrade-reinstall.
     expect(isMenubarStale({ installed: REL('1.1.0'), available: REL('1.0.0'), execExists: true })).toBe(false);
   });
 
@@ -172,22 +162,15 @@ describe('isMenubarStale', () => {
   });
 
   it('is stale exactly once on a legacy bare-string stamp, then re-stamped', () => {
-    // Old installs wrote the CLI's version as a bare string. That cannot be
-    // compared on the helper axis at all, so it is stale once — the reinstall
-    // rewrites it as JSON and the next call compares normally.
     expect(isMenubarStale({ installed: { source: 'legacy', raw: '1.22.49' }, available: REL('1.0.0'), execExists: true })).toBe(true);
   });
 
   it('is stale when the install KIND changes (local <-> release)', () => {
-    // A dev build and a release bundle are not interchangeable, whatever their
-    // version strings say.
     expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: REL('1.0.0'), execExists: true })).toBe(true);
     expect(isMenubarStale({ installed: REL('1.0.0'), available: LOC('/src/MenubarHelper.app@111'), execExists: true })).toBe(true);
   });
 
   it('tracks a local build by source path + mtime, since it carries no version', () => {
-    // menubar/scripts/build.sh hardcodes CFBundleShortVersionString, so a local
-    // rebuild is only detectable by its source stamp changing.
     expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: LOC('/src/MenubarHelper.app@111'), execExists: true })).toBe(false);
     expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: LOC('/src/MenubarHelper.app@222'), execExists: true })).toBe(true);
   });
@@ -204,7 +187,6 @@ describe('isMenubarStale', () => {
     expect(start).toBeGreaterThan(-1);
     const fn = src.slice(start, src.indexOf('\nfunction ', start + 10));
     expect(fn.length).toBeGreaterThan(200);
-    // One resolution, reused — never the raw option in either position.
     expect(fn).toContain('const src = opts.sourceAppPath ?? sourceAppPath()');
     expect(fn).toContain('sourceAppPath: src');
     expect(fn).toContain('stampFor(src)');
@@ -212,20 +194,13 @@ describe('isMenubarStale', () => {
   });
 
   it('classifies a release only when the bundle is really in its cache dir', () => {
-    // A path regex got this wrong both ways: a checkout under any directory with
-    // a version-shaped segment read as a release, and vice versa.
     const cacheFor = (v: string) => `/cache/menubar/mac-helper/v${v}`;
     expect(releaseVersionOfCachedBundle('/cache/menubar/mac-helper/v1.0.1/MenubarHelper.app', cacheFor)).toBe('1.0.1');
-    // Version-shaped, but not the cache — a checkout, not a release.
     expect(releaseVersionOfCachedBundle('/Users/me/src/v1.0.1/menubar/MenubarHelper.app', cacheFor)).toBeNull();
-    // No version at all.
     expect(releaseVersionOfCachedBundle('/Users/me/src/agents-cli/cli/menubar/MenubarHelper.app', cacheFor)).toBeNull();
   });
 
   it('stampFor uses the real cache dir, not a path pattern', () => {
-    // Mutation-driven: making stampFor always return `local` killed no test,
-    // because the classifier was only exercised through an injected cache
-    // function. This drives stampFor itself against the REAL cache path.
     const inCache = path.join(menubarHelperCacheDir('1.0.1'), 'MenubarHelper.app');
     expect(stampFor(inCache)).toEqual({ source: 'release', helperVersion: '1.0.1' });
 
@@ -250,8 +225,8 @@ describe('isMenubarStale', () => {
     fs.mkdirSync(local);
     try {
       for (const source of [local, path.join(menubarHelperCacheDir('1.0.1'), 'MenubarHelper.app')]) {
-        const written = stampFor(source);        // what install persists
-        const computed = stampFor(source);       // what the next check derives
+        const written = stampFor(source);
+        const computed = stampFor(source);
         expect(isMenubarStale({ installed: written, available: computed, execExists: true })).toBe(false);
       }
     } finally {
@@ -260,9 +235,6 @@ describe('isMenubarStale', () => {
   });
 
   it('finds the cache match even when an earlier path segment looks like a version', () => {
-    // Reviewer-found: the classifier took the LEFTMOST version-shaped match, so
-    // a genuinely cached bundle under e.g. an nvm dir (`.../v24.15.0/...`)
-    // matched that segment, failed the prefix check, and read as a local build.
     const cacheFor = (v: string) => `/Users/me/.nvm/versions/node/v24.15.0/cache/menubar/mac-helper/v${v}`;
     expect(releaseVersionOfCachedBundle(`${cacheFor('1.0.1')}/MenubarHelper.app`, cacheFor)).toBe('1.0.1');
   });
@@ -275,7 +247,7 @@ describe('isMenubarStale', () => {
       ownerEntryExists: true,
       sourceIsDeveloperId: true,
       plistEntry: '/a',
-      activeEntry: '/b',            // not the owner, so only a version arm could grant
+      activeEntry: '/b',
       helperExecMissing: false,
       needsDevIdHeal: false,
       msSinceLastHeal: 0,
@@ -294,12 +266,10 @@ describe('isMenubarStale', () => {
     fs.mkdirSync(app);
     try {
       const before = stampFor(app);
-      fs.utimesSync(app, new Date(), new Date(Date.now() + 60_000)); // rebuild
+      fs.utimesSync(app, new Date(), new Date(Date.now() + 60_000));
       const after = stampFor(app);
 
-      // Through the lossy label the two are indistinguishable...
       expect(stampVersionLabel(before)).toBe(stampVersionLabel(after));
-      // ...but the stamps are not, which is what the comparison must use.
       expect(JSON.stringify(before)).not.toBe(JSON.stringify(after));
       expect(isMenubarStale({ installed: before, available: after, execExists: true })).toBe(true);
     } finally {
@@ -315,12 +285,9 @@ describe('isMenubarStale', () => {
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
       'utf-8',
     );
-    // Anchor on the unique symbol, not `step('bundle'` — there are three of
-    // those and indexOf finds an error path, not the comparison under test.
     const i = src.indexOf('const bundleUnchanged');
     expect(i).toBeGreaterThan(-1);
     const around = src.slice(i, src.indexOf("step('bundle'", i) + 200);
-    // Must go through the canonical comparator on the full stamps...
     expect(around).toContain('isMenubarStale({');
     expect(around).toContain('available: availableStamp()');
     expect(around).not.toMatch(/bundleUnchanged[\s\S]{0,120}stampVersionLabel\(bundleStamp\) ===/);
@@ -328,18 +295,12 @@ describe('isMenubarStale', () => {
   });
 
   it('never compares against the CLI version', () => {
-    // The bug this replaces: an unchanged helper looked stale on every CLI
-    // release (the #2109 restart storm), and a newer helper at the same CLI
-    // version never looked stale at all.
     const src = fs.readFileSync(
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
       'utf-8',
     );
     const start = src.indexOf('export function isMenubarStale');
     const end = src.indexOf('function menubarSetupStale');
-    // Guard the guard: if either marker is ever renamed the slice silently
-    // becomes empty or inverted, and `not.toContain` passes vacuously — the
-    // assertion would survive the very regression it exists to catch.
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const fn = src.slice(start, end);
@@ -399,7 +360,6 @@ describe('mayInstallMenubarHelper', () => {
   const brew = '/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
   const nvm = '/Users/me/.nvm/versions/node/v24.15.0/lib/node_modules/@phnx-labs/agents-cli/dist/index.js';
   const HOUR = 60 * 60 * 1000;
-  // Healthy install, recent heal — the fields that are not what a case is about.
   const base = {
     helperExecMissing: false,
     needsDevIdHeal: false,
@@ -411,17 +371,12 @@ describe('mayInstallMenubarHelper', () => {
   };
 
   it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
-    // The steady state that produced the loop: nvm 1.22.5 invoking while the
-    // Homebrew copy owns the helper. Before the gate this recopied the bundle and
-    // killed the running helper on every invocation.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
     })).toBe(false);
   });
 
   it('allows the owner to reinstall — a same-install upgrade still lands', () => {
-    // `npm update` keeps the entry path and only bumps the version, so the
-    // staleness path behind this gate must still fire, cooldown or not.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
     })).toBe(true);
@@ -483,8 +438,6 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('never blocks a repair: a missing helper executable heals from any install', () => {
-    // A bundle that is not there cannot be contested, and gating this behind
-    // ownership leaves the menu bar dead with no automatic recovery.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       helperExecMissing: true,
@@ -493,7 +446,6 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('never blocks a repair: the Developer-ID heal runs from any install', () => {
-    // An ad-hoc copy re-prompts for Accessibility until the identity is restored.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
       needsDevIdHeal: true,
@@ -522,9 +474,6 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('still lets an ad-hoc build repair a BROKEN helper whose owner is gone (no deadlock)', () => {
-    // The real "nothing else can install it" case is a MISSING/ad-hoc-installed
-    // helper — escape (1) (helperExecMissing / needsDevIdHeal) heals it from ANY
-    // source, so refusing the healthy-helper takeover above strands nothing.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
       sourceIsDeveloperId: false, helperExecMissing: true,
@@ -532,8 +481,6 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('still lets a Developer-ID build adopt a healthy helper whose owner-entry is gone', () => {
-    // A relocated npm dir (owner AGENTS_ENTRY path vanished) must still self-heal
-    // for a legitimately signed install — only ad-hoc sources are refused above.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
       sourceIsDeveloperId: true,
@@ -548,17 +495,12 @@ describe('mayInstallMenubarHelper', () => {
   });
 
   it('never churns when the active entry cannot be resolved (dev/tsx run)', () => {
-    // Matches menubarPlistNeedsRepoint's existing guard: an unresolvable entry
-    // must not be written into the plist or used to seize ownership.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: null, ownerEntryExists: true,
     })).toBe(false);
   });
 });
 
-// Regression guard for the auto-heal restart sequence: without a `bootout` first,
-// `bootstrap` fails on modern macOS when the job is already loaded, leaving the
-// helper in a dead state after a WindowServer disconnect.
 describe('restartMenubarLaunchAgent', () => {
   it('boots out the old job, bootstraps the plist, then kickstarts the service', () => {
     const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
@@ -586,9 +528,6 @@ describe('restartMenubarLaunchAgent', () => {
     }
   });
 
-  // The assertion above would pass against a hardcoded label too, so pin the
-  // property that actually matters: the target the call sites use is derived
-  // from HOME. Without it a sandboxed fork boots out the production job.
   it('namespaces the service target under a redirected HOME, and only then', () => {
     const savedHome = process.env.HOME;
     try {
@@ -632,9 +571,6 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-sig-'));
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
-    // A real Mach-O so codesign has something to sign; /bin/echo is stable.
-    // Read the basename from the shipped constant, never a literal: RUSH-3101
-    // renamed it and this fixture's hardcoded copy silently went stale.
     fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', MENUBAR_HELPER_EXECUTABLE_NAME));
     // The real bundle declares CFBundleExecutable (menubar/scripts/build.sh:122). Without an
     // Info.plist codesign infers `Contents/MacOS/MenubarHelper`, which no longer exists after the
@@ -657,15 +593,11 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
         '',
       ].join('\n'),
     );
-    // Ad-hoc sign it: the signature is valid, but it is NOT notarized — the exact
-    // state a non-Developer-ID / un-notarized cut leaves the bundle in.
     const signed = spawnSync(
       'codesign',
       ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app],
       { encoding: 'utf8' },
     );
-    // Fail loud. The previous `stdio: 'ignore'` swallowed the packaging error and
-    // turned it into a confusing "expected false to be true" three lines later.
     if (signed.status !== 0) {
       throw new Error(`ad-hoc codesign failed (status ${signed.status}): ${(signed.stderr || '').trim()}`);
     }
@@ -674,10 +606,7 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
 
   it('an ad-hoc-signed (un-notarized) bundle passes codesign but FAILS Gatekeeper', () => {
     const app = makeAdHocBundle();
-    // Signature is valid on its own...
     expect(codesignVerifies(app)).toBe(true);
-    // ...but Gatekeeper rejects it because it is not notarized. The guard's AND
-    // of the two is therefore false, so the helper is refused, not launched.
     expect(gatekeeperAssesses(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
   });
@@ -689,9 +618,6 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
   });
 });
 
-// RUSH-2968: launchctl is per-user-session and HOME-independent. A process under a
-// redirected HOME still registers jobs in the REAL launchd, even when the label is
-// namespaced. The registration abstraction must refuse the call and state why.
 darwinOnly('service-manager registration gating (RUSH-2968)', () => {
   it('never invokes launchctl under a redirected HOME', () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
@@ -735,9 +661,6 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
     expect(plist).toContain('<key>RunAtLoad</key>');
   });
 
-  // `plutil` is macOS-only and the CI test shards run on Linux, where spawnSync
-  // returns status null (ENOENT) rather than a non-zero exit — so gate on the
-  // tool actually being present instead of asserting against a missing binary.
   const hasPlutil = spawnSync('plutil', ['-help'], { encoding: 'utf8' }).error === undefined;
 
   it.skipIf(!hasPlutil)('emits a plist that plutil accepts', () => {
@@ -746,8 +669,6 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
     expect(spawnSync('plutil', ['-lint', file], { encoding: 'utf8' }).status).toBe(0);
   });
 
-  // Runs everywhere, so the structural contract is still pinned on Linux CI:
-  // a plist launchd will reject is a helper that never starts.
   it('is well-formed XML with a single top-level dict', () => {
     expect(plist.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect(plist).toContain('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"');
@@ -773,8 +694,6 @@ describe('menubarHealReplacedBundle', () => {
   });
 
   it('is false for a plist-only repoint — same version, same identity', () => {
-    // This is exactly the mixed-Node-interpreter case RUSH-3005 already owns;
-    // restarting the helper here too would double that churn.
     expect(menubarHealReplacedBundle({ stale: false, needsDevIdHeal: false })).toBe(false);
   });
 });
@@ -823,9 +742,6 @@ describe('restartMenubarHelperAfterSwap', () => {
   it('never touches launchd or kills anything under a redirected HOME with no test seam', () => {
     const exec = vi.fn(() => Buffer.alloc(0));
     const kill = vi.fn();
-    // No AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME set — the hermetic test
-    // HOME (tests/setup.ts) must refuse registration, same as
-    // restartMenubarLaunchAgent (RUSH-2968).
     restartMenubarHelperAfterSwap(501, OWN, exec, kill);
     expect(exec).not.toHaveBeenCalled();
     expect(kill).not.toHaveBeenCalled();
@@ -888,9 +804,6 @@ describe('resetMenubarAccessibilityTcc', () => {
   });
 });
 
-// Regression guard for the stale-process diagnostic behind `agents menubar
-// doctor`: a live pid that started before the installed bundle's last write is
-// still running the binary an update swapped out from under it.
 describe('isMenubarProcessStaleAgainstBundle', () => {
   it('is stale when the pid started before the bundle was last written', () => {
     expect(isMenubarProcessStaleAgainstBundle(1_000, 2_000)).toBe(true);
@@ -934,16 +847,11 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
     process.env.HOME = home;
     process.env.AGENTS_REAL_HOME = home;
     try {
-      // The seam is deliberately NOT set, so registration is refused — this
-      // asserts the guard rather than opting out of it.
       expect(serviceManagerRegistrationAllowed().allowed).toBe(false);
 
-      // Twice: a storm is non-convergence, so one call proving nothing is the
-      // point of running it again.
       expect(() => installMenubarLaunchAgentOnUpgrade()).not.toThrow();
       expect(() => installMenubarLaunchAgentOnUpgrade()).not.toThrow();
 
-      // Nothing was registered and nothing was stamped under the sandbox HOME.
       const launchAgents = path.join(home, 'Library', 'LaunchAgents');
       const plists = fs.existsSync(launchAgents) ? fs.readdirSync(launchAgents) : [];
       expect(plists.filter((f) => f.includes('menubar'))).toEqual([]);
@@ -1003,9 +911,6 @@ describe('auto-update decision (menubarUpdateSkipReason / menubarUpdateOutcome)'
   });
 
   it('a downloaded release cache is NOT a shipped bundle: the pass still proceeds', () => {
-    // The floor prefetch fills the download cache; `shipped` covers only the
-    // bundles that ship with the install (dist sibling, repo bin, Bun layout).
-    // Keying the skip on the cache would pin every npm-global Mac to the floor.
     expect(menubarUpdateSkipReason({ ...base, shipped: false })).toBeNull();
   });
 
@@ -1028,7 +933,6 @@ describe('auto-update decision (menubarUpdateSkipReason / menubarUpdateOutcome)'
 
 describe('cachedReleaseBundlePath', () => {
   it('is the floor cache until a newer version has been resolved', () => {
-    // No resolve cache in the test HOME → cachedMenubarVersion() is the floor.
     expect(cachedReleaseBundlePath()).toBe(cachedFloorBundlePath());
   });
 });

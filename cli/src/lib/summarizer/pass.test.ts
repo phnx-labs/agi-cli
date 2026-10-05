@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Fresh HOME before importing state/db (db.ts captures DB_PATH at module load).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-summ-pass-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
@@ -26,7 +25,6 @@ function session(over: Record<string, any> = {}): any {
   };
 }
 
-/** A summarize stub that records calls and returns a scripted result. */
 function stubSummarize(result: any) {
   const calls: any[] = [];
   const impl = (async (prompt: string, progress: any) => {
@@ -69,7 +67,6 @@ describe('runSummarizerPass', () => {
       { text: 'did B', at: '2026-09-05T12:00:00.000Z' },
     ]);
     expect(stored?.summaryChecklist).toEqual([{ text: 'step', done: false }]);
-    // The prompt fed to the model is the first user turn, never a tool firehose.
     expect(stub.calls[0].prompt).toBe('Ship the feature end to end');
   });
 
@@ -82,7 +79,7 @@ describe('runSummarizerPass', () => {
     const second = await runSummarizerPass({ config: RUNNABLE, sessions: s, summarizeImpl: stub.impl, statFile });
     expect(second.reused).toBe(1);
     expect(second.computed).toBe(0);
-    expect(stub.calls.length).toBe(1); // never called the model again
+    expect(stub.calls.length).toBe(1);
   });
 
   it('keeps the goal stable across a transcript delta (goal computed once)', async () => {
@@ -92,15 +89,12 @@ describe('runSummarizerPass', () => {
     const first = stubSummarize({ goal: 'Original goal', checkpoints: ['a'], checklist: [] });
     await runSummarizerPass({ now: t1, config: RUNNABLE, sessions: s, summarizeImpl: first.impl, statFile: () => ({ mtimeMs: 1, size: 1 }) });
 
-    // Bytes change → recompute. The model drifts the goal, but the stored goal
-    // must stay the first one; checkpoints refresh.
     const second = stubSummarize({ goal: 'Drifted goal', checkpoints: ['a', 'b'], checklist: [] });
     await runSummarizerPass({ now: t2, config: RUNNABLE, sessions: s, summarizeImpl: second.impl, statFile: () => ({ mtimeMs: 2, size: 5 }) });
 
     const stored = readSessionSummaryAny('goal-1');
     expect(stored?.goal).toBe('Original goal');
     expect(stored?.checkpoints?.map((c) => c.text)).toEqual(['a', 'b']);
-    // The pre-existing checkpoint 'a' keeps its original timestamp.
     const a = stored?.checkpoints?.find((c) => c.text === 'a');
     const b = stored?.checkpoints?.find((c) => c.text === 'b');
     expect(a && b && a.at !== b.at).toBe(true);

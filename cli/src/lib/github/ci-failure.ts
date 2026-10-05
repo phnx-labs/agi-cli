@@ -6,35 +6,25 @@ import { ghExec, type GhExec } from './pr-mergeable.js';
 import { FAILING_CONCLUSIONS, FAILING_STATES, ghFailure } from './project-prs.js';
 import { rollupForSha, type RollupItem } from './rest.js';
 
-/** The most excerpt lines one failing check carries. */
 export const EXCERPT_LIMIT = 12;
 
-/** One failing check on the commit, with the error lines of its job log. */
 export interface FailingCheck {
   name: string;
-  /** The check's page (an Actions job page, or a status's target URL); null when GitHub gave none. */
   url: string | null;
-  /** The Actions workflow run and job; null for a check that is not an Actions job. */
   runId: number | null;
   jobId: number | null;
-  /** Upper-cased conclusion (FAILURE, TIMED_OUT, CANCELLED, …) or a status's state (FAILURE, ERROR). */
   conclusion: string;
-  /** At most {@link EXCERPT_LIMIT} error lines from the job log; [] when there is no log or it could not be read. */
   excerpt: string[];
-  /** Why `excerpt` is empty, when it is not simply a log with no error lines. */
   excerptError: string | null;
 }
 
-/** `agents projects prs failure --json`. */
 export interface CiFailureReport {
   repo: string;
   sha: string;
   checks: FailingCheck[];
-  /** Non-null when the commit's checks could not be read; `checks` is then not authoritative. */
   error: string | null;
 }
 
-/** `agents projects prs rerun --json`. */
 export interface RerunResult {
   repo: string;
   runId: number;
@@ -42,25 +32,17 @@ export interface RerunResult {
   message: string;
 }
 
+// Fork-controlled logs are hostile terminal input: strip CSI/OSC/DCS/APC/PM and C0/C1 controls.
 const TIMESTAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?/;
-// A job log is written by the code under test, a fork PR's included, and the
-// excerpt reaches a terminal and the menu. gh's own escape-sequence guard is off
-// for the log read, so every escape sequence goes here: CSI (colour, cursor),
-// OSC/DCS/APC/PM strings (title, clipboard writes, hyperlinks), other ESC pairs,
-// then any C0/C1 control character left (bare CR, BEL, the 8-bit CSI 0x9b).
 // eslint-disable-next-line no-control-regex
 const ESCAPES = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[\]P^_][\s\S]*?(?:\x07|\x1b\\|$)|\x1b[@-Z\\-_]|\x9b[0-9;?]*[ -/]*[@-~]/g;
 // eslint-disable-next-line no-control-regex
 const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 const ERRORISH = /error|fail|exit(?:ed|ing)? (?:with )?code|✗|×/i;
-/** Summary lines that name the error words while saying nothing failed: "0 failed", "errors: 0". */
 const ALL_CLEAR = /(?:^|\W)0 (?:failed|failures?|errors?)\b|\b(?:failed|failures?|errors?):? 0\b/i;
-/** Runner bookkeeping that carries "error"/"fail" words without being the failure. */
 const NOISE = /^(?:##\[(?:group|endgroup)\]|\[command\]|shell: |env:$)/;
-/** The runner's post-steps (checkout cleanup, credential removal) start here. */
 const CLEANUP = /^Post job cleanup\.?$/;
 
-/** One raw log line as a person reads it: no timestamp, no colour, no runner annotation marker. */
 function cleanLine(raw: string): string {
   return raw.replace(TIMESTAMP, '').replace(ESCAPES, '').replace(CONTROLS, '').replace(/^##\[(?:error|warning)\]/, '').trimEnd();
 }
@@ -89,18 +71,16 @@ export function excerptFromLog(log: string): string[] {
   return [...picked.slice(0, 7), '…', ...picked.slice(-4)];
 }
 
-/** `…/actions/runs/{run}/job/{job}` → the run and job ids; nulls for any other URL. */
 export function actionsIds(url: string | null): { runId: number | null; jobId: number | null } {
   const m = url?.match(/\/actions\/runs\/(\d+)\/jobs?\/(\d+)/);
   return m ? { runId: Number(m[1]), jobId: Number(m[2]) } : { runId: null, jobId: null };
 }
 
-/** One job's log, over REST. gh refuses to print a payload with escape sequences unless told it may; {@link cleanLine} strips them. */
+// gh may preserve escapes for binary-safe output; cleanLine must sanitize the result before display.
 async function readJobLog(repo: string, jobId: number, gh: GhExec): Promise<string> {
   return gh(['api', '--allow-escape-sequences', `repos/${repo}/actions/jobs/${jobId}/logs`]);
 }
 
-/** A failed log read in words a person can act on; gh's own message otherwise. */
 function logFailure(err: unknown): string {
   const raw = `${String((err as { stderr?: unknown })?.stderr ?? '')} ${err instanceof Error ? err.message : String(err)}`;
   if (/unknown flag: --allow-escape-sequences/.test(raw)) return 'This gh is too old to read job logs (it lacks --allow-escape-sequences); upgrade gh.';
@@ -109,7 +89,6 @@ function logFailure(err: unknown): string {
   return ghFailure(err);
 }
 
-/** A rollup item that makes the commit red, by the same rule as the ✗ glyph (`ciFromRollupItems`). */
 const isFailing = (item: RollupItem) => (item.state === undefined
   ? FAILING_CONCLUSIONS.has(item.conclusion ?? '')
   : FAILING_STATES.has(item.state));

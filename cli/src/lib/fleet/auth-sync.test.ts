@@ -61,7 +61,6 @@ describe('FLEET_AUTH_FILES coverage', () => {
   it('maps the portable-auth agents but NONE are propagatable anymore (SING-1b)', () => {
     for (const agent of ['claude', 'codex', 'grok', 'kimi', 'opencode', 'antigravity']) {
       expect(FLEET_AUTH_FILES[agent]?.length).toBeGreaterThan(0);
-      // Portable file on disk, but a native OAuth login is never copied between devices.
       expect(isCredentialSafeToPropagate(agent)).toBe(false);
       expect(isPropagatableAgent(agent)).toBe(false);
     }

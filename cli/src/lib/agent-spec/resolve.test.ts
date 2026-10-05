@@ -4,7 +4,6 @@ import { compareVersions } from './primitives.js';
 import { AgentSpecError, type VersionProvider } from './types.js';
 import { resolveAgentTargets, resolveSingleAgentTarget, resolveVersionFilter, resolveListFilter } from './resolve.js';
 
-// In-memory provider — the whole point of the DI seam: no fs, no $HOME.
 function providerOf(state: {
   installed?: Partial<Record<string, string[]>>;
   project?: Partial<Record<string, string>>;
@@ -50,7 +49,6 @@ describe('isolated default', () => {
   });
 
   it('ambiguity is resolved by the isolated default rather than throwing', () => {
-    // Two isolated copies and no global default used to be a hard error.
     const p = providerOf({ installed: { claude: ['2.1.0', '2.1.1'] }, isolated: { claude: '2.1.1' } });
     expect(() => resolveSingleAgentTarget('claude', p)).not.toThrow();
   });

@@ -6,21 +6,15 @@ import { resolveActor } from '../actor.js';
 import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
 import { resolveRemoteDevice } from '../ssh-tunnel.js';
 
-/** A `--device <name>` target, resolved against the fleet. */
 export interface ComputerTargetContext {
-  /** The device name as the user typed it. */
   alias: string;
-  /** `user@host`, already validated against ssh option injection. */
   host: string;
   user: string;
-  /** Bare host — the ssh-config Host name or address, without the user. */
   hostname: string;
   platform: string;
-  /** Per-device ssh identity flags, in argv order. Possibly empty. */
   sshArgs: string[];
 }
 
-/** Who is acting, so the engine can stamp the action it reports back. */
 interface ComputerSessionContext {
   sessionId?: string;
   launchId?: string;
@@ -48,11 +42,8 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
 }
 
 interface BuildContextOptions {
-  /** `--device <name>`, if given. */
   device?: string;
-  /** Direct host targeting, which bypasses fleet resolution. */
   host?: string;
-  /** Resolved path of the standalone executable, for the peer allow list. */
   computerBin?: string;
   /** A precomputed target (PHNX-4090: `resolveDeviceHost` already resolved the device's
    * `computer.host` or ssh fallback). `device` then only gates the local-permissions branch,
@@ -85,8 +76,6 @@ export async function buildComputerContext(opts: BuildContextOptions = {}): Prom
     ...(!opts.device && !opts.host && !process.env.COMPUTER_HELPER_TCP && !process.env.COMPUTER_HELPER_VNC
       ? { permissions: { allow: loadComputerAllowList() } } : {}),
     peers: { allow: loadDefaultPeers({ computerBin: opts.computerBin }) },
-    // Spread rather than assigned: a local invocation must not ship a `target`
-    // key at all, so the engine never has to distinguish absent from null.
     ...(target ? { target } : {}),
     session: {
       sessionId: agentSessionId(),

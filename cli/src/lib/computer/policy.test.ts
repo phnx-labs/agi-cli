@@ -24,7 +24,6 @@ afterEach(() => {
   }
 });
 
-/** Write real group YAML into a real directory and point the resolver at it. */
 function withGroups(groups: { user?: Record<string, string>; system?: Record<string, string> }): void {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-computer-policy-'));
   tempDirs.push(root);
@@ -76,9 +75,6 @@ describe('loadComputerAllowList', () => {
   });
 
   it('only honors the allow: section — a rule under deny: must not be admitted', () => {
-    // The section tracker is what makes this true; a naive whole-file regex
-    // would turn a deny rule into a grant, which is the worst possible failure
-    // for this parser.
     withGroups({
       user: {
         'computer.yaml': [
@@ -103,8 +99,6 @@ describe('loadComputerAllowList', () => {
   });
 
   it('lets the USER layer win a filename collision', () => {
-    // Resource resolution is user-over-system; the allow list must not quietly
-    // union a system group the user deliberately overrode.
     withGroups({
       user: { 'computer.yaml': 'name: computer\nallow:\n  - "Computer(com.apple.notes)"\n' },
       system: { 'computer.yaml': 'name: computer\nallow:\n  - "Computer(com.apple.systempreferences)"\n' },

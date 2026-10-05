@@ -24,12 +24,8 @@ export interface HookProfileRow {
   /** Count of intentional deny/block exits (PreToolUse exit 2), which deny-by-design guards use;
    * not a crash. */
   blockCount: number;
-  /** Fraction (0-1) of fires with exit code 2 (intentional deny/block). */
   blockRate?: number;
-  /** Fraction (0-1) of fires that hit their configured timeout. */
   timeoutRate?: number;
-  /** Project key the row is scoped to (see project-key.ts) — set only when
-   *  a `--project` filter narrowed the underlying query. */
   project?: string;
 }
 
@@ -69,7 +65,6 @@ export function loadHookFireEvents(days = 7, logsDir: string = getLogsDir()): Ra
   return events;
 }
 
-/** Aggregate fire events into a per-hook profile, sorted by p99 desc. */
 export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
   const byHook = new Map<string, RawFireEvent[]>();
   for (const e of events) {
@@ -86,8 +81,6 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
     const hits = evs.filter(e => e.cache === 'hit').length;
     const stale = evs.filter(e => e.cache === 'stale-prefetch').length;
     const misses = evs.filter(e => e.cache === 'miss').length;
-    // Exit classes (Claude/Codex PreToolUse convention): 0 allow, 2 deny/block,
-    // 1 / other nonzero = real error. Exit 2 is not a crash.
     const blocks = evs.filter(e => e.exit === 2).length;
     const errors = evs.filter(e => typeof e.exit === 'number' && e.exit !== 0 && e.exit !== 2).length;
     rows.push({
@@ -115,7 +108,6 @@ export function aggregateHookProfile(events: RawFireEvent[]): HookProfileRow[] {
   return rows;
 }
 
-/** Human-friendly duration: "42ms" / "1.2s" / "12s" / "2m". */
 export function formatMs(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -125,7 +117,6 @@ export function formatMs(ms: number): string {
   return secs > 0 ? `${mins}m${secs}s` : `${mins}m`;
 }
 
-/** Format a row's cache column: `hit:97% miss:3%` or `n/a` when nothing cached. */
 export function formatCacheColumn(row: HookProfileRow): string {
   if (row.cacheHitPct + row.cacheStalePct + row.cacheMissPct === 0) return 'n/a';
   const parts: string[] = [];

@@ -128,7 +128,6 @@ describe('monorepo scoping', () => {
   });
 });
 
-/** Recorded REST answers for acme/mono (open-PR, merge-commit and default-branch CI, the closed-PR list). */
 const REST = (() => {
   const raw = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-rest.json', import.meta.url), 'utf-8')) as {
     routes: Record<string, string | Array<Record<string, unknown>>>;
@@ -143,7 +142,6 @@ const NOW = Date.parse('2026-10-04T12:00:00Z');
 const CLOSED_PAGE = (n: number) => `repos/acme/mono/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=${n}`;
 const MERGE = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-merge.json', import.meta.url), 'utf-8')) as Record<string, string>;
 const ghError = (stderr: string) => Object.assign(new Error('Command failed: gh api'), { stderr });
-/** `repos/{r}` answers canonicalization, the default branch, and a non-admin's merge settings. */
 const repoRead = (args: string[]) => (args.includes('.default_branch')
   ? 'main\n'
   : args.some((a) => a.includes('allow_rebase_merge')) ? MERGE['repo-nonadmin'] : 'acme/mono\n');
@@ -212,7 +210,6 @@ describe('CI at a glance and recently merged PRs', () => {
     const first = await buildProjectPrs(solo, {}, recordedGh(routesWith(red)).gh, [solo], { nowMs: NOW, cacheDir });
     expect(first.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE', failingChecks: ['test'] });
 
-    // The job was re-run and passed, but within five minutes the cached red still stands.
     const early = recordedGh(routesWith(green));
     const stillRed = await buildProjectPrs(solo, {}, early.gh, [solo], { nowMs: NOW + FAILING_ROLLUP_TTL_MS - 1, cacheDir });
     expect(early.asked).not.toContain('repos/acme/mono/commits/o1/check-runs');
@@ -304,14 +301,12 @@ describe('CI at a glance and recently merged PRs', () => {
     });
     const [repo] = envelope.repositories;
     expect(repo.releaseError).toBeNull();
-    // #13 and #10 merged after the tag; #15 before it.
     expect(repo.release).toEqual({
       latestTag: 'v2.0.0', latestTagAt: '2026-10-01T00:00:00Z', mergesSince: 2, mergesSinceComplete: true,
       npm: { name: '@acme/mono', version: '1.9.0', error: null },
     });
     expect(viewed).toEqual(['@acme/mono']);
 
-    // A failed tag read is reported, never shown as a repository with no release.
     const failed = await buildProjectPrs(solo, {}, recordedGh({
       ...tagRoutes, 'repos/acme/mono/tags?per_page=100': Object.assign(new Error('gh'), { stderr: 'gh: Server Error (HTTP 500)\n' }),
     }).gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
@@ -354,7 +349,6 @@ describe('CI at a glance and recently merged PRs', () => {
     const [repo] = (await buildProjectPrs(rush, {}, first.gh, [rush, prix], { nowMs: NOW, cacheDir })).repositories;
     expect(repo.pullRequests.map((pr) => [pr.number, pr.scope, pr.ciState])).toEqual([[1, 'project', 'FAILURE']]);
     expect(repo.recentlyMerged.map((pr) => [pr.number, pr.scope])).toEqual([[13, 'repo-wide'], [10, 'project']]);
-    // A merged PR scoped out is never read further.
     expect(first.asked).not.toContain('repos/acme/mono/pulls/15');
 
     const second = recordedGh(routes);
@@ -376,7 +370,6 @@ describe('CI at a glance and recently merged PRs', () => {
     };
     const cacheDir = freshCache();
     await buildProjectPrs(prix, {}, recordedGh(routes).gh, [rush, prix], { nowMs: NOW, cacheDir });
-    // rush never reads PR 2 (prix-only), and must not evict prix's cached green rollup for it.
     await buildProjectPrs(rush, {}, recordedGh(routes).gh, [rush, prix], { nowMs: NOW, cacheDir });
     const again = recordedGh(routes);
     const [repo] = (await buildProjectPrs(prix, {}, again.gh, [rush, prix], { nowMs: NOW, cacheDir })).repositories;
@@ -693,7 +686,6 @@ describe('commentOnProjectPr', () => {
     expect(result).toEqual({
       repo: 'acme/mono', number: 7, commented: true, id: 5, url: 'https://github.com/acme/mono/pull/7#issuecomment-5', message: 'Commented',
     });
-    // -f keeps a leading @ literal; -F would read it as a file name.
     expect(calls[0]).toEqual(expect.arrayContaining(['-f', `body=${body}`]));
   });
 

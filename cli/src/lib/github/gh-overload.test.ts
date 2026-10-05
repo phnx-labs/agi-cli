@@ -59,8 +59,6 @@ describe('isSettled — the empty/pending green trap (PHNX-3042 sibling)', () =>
     expect(isSettled(green, 0)).toBe(true);
   });
   it('a non-empty terminal rollup is settled even with a stuck queued App suite', () => {
-    // claude/cursor reviewer suites stay `queued` forever without posting runs —
-    // real checks decide, exactly as `gh pr checks` ignores them.
     expect(isSettled(green, 2)).toBe(true);
   });
   it('an empty rollup with zero pending suites is settled (genuinely no checks)', () => {
@@ -80,7 +78,7 @@ describe('renderRollup', () => {
   });
   it('emits JSON with lowercased state when --json (sorted by name)', () => {
     const j = JSON.parse(renderRollup(rollup, true)) as Array<{ name: string; state: string }>;
-    expect(j.map((c) => c.name)).toEqual(['lint', 'test']); // deterministic sort
+    expect(j.map((c) => c.name)).toEqual(['lint', 'test']);
     expect(j.find((c) => c.name === 'test')).toMatchObject({ state: 'success' });
     expect(j.find((c) => c.name === 'lint')).toMatchObject({ state: 'in_progress' });
   });
