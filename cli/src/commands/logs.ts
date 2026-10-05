@@ -1,25 +1,3 @@
-/**
- * `agents logs` — unified, discoverable run-log viewer + audit trail.
- *
- * Resolves a run across two substrates and shows (or `-f` follows) its log:
- *  - host-dispatch tasks (`agents run --device`) → combined-stdout log, offset-tailed
- *  - sessions (the local index) → transcript, tailed via the sessions tailer
- *
- * Subcommands:
- *  - `agents logs audit` — read the structured audit/event log
- *  - `agents logs stats` — show aggregate audit statistics
- *
- * Concise by default: a bare `agents logs <id>` prints the same summary digest as
- * `agents sessions <id>` — cheap for an agent to glance at. The token-heavy full
- * transcript / raw stdout is opt-in behind `--full` (alias `-m/--markdown`).
- *
- * `[id]`/`--session` load directly (host task tried first, then session). With no
- * id, `--device`/`--agent`/`--version` filter a merged candidate list; one match is
- * shown, several open the fuzzy picker (or, non-TTY, print the list).
- *
- * Additive: `agents devices ps`/`stop` and `agents sessions tail` are unchanged and
- * share the same underlying helpers (showHostTaskLog / streamSessionTail).
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -50,7 +28,6 @@ type Candidate =
   | { kind: 'task'; task: HostTask }
   | { kind: 'session'; session: SessionMeta };
 
-/** Compact one-line label used by both the picker and the non-TTY list. */
 function candidateLabel(c: Candidate): string {
   if (c.kind === 'task') {
     const t = c.task;
@@ -65,7 +42,6 @@ function candidateLabel(c: Candidate): string {
   return `${chalk.gray('sess')} ${s.shortId.padEnd(9)} ${(s.agent + ver).padEnd(14)} ${chalk.gray(s.timestamp.slice(0, 16))}  ${title.slice(0, 40)}`;
 }
 
-/** Emit a host-dispatch task's log as JSON: `{ kind, task, log }`. */
 function emitHostTaskJson(id: string): boolean {
   const hj = hostTaskLogJson(id);
   if (!hj.found) return false;
@@ -73,7 +49,6 @@ function emitHostTaskJson(id: string): boolean {
   return true;
 }
 
-/** Show a resolved session — follow (tail), concise summary, or (`full`) transcript. */
 async function showSession(session: SessionMeta, follow: boolean, full: boolean, json = false): Promise<void> {
   if (json) {
     await renderSessionLogJson(session);
@@ -103,7 +78,6 @@ async function showCandidate(c: Candidate, follow: boolean, full: boolean, json 
   await showSession(c.session, follow, full, json);
 }
 
-/** Resolve an explicit id/--session: host task first, then a session. */
 async function showById(id: string, follow: boolean, full: boolean, json = false): Promise<void> {
   if (json) {
     if (emitHostTaskJson(id)) return;
@@ -143,8 +117,6 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   const { agent, version } = parseAgentFilter(opts.agent);
   const wantVersion = opts.version ?? version;
 
-  // Host tasks carry no session-index metadata; sessions carry no host tag.
-  // So --device scopes to dispatched tasks, and --version to sessions.
   const candidates: Candidate[] = [];
 
   let tasks = listTasks();
@@ -167,7 +139,6 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
     return;
   }
 
-  // Multiple sessions matched → picker if interactive, else a list to pick from.
   if (!process.stdin.isTTY) {
     console.error(chalk.yellow(`${candidates.length} runs match. Pass an id or --session <id>:`));
     for (const c of candidates.slice(0, 30)) console.error('  ' + candidateLabel(c));
@@ -278,7 +249,6 @@ async function runStats(opts: { since?: string; json?: boolean }): Promise<void>
   console.log();
 }
 
-/** Register the top-level `agents logs` command. */
 export function registerLogsCommand(program: Command): void {
   const logsCmd = program
     .command('logs [id]')

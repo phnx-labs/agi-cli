@@ -1,15 +1,3 @@
-/**
- * Custom harness commands (`agents harness`).
- *
- * A "custom harness" is a named (host CLI + model) combo — e.g. OpenCode pinned
- * to meta/muse-spark-1.1, called `spark`. It runs like a native agent type
- * (`agents run spark`) and syncs across devices via `agents repo push user`.
- *
- * Mechanism: harnesses ARE profiles (same ~/.agents/profiles/*.yml, same run
- * resolution). This command group is the surface over that layer + a discovery
- * `list` spanning custom harnesses, addable presets, and the native harness
- * registry. The former top-level `agents profiles` tree was removed — use harness.
- */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
@@ -54,17 +42,11 @@ import {
 import { harnessHooks } from './harness-hooks.js';
 import { CONNECTION_TEST_PROMPT } from '../lib/harness-connection-test.js';
 
-/** Short capability summary for a native harness — its supported run modes. */
 function nativeModes(id: (typeof ALL_AGENT_IDS)[number]): string {
   const modes = AGENTS[id]?.capabilities?.modes ?? [];
   return modes.length ? modes.join('/') : '-';
 }
 
-/**
- * Print one custom harness. Shared by `agents harness view <name>` and by
- * `agents view <name>` — a custom harness resolves as an agent type there, so
- * both entry points must describe it identically.
- */
 export function renderHarnessDetail(name: string): void {
   const p = readProfile(name);
   console.log(chalk.bold(profileLabel(p)) + chalk.gray('  (custom harness)'));
@@ -82,7 +64,6 @@ export function renderHarnessDetail(name: string): void {
   console.log(chalk.gray(`Run: agents run ${p.name} "hello"`));
 }
 
-/** Options accepted by `agents harness fork`. */
 export interface ForkOptions {
   toHost?: string;
   model?: string;
@@ -91,40 +72,25 @@ export interface ForkOptions {
   account?: string;
   version?: string;
   description?: string;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
   fromSecrets?: string;
   keyStdin?: boolean;
   force?: boolean;
-  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
   test?: boolean;
 }
 
-/** Options accepted by `agents harness edit`. */
 export interface EditOptions {
   model?: string;
   baseUrl?: string;
   authProvider?: string;
   account?: string;
-  /** Empty string ('') unpins the host CLI version. */
   version?: string;
   description?: string;
-  /** Empty string ('') clears the fallback model. */
   fallbackModel?: string;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
   fromSecrets?: string;
   keyStdin?: boolean;
-  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
   test?: boolean;
 }
 
-/**
- * Build the new harness for `agents harness fork <source> <name>`.
- *
- * Two sources, one verb: an existing custom harness is copied and overridden;
- * a native agent id is turned into a harness pinned to `--model` on that host.
- * Forking a native harness therefore requires `--model` — there is nothing to
- * copy a model from.
- */
 export function buildFork(source: string, name: string, opts: ForkOptions): Profile {
   if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
   if (profileExists(source)) {
@@ -175,7 +141,6 @@ export function buildFork(source: string, name: string, opts: ForkOptions): Prof
   return profile;
 }
 
-/** Auth env var for a host, as a hard error when the host declares none. */
 function authEnvKeyForHostOrThrow(host: AgentId): string {
   const key = authEnvKeyForHost(host);
   if (!key) {
@@ -184,11 +149,6 @@ function authEnvKeyForHostOrThrow(host: AgentId): string {
   return key;
 }
 
-/** Map `agents harness edit` flags onto {@link ForkProfileOptions} — the same
- * override shape `editProfile`/`forkProfile` apply. `--version ''` (unpin) is
- * handled by the caller ({@link buildEdit}), not here: `forkProfile`'s own
- * ternary treats an empty string as "no override" and would otherwise inherit
- * the source's version instead of clearing it. */
 function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
   const overrides: ForkProfileOptions = {};
   if (opts.model !== undefined) overrides.model = opts.model;
@@ -199,7 +159,6 @@ function buildEditOverrides(opts: EditOptions): ForkProfileOptions {
   return overrides;
 }
 
-/** True when at least one recognized edit flag was given. */
 export function hasEditFlags(opts: EditOptions): boolean {
   return (
     opts.model !== undefined ||
@@ -216,12 +175,6 @@ export function hasEditFlags(opts: EditOptions): boolean {
 const EDIT_FLAGS_HELP =
   'No changes given. Available flags: --model, --base-url, --auth-provider, --version, --description, --fallback-model, --from-secrets.';
 
-/**
- * Build the edited harness for `agents harness edit <name>` — the profile-shape
- * transform only; the caller applies `--from-secrets`/`--auth-provider` (async
- * keychain side effects) and persists with `writeProfile`. Mirrors
- * {@link buildFork}'s split between a pure builder and the action's IO.
- */
 export function buildEdit(name: string, opts: EditOptions): Profile {
   if (!profileExists(name)) {
     throw new Error(`Harness '${name}' not found. Create it first: agents harness add ${name} ...`);
@@ -246,17 +199,12 @@ export function buildEdit(name: string, opts: EditOptions): Profile {
   return edited;
 }
 
-/** True when `agents harness fork` was given too little to proceed without the wizard. */
 export function forkNeedsWizard(source: string | undefined, name: string | undefined, opts: ForkOptions): boolean {
   if (!source || !name) return true;
   if (!profileExists(source) && resolveAgentName(source) && !opts.model) return true;
   return false;
 }
 
-/** True when `agents harness add` was given too little to proceed without the wizard.
- * Mirrors {@link addProfile}'s own error condition in ./profiles.js so a bare
- * `agents harness add <preset-name>` (no flags) still resolves via the preset
- * fallback instead of being routed into the wizard. */
 export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions): boolean {
   if (!name) return true;
   if (opts.preset) return false;
@@ -265,30 +213,14 @@ export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions
   return !getPreset(name);
 }
 
-/** Whether the pre-save connection test runs, or must be asked for on a TTY. */
 type ConnectionTestGate = 'on' | 'off' | 'ask';
 
-/**
- * Resolve the tri-state connection-test gate (RUSH-2221), pure so the branching
- * is unit-tested with no prompt or spawn. `--test` forces it on, `--no-test`
- * forces it off, and with neither flag a TTY is asked (default yes) while a
- * non-interactive caller (`--key-stdin`, piped, CI) skips it — so scripting stays
- * non-interactive unless it opts in with `--test`.
- */
 export function connectionTestGate(testFlag: boolean | undefined, interactive: boolean): ConnectionTestGate {
   if (testFlag === true) return 'on';
   if (testFlag === false) return 'off';
   return interactive ? 'ask' : 'off';
 }
 
-/**
- * Pre-save connection test (RUSH-2221). The harness is already on disk (the test
- * drives the real `agents run <name>` path, so it must be), so this runs a
- * classified smoke test and — on a TTY, when it fails — offers to keep it, edit
- * it, or delete-and-cancel. A test is never blocking on its own: a save is only
- * discarded when the user explicitly chooses to, so a `--test` failure in a
- * non-interactive shell warns and keeps rather than exiting non-zero.
- */
 async function preSaveConnectionTest(name: string, testFlag: boolean | undefined): Promise<void> {
   const interactive = isInteractiveTerminal();
   const gate = connectionTestGate(testFlag, interactive);
@@ -332,25 +264,13 @@ async function preSaveConnectionTest(name: string, testFlag: boolean | undefined
   }
 }
 
-/**
- * Shared build+persist flow for a fork — used by `agents harness fork`'s
- * flag-driven path AND by the wizard (both for `fork` and, when it falls back
- * to the wizard, `add`), so a wizard run and a hand-written `fork` call build an
- * identical profile.
- */
 async function runForkFlow(source: string, name: string, opts: ForkOptions): Promise<void> {
   validateProfileName(name);
   if (profileExists(name) && !opts.force) {
     throw new Error(`Harness '${name}' already exists. Use --force to overwrite.`);
   }
-  // Build first so a bad source/flag combination fails before prompting for a
-  // key (or copying one from a bundle) the user would then have stored for
-  // nothing.
   const forked = buildFork(source, name, opts);
   if (opts.fromSecrets) {
-    // A fork's `auth` (when present) may just be inherited by reference from
-    // its source, not established for this harness itself -- never trust it
-    // as "safe to rotate" without an explicit --auth-provider.
     await applyFromSecrets(forked, opts.fromSecrets, opts.authProvider, { allowInheritedAuth: false });
   } else if (opts.authProvider) {
     await ensureProviderToken(opts.authProvider, undefined, opts.keyStdin);
@@ -361,14 +281,6 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
   await preSaveConnectionTest(name, opts.test);
 }
 
-/**
- * Interactive `agents harness add`/`fork` wizard — runs when required info is
- * missing and stdin+stdout are a TTY (see {@link forkNeedsWizard}, {@link addNeedsWizard}).
- * Drives the shared step engine ({@link createSteps}) and maps its finished draft
- * back to the same `(source, name, opts)` shape {@link buildFork} accepts via
- * {@link runForkFlow}, so a wizard run and a hand-written fork call build an
- * identical profile.
- */
 async function runCreateWizard(): Promise<{ source: string; name: string; opts: ForkOptions }> {
   const io = await defaultWizardIO();
   const draft = await runWizardSteps(createSteps(), { mode: 'create' }, io, harnessHooks());
@@ -383,16 +295,6 @@ async function runCreateWizard(): Promise<{ source: string; name: string; opts: 
   };
 }
 
-/**
- * Map a finished edit-wizard draft onto {@link EditOptions}, keeping only the
- * fields the user actually changed from the profile's current values. Unchanged
- * accepts (the wizard pre-fills each prompt with the current value) drop out, so
- * the resulting {@link buildEdit} touches nothing the user left alone — and the
- * "no changes" case is detectable via {@link hasEditFlags}. Base-URL clearing is
- * intentionally not expressed here: the flag path can't clear it either (an empty
- * `--base-url` is a no-op in `forkProfile`), so the wizard matches that until a
- * later subtask adds explicit clearing.
- */
 export function draftToEditOptions(draft: HarnessDraft, original: Profile): EditOptions {
   const host = original.host.agent;
   const curModel = original.env[modelEnvKeyForHost(host)];
@@ -412,14 +314,6 @@ export function draftToEditOptions(draft: HarnessDraft, original: Profile): Edit
   return opts;
 }
 
-/**
- * Interactive `agents harness edit <name>` wizard — runs when no edit flags were
- * given and stdin+stdout are a TTY. Loads the profile, drives the shared step
- * engine ({@link editSteps}) pre-filled with current values, then persists via the
- * same build+write path as the flag-driven edit. `--key-stdin` is honored for the
- * auth step's key entry. When the user changes nothing, it says so and writes
- * nothing.
- */
 async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> {
   if (!profileExists(name)) {
     throw new Error(`Harness '${name}' not found. Create it first: agents harness add ${name} ...`);
@@ -446,8 +340,6 @@ async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> 
   writeProfile(edited);
   console.log(chalk.green(`Harness '${name}' updated.`));
   console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
-  // An edit that touched host/model/endpoint/auth is exactly what can break the
-  // harness, so re-test after saving (RUSH-2221). cliOpts carries the --test flag.
   await preSaveConnectionTest(name, cliOpts.test);
 }
 
@@ -622,10 +514,6 @@ Examples:
     )
     .action(async (name: string, opts: EditOptions) => {
       try {
-        // No edit flags + a real terminal → the interactive wizard, pre-filled
-        // with current values. Any flag (or a non-interactive caller) takes the
-        // flag path unchanged; a flagless non-interactive call still errors via
-        // buildEdit's EDIT_FLAGS_HELP.
         if (!hasEditFlags(opts) && isInteractiveTerminal()) {
           await runEditWizard(name, opts);
           return;

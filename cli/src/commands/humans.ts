@@ -1,16 +1,8 @@
-/**
- * `agents humans` — owner identity and notification channel management.
- *
- * Reads from ~/.agents/humans.yaml (created by migration from owner.md and
- * agents.yaml notify.owner). Provides inspection commands for the current
- * owner config.
- */
 
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
 import { readHumans, getOwnerFromHumans } from '../lib/humans.js';
 
-/** Register the `agents humans` command tree. */
 export function registerHumansCommands(program: Command): void {
   const humansCmd = program
     .command('humans')

@@ -1,20 +1,3 @@
-/**
- * `agents feed` -- operator inbox + agent status posts.
- *
- * Default (`agents feed`): list open blocks (decisions agents are waiting on).
- * Aggregates block records from the local feed store and, with --device, from
- * reachable remote hosts via SSH passthrough. Each block carries enough
- * identity for `agents message` to route a reply back to the right agent.
- *
- * Default view groups by **outcome** (ticket / PR / worktree / Unassigned) so
- * an operator sees dozens of deliverables, not ~1,100 agents. Pass `--flat`
- * for the legacy per-agent list.
- *
- * `agents feed post`: agent-callable free-text progress into the activity
- * stream (milestone `status.posted`). Session/agent/host/runtime/pid identity
- * is auto-stamped from env + the pid registry — no domain-specific flags.
- * Humans watch via the feed activity lane.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import {
@@ -95,7 +78,6 @@ import {
   type FeedSessionSignal,
 } from '../lib/feed-ranking.js';
 
-/** Flags for `feed post`. Declared once — the action reads them off both the child and the parent. */
 interface PostCliOpts {
   title?: string;
   session?: string;
@@ -150,13 +132,11 @@ The owner destination comes from humans.yaml; do not duplicate it in agents.yaml
 
 const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
 
-/** Right-hand masthead summary: `N blocks · M agents`. */
 export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
   const agents = new Set(blocks.map((b) => b.mailboxId)).size;
   return `${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${agents} agent${agents === 1 ? '' : 's'}`;
 }
 
-/** Reply hint matching the shared fleet-comms reply line. */
 export function formatFeedReplyHint(mailboxId: string): string {
   return `↳ ag message ${mailboxId} "…"`;
 }
@@ -174,16 +154,12 @@ export function parseRemoteFeed(stdout: string, machine: string): OpenBlock[] {
     if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const block = item as Partial<OpenBlock>;
     if (!block.blockId || !block.sessionId || !block.mailboxId || !block.questions?.length) continue;
-    // A crafted mailboxId (path separators, `.`/`..`) would throw inside
-    // mailboxDir() when policy runs against the block, aborting the whole
-    // dispatch loop — drop it here so a malicious peer can't smuggle one in.
     if (!isValidMailboxId(block.mailboxId)) continue;
     blocks.push({ ...block, host: machine } as OpenBlock);
   }
   return blocks;
 }
 
-/** Merge local and remote rows, keeping the first copy of a host/session block. */
 export function mergeFeedBlocks(...groups: OpenBlock[][]): OpenBlock[] {
   const byIdentity = new Map<string, OpenBlock>();
   for (const block of groups.flat()) {
@@ -269,10 +245,6 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   const consequence = b.consequence && b.consequence !== 'normal' ? chalk.red(`[${b.consequence}]`) : '';
   const cost = b.costOfDelay ? chalk.gray(`cost:${b.costOfDelay}`) : '';
   const rank = b.delayRank ? chalk.gray(`rank:${Math.round(b.delayRank.score)}`) : '';
-  // Shared fleet-comms glyphs: ▲ open ask, ✓ answered (see comms-render GLYPH).
-  // A PENDING claim carries an answer record while the block is still open, so
-  // the delivered glyph is driven by the canonical state, not by `b.answer`
-  // being set — a claimed-but-undelivered ask must keep reading as needs-you.
   const marker = deriveBlockState(b) !== 'open'
     ? chalk.green(GLYPH.delivered)
     : b.kind === 'control'
@@ -335,7 +307,6 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   console.log();
 }
 
-/** Specific host app + routine provenance for one feed row. */
 export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 'routineName'>): string {
   const host = ({
     ghostty: 'Ghostty',
@@ -350,7 +321,6 @@ export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 
   return `${host} · routine${block.routineName ? `:${block.routineName}` : ''}`;
 }
 
-/** Human summary line for one outcome rollup. */
 export function formatOutcomeHeader(group: OutcomeGroup): string {
   const { agents, open, answered, parked } = group.counts;
   const parts = [
@@ -373,7 +343,6 @@ function renderOutcomeGroup(group: OutcomeGroup, localHost: string): void {
   }
 }
 
-/** Map active sessions into the lightweight hints outcome enrichment needs. */
 export function sessionHintsFromActive(
   sessions: Array<{
     sessionId?: string;
@@ -390,7 +359,6 @@ export function sessionHintsFromActive(
   return sessions.map((s) => ({
     sessionId: s.sessionId,
     agentId: s.agentId,
-    // Same precedence as mailboxIdForActiveSession (agentId ?? sessionId).
     mailboxId: s.agentId ?? s.sessionId,
     ticketId: s.ticket?.id,
     prNumber: s.pr?.number,
@@ -403,11 +371,6 @@ export function sessionHintsFromActive(
   }));
 }
 
-/**
- * True when a SQLite open/query failed because another writer holds the lock.
- * better-sqlite3 surfaces this as message "database is locked" and/or code
- * SQLITE_BUSY (RUSH-2006).
- */
 export function isSqliteBusyError(err: unknown): boolean {
   if (err == null) return false;
   const msg = err instanceof Error ? err.message : String(err);
@@ -417,14 +380,6 @@ export function isSqliteBusyError(err: unknown): boolean {
   return /SQLITE_BUSY|database is locked/i.test(msg) || /SQLITE_BUSY/i.test(code);
 }
 
-/**
- * Load session metas for feed outcome enrichment. The sessions index can be
- * locked by a concurrent scanner/daemon — enrichment is best-effort, so a lock
- * degrades to an empty list instead of crashing `agents feed` (RUSH-2006).
- *
- * `load` is injected so tests can throw a real lock-shaped error without
- * mocking the session module.
- */
 export async function loadSessionMetasForFeedEnrichment<T>(
   load: () => Promise<T[]>,
 ): Promise<{ metas: T[]; skippedLock: boolean }> {
@@ -438,11 +393,6 @@ export async function loadSessionMetasForFeedEnrichment<T>(
   }
 }
 
-/**
- * One human line per answer outcome. The three states the operator has to tell
- * apart are a real receipt, a hand-off no rail can confirm, and a refusal —
- * never collapsed into a single "Delivered" (PHNX-3999).
- */
 function renderAnswerResult(result: FeedAnswerResult): string {
   switch (result.status) {
     case 'failed':
@@ -486,8 +436,6 @@ export function registerFeedCommand(program: Command): void {
     .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; check?: boolean; attempt?: string; json?: boolean }, invoked: Command) => {
       const wantsJson = Boolean(opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json);
       try {
-        // The key's own host decides the rail; `answerOwnerIsLocal` normalizes
-        // both sides so a `.local` suffix is not read as a different machine.
         const { host: ownerHost } = parseAttentionKey(attentionKey);
         const local = answerOwnerIsLocal(ownerHost);
         if (opts.check && (opts.choice != null || opts.text != null)) {
@@ -509,9 +457,6 @@ export function registerFeedCommand(program: Command): void {
         if (wantsJson) console.log(JSON.stringify(result));
         else console.log(renderAnswerResult(result));
       } catch (error) {
-        // A failure is a first-class outcome for the operator UI, not a parse
-        // error: `--json` still gets a result object it can branch on, with a
-        // non-zero exit so a scripted caller sees the failure too.
         const message = error instanceof Error ? error.message : String(error);
         if (wantsJson) {
           const failure: FeedAnswerResult = {
@@ -545,9 +490,6 @@ export function registerFeedCommand(program: Command): void {
       opts: PostCliOpts,
       cmd?: { opts: () => PostCliOpts; parent?: { opts: () => { json?: boolean } } },
     ) => {
-      // Parent `feed` also declares `--json` (for the list view). Commander
-      // binds the flag on the parent, so a `feed post … --json` lands on
-      // parent.opts().json — not the child. Read both.
       const flags = {
         title: opts?.title ?? cmd?.opts?.()?.title,
         session: opts?.session ?? cmd?.opts?.()?.session,
@@ -560,10 +502,6 @@ export function registerFeedCommand(program: Command): void {
         json: Boolean(opts?.json ?? cmd?.opts?.()?.json ?? cmd?.parent?.opts?.()?.json),
       };
       try {
-        // Blocked is a state, not a volume: it always broadcasts at `important`,
-        // so an agent has exactly one thing to say. Passing both is a usage
-        // error rather than a silent override -- an agent that thinks it chose
-        // the level should not be quietly ignored.
         if (flags.blocked && flags.level && flags.level !== 'milestone') {
           throw new Error('--blocked already broadcasts at important; drop --level.');
         }
@@ -584,10 +522,6 @@ export function registerFeedCommand(program: Command): void {
           blocked: flags.blocked,
         });
 
-        // A blocked post lands in BOTH stores: the event in the shared activity
-        // stream (what happened) and an OpenBlock in the ledger (what is still
-        // open). The ledger is what makes it answerable and clearable -- without
-        // it the ask would scroll away like any other update.
         let outcomes: SinkOutcome[];
         if (flags.blocked) {
           const block = buildDeclaredBlock(
@@ -599,7 +533,6 @@ export function registerFeedCommand(program: Command): void {
               cwd: event.cwd,
             },
             {
-              // Prefer title as the front-loaded ask on the phone; body is detail.
               text: event.title
                 ? (event.detail ? `${event.title}: ${event.detail}` : event.title)
                 : (event.detail ?? ''),
@@ -618,13 +551,6 @@ export function registerFeedCommand(program: Command): void {
           outcomes = await broadcastPostedEvent(event, level, meta, flags.notify);
         }
 
-        // Fail loud when a block reached nobody. This is computed BEFORE the
-        // --json early return: a machine caller is exactly the one that reads the
-        // exit code, so returning 0 there while a human gets 1 would make the
-        // undelivered block invisible to the caller most likely to act on it —
-        // reintroducing, behind a flag, the silent failure this exists to remove.
-        // One sink failing among several stays a warning: the channels are
-        // redundant by design.
         const undelivered = blockDeliveryFailure(flags.blocked, outcomes);
         if (undelivered) process.exitCode = 1;
 
@@ -659,9 +585,6 @@ export function registerFeedCommand(program: Command): void {
       const includeLocal = shouldIncludeLocalFeed(opts.device, self);
       const setupWarnings: string[] = [];
       if (includeLocal) {
-        // Feed and activity hooks are independent -- install both, and register
-        // the manifest as long as at least one wrote its entries (don't couple
-        // activity registration to the feed hook succeeding).
         const hookInstall = ensureFeedPublishHook();
         const activityInstall = ensureActivityLogHook();
         if (hookInstall.error) setupWarnings.push(hookInstall.error);
@@ -681,8 +604,6 @@ export function registerFeedCommand(program: Command): void {
         }
       }
 
-      // Trailing lane under the block views: `--filter all` appends the same
-      // fleet-wide updates section, anything else the compact local lane.
       const renderTrailingActivity = async (): Promise<void> => {
         if (filter === 'all') {
           console.log();
@@ -694,10 +615,6 @@ export function registerFeedCommand(program: Command): void {
         if (includeLocal) renderActivityLane(opts.project);
       };
 
-      // Updates view: deliberate progress posts only (blocks are decisions, not
-      // announcements). Short-circuits the block pipeline — no dispatch policy —
-      // but fans out like the block view, because a post lands on whichever box
-      // ran the agent.
       if (filter === 'updates') {
         for (const warning of setupWarnings) {
           console.error(chalk.yellow(`Feed hook setup warning: ${warning}`));
@@ -717,14 +634,10 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
-      // Active sessions feed both the GC sweep and outcome enrichment (ticket/PR).
       let sessions: Awaited<ReturnType<typeof getActiveSessions>> = [];
       if (includeLocal) {
         sessions = await getActiveSessions();
       }
-      // discoverSessions touches sessions.db; under concurrent scan pressure it
-      // can throw SQLITE_BUSY. Outcome enrichment is best-effort — degrade with
-      // a warning rather than crash the whole feed (RUSH-2006).
       let sessionMetas: Awaited<ReturnType<typeof discoverSessions>> = [];
       if (includeLocal && sessions.length > 0) {
         const loaded = await loadSessionMetasForFeedEnrichment(
@@ -751,8 +664,6 @@ export function registerFeedCommand(program: Command): void {
       }
 
       if (opts.dispatch && includeLocal) {
-        // Liveness sweep: drop messages to dead agents and retire stale blocks
-        // before we render the feed.
         const activeBoxIds = new Set(sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id));
         const gcResult = gcMailbox(activeBoxIds);
         if (gcResult.blocksRemoved > 0 || gcResult.messagesDroppedDead > 0) {
@@ -766,16 +677,12 @@ export function registerFeedCommand(program: Command): void {
         ? [...listBlocks(), ...synthesizeControlCards(localSignals, listAskStats())]
         : [];
 
-      // Fill missing ticket/PR/worktree from live session meta before local
-      // policy mutates the store, so outcome keys land even when the publish
-      // hook had no deliverable stamp.
       if (sessions.length > 0) {
         localBlocks = enrichBlocksFromSessions(localBlocks, sessionHintsFromActive(sessions));
       }
 
-      // Stall suppression (RUSH-1477) must only mutate blocks owned by this
-      // machine. Remote peers run their own `feed --json`; never enqueue a
-      // policy answer into a local mailbox for a remote agent.
+      // Policy may mutate only blocks owned by this machine; peers dispatch
+      // their own blocks so a remote agent never receives a local mailbox action.
       const preparedLocal = prepareLocalFeedBlocks(localBlocks, {
         includeLocal,
         all: opts.all,
@@ -790,7 +697,6 @@ export function registerFeedCommand(program: Command): void {
         const remoteHosts = remoteFeedHostsToDial(opts.device, self);
         if (!opts.device?.length || (remoteHosts && remoteHosts.length > 0)) {
           const remote = await gatherRemoteAgentsJson({
-            // Bare --json stays a block array so older peers and scripts keep working.
             args: ['feed', '--json'],
             noFanoutEnv: FEED_NO_FANOUT_ENV,
             hosts: remoteHosts,
@@ -813,9 +719,6 @@ export function registerFeedCommand(program: Command): void {
         const policy = loadPolicy();
         const now = new Date();
         for (const b of dispatchBlocksProject) {
-          // Wrap per-block policy so one malformed block (e.g. a crafted
-          // mailboxId that throws in mailboxDir) can't abort the whole loop and
-          // strand every remaining block's dispatch.
           try {
             const result = applyPolicyToBlock(b, policy, now);
             if (result.action !== 'none') {
@@ -841,8 +744,6 @@ export function registerFeedCommand(program: Command): void {
       }
 
       if (opts.json) {
-        // Always a block array (stamped with outcome + ask class) so remote fan-out
-        // and scripts keep a stable contract. Human grouping is text-only.
         const stamped = stampBlockOutcomes(blocks).map((b) => ({
           ...b,
           ask: classifyBlock(b),
@@ -857,7 +758,6 @@ export function registerFeedCommand(program: Command): void {
         return;
       }
 
-      // Shared fleet-comms masthead (same family as `agents mailboxes`).
       console.log(
         masthead({
           title: opts.project ? `${opts.project} needs you` : 'they need you',
@@ -883,32 +783,14 @@ export function registerFeedCommand(program: Command): void {
     });
 }
 
-/**
- * Mirror a written post to the configured sinks (`feed.broadcast` in
- * agents.yaml, or the implicit `notify.owner` fallback for an important post —
- * see {@link effectiveBroadcastConfig}). The ticket is JOINED from the session
- * index rather than asked for as a flag — it is a domain fact about the
- * session, and an agent that has to remember a `--ticket` argument is an agent
- * that will forget it. Returns the per-sink outcomes; an empty array means
- * nothing is configured and no fallback applies, which is not a failure for a
- * routine post (see `blockDeliveryFailure` for the `--blocked` case).
- *
- * `meta` is threaded in rather than read here so the fallback/config decision
- * and the delivery are pinned to one config snapshot, and so this is testable
- * against a real in-memory `Meta` without touching `~/.agents/agents.yaml`.
- */
 async function broadcastPostedEvent(
   event: ActivityEvent,
   level: FeedPostLevel,
   meta: Meta,
   notify = false,
 ): Promise<SinkOutcome[]> {
-  // `--notify` adds a local desktop banner on top of the configured sinks; it
-  // fires even for a milestone post that no configured sink would broadcast.
   const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level, meta), notify);
   if (!config) return [];
-  // Upgrade an 8-char footer crumb to the full indexed id so the console session
-  // URL resolves instead of 404ing, and so the ticket join hits the right row.
   const session = resolveFullSessionId(event.sessionId) ?? event.sessionId;
   const ticket = getSessionById(session)?.ticketId;
   const planned = planFeedBroadcast(config, {
@@ -925,22 +807,10 @@ async function broadcastPostedEvent(
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
   }, meta);
-  // An important post links the session's console page; fire the trace sync now
-  // so that page exists when the owner taps it (trace sync otherwise waits for
-  // run exit — PHNX-3628/PHNX-3698). Gated + best-effort, never blocks the post.
   if (level === 'important') fireTraceSyncInBackground();
   return runFeedBroadcast(planned, meta);
 }
 
-/**
- * Mirror a declared block to the same sinks a post reaches (plus the implicit
- * `notify.owner` fallback — a block is always `important`, so it always
- * qualifies).
- *
- * Blocks previously never broadcast at all: `broadcastPostedEvent` ran only for
- * `feed post`, while every `publishBlock` call wrote to the ledger and stopped
- * there — so a "needs you" record was durable and invisible at the same time.
- */
 async function broadcastBlock(
   block: OpenBlock,
   extras: { project?: string; agent?: string; title?: string; body?: string },
@@ -955,13 +825,10 @@ async function broadcastBlock(
     { ...block, sessionId, ticket: block.ticket ?? ticket },
     extras,
   );
-  // A block is always important and links the session's console page — fire the
-  // trace sync so the page exists when tapped (best-effort, gated, non-blocking).
   fireTraceSyncInBackground();
   return runFeedBroadcast(planFeedBroadcast(config, ctx, meta), meta);
 }
 
-/** One line per sink that ran. Silent when nothing is configured. */
 function reportBroadcast(outcomes: SinkOutcome[]): void {
   for (const o of outcomes) {
     if (o.ok && o.error) console.error(chalk.yellow(`  → ${o.name} partial: ${o.error}`));
@@ -970,10 +837,8 @@ function reportBroadcast(outcomes: SinkOutcome[]): void {
   }
 }
 
-/** Feed view selector (RUSH-2015): decisions, progress, or both. */
 type FeedFilter = 'needs' | 'updates' | 'all';
 
-/** Normalize a raw --filter value; unknown/empty falls back to the default. */
 export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   const v = (raw ?? '').trim().toLowerCase();
   if (v === 'updates' || v === 'update') return 'updates';
@@ -981,23 +846,16 @@ export function resolveFeedFilter(raw: string | undefined): FeedFilter {
   return 'needs';
 }
 
-/** True when a block belongs to the requested project (case-insensitive). */
 function blockMatchesProject(block: OpenBlock, project?: string): boolean {
   if (!project) return true;
   return (block.project ?? '').toLowerCase() === project.toLowerCase();
 }
 
-/** True when an activity event belongs to the requested project (case-insensitive). */
 function eventMatchesProject(ev: EnrichedActivityEvent, project?: string): boolean {
   if (!project) return true;
   return ((ev.project ?? projectKeyFromCwd(ev.cwd) ?? '')).toLowerCase() === project.toLowerCase();
 }
 
-/**
- * Render one activity event in the lane: deliberate progress posts
- * (`status.posted`) use the rich multi-line {@link formatProgressUpdate}; hook
- * milestones (PR, commit, …) keep the compact {@link formatActivityLine}.
- */
 function renderActivityEntry(ev: ActivityEvent): void {
   if (ev.event === 'status.posted') {
     console.log(formatProgressUpdate(ev));
@@ -1006,18 +864,10 @@ function renderActivityEntry(ev: ActivityEvent): void {
   }
 }
 
-/** How far back the updates view looks for deliberate progress posts. */
 const UPDATES_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-/** Posts kept per machine in the rendered view / the `--json` payload. */
 const UPDATES_VIEW_LIMIT = 30;
 const UPDATES_JSON_LIMIT = 100;
 
-/**
- * The most recent `limit` deliberate progress posts on THIS machine, newest
- * first. The event filter is pushed into the reader so `limit` counts posts —
- * slicing first and filtering after returned an empty view on a busy box, where
- * routine `file.edited` hook events fill the whole slice.
- */
 function readStatusPosts(limit: number): ActivityEvent[] {
   return readRecentActivity({
     sinceMs: Date.now() - UPDATES_WINDOW_MS,
@@ -1026,12 +876,6 @@ function readStatusPosts(limit: number): ActivityEvent[] {
   });
 }
 
-/**
- * Progress posts across the fleet, newest first. An agent posts on whichever
- * box it runs on, so a local-only read shows the operator a fraction of what
- * the fleet reported. Peers are dialed with the same SSH fan-out the block view
- * uses; `--local` (or the no-fanout env guard on a peer) keeps it to this box.
- */
 async function gatherStatusPosts(opts: {
   limit: number;
   hosts?: string[];
@@ -1057,11 +901,6 @@ async function gatherStatusPosts(opts: {
   return merged.slice(0, opts.limit);
 }
 
-/**
- * Render the **Updates** view: deliberate progress posts only (`status.posted`),
- * recency-ordered, with rich identity chips. Pure `file.edited` / git-hook noise
- * is excluded so operators see announcements, not tool churn.
- */
 function renderUpdatesView(updates: ActivityEvent[], project?: string): void {
   const hosts = new Set(updates.map((e) => e.host).filter(Boolean));
   console.log(
@@ -1083,12 +922,6 @@ function renderUpdatesView(updates: ActivityEvent[], project?: string): void {
   }
 }
 
-/**
- * Print a compact "recent activity" lane under the feed: the last few milestone
- * events (plans, PRs, worktrees, sub-agents, progress posts) from the append-only
- * activity logs. Read-only tail of the logs -- no transcript re-parsing. Silent
- * when empty.
- */
 function renderActivityLane(project?: string, limit = 6): void {
   const events = readRecentActivity({
     sinceMs: Date.now() - 24 * 60 * 60 * 1000,

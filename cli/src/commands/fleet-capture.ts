@@ -1,14 +1,3 @@
-/**
- * `agents fleet capture` (alias surface of `agents devices capture`) — snapshot
- * the live environment into the `fleet:` block of `agents.yaml` so a fresh
- * machine can reconstruct it with `agents fleet apply`.
- *
- * Local-read + local-write, zero SSH. Records device NAMES only (never IPs or
- * usernames — those are re-resolved live from Tailscale at apply-time), plus the
- * source's own agents as defaults, browser profiles, secrets-bundle names, and
- * routine names. The heavy lifting is the pure `captureFleet` builder; this
- * command just gathers inputs and persists via `updateMeta`.
- */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,11 +18,6 @@ interface CaptureOptions {
   device?: string;
 }
 
-/** Read THIS machine's pins file into `name -> [id@latest]`. Only used with
- * `--from-pins`; keeps capture zero-SSH by reading local state. Pins are
- * machine-local runtime state (`.history/devices/pins-<host>.json`, untracked)
- * — peer pins never sync, so only this machine contributes; peers inherit the
- * captured fleet defaults. */
 function agentsFromPins(names: string[]): Record<string, string[]> {
   const self = machineId();
   if (!names.includes(self)) return {};
@@ -41,19 +25,12 @@ function agentsFromPins(names: string[]): Record<string, string[]> {
   try {
     pins = JSON.parse(fs.readFileSync(getDevicePinsPath(), 'utf-8')) as typeof pins;
   } catch {
-    return {}; // no pins file (or unparsable) — capture is best-effort
+    return {};
   }
   const ids = pins?.agents ? Object.keys(pins.agents) : [];
   return ids.length > 0 ? { [self]: ids.map((id) => `${id}@latest`) } : {};
 }
 
-/**
- * The names to snapshot into `fleet.secretsBundles` — best-effort. Capture's
- * primary job (device/agent/routine snapshot) is unrelated to secrets, so a
- * missing standalone `secrets` install (DIST-1: no fallback engine) degrades
- * this ONE optional field to empty with a warning rather than failing the
- * whole capture. A real store error still surfaces.
- */
 async function captureSecretsBundleNames(): Promise<string[]> {
   try {
     return (await listBundles()).map((b) => b.name);
@@ -69,7 +46,6 @@ async function captureSecretsBundleNames(): Promise<string[]> {
 async function runCapture(opts: CaptureOptions): Promise<void> {
   const meta = readMeta();
 
-  // Roster: every registered device name.
   const registry = await loadDevices();
   let names = Object.values(registry)
     .map((d) => d.name)
@@ -77,8 +53,6 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
   if (opts.device) {
     names = names.filter((n) => n === opts.device);
     if (names.length === 0) throw new Error(`Device '${opts.device}' is not a registered device.`);
-    // --from-pins reads the LOCAL pins file only (peer pins are machine-local
-    // runtime state and never sync), so targeting a peer would record nothing.
     if (opts.fromPins && opts.device !== machineId()) {
       throw new Error(
         `--from-pins can only read THIS machine's pins ('${machineId()}') — peer pins are machine-local and never sync. Run it on '${opts.device}' itself, or drop --device.`,
@@ -86,7 +60,6 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     }
   }
 
-  // Defaults seeded from the source machine's own installed agents.
   const sourceAgents = Object.keys(meta.agents ?? {}).sort();
   const defaults: FleetDefaults = {
     agents: sourceAgents.map((id) => `${id}@latest`),
@@ -98,20 +71,14 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     devices: names,
     defaults,
     agentsByDevice: opts.fromPins ? agentsFromPins(names) : undefined,
-    // Browser profiles are intentionally NOT captured — the central `browser:`
-    // block already syncs via the repo, and its ssh:// endpoints can carry
-    // `user@host`, which must never be copied into the fleet: block.
+    // Browser endpoints can contain user@host and already sync in `browser:`;
+    // never copy them into the fleet profile.
     secretsBundles: await captureSecretsBundleNames(),
     routines: listJobs().map((j) => j.name),
   };
 
-  // Discovery decisions and dismissals are device-scoped now (PHNX-3315): they
-  // live in each box's device doc and sync via the repo, so `capture` must NOT
-  // hoist the cross-box union back into the shared `agents.yaml` `fleet:` block
-  // (that would recreate the N-boxes-rewrite-one-map conflict Task A removed and
-  // re-arm the fold-then-delete migration on every capture). `meta.fleet` carries
-  // only the roster/defaults; any lingering central-legacy discovery/ignored is
-  // carried forward verbatim and drained by the migration.
+  // Discovery decisions remain device-scoped; capture must not recreate the
+  // former shared map and its cross-device rewrite conflict.
   const next = captureFleet(meta.fleet, inputs);
 
   if (opts.dryRun) {
@@ -132,7 +99,6 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
   console.log(chalk.gray('  Wrote agents.yaml → fleet:. Push it (`agents repo push`) and run `agents fleet apply` on any machine.'));
 }
 
-/** Attach `capture` to the `devices`/`fleet` command tree. */
 export function registerFleetCaptureCommand(devicesCmd: Command): void {
   devicesCmd
     .command('capture')

@@ -1,12 +1,3 @@
-/**
- * Tests for the `agents mailboxes` command surface (RUSH-1737).
- *
- * Real behavior only: boxes are seeded with the actual `enqueue` spool writer
- * into a temp HOME (state.ts derives the mailbox root from HOME at import
- * time, so HOME must be set before the module graph loads), and every view is
- * driven through real Commander parsing. --watch is stopped by invoking the
- * SIGINT handler the action installs — the same path ⌃C takes in production.
- */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -31,16 +22,14 @@ interface RunResult {
 }
 
 interface RunHandle {
-  /** Filled live as the action prints — readable while --watch is still running. */
   lines: string[];
   errs: string[];
   done: Promise<RunResult>;
 }
 
-/** Start `agents mailboxes <args...>`, capturing output and intercepting die()'s process.exit. */
 function startMailboxes(args: string[]): RunHandle {
   const program = new Command();
-  program.exitOverride(); // throw instead of process.exit on parse errors
+  program.exitOverride();
   registerMailboxesCommand(program);
 
   const lines: string[] = [];
@@ -57,7 +46,6 @@ function startMailboxes(args: string[]): RunHandle {
     try {
       await program.parseAsync(['node', 'agents', 'mailboxes', ...args]);
     } catch {
-      // die() (intercepted exit) or a commander parse error — asserted via errs/exitCode.
     } finally {
       logSpy.mockRestore();
       errSpy.mockRestore();
@@ -72,7 +60,6 @@ async function runMailboxes(args: string[]): Promise<RunResult> {
   return startMailboxes(args).done;
 }
 
-/** Backdate a queued message by rewriting its on-disk record (same trick as lib/mailbox.test.ts). */
 function backdate(boxDir: string, msgId: string, iso: string): void {
   const file = path.join(boxDir, 'inbox', `${msgId}.json`);
   const record = JSON.parse(fs.readFileSync(file, 'utf-8'));
@@ -82,12 +69,10 @@ function backdate(boxDir: string, msgId: string, iso: string): void {
 
 type SigintListener = (...args: never[]) => void;
 
-/** Snapshot SIGINT listeners so the test can find the one the watch action adds. */
 function sigintBaseline(): Set<SigintListener> {
   return new Set(process.listeners('SIGINT') as SigintListener[]);
 }
 
-/** Invoke the SIGINT handler the watch action installed (what ⌃C does), leaving vitest's own listeners alone. */
 function sendSigint(before: Set<SigintListener>): void {
   const handler = (process.listeners('SIGINT') as SigintListener[]).find((l) => !before.has(l));
   expect(handler, 'watch should have installed a SIGINT handler').toBeTruthy();
@@ -97,7 +82,6 @@ function sendSigint(before: Set<SigintListener>): void {
 describe('agents mailboxes', () => {
   const savedMailboxEnv = process.env.AGENTS_MAILBOX_DIR;
   beforeAll(() => {
-    // Deterministic "you" resolution: unset unless a test sets it explicitly.
     delete process.env.AGENTS_MAILBOX_DIR;
   });
   afterAll(() => {
@@ -106,11 +90,6 @@ describe('agents mailboxes', () => {
     try {
       fs.rmSync(TEST_HOME, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     } catch (err) {
-      // Windows CI: a just-released handle on the spool (the aborted watch
-      // poll, or Defender scanning the tree) can outlive even the rm retries
-      // and EPERM the whole suite. Cleanup here is hygiene, not a behavior
-      // assertion — a leaked temp dir on an ephemeral runner is harmless, a
-      // false-negative suite is not. Stay strict on posix.
       if (process.platform !== 'win32') throw err;
     }
   });
@@ -179,7 +158,6 @@ describe('agents mailboxes', () => {
     expect(thread.a).toMatchObject({ id: 'alpha-a01' });
     expect(thread.b).toMatchObject({ id: 'bravo-b01' });
     expect(thread.count).toBe(3);
-    // Chronological across both directions: a->b, b->a, a->b.
     expect(thread.messages.map((m) => m.text)).toEqual(['a to b first', 'b to a second', 'a to b third']);
     expect(thread.messages.map((m) => m.to)).toEqual(['bravo-b01', 'alpha-a01', 'bravo-b01']);
 
@@ -240,8 +218,6 @@ describe('agents mailboxes', () => {
 
     const before = sigintBaseline();
     const run = startMailboxes(['--watch', '--json']);
-    // The watcher baselines existing mail on its first poll; keep enqueueing
-    // until the live tail picks one up (collectBoxes scan time varies).
     let n = 0;
     const started = Date.now();
     while (run.lines.length === 0 && Date.now() - started < 10_000) {
@@ -269,7 +245,6 @@ describe('agents mailboxes', () => {
     while (run.lines.length === 0 && Date.now() - started < 10_000) {
       await sleep(300);
     }
-    // Let any further first-poll lines flush, then stop and inspect.
     await sleep(600);
     sendSigint(before);
     const result = await run.done;

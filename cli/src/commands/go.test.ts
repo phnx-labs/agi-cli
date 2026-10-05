@@ -11,7 +11,6 @@ import {
 import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
-/** Minimal ActiveSession builder — only the fields describeWhere reads. */
 function s(over: Partial<ActiveSession>): ActiveSession {
   return { context: 'terminal', kind: 'claude', status: 'running', ...over } as ActiveSession;
 }
@@ -109,11 +108,10 @@ describe('PHNX-3298 — skip fleet when local already answered a live selector',
 });
 
 describe('filterLivePool — focus device + live-state scoping', () => {
-  // A fleet of live sessions across two machines with distinct statuses.
   const pool = [
     s({ sessionId: 'a', machine: 'zion', status: 'orphaned' }),
     s({ sessionId: 'b', machine: 'yosemite-s0', status: 'orphaned' }),
-    s({ sessionId: 'c', machine: 'yosemite-s0', status: 'running' }), // working
+    s({ sessionId: 'c', machine: 'yosemite-s0', status: 'running' }),
     s({ sessionId: 'd', machine: 'yosemite-s0', status: 'idle' }),
     s({ sessionId: 'e', machine: 'zion', status: 'crashed' }),
   ];
@@ -127,7 +125,6 @@ describe('filterLivePool — focus device + live-state scoping', () => {
     expect(ids(filterLivePool(pool, { statuses: ['orphaned'] }))).toEqual(['a', 'b']);
     expect(ids(filterLivePool(pool, { statuses: ['crashed'] }))).toEqual(['e']);
     expect(ids(filterLivePool(pool, { statuses: ['idle'] }))).toEqual(['d']);
-    // 'working' matches status 'running' with no explicit activity (matchesLiveStatus).
     expect(ids(filterLivePool(pool, { statuses: ['working'] }))).toEqual(['c']);
   });
 
