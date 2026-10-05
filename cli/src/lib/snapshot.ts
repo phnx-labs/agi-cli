@@ -31,7 +31,7 @@ export type SnapshotSessionRow = {
   [key: string]: unknown;
 };
 
-// FleetSnapshot v1 is a stable local stores contract; default collection performs no SSH.
+// Stable machine JSON v1 assembled from the owning inventory/session/feed/sync sources; default session collection is local and performs no SSH.
 export interface FleetSnapshot {
   version: 1;
   host: string;

@@ -7,7 +7,7 @@ const execFileAsync = promisify(execFile);
 const SEP = '\x1f';
 
 export function shouldWarnUnpushed(mode: string, interactive: boolean): boolean {
-  // Advisory only for writable noninteractive runs; it never mutates, blocks, or throws.
+  // Advisory only for non-plan, noninteractive runs: never mutates or throws; every Git probe is capped at five seconds.
   return mode !== 'plan' && !interactive;
 }
 

@@ -11,7 +11,7 @@ export interface TermResponse {
 }
 
 export function resolveTermBin(): string | null {
-  // The standalone CLI owns server resolution; this compatibility client has no fallback server.
+  // The standalone term CLI owns server lifecycle; this client resolves TERM_BIN then PATH, shells out, and has no fallback sidecar.
   const override = process.env.TERM_BIN;
   if (override && override.trim().length > 0) return override.trim();
   return findInPath('term');
