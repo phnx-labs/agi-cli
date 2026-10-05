@@ -493,13 +493,6 @@ export class SelfUpdateService extends BasePeriodicService {
   }
 }
 
-/**
- * Bring installed host CLIs (browser, secrets, computer, …) up to the npm pin
- * their manifest declares. They are separate packages with their own release
- * trains, so the agents-cli self-update above never moves them; without this a
- * box kept whatever version it first installed (R5). A failure leaves that
- * tool on its old version and is retried next tick.
- */
 export async function upgradeHostClis(ctx: DaemonContext, signal: AbortSignal, deadlineAt: number, cwd?: string): Promise<void> {
   let results: CliUpgradeResult[];
   try {

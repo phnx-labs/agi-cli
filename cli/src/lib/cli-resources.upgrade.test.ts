@@ -1,8 +1,3 @@
-/**
- * Host-CLI pin upgrades end to end: real `npm install -g --prefix` against a
- * real npm registry served from this process, an isolated HOME so the user and
- * system layers are this test's own, and the daemon tick's own entry point.
- */
 import * as crypto from 'crypto';
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
@@ -27,7 +22,6 @@ function packVersion(dir: string, version: string): Published {
   return { version, tarball: fs.readFileSync(path.join(dir, file)) };
 }
 
-/** A minimal npm registry: one packument and its tarballs. */
 function serveRegistry(versions: Published[]): Promise<http.Server> {
   const server = http.createServer((req, res) => {
     const url = decodeURIComponent(req.url ?? '');
@@ -96,7 +90,6 @@ describe.skipIf(process.platform === 'win32')('host CLI pin upgrade (real npm, l
     process.env.npm_config_update_notifier = 'false';
     process.env.npm_config_audit = 'false';
     process.env.npm_config_fund = 'false';
-    // Async: the registry is served from this process, so a sync spawn would deadlock it.
     await promisify(execFile)('npm', ['install', '-g', '--prefix', prefix, `${PKG}@0.1.0`]);
   }, 60_000);
   afterEach(() => {
