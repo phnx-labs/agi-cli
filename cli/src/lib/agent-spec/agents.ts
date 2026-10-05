@@ -610,8 +610,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Factory Droid Computers (cloud VMs) reached via `droid computer ssh` +
-    // remote headless `droid exec`.
     cloudProvider: 'factory',
     capabilities: {
       hooks: true,
@@ -624,7 +622,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       plugins: true,
       subagents: true,
       rules: { file: 'AGENTS.md' },
-      // Factory Missions are invoke-only — no installable discovery dir (RUSH-1864).
+      // Factory Missions are invoke-only; Droid exposes no installable workflow directory.
       workflows: false,
       memory: false,
       modes: ['plan', 'edit', 'auto', 'skip'],
@@ -632,9 +630,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       interactiveRepl: true,
     },
   },
-  // Nous Hermes Agent. Config lives under ~/.hermes/config.yaml; MCP servers
-  // are YAML `mcp_servers`, skills are local SKILL.md directories, and durable
-  // memory is file-backed.
   hermes: {
     id: 'hermes',
     name: 'Hermes',
@@ -659,24 +654,13 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
     supportsHooks: true,
-    // Plugins: Hermes loads plugins from a flat `~/.hermes/plugins/<name>/` dir
-    // with a `plugin.yaml` manifest; a plugin only loads once its name is in the
-    // `plugins.enabled` allowlist in `~/.hermes/config.yaml` (deny-list
-    // `plugins.disabled` wins). Not the Claude marketplace layout, so it installs
-    // via a flat-copy branch (mirrors goose) plus a YAML allowlist toggle.
-    // See https://hermes-agent.nousresearch.com/docs/user-guide/features/plugins
+    // Hermes uses flat plugin.yaml installs plus plugins.enabled; plugins.disabled wins.
     capabilities: {
-      // Lifecycle hooks land in ~/.hermes/config.yaml under a `hooks:` block
-      // (YAML, shared with `mcp_servers`); gated to Hermes ≥ 0.11.0 which
-      // introduced the configurable hook runner.
+      // Hooks share config.yaml since 0.11.0; permissions persist command globs/deny only.
       hooks: { since: '0.11.0' },
       mcp: true,
       mcpHttp: true,
       mcpHeaders: false,
-      // Permissions: ~/.hermes/config.yaml carries `command_allowlist` for
-      // always-approved command globs and `approvals.deny` for unconditional
-      // command blocks. It is command-glob only; session `/tools` toggles are
-      // intentionally not persisted by agents-cli.
       allowlist: true,
       skills: true,
       commands: false,
@@ -690,16 +674,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       interactiveRepl: true,
     },
   },
-  // Meta Muse Code (`muse`) — first-class harness for Meta's coding agent (terminal/CI), built on
-  // Muse Spark. Native binary via curl installer (self-updating; no npm package).
-  // Config: `~/.config/muse/settings.json` (requires `"schema_version": 1`).
-  // Sessions: `~/.local/share/muse/sessions/YYYY/MM/DD/<uuid>/session.jsonl`.
-  // Skills: `~/.config/muse/skills` + `~/.agents/skills` + project `.agents/skills`.
-  // MCP: `mcp_servers` in settings.json (stdio / streamable_http transports).
-  // Headless: `muse exec "<prompt>"` with --model, --reasoning-effort, --json,
-  // --yolo / --disable-approval / --disable-sandbox. Auth: META_API_KEY or
-  // browser OAuth stored at `~/.config/muse/auth.json`. Default model:
-  // muse-spark-1.2. Docs: https://dev.meta.ai/docs/muse-code
   muse: {
     id: 'muse',
     name: 'Muse',
@@ -724,59 +698,30 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // Muse hooks use the Claude-shaped settings.json hooks block (matcher +
-    // command groups) under ~/.config/muse/settings.json, plus project
-    // `.muse/hooks.json`. registerHooksForClaude is reused with Muse's config
-    // dir and schema_version: 1.
+    // Muse hooks reuse Claude-shaped settings; plugins use the .muse-plugin manifest.
     supportsHooks: true,
-    // Claude-compatible marketplace layout + native `.muse-plugin/` manifest.
     pluginManifestDir: '.muse-plugin',
     capabilities: {
-      // Hooks: Claude-compatible event→matcher→command groups in settings.json.
       hooks: true,
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Muse's safety model is approval-mode + OS sandbox (CLI flags), not a
-      // Claude-style tool-name allow/deny list. No settings.permissions writer.
+      // Safety has no tool-name writer; skills replace droppable commands/workflows.
       allowlist: false,
       skills: true,
-      // No slash-command file dir; skills double as reusable workflows.
       commands: false,
-      // Plugins: Claude marketplace + .muse-plugin (syncPluginToVersion).
       plugins: true,
-      // Runtime multi-agent / subagents exist, but there is no installable
-      // subagent-definition directory for agents-cli to sync into (capability
-      // table must stay truthful — see subagents-registry completeness).
+      // Runtime subagents are not an installable definition directory.
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
-      // Portable memory at <repo>/.agents/memory/ + personal scopes.
       memory: true,
       modes: ['plan', 'edit', 'auto', 'skip'],
       rulesImports: false,
       interactiveRepl: true,
     },
   },
-  // Warp Agent CLI (`warp`) — Warp's standalone interactive TUI coding agent
-  // (docs.warp.dev/cli). Installed by the official cross-platform installer
-  // `curl -fsSL https://app.warp.dev/download/agent-cli | bash` (Windows: the
-  // sibling agent-cli.ps1), which drops a self-updating `warp` binary at
-  // ~/.local/bin/warp — NOT the older `oz` platform runner (brew cask `oz` /
-  // apt `oz-stable`), a separate headless product that no longer matches this
-  // CLI. Config lives under `~/.warp/` (`.mcp.json`, `skills/`, `tui/`). It is
-  // interactive-only: bare `warp` opens the TUI (streamed responses, diffs,
-  // inline approvals). There is NO headless one-shot form — the documented
-  // flags are --api-key / --auto-approve / --resume <token> /
-  // --set-provider-api-key / --clear-provider-api-key / --version / --help; no
-  // -p/--prompt, no --model (model is the `/model` picker), no JSON output.
-  // Auth: interactive browser sign-in on launch, or the `WARP_API_KEY` env
-  // token / `--api-key` for CI. Rules/context file is `AGENTS.md` (also reads
-  // WARP.md / CLAUDE.md). Conversations sync SERVER-SIDE to the Warp/Oz
-  // platform (resume a prior one with `warp --resume <token>`), so there is no
-  // local transcript for `agents sessions` to index — warp is intentionally
-  // absent from SESSION_AGENTS.
-  // Docs: https://docs.warp.dev/cli/quickstart
+  // Warp Agent CLI is the self-updating interactive TUI, not the older headless oz runner.
   warp: {
     id: 'warp',
     name: 'Warp',
@@ -800,59 +745,32 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
     instructionsFile: 'AGENTS.md',
     format: 'markdown',
     variableSyntax: '$ARGUMENTS',
-    // Warp has no event->shell-command hook registration surface (its startup
-    // flags are --api-key/--auto-approve/--resume/--set-provider-api-key/
-    // --clear-provider-api-key — no hooks).
+    // No general hooks or one-shot prompt; conversations and command surfaces are server-owned.
     supportsHooks: false,
     capabilities: {
       hooks: false,
-      // MCP: Warp reads the Claude `{ "mcpServers": {...} }` schema from
-      // `.warp/.mcp.json` (user `~/.warp/.mcp.json`, project `<root>/.warp/.mcp.json`),
-      // stdio + http with headers, same schema as Claude's .mcp.json.
       mcp: true,
       mcpHttp: true,
       mcpHeaders: true,
-      // Autonomy is a single toggle (`--auto-approve`), not a Claude-style
-      // tool-name allow/deny list agents-cli can write — so no allowlist writer
-      // (mirrors muse).
       allowlist: false,
-      // Skills searched in `.agents/skills/`, `.warp/skills/`, `.claude/skills/`,
-      // `.codex/skills/`.
       skills: true,
-      // Slash-commands are native/server-managed (no droppable markdown
-      // command-file directory for agents-cli to sync into).
       commands: false,
-      // No Claude marketplace / plugin manifest support.
       plugins: false,
-      // Cloud agents are server-side; no installable subagent-definition
-      // directory to sync into (keeps the table truthful).
       subagents: false,
       rules: { file: 'AGENTS.md' },
       workflows: false,
       memory: false,
-      // No per-run permission flag beyond `--auto-approve`; the single `edit`
-      // mode maps to no flags (mirrors hermes).
       modes: ['edit'],
       rulesImports: false,
-      // Bare `warp` opens the interactive TUI (its only run form).
+      // Bare Warp opens its only run form; there is no local transcript to index.
       interactiveRepl: true,
     },
   },
 };
 
-/** All current and legacy agent IDs derived from the AGENTS registry. */
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
-/**
- * Agents the routine daemon can fire locally. Lives here (not runner.ts) so
- * routines.ts can import it for schedule-time validation without a circular
- * import (runner.ts already imports from routines.ts).
- *
- * This is a curated subset of AGENT_COMMANDS, not "every harness that can run
- * headlessly". Expanding it is a product change. Argv itself is baked from
- * AGENT_COMMANDS in daemon/runner.ts bakeRoutineArgv — do not reintroduce a
- * second token table.
- */
+// Curated headless product set, not every harness that can technically run headlessly.
 export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'claude',
   'codex',
@@ -862,67 +780,37 @@ export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
   'muse',
 ]);
 
-/** Agents that can receive managed installs, imports, and resource sync writes. */
 export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
-/**
- * A self-updating agent is a single global binary installed by an official
- * `curl … | sh` / `brew install` script that carries NO version token — the
- * installer can only ever fetch the *current* release, and the binary then keeps
- * itself up to date in place (droid, grok, antigravity, cursor, hermes,
- * goose). There is no semver to pin, so agents-cli must not model these as
- * having multiple installable version-homes the way it does for npm-packaged
- * agents (claude, codex, kimi, …).
- *
- * The predicate is `!npmPackage && installScript && !installScript.includes('VERSION')`:
- *   - `npmPackage` empty       → not installed from npm, so `agents add x@1.2.3`
- *                                can't resolve a registry version.
- *   - `installScript` present  → it IS installed by a script (not unmanaged).
- *   - no `VERSION` placeholder → the script has no slot for a pinned version
- *                                (contrast: an installer templated with `VERSION`
- *                                could pin, and is NOT self-updating).
- *
- * Route every "is this a pinnable, multi-version agent?" decision through here —
- * never a scattered `agent === 'droid'`.
- */
+// Canonical install-model predicate: a script with no VERSION slot is one moving install.
 export function isSelfUpdatingAgent(agent: AgentId): boolean {
   const cfg = AGENTS[agent];
   return !cfg.npmPackage && !!cfg.installScript && !cfg.installScript.includes('VERSION');
 }
 
 export function isAgentHardDeprecated(agent: AgentId): boolean {
-  // Tolerate ids outside the registry (legacy YAML, test fixtures): an unknown
-  // agent is not hard-deprecated — its own validation rejects it elsewhere.
+  // Legacy YAML may carry unknown ids; validation rejects them at the owning boundary.
   return AGENTS[agent]?.deprecated?.hard === true;
 }
 
-// Capability-filtered agent lists used to live here as `*_CAPABLE_AGENTS`
-// constants. They were a frequent source of silent-skip bugs (e.g. grok
-// rules sync gated on `COMMANDS_CAPABLE_AGENTS`). Use `capableAgents(cap)`
-// from `./capabilities.js` instead — it consults the AgentConfig matrix
-// directly, so a single source of truth drives every gate.
 
-/** Get the chalk color function for an agent. Works for any AgentId or SessionAgentId. */
 export function colorAgent(agentId: string): (s: string) => string {
   const agent = AGENTS[agentId as AgentId];
   if (!agent) return chalk.white;
   return chalk[agent.color];
 }
 
-/** Return the agent's display name, colored. */
 export function agentLabel(agentId: string): string {
   const agent = AGENTS[agentId as AgentId];
   if (!agent) return agentId;
   return chalk[agent.color](agent.name);
 }
 
-/** Check whether the given agent's CLI binary is present on PATH. */
 export async function isCliInstalled(agentId: AgentId): Promise<boolean> {
   const agent = AGENTS[agentId];
   return findInPath(agent.cliCommand) !== null;
 }
 
-/** Return the installed CLI version for the given agent, or null if not found. */
 export async function getCliVersion(agentId: AgentId): Promise<string | null> {
   const agent = AGENTS[agentId];
   const binaryPath = findInPath(agent.cliCommand);
@@ -930,18 +818,15 @@ export async function getCliVersion(agentId: AgentId): Promise<string | null> {
   return getCachedVersionForBinary(agentId, binaryPath);
 }
 
-/** Return the absolute path to the agent's CLI binary on PATH, or null. */
 export async function getCliPath(agentId: AgentId): Promise<string | null> {
   return findInPath(AGENTS[agentId].cliCommand);
 }
 
-/** Look up version from cache by (binary, mtime). On miss or stale, spawn `--version` and cache. */
 async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): Promise<string | null> {
   let mtime = 0;
   try {
     mtime = fs.statSync(binaryPath).mtimeMs;
   } catch {
-    /* binary vanished between findInPath and statSync */
     return null;
   }
 
@@ -954,10 +839,7 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
   const agent = AGENTS[agentId];
   let version: string | null = null;
   try {
-    // probeCapture, not bare execFileAsync: a probed harness can fork its own
-    // children (copilot's platform-binary downloader), and a timeout kill of
-    // the direct child would orphan them mid-write (RUSH-3028). The probe runs
-    // in its own process group and the whole group is reaped on settle.
+    // Probe in a killable process group; cache successes only so transient failures recover.
     const { stdout } = await probeCapture(agent.cliCommand, ['--version'], 3000);
     const versionRe = agent.versionStdoutMatch === 'openclaw'
       ? /openclaw\/(\d+\.\d+\.\d+)/
@@ -965,16 +847,9 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
     const match = stdout.match(versionRe);
     version = match ? match[1] : stdout.trim();
   } catch {
-    /* version command failed */
     version = null;
   }
 
-  // Skip persisting null results — the most common cause is a transient
-  // `--version` failure (slow startup, stdout race, etc.). A sticky-null
-  // entry kept users in a broken state where every subsequent
-  // `getCachedVersionForBinary` short-circuited to null forever, even
-  // after the binary started working. Re-probing on the next call costs
-  // one execFile; persisting null costs the whole feature.
   if (version !== null) {
     cache[agentId] = { binaryPath, mtime, version };
     saveCliVersionCache();
@@ -982,17 +857,10 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
   return version;
 }
 
-/**
- * Resolve the full CLI state for an agent: whether it is installed, its version,
- * and the path to the binary. Checks version-managed installs first, then falls
- * back to a plain PATH lookup.
- */
 export async function getCliState(agentId: AgentId): Promise<CliState> {
-  // Fast path: if version-managed, derive state from filesystem (no subprocesses)
   const agent = AGENTS[agentId];
   const agentVersionsDir = path.join(getVersionsDir(), agentId);
   if (fs.existsSync(agentVersionsDir)) {
-    // Use resolved version (project manifest -> global default)
     const resolvedVer = resolveVersion(agentId, process.cwd());
     if (resolvedVer) {
       const binaryPath = path.join(agentVersionsDir, resolvedVer, 'node_modules', '.bin', agent.cliCommand);
@@ -1006,7 +874,6 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
       }
     }
 
-    // Fallback: if no default set or resolved version not installed, return first available
     const entries = fs.readdirSync(agentVersionsDir, { withFileTypes: true });
     for (const entry of entries) {
       if (entry.isDirectory()) {
@@ -1026,20 +893,9 @@ export async function getCliState(agentId: AgentId): Promise<CliState> {
   return getUnmanagedCliState(agentId);
 }
 
-/**
- * Resolve the agent's OWN install — the one agents-cli does not manage — by plain
- * PATH lookup, ignoring the version dirs entirely.
- *
- * Callers that specifically mean "the user's own globally-installed CLI" must use
- * this rather than `getCliState`, whose managed fast path reports an installed
- * version (any version dir, in readdir order) and would therefore hand back an
- * isolated copy — a copy that is deliberately unreachable from PATH — labelled as
- * the global install.
- */
 export async function getUnmanagedCliState(agentId: AgentId): Promise<CliState> {
+  // This path must never relabel an isolated managed version as the user's global install.
   const agent = AGENTS[agentId];
-  // Grok (and any future harness with unmanagedBinary: 'grok-downloads')
-  // keeps versioned binaries under ~/.grok/downloads/, not on PATH.
   if (agent.unmanagedBinary === 'grok-downloads') {
     const grokBin = resolveGrokBinary();
     if (!grokBin) {
@@ -1063,7 +919,6 @@ export async function getUnmanagedCliState(agentId: AgentId): Promise<CliState> 
   };
 }
 
-/** Resolve CLI state for all registered agents in parallel. */
 export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliState>>> {
   const states: Partial<Record<AgentId, CliState>> = {};
   const results = await Promise.all(
@@ -1078,26 +933,17 @@ export async function getAllCliStates(): Promise<Partial<Record<AgentId, CliStat
   return states;
 }
 
-/** Info about an existing unmanaged agent installation. */
 interface UnmanagedInstall {
   agentId: AgentId;
   configDir: string;
   version: string | null;
 }
 
-/**
- * Agents that `agents setup` probes for pre-existing native installations
- * (i.e., a config dir present before agents-cli took over). Derived from
- * `sessionDir` so a new harness cannot be walkable yet missing from setup.
- */
+// Derive setup discovery from sessionDir so every walkable harness participates.
 export const UNMANAGED_DETECTION_CANDIDATES: AgentId[] = ALL_AGENT_IDS.filter(
   (id) => AGENTS[id].sessionDir !== null,
 );
 
-/**
- * Detect existing agent installations that are NOT yet managed by agents-cli.
- * Returns agents whose config dir exists as a real directory (not a symlink).
- */
 export async function getUnmanagedAgentInstalls(): Promise<UnmanagedInstall[]> {
   const unmanaged: UnmanagedInstall[] = [];
 
@@ -1110,14 +956,12 @@ export async function getUnmanagedAgentInstalls(): Promise<UnmanagedInstall[]> {
         unmanaged.push({ agentId, configDir: agent.configDir, version });
       }
     } catch {
-      // Config dir doesn't exist
     }
   }
 
   return unmanaged;
 }
 
-/** Create the agent's slash-commands directory if it does not exist. */
 export function ensureCommandsDir(agentId: AgentId): void {
   const agent = AGENTS[agentId];
   if (!fs.existsSync(agent.commandsDir)) {
@@ -1125,7 +969,6 @@ export function ensureCommandsDir(agentId: AgentId): void {
   }
 }
 
-/** Create the agent's skills directory if it does not exist. */
 export function ensureSkillsDir(agentId: AgentId): void {
   const agent = AGENTS[agentId];
   if (!fs.existsSync(agent.skillsDir)) {
@@ -1133,26 +976,11 @@ export function ensureSkillsDir(agentId: AgentId): void {
   }
 }
 
-/**
- * The agent's config-dir name relative to $HOME — e.g. '.claude',
- * '.gemini/antigravity-cli', '.config/amp', '.kimi-code'.
- *
- * Path segment to join onto a (version) home root when locating an agent's
- * commands/skills/plugins. Do NOT hardcode `.${agentId}`: it is wrong for
- * every agent whose config dir is nested or under ~/.config — antigravity
- * (~/.gemini/antigravity-cli), amp (~/.config/amp), goose (~/.config/goose),
- * kimi (~/.kimi-code). Mirrors the shim configDirName derivation in shims.ts.
- *
- * Relativized against the module-level HOME constant (the same value used to
- * build every `configDir`), NOT a fresh `os.homedir()` — so the result stays a
- * clean relative name even when HOME is overridden after module load (tests,
- * sandboxes). Using `os.homedir()` here would yield `../../real/home/.claude`.
- */
 export function agentConfigDirName(agentId: AgentId): string {
+  // Use import-time HOME: nested config dirs and later HOME overrides must stay relative.
   return path.relative(HOME, AGENTS[agentId].configDir);
 }
 
-/** Account identity and billing information extracted from an agent's auth config. */
 export interface AccountInfo {
   accountKey: string | null;
   usageKey: string | null;
@@ -1164,28 +992,13 @@ export interface AccountInfo {
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   overageCredits: { amount: number; currency: string } | null;
   lastActive: Date | null;
-  // Whether the agent has a usable local credential. For most agents this
-  // tracks `email != null`, but some CLIs (Antigravity, Kimi) store an opaque
-  // OAuth/JWT credential with no email claim — they are signed in even though
-  // we can't surface an address. Callers that only want to know "logged in or
-  // not" should read this, not `email`.
+  // Opaque credentials can be signed in without exposing an email.
   signedIn: boolean;
-  // Claude-only: raw organizationType/organizationName from .claude.json's
-  // oauthAccount ("claude_max", "claude_team", ...). Two installs can share an
-  // email yet belong to different orgs (a personal Max plan and a Team seat);
-  // these fields are what let display layers tell them apart. Optional so the
-  // other agents' return literals stay valid — absent means "not applicable".
+  // Claude org identity keeps same-email personal and multi-seat billing buckets distinct.
   organizationType?: string | null;
   organizationName?: string | null;
 }
 
-/**
- * Human-readable label for a Claude account's organizationType as read from
- * .claude.json's oauthAccount ("claude_team" -> "Team"). Unrecognized values
- * (future tiers) are rendered by stripping the "claude_" prefix and
- * title-casing the rest — an unfamiliar-but-visible label beats silence.
- * Returns null for missing input.
- */
 export function formatClaudeOrgLabel(orgType: string | null | undefined): string | null {
   if (!orgType) return null;
   const known: Record<string, string> = {
@@ -1204,25 +1017,16 @@ export function formatClaudeOrgLabel(orgType: string | null | undefined): string
     .join(' ');
 }
 
-/**
- * Short badge identifying which ORG an account belongs to — "Turing Labs" for a
- * multi-seat Team/Enterprise org, whose name is real identity that disambiguates
- * a Team seat from a same-email personal plan. Returns null for personal plans
- * (Max/Pro/Free): the tier label now lives in the aligned plan column, so a badge
- * would only duplicate it, and a personal org's name is auto-generated boilerplate
- * ("<email>'s Organization"), not identity. Also null when the account carries no
- * organizationType (signed out, non-Claude agents, configs predating the field).
- */
 export function accountOrgBadge(
   info?: Pick<AccountInfo, 'organizationType' | 'organizationName'> | null
 ): string | null {
+  // Personal org names are boilerplate; only named multi-seat orgs disambiguate identity.
   const isMultiSeat =
     info?.organizationType === 'claude_team' || info?.organizationType === 'claude_enterprise';
   if (isMultiSeat && info?.organizationName) return info.organizationName;
   return null;
 }
 
-/** Agents whose local credential formats expose enough state for account selection. */
 export const ACCOUNT_INSPECTION_AGENT_IDS = [
   'claude',
   'codex',
@@ -1237,16 +1041,10 @@ export const ACCOUNT_INSPECTION_AGENT_IDS = [
 
 const ACCOUNT_INSPECTION_AGENTS = new Set<AgentId>(ACCOUNT_INSPECTION_AGENT_IDS);
 
-/** Whether agents-cli can determine this agent's per-version sign-in state. */
 export function supportsAccountInspection(agentId: AgentId): boolean {
   return ACCOUNT_INSPECTION_AGENTS.has(agentId);
 }
 
-/**
- * Human-readable account identity shared by every account-aware surface.
- * Prefer email, append a multi-seat Claude organization name when present,
- * then fall back to a non-secret account id or a generic signed-in label.
- */
 export function accountDisplayLabel(
   info?: Pick<
     AccountInfo,
@@ -1262,7 +1060,6 @@ export function accountDisplayLabel(
   return '';
 }
 
-/** Return the email address associated with the agent's auth config, or null. */
 export async function getAccountEmail(
   agentId: AgentId,
   home?: string
@@ -1271,21 +1068,6 @@ export async function getAccountEmail(
   return info.email;
 }
 
-/**
- * Extract full account information (identity, plan, usage status, credits) from
- * the agent's local auth/config files. Supports Claude, Codex, and Gemini.
- */
-/**
- * Resolve a file-auth agent's credential file. Sign-in is account-global, but
- * each installed version gets an isolated home; the credential physically lives
- * only in the home the user logged in under (the one the `~/.<config>` symlink
- * targets). Check the per-version `base` first, then fall back to the active
- * config location under the real HOME so every installed version reflects the
- * true account state (droid/antigravity/kimi all stored login per-version-home
- * and showed non-active versions as "not signed in"). Returns the first
- * existing path, or null.
- */
-/** True when `dir` is under the per-account slot root (`~/.agents/.history/accounts/`). */
 export function isAccountSlotDir(dir: string): boolean {
   const root = path.resolve(getHistoryDir(), 'accounts');
   const resolved = path.resolve(dir);
