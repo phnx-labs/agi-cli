@@ -346,7 +346,7 @@ Everything below was re-verified against live infrastructure and source on
 
 1. **The self-hosted runner pool already exists and is idle.** `ci-runner-fsn1`
    (Hetzner fsn1, 16 cores, 465G free, load 0.00) answers to
-   `ssh -i ~/.ssh/ci-runner-ops root@$CI_BOX_IP` (the documented ops path in
+   `ssh -i ~/.ssh/ci-runner-ops root@ci-runner-fsn1` (the documented ops path in
    `agents/infra/ci-runner/RUNBOOK.md:28`) and runs **six active runner units**:
    `runner@1..4` (the agents monorepo's whole CI runs on them at $0) and
    `runner-phnx@1..2` (the phnx-labs org pool, labels

@@ -3,8 +3,7 @@
 # and the crabbox idle-reaper. Designed to run from launchd/cron on mac-mini
 # (needs: ~/.ssh/ci-runner-ops key, gh auth, and hetzner access via either an
 # unlocked `agents secrets` hetzner.com bundle or ~/.config/infra-ci/hcloud-token).
-# CI_BOX_IP (required) is the box's public address; the launchd/cron entry
-# exports it, e.g. CI_BOX_IP="$(hcloud server ip ci-runner-fsn1)".
+# The box is reached by its tailnet name, so the runner host must be on the tailnet.
 #
 #   supervise.sh [--once]     one pass (default), prints a summary line
 #
@@ -14,11 +13,7 @@
 # being unreachable is reported, not rebuilt (full re-provision is a script).
 set -uo pipefail
 
-BOX_IP="${CI_BOX_IP:-}"
-if [ -z "$BOX_IP" ]; then
-  echo "supervise.sh: CI_BOX_IP is not set; export the CI runner box's address (hcloud server ip ci-runner-fsn1) before running" >&2
-  exit 2
-fi
+BOX=ci-runner-fsn1
 BOX_KEY="${CI_BOX_KEY:-$HOME/.ssh/ci-runner-ops}"
 LOG_DIR="$HOME/.cache/infra-ci"
 LOG="$LOG_DIR/supervise.log"
@@ -28,7 +23,7 @@ mkdir -p "$LOG_DIR"
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG"; }
 fail=0
 
-box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "root@$BOX_IP" "$@" 2>/dev/null; }
+box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 "root@$BOX" "$@" 2>/dev/null; }
 
 hcloud_token() {
   if [ -n "${HCLOUD_TOKEN:-}" ]; then echo "$HCLOUD_TOKEN"; return; fi
@@ -40,7 +35,7 @@ hcloud_token() {
 
 # --- 1. box reachable ---------------------------------------------------------
 if ! box 'true'; then
-  log "FATAL box $BOX_IP unreachable over SSH — runners down; manual re-provision may be needed"
+  log "FATAL box $BOX unreachable over SSH — runners down; manual re-provision may be needed"
   exit 1
 fi
 
