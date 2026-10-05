@@ -126,6 +126,7 @@ describe('OpenCode scan survives a malformed row (RUSH-2358 follow-up)', () => {
 describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
   const parsed = () => parse.parseOpenCode(`${OPENCODE_DB}#${SESSION_ID}`);
 
+  // Measure the query directly: event assertions stay green if megabyte attachments are loaded then discarded.
   const projectedBytes = (): { total: number; max: number } => {
     const oc = new (Database as any)(OPENCODE_DB);
     try {
@@ -170,7 +171,7 @@ describe('OpenCode tool-part read stays bounded (RUSH-2358 follow-up)', () => {
 });
 
 describe('OpenCode transcript parses on a schema with no todo table', () => {
-  // The `todo` probe must not cost the transcript when the table is absent. The
+  // Missing todo must not hide the transcript; empty get() is undefined in node:sqlite but null in Bun.
   const OLD_DB = path.join(tmpHome, 'old', 'opencode.db');
   const OLD_SESSION = 'ses_notodo000000000000000000';
 

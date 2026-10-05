@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 
+// Redirect HOME before dynamic import because state paths are captured at module initialization.
 const TMP_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-bundle-home-'));
 process.env.HOME = TMP_HOME;
 

@@ -84,6 +84,7 @@ function addMessage(oc: any, sessionId: string, messageId: string, ts: number, t
     .run(`${messageId}-p0`, messageId, sessionId, JSON.stringify({ type: 'text', text }), ts);
 }
 
+// Model a normal turn that advances session.updated.
 function appendTurnTo(sessionId: string, ts: number, text: string): void {
   const oc = openFixture();
   addMessage(oc, sessionId, `${sessionId}-m-${ts}`, ts, text);
@@ -92,6 +93,7 @@ function appendTurnTo(sessionId: string, ts: number, text: string): void {
   bumpDbMtime(ts);
 }
 
+// Model a late part with no session/message timestamp update.
 function appendPartTo(sessionId: string, messageId: string, ts: number, text: string): void {
   const oc = openFixture();
   oc.prepare(`INSERT INTO part (id, message_id, session_id, data, time_created) VALUES (?, ?, ?, ?, ?)`)
@@ -100,6 +102,7 @@ function appendPartTo(sessionId: string, messageId: string, ts: number, text: st
   bumpDbMtime(ts);
 }
 
+// Model streamed in-place payload growth with no new row or timestamp; file_size is the downstream byte budget.
 function growPartInPlace(partId: string, text: string, ts: number): void {
   const oc = openFixture();
   oc.prepare(`UPDATE part SET data = ? WHERE id = ?`).run(JSON.stringify({ type: 'text', text }), partId);
