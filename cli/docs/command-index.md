@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 472 commands._
+_65 command groups · 474 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -459,11 +459,13 @@ agents projects edit <name>          Open the project YAML in $EDITOR (it is han
 agents projects import               Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>          Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list                 List defined projects (definitions only by default; no session scan).
-agents projects prs                  A project's open pull requests: list them (default), or act on one: ready, review, comment, merge.
+agents projects prs                  A project's open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).
 agents projects prs comment <name>   Post a comment on one open PR of a project.
+agents projects prs failure <name>   Why one commit's CI failed: each failing check with the error lines of its job log.
 agents projects prs list <name>      Every OPEN pull request across a project's attached repos (drafts included, no author filter), scoped to this project's paths in a shared repo.
 agents projects prs merge <name>     Merge one open PR of a project, pinned to the head SHA you reviewed.
 agents projects prs ready <name>     Mark one draft PR of a project ready for review.
+agents projects prs rerun <name>     Re-run the failed jobs of one GitHub Actions workflow run.
 agents projects prs review <name>    Approve one open PR of a project, pinned to the head SHA you reviewed.
 agents projects pull <name>          Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects remove <name>        Remove a project definition. Never touches the repo.
