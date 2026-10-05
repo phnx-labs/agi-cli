@@ -1,10 +1,15 @@
 
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { listProjectDefs } from '../lib/projects.js';
 import {
+  ADD_PRIORITIES,
   addQuickTodo,
+  DESCRIPTION_MAX,
+  TITLE_MAX,
+  TITLE_MIN,
+  type AddPriority,
   completeTodo,
   linearFailure,
   listQuickTodos,
@@ -43,26 +48,36 @@ export function registerProjectTodoCommands(projects: Command): void {
   const addCmd = todo
     .command('add <text...>')
     .description('Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).')
-    .option('--project <name>', 'Project when the text names none: an agents project or a Linear project name')
+    .option('--project <name>', 'Project: an agents project or a Linear project name')
+    .option('--description <text>', 'Description, shown above the AGI Menu marker')
+    .option('--assignee <name>', 'Assign to a person by name or email (default: you)')
+    .option('--due <date>', 'Due date, YYYY-MM-DD, today or later')
+    .addOption(new Option('--priority <level>', 'Priority').choices([...ADD_PRIORITIES]))
     .option('--json', 'Machine-readable result')
-    .action(async (words: string[], opts: { project?: string; json?: boolean }) => {
-      report(await addQuickTodo(words.join(' '), { project: opts.project, defs: listProjectDefs(), now: new Date() }), opts.json);
+    .action(async (words: string[], opts: { project?: string; description?: string; assignee?: string; due?: string; priority?: AddPriority; json?: boolean }) => {
+      const { json, ...fields } = opts;
+      report(await addQuickTodo(words.join(' '), { ...fields, defs: listProjectDefs(), now: new Date() }), json);
     });
 
   setHelpSections(addCmd, {
     examples: `
       agents projects todo add "Renew npm token #AGI tomorrow !!"
-      agents projects todo add "Draft the Q4 note fri" --project atlas --json
+      agents projects todo add "Draft the Q4 note" --project atlas --due 2026-10-09 --json
+      agents projects todo add "Rotate the share token" --description "Expires Oct 20" --assignee bisma
       agents projects todo add --json -- "-v flag is ignored by run"    # text starting with "-"
     `,
     notes: `
-      Runs linear create: assigned to the Linear API key's owner, in the active
-      cycle, status Todo, no milestone, priority none unless ! or !! is typed.
+      Runs linear create: in the active cycle, status Todo, no milestone, no
+      delegate (any agent's queue picks it up), assigned to you unless
+      --assignee names someone, priority none unless set.
       #name is an agents project (its Linear project) or a Linear project name.
       A day word or ! / !! counts only at the end of the line (so "Fix the today
       view" keeps its words); #name counts anywhere. A day word is the next such
-      day, today included. The description carries
-      "${QUICK_TODO_MARKER}", which is how todo list finds it.
+      day, today included. An option beats the same field typed in the line.
+      Refused without creating anything: a title under ${TITLE_MIN} or over ${TITLE_MAX}
+      characters, a due date in the past, a description over ${DESCRIPTION_MAX.toLocaleString('en-US')}
+      characters. The description ends with "${QUICK_TODO_MARKER}", which is how
+      todo list finds it.
     `,
   });
 
