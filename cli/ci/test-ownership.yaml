@@ -91,6 +91,21 @@ groups:
     checks: [typecheck, binary-smoke]
     budget_sec: 120
 
+  # The shared bash helpers every release/test script sources. Each consumer's
+  # companion test executes its script, so a helper change runs all of them.
+  - id: script-common
+    when:
+      - cli/scripts/lib/common.sh
+    tests:
+      - cli/scripts/release.test.ts
+      - cli/scripts/test.test.ts
+      - cli/scripts/release-lease.test.ts
+      - cli/scripts/release-attestation-produce.test.ts
+      - cli/scripts/release-attestation.test.ts
+      - cli/scripts/release-manifest.test.ts
+      - cli/scripts/release-install-smoke.test.ts
+      - cli/scripts/sandbox.test.ts
+
   - id: command-surface
     when:
       - cli/src/commands/**
