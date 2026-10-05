@@ -154,6 +154,7 @@ export function importInstallScriptBinary(
 ): ImportBinaryResult {
   const binaryLink = path.join(versionDir, 'node_modules', '.bin', spec.cliCommand);
 
+  // lstat keeps a dangling destination link from being mistaken for an empty install slot.
   let alreadyExists = false;
   try {
     fs.lstatSync(binaryLink);

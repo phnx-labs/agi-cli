@@ -45,7 +45,7 @@ export function sampleWeighted(
 }
 
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
-  // Automatic placement uses the worker-role allowlist; personal machines are not implicit fallbacks.
+  // The central pool filter narrows online candidates by device roles; it may return empty and callers must not fall back locally.
   const names = new Set<string>([normalizeHost(localName)]);
   try {
     const reg = loadDevicesSync();
@@ -138,7 +138,7 @@ export async function resolveDeviceAuto(
     preferred?: ReadonlySet<string>;
   } = {},
 ): Promise<DeviceAutoPlan> {
-  // Local is probed for the same health and harness readiness as peers and participates only when pool-eligible.
+  // Local participates in the same health and harness-readiness probe as peers.
   const local = normalizeHost(opts.localMachine ?? localMachineId());
   const pool = [...new Set((opts.eligibleHosts ?? listOnlineDeviceNames(local)).map(normalizeHost))];
   if (!pool.includes(local) && isAutoPoolMember(local)) pool.push(local);

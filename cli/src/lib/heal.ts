@@ -238,7 +238,7 @@ function healVersion(
 
 export async function heal(opts: HealOptions): Promise<HealResult> {
   const cwd = opts.cwd ?? os.homedir();
-  // Full sync may overwrite drift; unattended safe heal fills unambiguous gaps and never deletes.
+  // Full sync may overwrite drift; unattended safe heal fills unambiguous gaps and never deletes resources or orphans.
   const full = opts.mode === 'full';
 
   const repairedManifests = repairCentralPluginManifests(opts.dryRun);
