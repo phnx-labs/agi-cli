@@ -16,6 +16,7 @@ const TEST_SCRIPT = path.resolve(__dirname, 'test.sh');
 const BUILD_SCRIPT = path.resolve(__dirname, 'build.sh');
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
+const COMMON_SCRIPT = path.resolve(__dirname, 'lib/common.sh');
 const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
 const STAGE_SCRIPT = path.resolve(__dirname, 'stage-menubar-helper.sh');
 const roots: string[] = [];
@@ -84,6 +85,8 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   // to carry the real test.sh, and runProduce passes --test-here so the fake
   // `bun run test` below is still what actually executes. Deliberately the real
   // script and not a stub: that is what pins the producer -> test.sh contract.
+  fs.mkdirSync(path.join(caller, 'cli/scripts/lib'), { recursive: true });
+  fs.copyFileSync(COMMON_SCRIPT, path.join(caller, 'cli/scripts/lib/common.sh'));
   fs.copyFileSync(TEST_SCRIPT, path.join(caller, 'cli/scripts/test.sh'));
   fs.chmodSync(path.join(caller, 'cli/scripts/test.sh'), 0o755);
   fs.copyFileSync(BUILD_SCRIPT, path.join(caller, 'cli/scripts/build.sh'));

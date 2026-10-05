@@ -15,7 +15,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
-import { seedHermeticE2eWinHost } from './seed-e2e-win-host.js';
 import { shouldArmHermeticGuards } from './hermetic-guards.js';
 import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
@@ -116,26 +115,6 @@ process.env.AGENTS_EVENTS_PATH = path.join(tmp, 'events.jsonl');
 // is the surgical mirror of AGENTS_EVENTS_PATH / AGENTS_SECRETS_AGENT_DIR — it
 // leaves HOME untouched (git and every other HOME consumer behave normally).
 process.env.AGENTS_DEVICES_DIR = path.join(tmp, 'devices');
-
-// Live Windows-host e2e (AGENTS_TEST_WIN_HOST) still needs a real DeviceProfile
-// for resolveRemoteDevice. Seed the private registry from the real fleet
-// registry (or ssh -G) so the hermetic redirect above does not empty the e2e
-// host out of existence — that is exactly what made tests-windows-host-e2e
-// red after #1572. See tests/seed-e2e-win-host.ts.
-const e2eWinHost = process.env.AGENTS_TEST_WIN_HOST?.trim();
-if (e2eWinHost) {
-  seedHermeticE2eWinHost({
-    host: e2eWinHost,
-    devicesDir: process.env.AGENTS_DEVICES_DIR,
-    realRegistryPath: path.join(
-      realHome,
-      '.agents',
-      '.history',
-      'devices',
-      'registry.json',
-    ),
-  });
-}
 
 // NB: AGENTS_DAEMON_DIR is deliberately NOT set here. Tests that spawn a REAL
 // daemon (migrate.test.ts, daemon.test.ts) isolate it per-test via a unique

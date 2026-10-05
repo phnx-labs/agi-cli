@@ -67,11 +67,9 @@ set -euo pipefail
 LEASE_REF="${RELEASE_LEASE_REF:-refs/release-lock/held}"
 DEFAULT_TTL_MIN="${RELEASE_LEASE_TTL:-30}"
 
-red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-yellow(){ printf '\033[33m%s\033[0m\n' "$*"; }
-gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
-die()   { red "error: $*"; exit 2; }
+DIE_STATUS=2
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 # This box's name, the way the fleet knows it. Recorded as the lease's `host` and
 # compared against it, so the liveness probe only ever reads the process table of

@@ -28,7 +28,8 @@ PROFILE="${CRABBOX_PROFILE:-$(awk '/^profile:/ {print $2; exit}' "$REPO_ROOT/.cr
 PROFILE="${PROFILE:-default}"
 export PROFILE
 
-die() { echo "error: $*" >&2; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 # Ensure deps. `agents` is only needed when secrets must be pulled from the
 # local Keychain — CI passes them in via env, so we don't require it there.

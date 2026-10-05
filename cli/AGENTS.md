@@ -1987,7 +1987,7 @@ that the caller be on a clean `main`:
 ```bash
 scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
 scripts/release.sh <version> --apply              # tests on an auto-picked fleet worker -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
-scripts/release.sh <version> --apply --device <mac>  # sign/publish on <mac> when mac-mini is down -- <mac> must ALREADY be a provisioned signing home base (see below)
+scripts/release.sh <version> --apply --device <box>  # promote + publish on <box> when mac-mini is down -- <box> must already pass the promote preflight (see below)
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -2013,29 +2013,22 @@ auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
 first mutation. Helper signing is a separate, source-change-only path and still
 needs a provisioned Mac. The test worker is **not** hardcoded.
 
-**A `--device` fallback must ALREADY be a provisioned signing home base — it is
-not turnkey.** Signing + notarizing + publishing needs, on that box: the
-`Developer ID Application` identity in a *headless-unlockable* keychain
-(`rush-signing.keychain-db` + `~/Library/Application Support/rush/signing.kcpass`,
-the pass file that lets a headless SSH release unlock it — a cert that only appears
-after an interactive login does **not** count), and the `apple.com` (notarytool)
-and `npmjs.com` (publish token) secrets bundles. A box like `zion` typically has a
-Developer ID cert in its *login* keychain but none of the headless plumbing, so it
-cannot sign a release. **Verify with the probe rather than assuming from this prose** — `bash cli/scripts/signing-home-base-probe.sh` is the authoritative test, and a box that has since been provisioned (dedicated keychain + `signing.kcpass` + the `apple.com` bundle) returns `OK` and can sign, whatever this paragraph says about it. Passing `--device <unprovisioned>` used to run the whole flow —
-merge the PR, push the tag — and only fail at the sign step, leaving a
-tagged-but-**unpublished** release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.36`
-tagged). `release.sh` now **preflights the resolved home base BEFORE any mutation**
-([`scripts/signing-home-base-probe.sh`](scripts/signing-home-base-probe.sh), run on
-that box over `agents ssh`): an unprovisioned `--device` aborts at the preflight,
-before the test/PR/merge/tag phases, naming the exact gap, so a mac-mini outage
-no longer risks a half-finished release. `cli/bin/embedded.provisionprofile` is a
-committed input (commit 2567004b4) that self-heals — the preflight and the
-home-base phase both recover it from a freshly fetched `origin/<default>` ref when
-the box's own on-disk checkout predates that commit, so a brand-new home base
-never needs the profile hand-copied over (RUSH-2541). The keychain (Developer ID
-identity in a headless-unlockable keychain) and the `apple.com`/`npmjs.com`
-secrets bundles remain genuinely manual, per-machine provisioning steps — seed
-those first, then `--device <that-mac>` works.
+**A `--device` fallback must already be able to promote — it is not turnkey.**
+Promoting needs, on that box: `npm`, `node`, `git`, `jq`, `gh` (authenticated, for
+the release-asset attach), the `agents` CLI, and a **headlessly readable**
+`npmjs.com` bundle carrying `NPM_TOKEN`. Nothing on this path signs or notarizes
+(RUSH-3026), so no keychain, Developer ID identity, or `apple.com` bundle is
+required. Passing `--device <unready>` used to run the whole flow — merge the PR,
+push the tag — and only fail at the publish step, leaving a tagged-but-**unpublished**
+release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.36` tagged). `release.sh` now
+**preflights the resolved home base BEFORE any mutation** (`assert_promote_home_base`,
+running [`scripts/promote-home-base-probe.sh`](scripts/promote-home-base-probe.sh)
+inline when this box is the home base, otherwise piped over `agents ssh <home-base>
+bash -s` so the caller's fresh probe runs even when the home base's checkout is
+older): an unready `--device` aborts there, before the test/PR/merge/tag phases,
+with the probe's own line naming the gap. Run the same probe by hand
+(`bash cli/scripts/promote-home-base-probe.sh` on the candidate box; it prints
+`promote-ready`) rather than trusting this paragraph about any particular machine.
 
 **The caller checkout is never mutated or gated.** `release.sh` immediately
 fetches origin and re-enters the release from a detached, release-owned worktree

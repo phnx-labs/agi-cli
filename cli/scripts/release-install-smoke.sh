@@ -8,7 +8,8 @@
 #
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 [[ $# -ge 1 ]] || die "usage: release-install-smoke.sh <tarball.tgz> [expected-version]"
 TGZ="$1"

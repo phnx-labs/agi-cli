@@ -75,12 +75,8 @@
 # --keep leaves the worktree in place for inspection instead of removing it.
 set -euo pipefail
 
-red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-gray()   { printf '\033[2m%s\033[0m\n'  "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
-
-die() { red "error: $*"; exit 1; }
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 cd "$(dirname "$0")/.."
 DEFAULT_REPO_ROOT="$(git rev-parse --show-toplevel)"

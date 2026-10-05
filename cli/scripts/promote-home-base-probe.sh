@@ -5,9 +5,9 @@
 # install-smoke, npm publish, re-attach the reused helper zip. Nothing on that
 # path signs or notarizes, so this probe checks exactly what promoting needs —
 # tool presence, gh auth, and a headlessly readable npmjs.com NPM_TOKEN — and
-# deliberately NOT signing provisioning (cert/keychain/provisionprofile). Helper
-# signing has its own path (scripts/signing-home-base-probe.sh remains the
-# provisioning checker for that) and runs only when helper sources change.
+# deliberately NOT signing provisioning (cert/keychain/provisionprofile): helper
+# signing left this repo with the standalone helper engines, and nothing on the
+# release path signs.
 #
 # `secrets exec ... test -n` proves the token resolves WITHOUT printing it; a
 # locked keychain or missing bundle fails here, before the release's first

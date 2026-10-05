@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 const TEST_SH = path.resolve(__dirname, 'test.sh');
+const COMMON_SH = path.resolve(__dirname, 'lib/common.sh');
 
 function run(args: string[], env: NodeJS.ProcessEnv = {}) {
   return spawnSync('bash', [TEST_SH, ...args], {
@@ -68,6 +69,8 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     const scripts = path.join(dir, 'cli', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
     fs.copyFileSync(TEST_SH, path.join(scripts, 'test.sh'));
+    fs.mkdirSync(path.join(scripts, 'lib'));
+    fs.copyFileSync(COMMON_SH, path.join(scripts, 'lib/common.sh'));
 
     // Stand-in sandbox.sh records exactly what the offload branch handed it.
     const record = path.join(dir, 'got.txt');

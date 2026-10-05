@@ -298,7 +298,6 @@ groups:
     when:
       - scripts/ci-scope.ts
       - scripts/ci-scope.test.ts
-      - scripts/ci-impact-bench.ts
       - scripts/ci-bench/**
       - scripts/guard-artifacts-confidential.ts
       - scripts/guard-artifacts-confidential.test.ts
@@ -323,9 +322,7 @@ testless:
   # so a genuinely NEW script here still trips the gate.
   - cli/scripts/backfill-changelog.ts
   - cli/scripts/bench-boot.sh
-  - cli/scripts/bench-browser-loop.sh
   - cli/scripts/bench-ssh.mjs
-  - cli/scripts/bench-staleness.ts
   - cli/scripts/companion-shim/bin/agents.js
   - cli/scripts/companion-shim/scripts/postinstall.js
   # One-time per-box fleet fix (PHNX-3285): re-enables unprivileged userns so
@@ -336,8 +333,6 @@ testless:
   - cli/scripts/headless-sign-context.sh
   - cli/scripts/release-changelog.ts
   - cli/scripts/remote-sign-mac.sh
-  - cli/scripts/scrub-orphan-branches.sh
-  - cli/scripts/setup-npm-secret.sh
   - cli/scripts/sign-cli-binary.sh
   - cli/tests/bench-concurrent-writes.ts
   - cli/tests/bench-concurrent-writes.worker.ts

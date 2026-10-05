@@ -4,7 +4,7 @@
  *
  * release.sh itself cannot run hermetically (it demands live npm + GitHub);
  * extracting the tag+notes contract into create-annotated-release-tag.sh is what
- * makes this path testable — the same reason select-publish-commit.sh exists.
+ * makes this path testable — the same reason validate-bump.sh exists.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';

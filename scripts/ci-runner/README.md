@@ -78,6 +78,14 @@ Supervisor and janitor still cover the **trusted** org-runner pool on
 `provision-phnx-runners.sh`). The untrusted executor is a separate
 standing Crabbox: no tailnet, no durable credentials, no host sockets.
 
+`supervise.sh` requires `CI_BOX_IP` and exits 2 without it; the box's address
+is not committed to this public repo. Export it in the launchd/cron entry that
+runs the supervisor:
+
+```bash
+CI_BOX_IP="$(hcloud server ip ci-runner-fsn1)" scripts/ci-runner/supervise.sh --once
+```
+
 ## Files
 
 | File | Purpose |

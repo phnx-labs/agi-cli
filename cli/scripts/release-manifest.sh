@@ -28,25 +28,8 @@
 #
 set -euo pipefail
 
-die() { echo "error: $*" >&2; exit 1; }
-
-file_sha256() {
-  local f="$1"
-  [[ -f "$f" ]] || die "not a file: $f"
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$f" | awk '{print $1}'
-  else
-    shasum -a 256 "$f" | awk '{print $1}'
-  fi
-}
-
-str_sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s' "$1" | sha256sum | awk '{print $1}'
-  else
-    printf '%s' "$1" | shasum -a 256 | awk '{print $1}'
-  fi
-}
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 
 usage() {
   sed -n '3,20p' "$0" | sed 's/^# \?//'

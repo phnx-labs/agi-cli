@@ -52,16 +52,10 @@ set -euo pipefail
 PHNX_PKG="@phnx-labs/agents-cli"
 SWARMIFY_PKG="${SHIM_PACKAGE:-@swarmify/agents-cli}"
 
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
-
-red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green()  { printf '\033[32m%s\033[0m\n' "$*"; }
-yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
-gray()   { printf '\033[2m%s\033[0m\n'  "$*"; }
-bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
-
-die() { red "error: $*"; exit 1; }
 
 # ----- apps/cli -> cli flatten compatibility (RUSH-3189 follow-up) -----
 # The apps/ wrapper died with the ext split: the CLI now lives at cli/ instead of

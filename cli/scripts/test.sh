@@ -36,14 +36,11 @@
 # operator believes work was offloaded while their laptop melts.
 set -euo pipefail
 
+_scripts_dir="${BASH_SOURCE[0]%/*}"; [[ "$_scripts_dir" != "${BASH_SOURCE[0]}" ]] || _scripts_dir=.
+source "$_scripts_dir/lib/common.sh"
+
 cd "$(dirname "$0")/.."
 CLI_DIR="$(pwd)"
-
-red()   { printf '\033[31m%s\033[0m\n' "$*" >&2; }
-green() { printf '\033[32m%s\033[0m\n' "$*"; }
-gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
-bold()  { printf '\033[1m%s\033[0m\n'  "$*"; }
-die()   { red "error: $*"; exit 1; }
 
 # `auto` is the default (RUSH-3211). Every call site that does not name a box
 # gets a real worker without the operator having to know which boxes are free --

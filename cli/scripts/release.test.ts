@@ -818,6 +818,8 @@ describeRelease('release.sh derives its own release-tree attestation (PHNX-3696)
       { mode: 0o755 },
     );
     fs.copyFileSync(RELEASE_ATTESTATION_SH, path.join(dir, 'scripts', 'release-attestation.sh'));
+    fs.mkdirSync(path.join(dir, 'scripts', 'lib'));
+    fs.copyFileSync(path.resolve(__dirname, 'lib/common.sh'), path.join(dir, 'scripts', 'lib', 'common.sh'));
     // The identity the attestation binds (lockfile + vitest policy + version) must
     // exist for `release-attestation.sh identity` to resolve, same as initRepo() in
     // release-attestation.test.ts.
