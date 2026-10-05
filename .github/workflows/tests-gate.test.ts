@@ -39,6 +39,13 @@ describe('tests.yml required Linux gate', () => {
     expect(TESTS_YML).not.toContain('--deadline-sec');
   });
 
+  test('the comment ratchet scans the checked-out merge tree before proof reuse', () => {
+    expect(TESTS_YML).toContain('bun scripts/comment-lines.ts --check --base "$(git rev-parse HEAD^1)"');
+    expect(TESTS_YML.indexOf('- name: Enforce the exact comment-line ratchet')).toBeLessThan(
+      TESTS_YML.indexOf('- name: Restore exact-tree proof'),
+    );
+  });
+
   test('fork code stays on GitHub-hosted runners', () => {
     expect(TESTS_YML).toMatch(/runs-on: ubuntu-latest/);
     expect(TESTS_YML).not.toMatch(/runs-on: \[self-hosted/);

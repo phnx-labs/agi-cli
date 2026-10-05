@@ -311,6 +311,9 @@ groups:
 
   - id: impact-policy
     when:
+      - scripts/comment-budget.json
+      - scripts/comment-lines.ts
+      - scripts/comment-lines.test.ts
       - scripts/ci-scope.ts
       - scripts/ci-scope.test.ts
       - scripts/ci-bench/**

@@ -68,6 +68,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: bun scripts/guard-artifacts-confidential.ts --base "$BASE_SHA" --head "$HEAD_SHA"
+      - name: Enforce the exact comment-line ratchet
+        run: bun scripts/comment-lines.ts --check --base "$(git rev-parse HEAD^1)"
       - name: Pin release-matrix trigger policy, .agents/ layout, and the impact gate
         run: bun test ./.github/workflows/ ./scripts/ci-bench/
       - name: Impact plan
