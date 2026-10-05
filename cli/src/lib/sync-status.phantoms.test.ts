@@ -4,16 +4,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/**
- * Real-filesystem regression tests for the "sync lies about success" cluster
- * (PHNX-3186): `agents sync status` (computeSyncStatus → diffVersionResources)
- * used to report DRIFT that the sync writer never creates and can never clear, so
- * re-running sync forever printed success while the phantom "N missing" stuck.
- *
- * Each test builds a temp HOME with a real version home + real sources, runs the
- * real computeSyncStatus / verifyVersionConverged in a subprocess with HOME
- * pointed at the fixture — no mocks — and asserts the mapping.
- */
 
 let testHome: string;
 let userDir: string;
@@ -35,11 +25,6 @@ afterEach(() => {
   fs.rmSync(testHome, { recursive: true, force: true });
 });
 
-/**
- * Install a version for `agent` at `version`: version dir with an executable
- * launch binary (so listInstalledVersions/isVersionInstalled see it) and the
- * config dir. Returns the version home and its config dir.
- */
 function makeInstalledVersion(agent: string, version: string, cliCommand: string, configDirName: string): { home: string; configDir: string } {
   const versionDir = path.join(userDir, '.history', 'versions', agent, version);
   const home = path.join(versionDir, 'home');
@@ -251,9 +236,7 @@ describe('verifyVersionConverged — post-reconcile truth (PHNX-3186)', () => {
     fs.mkdirSync(cmdsHome, { recursive: true });
     const srcCmds = path.join(userDir, 'commands');
     fs.mkdirSync(srcCmds, { recursive: true });
-    // missing: source exists, home does not.
     fs.writeFileSync(path.join(srcCmds, 'gap.md'), 'GAP\n');
-    // drifted: home differs from source.
     fs.writeFileSync(path.join(srcCmds, 'skew.md'), 'NEW\n');
     fs.writeFileSync(path.join(cmdsHome, 'skew.md'), 'OLD\n');
 

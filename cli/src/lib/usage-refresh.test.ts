@@ -38,7 +38,6 @@ import {
 
 const NOW = 1_800_000_000_000;
 
-/** A minimal cached headroom entry the new budget/ordering tests clone and tweak. */
 const baseEntry: HeadroomEntry = {
   status: 'available',
   minutesToLimit: 10,
@@ -90,7 +89,7 @@ describe('the rolling-hour call cap bounds provider load', () => {
   it('refuses a due account that already hit the hourly cap', () => {
     const atCap: HeadroomEntry = {
       status: 'available', minutesToLimit: 10, sessionUsedPercent: 80, capturedAt: NOW - 60_000,
-      nextRefreshAt: NOW - 1, // due
+      nextRefreshAt: NOW - 1,
       callTimestamps: Array.from({ length: HOURLY_CALL_CAP }, (_, i) => NOW - i * 60_000),
       computedAt: NOW - 60_000,
     };
@@ -319,7 +318,6 @@ describe('orderUsageAccounts — stalest account first', () => {
       'claude:org=fresh': { ...baseEntry, capturedAt: NOW - 60_000 },
       'claude:org=stalest': { ...baseEntry, capturedAt: NOW - 40 * 60_000 },
       'claude:org=mid': { ...baseEntry, capturedAt: NOW - 10 * 60_000 },
-      // 'cold' has no entry → maximally stale, leads the pass.
     };
     const ordered = orderUsageAccounts(accounts, cache, 0).map((a) => a.usageKey);
     expect(ordered).toEqual([

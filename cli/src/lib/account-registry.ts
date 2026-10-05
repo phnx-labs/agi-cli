@@ -1,21 +1,3 @@
-/**
- * Credential accounts, stored as canonical `agents secrets` bundles (RUSH-2470).
- *
- * One account IS one bundle: the bundle label is the account name, its vars
- * carry the identity (ACCOUNT_ID / PROVIDER / AUTH_TYPE / optional BASE_URL)
- * and the secret (API_KEY or TOKEN), and it uses the `never` prompt policy so
- * it reads headlessly and syncs across the fleet with no Touch ID. The bundle
- * shape lives in [[account-schema]]; this module owns the CRUD, resolution,
- * and the one-time migration off the legacy `accounts.yaml`.
- *
- * `readAccountRegistry()` still returns the historical
- * `{ version: 2, accounts }` view so existing consumers (harness, profiles,
- * exec) keep working — it is now a projection over the account bundles, not a
- * file read. Native OAuth logins are NOT accounts here; they stay native and
- * surface through unified discovery in [[account-catalog]]. Labels bind to
- * `(agent, identityKey)` on the central `accounts.native` rows in agents.yaml,
- * which `agents repo push/pull` already syncs fleet-wide.
- */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
@@ -89,7 +71,6 @@ function toCredentialAccount(record: AccountSchemaRecord): CredentialAccount {
   };
 }
 
-/** Every account bundle currently on this device, keyed by stable id. */
 function readAccountBundles(): CredentialAccount[] {
   const out: CredentialAccount[] = [];
   for (const bundle of listBundlesSync()) {
@@ -99,21 +80,12 @@ function readAccountBundles(): CredentialAccount[] {
   return out;
 }
 
-/**
- * Fold a legacy `accounts.yaml` into account bundles, then archive it.
- * Transactional: every bundle is written first, and the file is archived (and
- * the old per-account keychain items dropped) ONLY after all writes succeed —
- * so an interrupted migration leaves the file in place and the next read
- * retries, skipping accounts that already landed as a bundle.
- */
 function migrateLegacyRegistryFile(base: string): void {
   const file = accountRegistryPath(base);
   if (!fs.existsSync(file)) return;
   const raw = yaml.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown> | null;
   if (!raw || Array.isArray(raw)) throw new Error(`Account registry corrupted at ${file}: expected a YAML map.`);
 
-  // Legacy version-bound labels (pre-credential-accounts) are not credentials —
-  // archive them so they are never resurrected as fake accounts.
   if (raw.version === undefined && raw.labels !== undefined) {
     archiveLegacyFile(file, 'accounts.legacy-labels.yaml');
     return;
@@ -139,18 +111,16 @@ function migrateLegacyRegistryFile(base: string): void {
       if (!existing || existing.id !== id) {
         throw new Error(`Cannot migrate account '${name}': a different secrets bundle already uses that name.`);
       }
-      continue; // already migrated on an earlier, interrupted run
+      continue;
     }
     const baseUrl = item.baseUrl ? String(item.baseUrl) : undefined;
     const record: AccountSchemaRecord = { id, name, provider, auth, baseUrl };
     const secret = hasKeychainTokenSync(legacySecretRef) ? getKeychainTokenSync(legacySecretRef) : '';
     const { bundle, items } = buildAccountBundle(record, secret || 'x');
-    if (!secret) items.clear(); // no device-local secret: write metadata only
+    if (!secret) items.clear();
     writeBundleWithItemsSync(bundle, items);
   }
 
-  // Success: the file's accounts all exist as bundles now. Archive it and drop
-  // the superseded per-account keychain items.
   archiveLegacyFile(file, 'accounts.migrated.yaml');
   for (const legacyItem of retiredSecretItems) deleteKeychainTokenSync(legacyItem);
 }
@@ -203,17 +173,6 @@ export function findNativeAccountByIdentity(
   return listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey) ?? null;
 }
 
-/**
- * Resolve one account by name or id across both stores, native first.
- *
- * `doc` is optional and read LAZILY: a native match returns without ever reading
- * the provider bundle registry — so a native view/attach/run never triggers a
- * bundle read, legacy-`accounts.yaml` migration, or a keychain decrypt (which
- * would surface a Touch ID prompt or crash on an undecryptable legacy item). A
- * default-evaluated `doc = readAccountRegistry()` argument would defeat this by
- * running before the body, so callers that only need a native lookup must be
- * able to omit it.
- */
 export function findUnifiedAccount(
   nameOrId: string,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
@@ -224,15 +183,6 @@ export function findUnifiedAccount(
   const matches = listNativeAccounts(meta).filter(account =>
     account.id === nameOrId || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
   );
-  // `identityLabel` defaults to the login's own identifier (the email), so ONE
-  // selector legitimately matches several harnesses: `muqsitnawaz@gmail.com` is a
-  // claude login AND a codex login. Un-scoped, `.find()` returned whichever row the
-  // merged store happened to order first, so `agents run claude#<email>` died with
-  // "Account 'personal' is a codex login and cannot authenticate the claude harness"
-  // while that identity's own claude login sat right there. Prefer the harness being
-  // launched; fall back to the first match when the caller has no harness in hand.
-  // rename/remove/view refuse an ambiguous *name* via assertUnambiguousNativeAccount
-  // before they get here — this fallback is for identityLabel collisions.
   const native = matches.find(account => account.agent === preferAgent) ?? matches[0];
   if (native) return native;
   const provider = findAccount(nameOrId, doc ?? readAccountRegistry());
@@ -282,10 +232,6 @@ export function assertUnambiguousNativeAccount(
   }
 }
 
-/** Every row (central + this box's device store) for the identity that `name`
- * (id or account name) resolves to. With `agent` set only that harness's rows
- * are considered; without it, a name owned by rows in several harnesses is
- * refused rather than resolved to whichever the store ordered first. */
 function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string, agent?: AgentId): NativeAccount[] {
   assertUnambiguousNativeAccount(meta, name, agent);
   const matches = listNativeAccounts(meta).filter(account =>
@@ -332,19 +278,11 @@ function assertUniqueUnifiedName(
         : `Account '${name}' already exists for the ${agent} harness.`,
     );
   }
-  // Same laziness as findUnifiedAccount: a native row that already owns this
-  // name (even one we are mutating) means we never open the provider store.
   if (nativeHits.length > 0) return;
   const provider = findAccount(name, doc ?? readAccountRegistry());
   if (provider && !exceptIds?.has(provider.id)) throw new Error(`Account '${name}' already exists.`);
 }
 
-/**
- * Validate a native account NAME (charset + per-harness uniqueness) WITHOUT a
- * known identity — the pre-flight `agents accounts add` runs before it
- * installs a home and drives a login, so a bad/colliding name fails before any
- * side effect instead of orphaning a freshly-minted home (PHNX-3940).
- */
 export function assertNativeAccountNameAvailable(name: string, agent: AgentId): void {
   assertNativeLabel(name);
   assertUniqueUnifiedName(name, readMeta(), undefined, undefined, agent);
@@ -364,9 +302,6 @@ export function addNativeAccount(
   if (duplicate) throw new Error(`This ${agent} login is already named '${duplicate.name}'.`);
   const account: NativeAccount = { id: crypto.randomUUID(), name, kind: 'native', agent, identityKey, identityLabel, scope };
   const entry = { id: account.id, name, agent, identityKey, identityLabel, scope };
-  // A native login's home follows its scope (PHNX-3315): a device-scoped
-  // identity lands in THIS box's device doc (its PII never touches the shared
-  // central agents.yaml); a version-scoped one stays in the fleet-shared store.
   if (scope === 'device') {
     updateMeta(current => ({
       ...current,
@@ -387,7 +322,6 @@ export function addNativeAccount(
   return account;
 }
 
-/** Create or replace the version-independent label for one native identity. */
 export function labelNativeAccount(
   agent: AgentId,
   identityKey: string,
@@ -402,10 +336,6 @@ export function labelNativeAccount(
   const matches = nativeIdentityRows(meta, agent, identityKey);
   assertUniqueUnifiedName(resolvedLabel, meta, undefined, new Set(matches.map(account => account.id)), agent);
   if (matches.length === 0) return addNativeAccount(resolvedLabel, agent, identityKey, identityLabel, scope);
-  // Sweep every row for this identity (PHNX-3206), routing the whole sweep to the
-  // store that owns them: all rows for one identityKey share a scope (same agent),
-  // so a device-scoped login lands in this box's device doc, a version-scoped one
-  // in central (PHNX-3315).
   const rowScope = matches[0]!.scope;
   updateMeta(current => {
     if (rowScope === 'device') {
@@ -420,31 +350,15 @@ export function labelNativeAccount(
   return { ...matches[0]!, name: resolvedLabel, identityLabel, scope: rowScope };
 }
 
-/**
- * This box's recorded home LABEL for an account, or null.
- * Reads the leftover device-scoped `homes` map so legacy `acct-*` installation
- * labels still resolve (T5/T7); spawn-time HOME is {@link readSlots}[id].slotDir.
- */
 export function nativeAccountHome(accountId: string, meta: Pick<Meta, 'deviceAccounts'>): string | null {
   return meta.deviceAccounts?.homes?.[accountId] ?? null;
 }
 
-/**
- * Set the per-harness default account by NAME only when none is configured
- * (PHNX-3940). Never overrides an existing choice — a first connect selecting a
- * default is a convenience, not a takeover. Returns whether it set the default.
- *
- * The check-then-write is performed INSIDE the `updateMeta` callback so two
- * concurrent callers (concurrent Promises or back-to-back calls on an async
- * boundary) cannot both observe "no default" and then both set themselves. Only
- * the first write wins; the second callback sees the first's write and returns
- * the current state unchanged.
- */
 export function setDefaultAccountIfAbsent(agent: AgentId, name: string): boolean {
   let set = false;
   updateMeta(current => {
-    if (current.accounts?.defaults?.[agent]) return current; // already set — no-op
-    if (current.agents?.[agent] || current.isolatedAgents?.[agent]) return current; // preserve a legacy home default
+    if (current.accounts?.defaults?.[agent]) return current;
+    if (current.agents?.[agent] || current.isolatedAgents?.[agent]) return current;
     set = true;
     return {
       ...current,
@@ -521,9 +435,6 @@ export function resolveAccountSelection(
   opts: { useDefault?: boolean; target?: string } = {},
 ): AccountSelection | undefined {
   if (explicit) return { id: explicit, source: 'explicit' };
-  // This box's device-doc bindings win over the fleet-shared central bindings
-  // (PHNX-3315), so a per-box account attachment resolves without touching the
-  // shared file. Defaults are genuinely fleet-shared and stay central.
   const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
   const bound = opts.target ? bindings[opts.target] : undefined;
   if (bound) return { id: bound, source: 'binding' };
@@ -785,23 +696,14 @@ export function resolveSpawnAccount(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; provider?: string; base?: string; target?: string } = {},
 ): SpawnAccount | null {
-  // The binding lookup key. A custom harness passes its own profile/harness name
-  // (a run of `deepseek` must find a binding on `deepseek`, not `claude@x`); a
-  // native/global run keys on the exact `agent@version` installation.
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;
-  // Scope the lookup to the harness being launched: a bare identity selector
-  // (`claude#muqsitnawaz@gmail.com`) matches every harness that identity is signed
-  // into, and only this one can authenticate the spawn.
   let unified = findUnifiedAccount(selection.id, meta, undefined, agent);
   if (!unified && selection.source === 'explicit' && selection.id.includes('@')) {
     unified = discoverUnregisteredNativeAccount(selection.id, agent);
   }
   if (!unified) {
-    // A stale per-harness default is a preference, not a hard requirement: the
-    // machine stays runnable by falling back to balanced rotation. Bindings and
-    // explicit --account are intentional, so they still fail loud.
     if (selection.source === 'default') {
       process.stderr.write(chalk.yellow(
         `[agents] default account '${selection.id}' for ${agent} no longer exists on this machine; falling back to balanced selection. Clear the stale default with: agents accounts clear-default ${agent}\n`,
@@ -817,9 +719,6 @@ export function resolveSpawnAccount(
     if (unified.agent !== agent) {
       throw new Error(`Account '${unified.name}' is a ${unified.agent} login and cannot authenticate the ${agent} harness.`);
     }
-    // A provider-backed custom harness still injects its provider auth env, so a
-    // native identity claim over it is incoherent — reject before spawn even when
-    // the account is chosen explicitly with --account (which bypasses `attach`).
     if (opts.provider) {
       throw new Error(`Account '${unified.name}' is a native ${unified.agent} login and cannot run under a provider-backed harness (${opts.provider}); the harness's ${opts.provider} credentials would still be injected. Use a matching provider account.`);
     }

@@ -55,17 +55,8 @@ import * as path from 'path';
 import { getCacheDir } from './state.js';
 import type { AgentId } from './types.js';
 
-/** Cap a server-supplied delay so a bad header cannot park a provider forever. */
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
 
-/**
- * Test seam, mirroring `setKeychainBackendForTest`. The cache dir is resolved
- * from a module-level constant at import time, so overriding `HOME` in a test
- * does NOT redirect this state — it silently writes into the developer's real
- * `~/.agents/.cache/` and parks their own usage reads behind a 45-minute
- * penalty. (It did exactly that once while this was being written.) Returns the
- * previous value so a test can restore it.
- */
 let backoffDirOverride: string | null = null;
 export function setUsageBackoffDirForTest(dir: string | null): string | null {
   const prev = backoffDirOverride;
@@ -77,11 +68,6 @@ function backoffDir(): string {
   return backoffDirOverride ?? path.join(getCacheDir(), 'usage-backoff');
 }
 
-/**
- * Parse a `Retry-After` header. HTTP allows either delta-seconds or an HTTP
- * date; both appear in the wild, so handle both and ignore anything else.
- * Returns milliseconds from `now`, or null when there is nothing usable.
- */
 export function parseRetryAfterMs(header: string | null | undefined, now: number = Date.now()): number | null {
   const raw = (header ?? '').trim();
   if (!raw) return null;
@@ -136,12 +122,6 @@ function deadlinesFor(scope: string): number[] {
   return out;
 }
 
-/**
- * Record that `agent`'s usage endpoint threw a 429. `retryAfter` is the raw
- * header; when it is absent or unparseable we still back off for `fallbackMs`,
- * because continuing to poll an endpoint that just said no is what created the
- * loop in the first place.
- */
 export function noteUsageRateLimited(
   agent: AgentId,
   retryAfter: string | null | undefined,
@@ -153,39 +133,16 @@ export function noteUsageRateLimited(
   const deadline = now + Math.min(ms, MAX_BACKOFF_MS);
   try {
     fs.mkdirSync(backoffDir(), { recursive: true });
-    // Empty file: the name carries the whole value, so there is no content a
-    // concurrent reader could catch half-written, and no document to merge.
-    //
-    // With an account, the penalty is scoped to THAT account (RUSH-3036): the
-    // observed 429s are per-account quotas, and a provider-wide park let the
-    // first throttled account starve every account after it in the refresh
-    // loop's fixed order — the same 4 accounts stayed 'usage unavailable'
-    // across passes while their siblings refreshed. Callers with no account
-    // identity still record provider-wide, which continues to park everything.
     fs.writeFileSync(path.join(backoffDir(), `${backoffScope(agent, opts?.account)}.${deadline}`), '');
   } catch {
-    // Best-effort. An unwritable cache dir costs the cross-process backoff, not
-    // the correctness of this read.
   }
 }
 
-/**
- * Epoch ms until which `agent`'s usage endpoint should not be called, or null
- * when it is free — the furthest recorded deadline still in the future, so a
- * concurrently-written shorter one can never pull it in.
- *
- * Sweeps elapsed files while it is here: they can only accumulate at the rate
- * penalties are issued, and this is the one place that already lists them.
- */
 export function usageRateLimitedUntil(
   agent: AgentId,
   now: number = Date.now(),
   account?: string | null,
 ): number | null {
-  // A provider-wide penalty parks every account; an account-scoped read also
-  // honors that account's own penalties. A bare (no-account) read deliberately
-  // ignores account-scoped penalties — one pinned account must not park its
-  // siblings (RUSH-3036).
   const scopes = account ? [backoffScope(agent, null), backoffScope(agent, account)] : [backoffScope(agent, null)];
   let latest: number | null = null;
   for (const scope of scopes) {
@@ -196,7 +153,6 @@ export function usageRateLimitedUntil(
         try {
           fs.rmSync(path.join(backoffDir(), `${scope}.${at}`), { force: true });
         } catch {
-          /* another process may have swept it already */
         }
       }
     }
@@ -204,7 +160,6 @@ export function usageRateLimitedUntil(
   return latest;
 }
 
-/** Human-readable remaining backoff, for the error a skipped read returns. */
 export function formatBackoffRemaining(untilMs: number, now: number = Date.now()): string {
   const mins = Math.ceil((untilMs - now) / 60_000);
   if (mins <= 1) return 'under a minute';

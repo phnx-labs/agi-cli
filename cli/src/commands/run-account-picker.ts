@@ -20,16 +20,10 @@ interface RunAccountChoice {
   name: string;
   value: string;
   disabled?: string;
-  /** Can serve a run right now: signed in, authenticated, and under quota. */
   ready: boolean;
-  /**
-   * Selectable, but picking it launches the harness so you can authenticate
-   * first (RUSH-2334). Mutually exclusive with `ready`; never `disabled`.
-   */
   signInRequired: boolean;
 }
 
-/** One named account row for `agents accounts default` (reuses this picker's layout). */
 export interface SwitchAccountRow {
   accountName: string;
   kind: 'provider' | 'native';
@@ -51,7 +45,6 @@ function formatPercent(value: number): string {
   return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
-/** Human-readable remaining capacity for every window the provider exposes. */
 export function formatAccountLimits(candidate: RotateCandidate): string {
   const windows = candidate.usageSnapshot?.windows;
   if (!windows || windows.length === 0) return 'limits unavailable';
@@ -67,16 +60,6 @@ export function formatAccountLimits(candidate: RotateCandidate): string {
     .join(' · ');
 }
 
-/**
- * Why a row cannot be picked. Only a THROTTLE disables a row: the account is
- * signed in and out of capacity, so launching it just hammers an exhausted
- * account (RUSH-2132) and nothing the user does at this prompt helps.
- *
- * An AUTH exclusion (`signed_out` / `revoked`) is deliberately NOT disabled —
- * the harness's own TUI is the login surface, so picking that row and launching
- * is the only way to sign in through agents-cli. Disabling it left a fully
- * logged-out harness with no reachable account at all (RUSH-2334).
- */
 function disabledReason(candidate: RotateCandidate, readiness: AccountReadiness): string | undefined {
   if (readiness.ready) return undefined;
   if (isSignInRecoverable(readiness)) return undefined;
@@ -119,8 +102,6 @@ export function buildRunAccountChoices(
       candidate,
       account: marked,
       verdict,
-      // An auth-blocked row shows what picking it DOES; its quota is moot until
-      // there is a credential to spend it with.
       limits: !readiness.ready && readiness.reason === 'revoked'
         ? 'launch to re-authenticate'
         : !readiness.ready && readiness.reason === 'signed_out'
@@ -132,8 +113,6 @@ export function buildRunAccountChoices(
     };
   });
 
-  // Ready accounts first, then the ones a login would unlock (actionable), then
-  // the throttled rows the user can do nothing about at this prompt.
   const rank = (row: { ready: boolean; signInRequired: boolean }): number =>
     row.ready ? 0 : row.signInRequired ? 1 : 2;
   rows.sort((a, b) => {
@@ -277,15 +256,6 @@ export function signInLaunchDecision(
   return input.recoverable > 0 && humanPresent ? 'launch' : 'fail-loud';
 }
 
-/**
- * How a `balanced`/`available` run reacts when every account's usage is stale and
- * none is verified (PHNX-2526). A human present at a real terminal gets the
- * account `picker` — they can choose knowing the numbers are stale — while every
- * unattended shape (`--headless`, `--json`, or no TTY) `fail-loud`s with
- * NO_VERIFIED_USAGE rather than silently guess on a stale snapshot. `headless`
- * joins the gate because a routine/machine dispatch can carry a TTY yet have no
- * human to answer a picker; the split mirrors `signInLaunchDecision`.
- */
 export function noVerifiedUsageDecision(
   input: { tty: boolean; json: boolean; headless: boolean },
 ): 'picker' | 'fail-loud' {
@@ -293,19 +263,6 @@ export function noVerifiedUsageDecision(
   return humanPresent ? 'picker' : 'fail-loud';
 }
 
-/**
- * Choose which installed version to launch so the user can authenticate, when a
- * strategy found zero healthy accounts but at least one is merely signed out
- * (RUSH-2334). Returns the version to launch, or null if the user cancelled.
- *
- * A single candidate does NOT prompt — a one-item picker is pure noise, and the
- * only thing to decide has one answer. Several candidates fall through to the
- * normal account picker, which shows every account with its state so the choice
- * is informed (throttled rows stay disabled there).
- *
- * Callers MUST have already confirmed an interactive terminal: off a TTY there
- * is nobody to complete the login, and the run should fail loud instead.
- */
 export async function pickSignInLaunchVersion(
   agent: AgentId,
   recoverable: RotateCandidate[],
@@ -332,7 +289,6 @@ export async function pickSignInLaunchVersion(
   return only.version;
 }
 
-/** Prompt for one safe installed account/version. A cancelled picker launches nothing. */
 export async function pickRunAccountCandidate(agent: AgentId): Promise<RotateCandidate | null> {
   if (!isInteractiveTerminal()) {
     requireInteractiveSelection(`Selecting a ${agentLabel(agent)} account`, [

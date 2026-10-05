@@ -1,17 +1,3 @@
-/**
- * Feed timeout policy — unattended default-on-no-answer behavior.
- *
- * Two block classes:
- *   - Approval: has a safe default (e.g. 'deny'). After the configured timeout with
- *     no operator answer, the policy auto-records that default and queues it to the
- *     agent. Logged so the operator can audit later.
- *   - Decision: no safe default (a real choice). After the timeout the block is
- *     hard-parked: a parked marker is recorded and, if we can locate the session
- *     process, it is stopped so the agent cannot proceed on a stale default.
- *
- * Policy is loaded from ~/.agents/feed-policy.yaml. Missing file uses the built-in
- * conservative defaults.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -31,14 +17,12 @@ type BlockClass = 'approval' | 'decision';
 
 interface ClassPolicy {
   timeoutMinutes: number;
-  /** For approval class only: the answer to apply when the timeout fires. */
   safeDefault?: string;
 }
 
 interface FeedPolicy {
   approval: ClassPolicy;
   decision: ClassPolicy;
-  /** High-cost-of-delay blocks below this threshold do not page the phone. */
   phoneNotifyThreshold: 'low' | 'medium' | 'high';
 }
 
@@ -79,7 +63,6 @@ export function loadPolicy(root?: string): FeedPolicy {
       };
     }
   } catch {
-    // missing or malformed -> defaults
   }
   return DEFAULT_POLICY;
 }
@@ -89,10 +72,7 @@ export function blockClass(block: OpenBlock): BlockClass {
 }
 
 export function isPhoneUrgent(block: OpenBlock, policy: FeedPolicy): boolean {
-  // Openness is the canonical deriveBlockState, not a raw `block.answer`: a
-  // pending, unconfirmed claim sets `answer` while state stays `open`, and such
-  // a block is still waiting on the operator, so it must not silence the alert.
-  if (deriveBlockState(block) !== 'open') return false; // already answered
+  if (deriveBlockState(block) !== 'open') return false;
   const cost = block.costOfDelay ?? 'low';
   return COST_RANK[cost] >= COST_RANK[policy.phoneNotifyThreshold];
 }
@@ -121,10 +101,6 @@ interface PolicyResult {
   answer?: AnswerRecord;
 }
 
-/**
- * Apply policy to a single open block. Returns the action taken (none/defaulted/parked).
- * Caller is responsible for persistence/logging side effects not owned by feed.ts.
- */
 export function applyPolicyToBlock(
   block: OpenBlock,
   policy: FeedPolicy,
@@ -132,9 +108,6 @@ export function applyPolicyToBlock(
   root?: string,
   mailboxRoot?: string,
 ): PolicyResult {
-  // A pending, unconfirmed claim sets `block.answer` but keeps state `open`
-  // (deriveBlockState), so it must still be able to time out and escalate;
-  // parked/defaulted are separate terminal markers deriveBlockState omits.
   if (deriveBlockState(block) !== 'open' || block.parkedAt || block.defaultedAt) {
     return { blockId: block.blockId, action: 'none' };
   }
@@ -185,7 +158,6 @@ export function applyPolicyToBlock(
     };
   }
 
-  // Decision class: hard-park.
   recordParked(block.blockId, root);
   return {
     blockId: block.blockId,

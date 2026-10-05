@@ -15,20 +15,16 @@ const NOW = 1_800_000_000_000;
 
 describe('parseRetryAfterMs', () => {
   it('reads delta-seconds — the form the usage endpoint actually sent', () => {
-    // Measured on yosemite-s1: `retry-after: 2678`, about 45 minutes. Ignoring
-    // this is what let a 3-minute probe cadence re-arm the penalty forever.
     expect(parseRetryAfterMs('2678', NOW)).toBe(2678 * 1000);
   });
 
   it('reads an HTTP-date, the other form the spec allows', () => {
     const at = new Date(NOW + 10 * 60 * 1000).toUTCString();
-    // toUTCString drops sub-second precision, so allow the rounding.
     expect(parseRetryAfterMs(at, NOW)).toBeGreaterThan(9 * 60 * 1000);
     expect(parseRetryAfterMs(at, NOW)).toBeLessThanOrEqual(10 * 60 * 1000);
   });
 
   it('caps a hostile or mistaken value at an hour', () => {
-    // A provider (or a typo) must not be able to park usage reads for a week.
     expect(parseRetryAfterMs('99999999', NOW)).toBe(60 * 60 * 1000);
   });
 
@@ -37,19 +33,11 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs('', NOW)).toBeNull();
     expect(parseRetryAfterMs('0', NOW)).toBeNull();
     expect(parseRetryAfterMs('later please', NOW)).toBeNull();
-    // An HTTP-date already in the past is not a reason to wait.
     expect(parseRetryAfterMs(new Date(NOW - 60_000).toUTCString(), NOW)).toBeNull();
   });
 });
 
 describe('the recorded backoff survives across processes', () => {
-  // The whole point of putting this on disk: the offenders are separate
-  // processes — the long-lived daemon on a 3-minute timer, and every one-shot
-  // `agents view` / `agents run`. An in-memory guard would fix neither.
-  // The cache dir is a module-level constant resolved at import, so overriding
-  // HOME does NOT redirect the file — the first version of this test wrote into
-  // the real ~/.agents/.cache/ and parked live usage reads behind a 45-minute
-  // penalty. Use the explicit seam.
   let dir: string;
   let prevDir: string | null;
 
@@ -75,13 +63,10 @@ describe('the recorded backoff survives across processes', () => {
 
     const until = usageRateLimitedUntil('claude');
     expect(until).not.toBeNull();
-    // ~45 minutes out, not the next 3-minute tick.
     expect(until! - Date.now()).toBeGreaterThan(40 * 60 * 1000);
   });
 
   it('still backs off when the server sends no usable Retry-After', () => {
-    // Continuing to poll an endpoint that just said 429 is what created the
-    // loop; a missing header is not permission to keep going.
     noteUsageRateLimited('claude', null);
     expect(usageRateLimitedUntil('claude')).not.toBeNull();
   });
@@ -92,7 +77,6 @@ describe('the recorded backoff survives across processes', () => {
 
     noteUsageRateLimited('claude', '10');
 
-    // A second 429 carrying a smaller header must not put us back on the wire.
     expect(usageRateLimitedUntil('claude')).toBe(long);
   });
 
@@ -118,13 +102,6 @@ describe('formatBackoffRemaining', () => {
 });
 
 describe('a shorter deadline cannot displace a longer one', () => {
-  // Three rounds of review went into arguing that an unlocked read-modify-write
-  // on one shared JSON document was survivable. It was not: two processes could
-  // both read the old value and let the SHORTER deadline write last, and it
-  // could recur on every 429 batch. The argument was replaced with a design that
-  // does not need one — the deadline lives in the FILENAME, so concurrent
-  // writers create separate files and a read takes the maximum. Monotonicity is
-  // structural, and these tests pin that rather than a claim about interleaving.
   let dir: string;
   let prevDir: string | null;
 
@@ -146,9 +123,6 @@ describe('a shorter deadline cannot displace a longer one', () => {
   });
 
   it('is unaffected by the ORDER they were written in', () => {
-    // The exact interleaving the shared-document version could not survive: the
-    // longer penalty lands first, then a stale writer records a shorter one.
-    // Here the shorter file simply loses the max — it cannot erase the longer.
     noteUsageRateLimited('claude', '2678');
     const long = usageRateLimitedUntil('claude')!;
 
@@ -161,8 +135,6 @@ describe('a shorter deadline cannot displace a longer one', () => {
     noteUsageRateLimited('claude', '2678');
     noteUsageRateLimited('kimi', '600');
 
-    // Separate files, so a cross-provider write can never drop the other's
-    // entry the way one shared document could.
     expect(usageRateLimitedUntil('claude')).not.toBeNull();
     expect(usageRateLimitedUntil('kimi')).not.toBeNull();
   });
@@ -195,13 +167,8 @@ describe('per-account backoff scope (RUSH-3036)', () => {
   it("one account's 429 parks THAT account, not its siblings or the provider", () => {
     const now = 1_000_000;
     noteUsageRateLimited('claude', '3600', { now, account: A });
-    // The pinned account is parked…
     expect(usageRateLimitedUntil('claude', now + 1, A)).toBe(now + 3600_000);
-    // …its sibling is not — this is the starvation the fix removes: before,
-    // the first 429 in a refresh pass parked the provider and every account
-    // after it in iteration order never got fetched.
     expect(usageRateLimitedUntil('claude', now + 1, B)).toBeNull();
-    // …and a provider-wide (no-account) read is also free.
     expect(usageRateLimitedUntil('claude', now + 1)).toBeNull();
   });
 
@@ -215,9 +182,6 @@ describe('per-account backoff scope (RUSH-3036)', () => {
 
   it('account slugs with dots cannot swallow a longer sibling scope', () => {
     const now = 3_000_000;
-    // "claude@x" must not read "claude@x.y"'s penalty: the deadline segment is
-    // the digits after the LAST dot, and scope matching requires the remainder
-    // after "<scope>." to be pure digits.
     noteUsageRateLimited('claude', '600', { now, account: 'x.y' });
     expect(usageRateLimitedUntil('claude', now + 1, 'x')).toBeNull();
     expect(usageRateLimitedUntil('claude', now + 1, 'x.y')).toBe(now + 600_000);
@@ -227,6 +191,6 @@ describe('per-account backoff scope (RUSH-3036)', () => {
     const now = 4_000_000;
     noteUsageRateLimited('claude', '60', { now, account: A });
     expect(usageRateLimitedUntil('claude', now + 61_000, A)).toBeNull();
-    expect(fs.readdirSync(dir)).toHaveLength(0); // swept on read
+    expect(fs.readdirSync(dir)).toHaveLength(0);
   });
 });

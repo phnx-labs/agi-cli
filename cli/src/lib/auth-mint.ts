@@ -1,18 +1,3 @@
-/**
- * First-class setup-token mint + seed (PHNX-2364).
- *
- * Closes the mint-auth manual recipe: drive `claude setup-token` through an
- * injectable term driver (`lib/term-driver.ts`), capture a well-formed
- * `sk-ant-oat01-…` token (the #1767 ANSI-banner guard), and seed BOTH:
- *
- *   1. a named provider account (`agents accounts add` shape, policy never)
- *   2. the reserved FILE-BASED `auth` bundle keyed per-account email, which
- *      usage/probe reads (`resolveClaudeSetupToken`)
- *
- * Native rotating OAuth is never copied. Only this non-rotating class is
- * stored and optionally synced. Interactive mint is Claude-only; every other
- * harness fails loud with the command that actually provisions it.
- */
 import type { AgentId, Meta } from './types.js';
 import { resolveAgentName } from './agents.js';
 import {
@@ -55,7 +40,6 @@ import { isSelfHost } from './devices/self-host.js';
 import { assertCredentialTransportHostPinned, resolveHostSshTarget } from './hosts/credential-transport.js';
 import { resolveRemoteOsSync } from './hosts/remote-os.js';
 
-/** Well-formed Claude setup-token as it appears inside a TTY blob. */
 export const CLAUDE_SETUP_TOKEN_CAPTURE_RE = /sk-ant-oat01-[A-Za-z0-9_-]+/;
 
 const ACCOUNT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
@@ -65,33 +49,18 @@ export interface MintFlow {
   harness: AgentId;
   provider: string;
   auth: 'setup-token' | 'api-key';
-  /** Interactive mint argv after HOME=… <bin>. Null when stdin-seed only or an api-key collection flow. */
   mintArgs: string[] | null;
-  /** api-key flows: the env var the collected key injects as on a worker (e.g. OPENAI_API_KEY). */
   apiKeyEnv?: string;
-  /** setup-token flows: authorize-URL and token patterns scraped from the term session. */
   verificationUrlRegex?: RegExp;
   tokenCapture?: RegExp;
 }
 
-/**
- * Durable-credential flows per harness. Only Claude exposes an interactive
- * setup-token MINT; every other harness's durable credential is a provider API
- * key, COLLECTED via `--api-key` or a prompt by `accounts add` (never derived
- * from OAuth). The api-key entries describe collection only — they have no
- * mint argv, and `mintAndSeed` refuses them with the `accounts add` pointer.
- * A token-less harness (kimi/antigravity) has no portable credential and logs
- * in per box (run it there and complete its native login).
- * The apiKeyEnv values are pinned to HARNESS_AUTH's `api-key:<ENV>` worker
- * kinds by auth-mint.test.ts — keep them in lockstep.
- */
 export const MINT_FLOWS: Record<string, MintFlow> = {
   claude: {
     harness: 'claude',
     provider: 'anthropic',
     auth: 'setup-token',
     mintArgs: ['setup-token'],
-    // Authorize URL printed by `claude setup-token` before it waits for a code.
     verificationUrlRegex: /(https:\/\/[^\s"'<>]+)/i,
     tokenCapture: CLAUDE_SETUP_TOKEN_CAPTURE_RE,
   },
@@ -102,7 +71,6 @@ export const MINT_FLOWS: Record<string, MintFlow> = {
   droid: { harness: 'droid', provider: 'factory', auth: 'api-key', mintArgs: null, apiKeyEnv: 'FACTORY_API_KEY' },
 };
 
-/** Harnesses with an interactive setup-token mint (api-key flows are collection, not mint). */
 export function listMintableHarnesses(): AgentId[] {
   return (Object.values(MINT_FLOWS) as MintFlow[]).filter((f) => f.auth === 'setup-token').map((f) => f.harness);
 }
@@ -134,16 +102,10 @@ export function unmintableMessage(harness: string): string {
   ].join(' ');
 }
 
-/** Strip CSI / Fe ANSI so a #1767 TTY blob can be scanned for a real token. */
 export function stripAnsi(text: string): string {
   return text.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
 }
 
-/**
- * Pull a single well-formed Claude setup-token out of a (possibly ANSI-wrapped)
- * screen. Returns null when none is present. Two distinct tokens fail loud —
- * guessing which one to seed is how a banner fragment becomes an auth header.
- */
 export function extractClaudeSetupToken(screen: string): string | null {
   const text = stripAnsi(screen);
   const matches = text.match(new RegExp(CLAUDE_SETUP_TOKEN_CAPTURE_RE.source, 'g')) ?? [];
@@ -157,7 +119,6 @@ export function extractClaudeSetupToken(screen: string): string | null {
   return unique[0]!;
 }
 
-/** First https URL on the screen, trailing punctuation stripped. */
 export function extractMintUrl(screen: string, flow: MintFlow): string | undefined {
   if (!flow.verificationUrlRegex) return undefined;
   const text = stripAnsi(screen);
@@ -171,7 +132,6 @@ export function isEmail(value: string): boolean {
   return EMAIL_RE.test(value.trim());
 }
 
-/** Account-name slug of an email (`ada@example.com` → `ada-at-example.com`). */
 export function accountNameFromEmail(email: string): string {
   const slug = email
     .trim()
@@ -205,12 +165,6 @@ export interface ResolvedMintIdentity {
   email: string;
 }
 
-/**
- * Resolve the named account + the email that keys the reserved `auth` bundle.
- * `--account` that looks like an email is the email; a name needs `--email` or
- * a locally signed-in `.claude.json`. Missing email fails loud — we must not
- * fall back to a bare shared key (that is the multi-account mix-up).
- */
 export function resolveMintIdentity(input: ResolveMintIdentityInput): ResolvedMintIdentity {
   const accountRaw = input.account?.trim();
   const emailRaw = input.email?.trim();
@@ -337,17 +291,6 @@ export function seedReservedStoreKey(
   const name = reservedStoreName(harness);
   const cleaned = value.trim();
   if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
-  // A `__<harness>__` reserved store is a real FILE-backed, policy-`never` bundle
-  // — the same shape as the legacy `auth` bundle — because the only transport to
-  // a worker is the ordinary bundle push (`syncReservedStores` →
-  // `pushBundleToHost`), which reads the store as a bundle and imports it
-  // remotely as one. It used to be written as a bare `store.set` item with no
-  // bundle record (the standalone rejected the `__`-wrapped name at the time), so
-  // the push could never read it and no worker received a Cursor/Codex/Grok key.
-  // The item name is unchanged (`agents-cli.secrets.__<harness>__.<KEY>`), so
-  // `readReservedCredential` and every worker that already holds the raw item
-  // keep resolving it. Requires -labs/secrets-cli >= 0.1.1 (reserved-shape
-  // bundle names).
   const item = secretsKeychainItem(name, key);
   try {
     if (bundleExistsSync(name)) {
@@ -379,9 +322,6 @@ export function seedReservedStoreKey(
     writeBundleWithItemsSync(bundle, new Map([[item, cleaned]]));
     return { bundle: name, key };
   } catch (err) {
-    // A standalone older than 0.1.1 rejects the `__<harness>__` bundle name and
-    // the client only sees a sanitized code. Name the real requirement instead
-    // of leaving `accounts add` to fail with `OPERATION_FAILED`.
     if (isSecretsClientError(err, 'OPERATION_FAILED')) {
       throw new Error(
         `Could not write the reserved store '${name}' as a bundle: ${err.message}. agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<harness>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
@@ -396,15 +336,6 @@ export interface AdoptLegacyReservedItemsResult {
   errors: Array<{ bundle: string; key: string; message: string }>;
 }
 
-/**
- * Adopt reserved-store keys written by 1.22.84–1.22.89 as bare file items (no
- * bundle record) into the file-backed bundle the daemon push reads. Every
- * `accounts add codex|grok|cursor` from those releases left its worker key in
- * that shape on the laptop, unpushable; the item name is the same in both
- * shapes, so adoption re-seeds the bundle from the raw value in place and
- * nothing already on a worker changes. Idempotent: a key the bundle already
- * carries is skipped. Local data repair only — it never talks to a peer.
- */
 export function adoptLegacyReservedStoreItems(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
 ): AdoptLegacyReservedItemsResult {
@@ -426,11 +357,6 @@ export function adoptLegacyReservedStoreItems(
   return result;
 }
 
-/**
- * Create or rotate the named provider account that `agents run --account` and
- * `agents accounts sync` consume. Existing account of a different kind fails
- * loud rather than silently overwriting an API key with a setup-token.
- */
 export function seedNamedAccount(name: string, token: string, flow: MintFlow): CredentialAccount {
   const cleaned = assertValidSetupToken(token);
   const existing = findAccount(name);
@@ -460,20 +386,13 @@ export interface DriveMintResult {
 
 export interface DriveSetupTokenMintOpts extends MintDriveHooks {
   code?: string;
-  /** Suppress stdout progress so `--json` callers get a parseable blob. */
   json?: boolean;
 }
 
-/** Stdout progress for the mint path. `--json` / quiet: drop it (stderr errors stay). */
 function emitMintProgress(line: string, json?: boolean): void {
   if (!json) console.log(line);
 }
 
-/**
- * Drive `claude setup-token` in a term session: scrape the authorize URL, open it,
- * optionally paste `--code`, then capture the token with the #1767 guard.
- * Tears the session down on the way out (success, timeout, or throw).
- */
 export async function driveSetupTokenMint(
   command: string,
   flow: MintFlow,
@@ -490,7 +409,6 @@ export async function driveSetupTokenMint(
   const openUrl = opts.openUrl ?? (async (url: string) => {
     const shown = await showUrl(url);
     if (shown.via === 'none') {
-      // stderr: `--json` stdout stays parseable; the operator still gets the URL.
       console.error(`Could not open a browser — open this yourself:\n  ${url}`);
     }
   });
@@ -582,7 +500,6 @@ export interface MintAndSeedInput {
   open?: boolean;
   fleet?: boolean;
   devices?: string[];
-  /** Suppress progress prints so `--json` stdout stays machine-parseable. */
   json?: boolean;
   hooks?: MintDriveHooks;
 }
@@ -602,16 +519,9 @@ export interface MintAndSeedResult {
   fleet: FleetSyncRow[];
 }
 
-/**
- * End-to-end mint: resolve identity, obtain a token (stdin or term drive),
- * seed the named account + reserved auth bundle, optionally sync the fleet.
- * Never returns or logs the token.
- */
 export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedResult> {
   const flow = getMintFlow(input.harness);
   const json = input.json === true;
-  // An injected term driver is a complete substitute for exec'ing the local
-  // binary, so the install lookup is only required on the real drive path.
   const install = input.token
     ? null
     : input.hooks?.driver

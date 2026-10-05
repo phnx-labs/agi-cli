@@ -1,27 +1,3 @@
-/**
- * Operator identity registry for multi-human feed controls.
- *
- * The mailbox `from` label is caller-supplied and unverified (same-user-writable).
- * For routine answers that's fine; for high-consequence blocks (merge/deploy/admin)
- * we need a verified operator identity. This module loads a local registry of
- * operators from ~/.agents/operators.yaml and provides the authz check used by
- * `recordAnswer` and `agents message --as`.
- *
- * Registry format (YAML):
- *   operators:
- *     muqsit:
- *       name: Muqsit
- *       admin: true
- *     bisma:
- *       name: Bisma
- *       can:
- *         - merge
- *         - deploy
- *
- * For this release identity is proven by knowing the operator id (local registry
- * membership). A future release can add public-key/totp challenge without changing
- * the call sites.
- */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
@@ -68,7 +44,6 @@ export function loadOperators(root?: string): OperatorRegistry {
       return { operators };
     }
   } catch {
-    // missing or malformed -> empty registry
   }
   return { operators: {} };
 }
@@ -93,7 +68,6 @@ export function canPerform(id: string, action: string, root?: string): boolean {
   return op.can?.includes(action) ?? false;
 }
 
-/** High-consequence blocks require a known operator with explicit merge/deploy/admin rights. */
 export function isHighConsequenceAllowed(blockConsequence: string | undefined, operatorId: string, root?: string): boolean {
   if (!blockConsequence || blockConsequence === 'normal') return true;
   if (!isKnownOperator(operatorId, root)) return false;
@@ -116,4 +90,3 @@ export function verifyOperatorIdentity(claimedId: string | undefined, root?: str
   if (!envId) return false;
   return envId === claimedId;
 }
-
