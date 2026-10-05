@@ -1,20 +1,3 @@
-/**
- * Output command — productivity: token *burn* vs shipped *output*.
- *
- * Nested as `agents insights output`. `agents insights cost` answers "what did
- * we burn?" (dollars + duration). This joins that burn to what actually shipped —
- * real generated (output) tokens plus PRs and commits across every git identity —
- * so you can see burn-vs-output and ratios like $/PR and output-tokens/$. Pure
- * SQLite + local git/gh, no server, no telemetry — the same offline spirit as cost.
- *
- * Why not just show `token_count`? Because that number sums cache-read/-write
- * context re-counted every turn and is dominated by cheap re-reads (often ~100x
- * the real generation). `output_tokens` (scanned per-agent into the session DB)
- * is the honest "work produced" signal, and it is what this command leads with.
- *
- * `--all-hosts` fans the same rollup across every online device (`ag devices`)
- * over SSH and merges — one fleet-wide burn-vs-output view.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import * as os from 'os';
@@ -42,23 +25,20 @@ interface OutputOptions {
   reposDir?: string;
   author?: string[];
   login?: string[];
-  prs?: boolean; // commander sets `prs: false` for --no-prs
+  prs?: boolean;
   allHosts?: boolean;
   pricing?: string;
 }
 
 interface RollupRow {
   key: string;
-  /** Human label when the key is an identity rather than display text (--by account). */
   label?: string;
   costUsd: number;
-  /** USD cost with cache read/write repriced at the input rate (RUSH-2287). */
   costUsdNoCache: number;
   durationMs: number;
   sessionCount: number;
   tokenCount: number;
   outputTokens: number;
-  /** Burn split — 0 for harnesses that record no cache split (RUSH-2287). */
   inputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
@@ -66,11 +46,9 @@ interface RollupRow {
 
 interface BurnTotals {
   costUsd: number;
-  /** USD cost priced as if caching were off (cache read/write at the input rate). */
   costUsdNoCache: number;
   outputTokens: number;
   tokenCount: number;
-  /** Burn split summed across the window. */
   inputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
@@ -80,7 +58,6 @@ interface BurnTotals {
 
 interface GitOut {
   commits: number;
-  /** Deduped commit SHAs — unioned across machines under --all-hosts. */
   commitShas: string[];
   prsOpened: number;
   prsMerged: number;
@@ -90,7 +67,6 @@ interface GitOut {
   logins: string[];
 }
 
-/** One machine's productivity payload — the `--json` shape, reused across the fleet. */
 interface OutputPayload {
   machine: string;
   pricingVersion: string;
@@ -99,11 +75,9 @@ interface OutputPayload {
   output: GitOut;
   breakdown: { by: string; rows: RollupRow[] };
   uncostedAgents: string[];
-  /** Set when a remote machine could not be reached / did not support the command. */
   error?: string;
 }
 
-/** Register `agents insights output` under the insights parent. */
 export function registerOutputCommand(insightsCmd: Command): void {
   addHostOption(insightsCmd.command('output'))
     .description('Productivity rollup — token burn vs shipped output (PRs, commits) across agents')
@@ -131,12 +105,6 @@ The burn is split into input / cache-read / cache-write where the harness record
 (Claude/Codex/Gemini/Droid). --pricing no-cache reprices cached tokens at the input rate,
 so you can see what caching is saving. --json always carries both actual and no-cache costs.
 `)
-    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
-    // with the `insights` parent's own options, so commander binds them to the
-    // parent at parse time and the leaf's plain opts() never sees them. Merging
-    // ancestor opts is what the sibling `insights mix` recipes already do
-    // (mix-commands.ts) — without it every flag on this command is silently
-    // dropped (e.g. `agents insights output --json` printed the human table).
     .action(async (_options: OutputOptions, command: Command) => {
       await outputAction(command.optsWithGlobals() as OutputOptions);
     });
@@ -158,7 +126,6 @@ function resolvePricing(pricing: string | undefined): PricingScenario {
   process.exit(1);
 }
 
-/** Compact token formatter: 38.6M, 4.1K, 10.6B. */
 function formatCompact(n: number): string {
   const abs = Math.abs(n);
   if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
@@ -196,12 +163,10 @@ function sumBurn(rows: RollupRow[]): BurnTotals {
   }, emptyBurn());
 }
 
-/** Compute this machine's payload from the local session DB + git. */
 async function computeLocalPayload(options: OutputOptions, includePrs: boolean): Promise<OutputPayload> {
   const since = options.since ?? '7d';
   const sinceMs = parseTimeFilter(since);
 
-  // Ensure the index is fresh (and migrated to v12 so output_tokens is populated).
   await discoverSessions({ all: true, since, limit: 1 });
 
   const filter: QueryOptions = { sinceMs };
@@ -238,7 +203,6 @@ async function computeLocalPayload(options: OutputOptions, includePrs: boolean):
   };
 }
 
-/** Fetch one remote device's payload by re-invoking `agents insights output --json --device <name>`. */
 async function fetchRemotePayload(device: string, options: OutputOptions): Promise<OutputPayload> {
   const args = ['insights', 'output', '--json', '--no-prs', '--device', device, '--since', options.since ?? '7d'];
   if (options.by) args.push('--by', options.by);
@@ -249,8 +213,6 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
       timeout: 120_000,
       maxBuffer: 64 * 1024 * 1024,
     });
-    // A Windows device relays its payload through PowerShell, which can prefix a
-    // CLIXML banner ahead of the JSON — strip it before parsing (RUSH-2286).
     const parsed = JSON.parse(stripClixml(stdout)) as OutputPayload;
     parsed.machine = parsed.machine || device;
     return parsed;
@@ -270,9 +232,6 @@ async function fetchRemotePayload(device: string, options: OutputOptions): Promi
 
 async function outputAction(options: OutputOptions): Promise<void> {
   const includePrs = options.prs !== false;
-  // Validate --pricing up front so a bad value errors even under --json. The JSON
-  // payload always carries BOTH costs regardless of the scenario — the flag only
-  // chooses which one the text renderer leads with.
   const scenario = resolvePricing(options.pricing);
 
   if (!options.allHosts) {
@@ -285,7 +244,6 @@ async function outputAction(options: OutputOptions): Promise<void> {
     return;
   }
 
-  // Fleet: local payload + every online device, folded in over SSH.
   const self = machineId();
   const registry = await loadDevices();
   const remotes = Object.values(registry)
@@ -294,7 +252,6 @@ async function outputAction(options: OutputOptions): Promise<void> {
 
   if (!options.json) console.error(chalk.gray(`Folding in ${remotes.length} online device${remotes.length !== 1 ? 's' : ''}…`));
 
-  // PRs are global (gh search by author, not machine-bound) — compute once, locally.
   const local = await computeLocalPayload(options, includePrs);
   const remotePayloads = await Promise.all(remotes.map(d => fetchRemotePayload(d, options)));
   const machines = [local, ...remotePayloads];
@@ -306,13 +263,9 @@ async function outputAction(options: OutputOptions): Promise<void> {
   renderFleet(machines, options, scenario);
 }
 
-/** Merge per-machine payloads into a combined one (burn + commits summed; PRs local-only). */
 function mergeMachines(machines: OutputPayload[], options: OutputOptions): OutputPayload {
   const burn = emptyBurn();
   const byKey = new Map<string, RollupRow>();
-  // Union commit SHAs across machines: shared repos (cloned on several boxes)
-  // expose the same commits to `git log` on each, so summing counts would
-  // multi-count. A commit's SHA is its global identity — union, don't add.
   const allShas = new Set<string>();
   const uncosted = new Set<string>();
   for (const m of machines) {
@@ -333,8 +286,6 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
         sessionCount: 0, tokenCount: 0, outputTokens: 0,
         inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
       };
-      // Peers resolve their own labels; keep the first non-empty one so a machine that
-      // has not indexed an account yet does not blank a label another machine supplied.
       cur.label ??= r.label;
       cur.costUsd += r.costUsd;
       cur.costUsdNoCache += r.costUsdNoCache;
@@ -349,7 +300,6 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
     }
   }
   const rows = [...byKey.values()].sort((a, b) => b.costUsd - a.costUsd);
-  // PRs from the local machine only (machines[0]) — gh search is not machine-scoped.
   const localGit = machines[0].output;
   return {
     machine: 'fleet',
@@ -362,7 +312,6 @@ function mergeMachines(machines: OutputPayload[], options: OutputOptions): Outpu
   };
 }
 
-/** Attach burn-vs-output ratios to a payload for JSON output. */
 function withRatios(payload: OutputPayload, machines: OutputPayload[]): unknown {
   const prsTotal = payload.output.prsOpened + payload.output.prsMerged;
   return {
@@ -376,12 +325,10 @@ function withRatios(payload: OutputPayload, machines: OutputPayload[]): unknown 
   };
 }
 
-/** The cost the text renderer leads with for the chosen scenario. */
 function scenarioCost(x: { costUsd: number; costUsdNoCache: number }, scenario: PricingScenario): number {
   return scenario === 'no-cache' ? x.costUsdNoCache : x.costUsd;
 }
 
-/** Shared header line: burned · output tokens · PRs · commits, plus ratios + burn split. */
 function headerLines(payload: OutputPayload, scenario: PricingScenario): string[] {
   const prsTotal = payload.output.prsOpened + payload.output.prsMerged;
   const burn = payload.burn;
@@ -403,7 +350,6 @@ function headerLines(payload: OutputPayload, scenario: PricingScenario): string[
   if (cost > 0) ratios.push(`${formatCompact(Math.round(burn.outputTokens / cost))} out-tok/$`);
   if (ratios.length > 0) out.push(chalk.gray('  ' + ratios.join('  ·  ')));
 
-  // Burn split — only for harnesses that recorded one (input/cache totals > 0).
   const splitTotal = burn.inputTokens + burn.cacheReadTokens + burn.cacheWriteTokens;
   if (splitTotal > 0) {
     out.push(
@@ -416,8 +362,6 @@ function headerLines(payload: OutputPayload, scenario: PricingScenario): string[
     );
   }
 
-  // No-cache comparison — shown whenever caching actually moved the number, so an
-  // operator sees the saving in `actual` mode too (RUSH-2287: "both if useful").
   if (burn.costUsdNoCache > burn.costUsd && burn.costUsd > 0) {
     const saved = burn.costUsdNoCache - burn.costUsd;
     const pct = Math.round((saved / burn.costUsdNoCache) * 100);
@@ -432,7 +376,6 @@ function headerLines(payload: OutputPayload, scenario: PricingScenario): string[
   return out;
 }
 
-/** Render the per-group burn/output table. */
 function renderBreakdown(rows: RollupRow[], groupBy: string, scenario: PricingScenario): string[] {
   const out: string[] = [chalk.bold(`By ${groupBy}`)];
   if (rows.length === 0) return out;
@@ -493,7 +436,6 @@ function renderFleet(machines: OutputPayload[], options: OutputOptions, scenario
   out.push(...headerLines(merged, scenario));
   out.push('');
 
-  // By machine.
   out.push(chalk.bold('By machine'));
   const nameW = Math.max(...machines.map(m => m.machine.length), 7);
   const burnW = Math.max(...machines.map(m => formatUsd(scenarioCost(m.burn, scenario)).length), 4);

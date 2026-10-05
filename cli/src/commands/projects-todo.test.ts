@@ -7,10 +7,8 @@ import { describe, expect, it } from 'vitest';
 const cliDir = path.resolve(__dirname, '..', '..');
 const entrypoint = path.join(cliDir, 'src', 'index.ts');
 
-/** Run the real CLI; these cases are refused before linear is ever called. */
 function runTodo(args: string[]): { code: number; stdout: string } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'projects-todo-'));
-  // The setup gate's marker: a cloned system repo.
   fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
   try {
     const stdout = execFileSync('bun', [entrypoint, 'projects', 'todo', ...args], {

@@ -1,20 +1,3 @@
-/**
- * `agents message <name>` resolving a detached `agents run --device <host>
- * --no-follow` dispatch (RUSH-2366 follow-up), end to end through the real
- * command.
- *
- * `decideHostTaskRoute` is unit-tested in `lib/mailbox-target.test.ts`, but the
- * WIRING in `commands/message.ts` was not covered — and the wiring is where the
- * bug lived twice over: first the command never consulted the host-task records
- * at all, then it consulted them WITHOUT the `reconcileRunningTasks` heal that
- * `agents devices stop`/`agents devices ps` both run first.
- *
- * Real CLI, real on-disk records under a throwaway HOME, no mocking. The cases
- * here are deliberately the ones that need no reachable host: a record that is
- * already terminal must be reported as finished from local state, and an
- * unknown name must fall through to the generic "no target" error. The live-SSH
- * heal itself is covered by `lib/hosts/reconcile`'s own tests.
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -49,7 +32,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
       fs.rmSync(home, { recursive: true, force: true });
     });
 
-    /** Write the same `<id>.json` record `agents devices ps` reads. */
     function writeTask(task: Record<string, unknown>): void {
       const dir = path.join(home, '.agents', '.cache', 'hosts');
       fs.mkdirSync(dir, { recursive: true });
@@ -83,8 +65,6 @@ describe.skipIf(process.platform === 'win32' || !BUN)(
 
       const res = runMessage('donerun');
 
-      // Fails loud, names the host and the status, and points at the log —
-      // rather than the generic "no running agent matches" this used to give.
       expect(res.status).not.toBe(0);
       expect(res.out).toContain("Task 'donerun' on host 'somebox' already completed");
       expect(res.out).toContain('agents logs donerun');

@@ -1,11 +1,3 @@
-/**
- * Custom-harness profile helpers (shared by `agents harness`).
- *
- * Named bundles of (host CLI, endpoint, model, keychain auth) live under
- * ~/.agents/profiles/*.yml. The user-facing surface is `agents harness`
- * (add/fork/edit/list/view/remove). This module keeps the shared write helpers
- * (`addProfile`, `ensureProviderToken`, …) that harness and the run path use.
- */
 
 import chalk from 'chalk';
 import { readStdinSync } from '../lib/format.js';
@@ -37,11 +29,6 @@ import { isInteractiveTerminal } from './utils.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { findAccount } from '../lib/account-registry.js';
 
-/**
- * Pure helper: builds a Profile from collected wizard inputs. Extracted so the
- * shape of preset->profile mapping for the `create` wizard is unit-testable
- * without mocking @inquirer/prompts.
- */
 export function buildProfileFromCollection(
   name: string,
   preset: Preset,
@@ -63,7 +50,6 @@ export function buildProfileFromCollection(
   };
 }
 
-/** Prompt the user for a secret value with masked input. Requires an interactive TTY. */
 async function promptForSecret(message: string): Promise<string> {
   if (!isInteractiveTerminal()) {
     throw new Error('A secret is required but the shell is not interactive. Pipe the key via stdin (--key-stdin).');
@@ -72,9 +58,7 @@ async function promptForSecret(message: string): Promise<string> {
   return await password({ message, mask: true });
 }
 
-/** Read all available data from stdin synchronously, trimmed. */
 
-/** Ensure a provider API key exists in keychain, prompting or reading stdin if missing. */
 export async function ensureProviderToken(provider: string, signupUrl?: string, fromStdin?: boolean): Promise<void> {
   const item = profileKeychainItem(provider);
   if (await hasKeychainToken(item)) {
@@ -94,7 +78,6 @@ export async function ensureProviderToken(provider: string, signupUrl?: string, 
   console.log(chalk.green(`Stored in keychain: ${item}`));
 }
 
-/** Options accepted by {@link addProfile} — shared by `agents harness add` and `agents harness add`. */
 export interface AddProfileOptions {
   preset?: string;
   host?: string;
@@ -105,7 +88,6 @@ export interface AddProfileOptions {
   version?: string;
   keyStdin?: boolean;
   force?: boolean;
-  /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets}. */
   fromSecrets?: string;
 }
 
@@ -159,7 +141,6 @@ export async function applyFromSecrets(
   try {
     bundle = await readBundle(bundleName);
   } catch (err) {
-    // The standalone reports only a code; name the bundle the user asked for.
     if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
     throw new Error(`Secrets bundle '${bundleName}' not found. List bundles with 'agents secrets list'.`);
   }
@@ -210,14 +191,6 @@ export async function applyFromSecrets(
   }
 }
 
-/**
- * Create a profile ("custom harness"). Two paths:
- *  - `--host <agent> --model <id>`: one-shot custom harness from a host + model
- *    (no preset needed). This is what makes a model like Muse Spark a named,
- *    runnable harness.
- *  - otherwise: apply a built-in preset (existing behavior).
- * `label` only tunes the success wording (Profile vs Harness). Throws on error.
- */
 export async function addProfile(name: string, opts: AddProfileOptions, label: 'Profile' | 'Harness' = 'Profile'): Promise<void> {
   validateProfileName(name);
   const account = opts.account ? findAccount(opts.account) : null;
@@ -226,7 +199,6 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
     throw new Error(`${label} '${name}' already exists. Use --force to overwrite.`);
   }
 
-  // One-shot host + model → custom harness, no preset required.
   if (opts.host || opts.model) {
     if (!opts.host || !opts.model) {
       throw new Error('Both --host <agent> and --model <id> are required to build a harness from a host + model.');
@@ -266,7 +238,6 @@ export async function addProfile(name: string, opts: AddProfileOptions, label: '
     return;
   }
 
-  // Preset path.
   const presetName = opts.preset || name;
   const preset = getPreset(presetName);
   if (!preset) {

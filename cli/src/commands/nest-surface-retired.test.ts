@@ -1,10 +1,3 @@
-/**
- * RUSH-2989 — leftover top-level aliases nested under their owning groups.
- * Pins that `unshare` / `audit` / `trends` are unregistered at the root and
- * cannot auto-correct. `audit`'s nested home (`events audit`) still exists;
- * `unshare`'s home was removed with the `artifacts` group (PHNX-3992) and
- * `trends` never had one.
- */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -59,25 +52,14 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(names).not.toContain('unshare');
     expect(names).not.toContain('audit');
     expect(names).not.toContain('trends');
-    // 'artifacts' (and with it `artifacts unshare`) was removed entirely — artifact
-    // sharing moved to the standalone `artifacts` CLI (PHNX-3992).
     expect(names).not.toContain('artifacts');
     expect(names).toContain('events');
     expect(names).toContain('insights');
-    // 'org' stayed retired with the Prix-coupled account layer; 'auth' returned
-    // against Phoenix ID, with the team surface nested as `auth space` (RUSH-2581).
     expect(names).not.toContain('org');
     expect(names).toContain('auth');
 
-    // `unshare` no longer has a nested home either — it lived under `artifacts`,
-    // which was removed with the share engine (PHNX-3992). It stays a retired
-    // top-level name (asserted below), with no nested home.
     const events = program.commands.find((c) => c.name() === 'events');
     expect(events?.commands.map((c) => c.name())).toContain('audit');
-    // The nested `insights trends` alias was itself removed in the recipe
-    // collapse: `agents insights mix` is the one counter surface, so `trends`
-    // survives only as a retired top-level name (asserted below), with no
-    // nested home. `insights mix` remains.
     const insights = program.commands.find((c) => c.name() === 'insights');
     expect(insights?.commands.map((c) => c.name())).not.toContain('trends');
     expect(insights?.commands.map((c) => c.name())).toContain('mix');

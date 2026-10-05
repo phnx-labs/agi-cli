@@ -1,8 +1,3 @@
-/**
- * Strict session resume — identity resolution, source-device routing, and
- * delegation to `agents run --resume`. Registered under `agents sessions resume`
- * (see sessions-resume.ts); this module owns the helpers + in-process action.
- */
 import { spawn } from 'child_process';
 import chalk from 'chalk';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
@@ -13,8 +8,6 @@ import { takeOverDetachedSession } from '../lib/session/detached.js';
 
 const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
-/** Inspect local archived context after the owner hop fails. Recovery still
- * requires readable content and explicit replay consent before starting a run. */
 export function resumeLocalFallbackSource(session: SessionMeta, self: string = machineId()): SessionMeta {
   return { ...session, machine: self };
 }
@@ -28,19 +21,10 @@ export interface StrictResumeOptions {
   headless?: boolean;
   cwd?: string;
   quiet?: boolean;
-  /** Run on THIS machine even when the session belongs to a peer (escape hatch). */
   here?: boolean;
   local?: boolean;
 }
 
-/**
- * The argv to re-run this resume on the machine that owns the session.
- *
- * Deliberately carries no "don't route again" FLAG — that rides the
- * {@link RESUME_PINNED_ENV} export instead, so the hop also works against a peer
- * on an older CLI (see the constant's docs). Every argv token here exists in the
- * released surface.
- */
 export function buildResumeRemoteArgs(
   sessionId: string,
   prompt: string | undefined,
@@ -58,8 +42,6 @@ export function buildResumeRemoteArgs(
   return args;
 }
 
-/** Translate `agents sessions resume <id>` to the canonical `agents run` surface after
- * resolving the source identity. The run command remains the only executor. */
 export function buildResumeRunArgs(
   session: { id: string; agent: string; version?: string },
   prompt: string | undefined,
@@ -85,12 +67,10 @@ function consumeResumeSource(): { id: string; agent: string; version?: string; c
     const value = JSON.parse(raw);
     if (typeof value?.id === 'string' && typeof value?.agent === 'string') return value;
   } catch {
-    // The routing pin is authoritative; malformed optional context is ignored.
   }
   return undefined;
 }
 
-/** True when the caller asked for the strict resume path (prompt and/or flags). */
 export function wantsStrictResume(
   prompt: string | undefined,
   options: StrictResumeOptions,
@@ -106,17 +86,11 @@ export function wantsStrictResume(
   );
 }
 
-/**
- * Strict single-session resume: resolve id/label across the fleet, hop to the
- * owning device when needed, then delegate to `agents run --resume`.
- */
 export async function runStrictResume(
   sessionId: string,
   prompt: string | undefined,
   options: StrictResumeOptions,
 ): Promise<void> {
-  // Read (and clear) the routing pin before anything else, so it can never
-  // reach the agent's own children.
   const routedHop = consumeResumePinned();
   const pinnedHere = routedHop || !!options.here;
   const routedSource = routedHop ? consumeResumeSource() : undefined;
@@ -127,14 +101,8 @@ export async function runStrictResume(
     process.exitCode = 1;
     return;
   }
-  // An owner hop must inspect only the owner's index. Fleet fan-out here can
-  // rediscover the dispatcher's synthetic row and bounce the same id forever.
   const outcome = await resolveSessionMetadataValue(sessionId.trim(), { agent: options.agent, local: pinnedHere || options.local });
   if (outcome.kind === 'partial') {
-    // RUSH-2492: an unreachable peer is a warning, not a hard failure. The
-    // resolver already resolves an id found on the reachable fleet (SES-9a),
-    // so reaching here means the session was not found on any device we COULD
-    // reach — it may live on an unreachable peer, which we could not check.
     const offline = outcome.failedPeers;
     console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
     console.error(chalk.red(`No session matching "${sessionId}" on any reachable device (${offline.length} unreachable, not checked).`));
@@ -153,20 +121,11 @@ export async function runStrictResume(
     return;
   }
 
-  // The harness keeps its conversation state on the machine that produced
-  // the session, so a peer-owned session MUST resume there. Running it here
-  // starts the agent against state this box does not have — silently, since
-  // a synced mirror makes the transcript look local (RUSH-2022).
   const owner = pinnedHere ? undefined : sessionOwnerDevice(outcome.session);
   if (owner) {
     if (!options.quiet) {
       process.stderr.write(chalk.gray(`[agents] session ${outcome.session.shortId} belongs to ${owner} → resuming there\n`));
     }
-    // `runOnPeer` is the existing transport for "this session's transcript
-    // and agent binary are on that box" (lib/session/remote-list.ts) — the
-    // same one the picker already uses. Not the `--host` passthrough: that
-    // one re-discovers locally and marks the run AGENTS_FLEET_REMOTE, which
-    // a long-lived resumed session must not inherit.
     const { runOnPeer } = await import('../lib/session/remote-list.js');
     const rc = await runOnPeer(
       buildResumeRemoteArgs(outcome.session.id, prompt, options),
@@ -181,8 +140,6 @@ export async function runStrictResume(
       },
     );
     if (rc === 'no-target' || rc === 'unreachable') {
-      // The owner may still be running. Only verified local content can be
-      // offered as a separate conversation after explicit replay consent.
       if (!options.quiet) {
         process.stderr.write(chalk.yellow(
           `[agents] session ${outcome.session.shortId} belongs to ${owner}, which is unreachable; checking for local transcript content before offering replay\n`,
@@ -198,11 +155,6 @@ export async function runStrictResume(
   process.exitCode = await delegateLocalResume(localSession, prompt, options);
 }
 
-/**
- * Spawn the delegated local `agents run --resume` for a session this box owns
- * (or is falling back to). The run command remains the sole executor; recovery
- * (native vs `/continue`) is resolved there. Returns the child's exit code.
- */
 async function delegateLocalResume(
   session: SessionMeta,
   prompt: string | undefined,
@@ -213,9 +165,6 @@ async function delegateLocalResume(
     stdio: 'inherit',
     env: {
       ...process.env,
-      // Avoid repeating the fleet lookup in the delegated local `run`
-      // process. The value is metadata-only and is not forwarded over SSH;
-      // the owner performs its own local SQLite lookup.
       [RESUME_SOURCE_ENV]: JSON.stringify(session),
     },
   });

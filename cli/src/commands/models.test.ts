@@ -80,7 +80,7 @@ describe('models set (run defaults)', () => {
     runAgents(home, ['models', 'set', 'claude:*', '--mode', 'full', '--model', 'opus']);
     const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     expect(yaml).toContain('claude:*');
-    expect(yaml).toContain('mode: skip'); // 'full' normalizes to 'skip'
+    expect(yaml).toContain('mode: skip');
     expect(yaml).toContain('model: opus');
   });
 
@@ -108,7 +108,6 @@ describe('models set (run defaults)', () => {
     expect(err).toBeDefined();
     expect(err?.status).toBe(1);
     expect(String(err?.stderr) + String(err?.stdout)).toContain('Selector is required');
-    // and nothing was written
     expect(fs.existsSync(path.join(home, '.agents', 'agents.yaml'))).toBe(false);
   });
 

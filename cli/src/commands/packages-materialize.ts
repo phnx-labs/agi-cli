@@ -1,13 +1,3 @@
-/**
- * `agents packages materialize` — user-facing front door for portable-agent
- * materialization (PHNX-3838). ONE execution path: this command resolves the
- * schema-v3 package once with {@link resolveAgentPackage} and projects it into
- * an ephemeral native home with the canonical {@link materializeAgentPackage}
- * (agent-spec/materialize.ts). The front door owns only what a materializer must
- * not: the portable-harness allowlist, an exact harness version, and the
- * output-home refusal that keeps a run off the live `~/.claude` / `~/.codex` /
- * `~/.opencode` homes.
- */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import { die, isJsonMode } from '../lib/format.js';
@@ -49,7 +39,6 @@ function fail(err: unknown, json: boolean): never {
   die(err instanceof Error ? err.message : String(err), 1, { json });
 }
 
-/** Register `agents packages materialize`. */
 export function registerPortablePackageCommands(program: Command): void {
   const packagesCmd = program
     .command('packages')
@@ -95,8 +84,6 @@ export function registerPortablePackageCommands(program: Command): void {
         const resolved = resolveAgentPackage(pkg);
         const receipt = materializeAgentPackage(resolved, { harness, harnessVersion, outputHome });
         if (json) {
-          // Verbatim canonical receipt — byte-identical to the
-          // materialization-receipt.json the materializer wrote into the home.
           console.log(JSON.stringify(receipt, null, 2));
           return;
         }

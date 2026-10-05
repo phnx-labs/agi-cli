@@ -60,10 +60,6 @@ describe('plugins install trust gate', () => {
     expect(shouldRefusePluginInstall(capabilities, true)).toBe(false);
   });
 
-  // Without this case the gate is untested in the direction that matters. Both
-  // assertions above hold for `return !allowExecSurfaces` — a guard that ignored
-  // `capabilities` entirely and refused EVERY plugin — so nothing proved the
-  // gate actually looks for exec surfaces.
   it('installs a plugin with no exec surfaces without the flag', () => {
     const root = makePluginRoot();
     fs.mkdirSync(path.join(root, 'skills', 'demo'), { recursive: true });
@@ -118,7 +114,7 @@ describe('discoverMarketplaces with project cwd', () => {
   });
 
   afterEach(() => {
-    try { process.chdir(savedCwd); } catch { /* ignore */ }
+    try { process.chdir(savedCwd); } catch {  }
   });
 
   it('exposes a project marketplace when <cwd>/.agents/plugins/ exists', () => {

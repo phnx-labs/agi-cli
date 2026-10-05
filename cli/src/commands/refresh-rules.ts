@@ -1,10 +1,3 @@
-/**
- * Internal rules refresh command.
- *
- * Registers the hidden `agents refresh-rules` command invoked by shims for
- * agents that do not natively resolve @-imports in their rules file.
- * Recompiles only when source files have changed.
- */
 
 import { Command } from 'commander';
 import chalk from 'chalk';
@@ -12,12 +5,6 @@ import { AGENTS, resolveAgentName } from '../lib/agents.js';
 import { isVersionInstalled } from '../lib/installations/versions.js';
 import { ensureRulesFresh, supportsRulesImports } from '../lib/rules/compile.js';
 
-/**
- * Hidden command invoked by shims for agents that don't natively resolve
- * @-imports in their rules file. Fast-path check first (sha256 of tracked
- * source files); only recompiles if a source has changed since the last
- * sync. Typical cost: 10-20ms when rules are fresh.
- */
 export function registerRefreshRulesCommand(program: Command): void {
   program
     .command('refresh-rules', { hidden: true })
@@ -37,7 +24,6 @@ export function registerRefreshRulesCommand(program: Command): void {
       }
 
       if (supportsRulesImports(agentId)) {
-        // Nothing to do — agent resolves @-imports natively.
         return;
       }
 

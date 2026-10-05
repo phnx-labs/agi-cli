@@ -1,11 +1,3 @@
-/**
- * PHNX-3949 — `agents open` is the OS callback for `agents://` deep links, not a
- * user command. It is hidden as the machine-only `_callback` verb, `open` stays a
- * hidden alias for handlers written by older CLIs, and the handler management
- * moves to the visible `agents setup url-scheme` group. These assertions pin the
- * command surface so a future edit cannot silently break a previously-registered
- * OS handler (which keeps calling `agents open <url>`).
- */
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
 import { registerOpenCommand, addUrlSchemeSubcommands } from './open.js';
@@ -27,13 +19,11 @@ describe('registerOpenCommand — machine-only `_callback` with `open` alias', (
   it('hides the command from the top-level surface', () => {
     const program = buildProgram();
     const cmd = program.commands.find((c) => c.name() === '_callback')!;
-    // commander marks a `{ hidden: true }` command via its internal `_hidden`.
     expect((cmd as unknown as { _hidden: boolean })._hidden).toBe(true);
   });
 
   it('resolves `agents open <url>` through the alias (back-compat)', () => {
     const program = buildProgram();
-    // commander matches an alias to the same command object as the primary name.
     const byPrimary = program.commands.find((c) => c.name() === '_callback');
     const byAlias = program.commands.find((c) => c.aliases().includes('open'));
     expect(byAlias).toBe(byPrimary);

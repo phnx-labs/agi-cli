@@ -7,7 +7,6 @@ import * as path from 'path';
 const repoRoot = process.cwd();
 const entrypoint = path.join(repoRoot, 'src/index.ts');
 
-/** Run the CLI (optionally under a brand via AGENTS_BRAND). Returns stdout+stderr. */
 function run(home: string, args: string[], brand?: string): { out: string; code: number } {
   try {
     const out = execFileSync('bun', [entrypoint, ...args], {
@@ -51,22 +50,16 @@ describe('mine command (white-label)', () => {
     const { out } = run(home, ['setup', 'mine', 'init', 'jack', '--disable', 'teams']);
     expect(out).toContain('Minted');
 
-    // createBrandShim mints per shimTargetsFor(): a 755 bash shim on POSIX, a
-    // .cmd pass-through on Windows — assert whichever this platform actually
-    // produces rather than the POSIX one unconditionally.
     const shim = path.join(home, '.agents', '.cache', 'shims', 'jack');
     if (process.platform === 'win32') {
       expect(fs.existsSync(`${shim}.cmd`)).toBe(true);
       const body = fs.readFileSync(`${shim}.cmd`, 'utf-8');
-      // Pure pass-through: sets the brand and forwards argv with no injected verb.
       expect(body).toContain('set AGENTS_BRAND=jack');
       expect(body).toContain('%*');
     } else {
       expect(fs.existsSync(shim)).toBe(true);
-      // Executable bit set.
       expect(fs.statSync(shim).mode & 0o111).not.toBe(0);
       const body = fs.readFileSync(shim, 'utf-8');
-      // Pure pass-through: sets the brand and forwards argv with no injected verb.
       expect(body).toContain('export AGENTS_BRAND=jack');
       expect(body).toContain('exec "$AGENTS_BIN" "$@"');
     }
@@ -90,10 +83,8 @@ describe('mine command (white-label)', () => {
     const branded = run(home, ['--help'], 'jack').out;
     expect(branded).toContain('Usage: jack');
     expect(branded).toMatch(/^ {2}setup /m);
-    // The disabled command's own listing line is gone under the brand…
     expect(branded).not.toMatch(/^ {2}teams /m);
 
-    // …but the plain `agents` CLI is unaffected.
     const plain = run(home, ['--help']).out;
     expect(plain).toContain('Usage: agents');
     expect(plain).toMatch(/^ {2}teams /m);
@@ -106,7 +97,6 @@ describe('mine command (white-label)', () => {
     expect(branded.code).toBe(1);
     expect(branded.out).toContain("unknown command 'teams'");
 
-    // Under the real CLI, `teams` is a known command group (prints its usage).
     const plain = run(home, ['teams']);
     expect(plain.out).toContain('teams');
     expect(plain.out).not.toContain("unknown command 'teams'");
@@ -117,14 +107,11 @@ describe('mine command (white-label)', () => {
     run(home, ['setup', 'mine', 'toggle', 'jack', '--enable', 'teams', '--disable-plugin', 'rush', '--disable-skill', 'deploy']);
 
     const yaml = readYaml(home);
-    // Command re-enabled → no disabledCommands list.
     expect(yaml).not.toMatch(/- teams/);
-    // Plugin/skill disables land as `['*', '!name']` excludes on the brand preset.
     expect(yaml).toContain('mine-jack');
     expect(yaml).toContain("!rush");
     expect(yaml).toContain("!deploy");
 
-    // The re-enabled command now resolves (branded usage, not "unknown").
     const branded = run(home, ['teams'], 'jack');
     expect(branded.out).not.toContain("unknown command 'teams'");
   });
@@ -137,14 +124,12 @@ describe('mine command (white-label)', () => {
     expect(list).toContain('jack');
     expect(list).toContain('pranjal');
 
-    // pranjal's disable does not leak into jack.
     expect(run(home, ['cloud'], 'jack').out).not.toContain("unknown command 'cloud'");
     expect(run(home, ['cloud'], 'pranjal').out).toContain("unknown command 'cloud'");
 
     run(home, ['setup', 'mine', 'remove', 'jack', '--purge']);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'shims', 'jack'))).toBe(false);
     expect(readYaml(home)).not.toContain('mine-jack');
-    // pranjal survives.
     expect(run(home, ['setup', 'mine', 'list']).out).toContain('pranjal');
   });
 });
