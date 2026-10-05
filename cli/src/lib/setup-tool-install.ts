@@ -1,11 +1,6 @@
 import { installCli, resolveCliManifest } from './cli-resources.js';
 import { getCachedToolSetup, refreshToolSetup, type SetupTool } from './setup-tool-status.js';
-
-const PACKAGES = {
-  browser: '@phnx-labs/browser-cli@0.1.15',
-  computer: '@phnx-labs/computer-cli@0.1.5',
-  term: '@phnx-labs/term-cli@0.1.0',
-} as const;
+import { pinnedSpec } from './standalone-tools.js';
 
 /** Use the host installer; setup must not install or start a tool from a read. */
 export async function installSetupTool(tool: Exclude<SetupTool, 'secrets'>): Promise<boolean> {
@@ -13,7 +8,7 @@ export async function installSetupTool(tool: Exclude<SetupTool, 'secrets'>): Pro
   const manifest = resolveCliManifest(tool) ?? {
     name: tool,
     check: { kind: 'which' as const, cmd: tool },
-    install: [{ npm: PACKAGES[tool] }],
+    install: [{ npm: pinnedSpec(tool) }],
     source: 'builtin',
     path: '',
   };

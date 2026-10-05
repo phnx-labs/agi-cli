@@ -677,8 +677,16 @@ export async function loadLocalActiveSessions(
   const gather =
     opts.gather ??
     (async () => {
-      const { getActiveSessions } = await import('./active.js');
-      return getActiveSessions({ localOnly: true });
+      const [{ getActiveSessions }, { machineId }] = await Promise.all([
+        import('./active.js'),
+        import('../machine-id.js'),
+      ]);
+      // Stamp this box like every other gatherer: a row with no machine fails
+      // isRunningLiveSession, so a daemon-published snapshot read `--active` empty.
+      const self = machineId();
+      const rows = await getActiveSessions({ localOnly: true });
+      for (const s of rows) if (!s.machine) s.machine = self;
+      return rows;
     });
 
   const sessions = await gather();

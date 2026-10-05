@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { liveStatusWord } from './sessions.js';
+import { liveStatusWord } from './ps-roster.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 /** Minimal ActiveSession for the status-word mapping (only the fields it reads). */

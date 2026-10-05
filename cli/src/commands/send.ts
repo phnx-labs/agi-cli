@@ -12,8 +12,8 @@
  *
  * `send --to owner` is the owner-delivery path; `agents feed post --level
  * important` records a milestone and broadcasts it through the same sink.
- * Not a second stack. Not agent control — use `agents message` /
- * `agents sessions inject` for running agents.
+ * Not a second stack. The `session` channel types into a running agent's
+ * terminal (`--to <session-id>`), the home of `agents sessions inject`.
  *
  * Feed / activity are a different plane (record + read); feed.broadcast may
  * call this command as a forward sink.
@@ -130,18 +130,23 @@ const SHARED_NOTES = `
     send              - DELIVER a message to a recipient (this command)
     feed post         - RECORD progress / milestones (optional broadcast may call send)
     activity          - READ the activity stream (not a send path)
-    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)
+    message           - CONTROL a running agent through its mailbox
+    send --channel session - type text + Enter into a running agent's terminal
 
   --to owner is an address alias for notify.owner in agents.yaml, not a
-  special control path. Agent resume / PTY inject stay on message and
-  sessions inject.
+  special control path.
+
+  --channel session resolves --to (a session id or unique prefix, the
+  <shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the
+  live sessions on this machine; add --device <name> for a session on
+  another box. --attach, --thread and --from are refused on this channel.
 `;
 
 export function registerSendCommand(program: Command): void {
   const sendCmd = program
     .command('send [text]')
     .description(
-      'Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.',
+      'Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.',
     )
     .option('--text <text>', 'message body (preferred over positional text)')
     .option('--to <target>', 'recipient id, or "owner" for notify.owner in agents.yaml')
@@ -161,6 +166,10 @@ export function registerSendCommand(program: Command): void {
       agents send --to owner --text "need a decision on the release"
       agents send --channel desktop --to local --text "deploy finished" --url https://example.com/pr/1
       agents send --channel mailbox --to <session-id> --text "peer note" --from orchestrator
+
+      # Type into a running agent's terminal (find ids with: agents ps)
+      agents send --channel session --to 4b2f1a9c --text "continue"
+      agents send --channel session --to 4b2f1a9c --text "continue" --device yosemite-s0
 
       # Attach a local file
       agents send --to owner --text "screenshot" --attach ./out/cover.png

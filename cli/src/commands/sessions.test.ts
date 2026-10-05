@@ -1,26 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import {
-  buildResumeCommand,
-  resumeSpawnInvocation,
-  resolveSessionQuery,
-  buildSessionDescription,
-  metadataResolveOutcome,
-  isDefinitiveMatch,
-  selectorAllowsEarlyExit,
-  fleetNotFoundMessage,
-  mergeToolSearchEnvelopes,
-  mergeToolProgramCountEnvelopes,
-  toolOriginSessions,
-  toolSearchFleetSortError,
-  toolSearchForwardedArgs,
-  resolveSessionAgentName,
-  parseInstalledAgentVersionQuery,
-  executionKind,
-  printRoutineDrilldown,
-  parseRemoteComputerSessionRows,
-  serializeSessionPickerRows,
-  type RoutineDrilldown,
-} from './sessions.js';
+import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, fleetNotFoundMessage, mergeToolSearchEnvelopes, mergeToolProgramCountEnvelopes, toolOriginSessions, toolSearchFleetSortError, toolSearchForwardedArgs, resolveSessionAgentName, parseInstalledAgentVersionQuery, executionKind, printRoutineDrilldown, parseRemoteComputerSessionRows, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
+import { buildSessionDescription } from './ps-roster.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';

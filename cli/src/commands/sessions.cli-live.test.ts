@@ -3,13 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import {
-  matchesLiveStatus,
-  isRunningLiveSession,
-  requestedLiveStatuses,
-  buildRoutineChoices,
-  hasNoBrowserDisqualifyingFlags,
-} from './sessions.js';
+import { isRunningLiveSession, buildRoutineChoices, hasNoBrowserDisqualifyingFlags } from './sessions.js';
+import { matchesLiveStatus, requestedLiveStatuses } from './ps-roster.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 import { describeLive, writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';

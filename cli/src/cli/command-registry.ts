@@ -64,6 +64,7 @@ export const loadSessions: ModuleLoader = async () => (await import('../commands
 export const loadTeams: ModuleLoader = async () => (await import('../commands/teams.js')).registerTeamsCommands;
 const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 const loadMessage: ModuleLoader = async () => (await import('../commands/message.js')).registerMessageCommand;
+const loadPs: ModuleLoader = async () => (await import('../commands/ps.js')).registerPsCommand;
 const loadSend: ModuleLoader = async () => (await import('../commands/send.js')).registerSendCommand;
 const loadFeed: ModuleLoader = async () => (await import('../commands/feed.js')).registerFeedCommand;
 const loadMailboxes: ModuleLoader = async () => (await import('../commands/mailboxes.js')).registerMailboxesCommand;
@@ -153,6 +154,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   teams: [loadTeams],
   cloud: [loadCloud],
   message: [loadMessage],
+  ps: [loadPs],
   send: [loadSend],
   feed: [loadFeed],
   mailboxes: [loadMailboxes],

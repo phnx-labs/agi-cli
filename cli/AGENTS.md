@@ -18,7 +18,11 @@ module map, build, and release mechanics the README does not.
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
 core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.
-`agents setup status --json` is the non-interactive view of the same probes. The
+`agents setup status --json` is the non-interactive view of the same probes.
+`agents setup tools` installs or upgrades the standalone `sessions`, `browser`,
+`secrets`, `computer` and `term` CLIs to the releases pinned in
+[`src/lib/standalone-tools.ts`](src/lib/standalone-tools.ts); see
+[`docs/setup.md`](docs/setup.md#pinned-standalone-releases). The
 `term` phase installs the standalone `term` CLI (`@phnx-labs/term-cli`, the PTY
 engine the setup-token mint behind `agents accounts add`/`login` spawns on demand, PHNX-4091);
 presence on PATH is its whole readiness signal — there is nothing else to configure.
@@ -1728,6 +1732,8 @@ re-probes to confirm it took. Run it once per fleet worker
 src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
+                       #   ps.ts + ps-roster.ts: `agents ps`, the live roster (gatherActiveSessions/renderActiveSessions)
+                       #   and the stop/focus/detach/migrate verbs; `sessions --active` calls the same runLiveRoster (PHNX-4227)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
