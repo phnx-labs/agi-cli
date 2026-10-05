@@ -3,10 +3,6 @@ import { collectLocalFleetInventory, collectLocalFleetSignIn } from './fleet-inv
 import { listInstalledVersions } from '../installations/versions.js';
 import { ALL_AGENT_IDS } from '../agents.js';
 
-// Real-path: exercise the live install (no mocking). The dev machine that runs
-// the suite may have any set of installed versions — the invariants below hold
-// regardless of what is installed, so the test is deterministic without pinning
-// a fixture home.
 describe('collectLocalFleetInventory populates signIn (RUSH-2069)', () => {
   it('emits a signIn entry for every agent that has installed versions, one row per version', async () => {
     const inv = await collectLocalFleetInventory(process.cwd());
@@ -16,18 +12,15 @@ describe('collectLocalFleetInventory populates signIn (RUSH-2069)', () => {
     for (const agent of ALL_AGENT_IDS) {
       const versions = listInstalledVersions(agent);
       if (versions.length === 0) {
-        // No versions → no signIn key (keeps the map aligned with agentVersions).
         expect(signIn[agent]).toBeUndefined();
         continue;
       }
       const rows = signIn[agent];
       expect(rows, `signIn should carry ${agent}`).toBeDefined();
-      // One row per installed version, versions line up.
       expect(rows.map((r) => r.version).sort()).toEqual([...versions].sort());
       for (const row of rows) {
         expect(typeof row.signedIn).toBe('boolean');
         expect(typeof row.provable).toBe('boolean');
-        // A signed-in version is never a provable logout.
         if (row.signedIn) expect(row.provable).toBe(false);
       }
     }

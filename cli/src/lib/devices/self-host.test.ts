@@ -1,20 +1,8 @@
-/**
- * isSelfHost — the self-identity check that gates `--device` dispatch and the
- * fleet fan-out (RUSH-2114). The old check compared only machineId() (short
- * hostname), so a target referenced by its tailscale dnsName self-SSH'd to the
- * local box and orphaned. These tests pin the fix through the REAL device
- * registry IO (no mocking): the box is matched by every alias it answers to, and
- * — the safety-critical half — a genuine PEER is never matched (else `--device
- * <peer>` would wrongly run locally).
- */
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Redirect the device registry to a test-private temp + pin this machine's id.
-// getDevicesDir()/machineId() read AGENTS_DEVICES_DIR / AGENTS_SYNC_MACHINE_ID at
-// call time, immune to the module-cache race a plain HOME override loses.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-selfhost-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';

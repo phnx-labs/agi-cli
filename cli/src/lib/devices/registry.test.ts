@@ -1,26 +1,9 @@
-/**
- * Round-trip, concurrency, and corruption guarantees for the device registry.
- *
- * registry.json is the source of truth for how to reach every host. The real
- * bugs this guards against:
- *   1. A profile written by upsertDevice() must survive a reload byte-for-byte.
- *   2. Concurrent upserts must all land (lock + atomic rename serializes the
- *      read-modify-write window) — a stomp would silently drop a host.
- *   3. A malformed file must throw, not silently return {} that the next write
- *      would clobber (the data-loss path).
- *   4. `shell` is always re-derived from `platform` so the two can never drift.
- */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as fsp from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 
-// Redirect the device registry dir to a test-private temp so writes never touch
-// the user's real ~/.agents/.history/devices (RUSH-2042). state.ts's
-// getDevicesDir() reads AGENTS_DEVICES_DIR at call time, so this is immune to the
-// module-cache race that made a plain HOME override leak (state.ts pins HOME at
-// module load; a later HOME change is too late once any static import ran).
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-devices-registry-test-'));
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, 'devices');
 
@@ -54,7 +37,6 @@ describe('device registry round-trip', () => {
       tailscale: { online: true, direct: true, relay: 'sfo', lastSeen: '2026-06-30T00:00:00Z' },
     });
 
-    // shell is derived, never supplied — windows must yield powershell.
     expect(created.shell).toBe('powershell');
 
     const back = await getDevice('win-mini');
@@ -67,8 +49,8 @@ describe('device registry round-trip', () => {
     await upsertDevice('box', { platform: 'windows', user: 'admin' });
     const updated = await upsertDevice('box', { platform: 'linux' });
     expect(updated.platform).toBe('linux');
-    expect(updated.shell).toBe('posix'); // must follow the new platform, not stay 'powershell'
-    expect(updated.user).toBe('admin'); // untouched field preserved
+    expect(updated.shell).toBe('posix');
+    expect(updated.user).toBe('admin');
   });
 
   it('removes a device and reports absence', async () => {
@@ -108,17 +90,8 @@ describe('device registry corruption surfacing', () => {
   });
 });
 
-/**
- * Which devices a cross-fleet sweep dials. Both directions below were live on a
- * real 17-device fleet and together made `agents sessions --resolve` unable to
- * ever answer: the manual box holding the transcript was skipped, while two
- * sleeping boxes were dialed and their timeouts read as doubt.
- */
 describe('isDialableDevice', () => {
   it('dials a manually-registered device that the live probe reached', () => {
-    // The real yosemite-s1: address.via 'manual', so it never gets a tailscale
-    // peer entry and `tailscale.online` is permanently undefined. Gating on
-    // `online === true` hid every session on that box from the fleet sweep.
     expect(isDialableDevice({
       name: 'yosemite-s1',
       platform: 'linux',
@@ -128,10 +101,6 @@ describe('isDialableDevice', () => {
   });
 
   it('a failed probe never removes a peer the snapshot still calls online', () => {
-    // The probe runs on a short SSH budget and produces false negatives on a
-    // congested tailnet — it was observed calling the LOCAL machine unreachable.
-    // Excluding on it would hide sessions on healthy boxes, so a negative probe
-    // must not override a snapshot that says online.
     expect(isDialableDevice({
       name: 'mac-mini',
       platform: 'macos',
@@ -152,10 +121,6 @@ describe('isDialableDevice', () => {
   });
 
   it('keeps dialing a manual device even after a probe says it is unreachable', () => {
-    // The deliberate cost of "a probe may only ADD a peer": a manual device has
-    // no tailscale block to say offline, so a confirmed-dead one stays in the
-    // sweep until it is removed from the registry. Pinned so the tradeoff is a
-    // decision on record, not an accident.
     expect(isDialableDevice({
       name: 'dead-manual',
       platform: 'linux',
@@ -190,10 +155,6 @@ describe('isDialableDevice', () => {
   });
 
   it('treats a never-probed manual device as unknown-not-offline, so it is still dialed', () => {
-    // Matches ssh.ts renderDeviceTable and the ext's isDeviceOnline: offline only
-    // when a tailscale block SAYS offline. Without this, a manual device stays
-    // invisible to the sweep until something happens to probe it — the same class
-    // of bug as yosemite-s1 above, just before the first probe.
     expect(isDialableDevice({
       name: 'unknown-manual',
       platform: 'linux',
@@ -203,14 +164,9 @@ describe('isDialableDevice', () => {
 });
 
 describe('device-name validation — shape vs policy', () => {
-  // The split is load-bearing and its failure mode is invisible to CI: it only
-  // bites a fleet that already owns a node named `auto`, so nothing here would
-  // fail if the two validators were re-merged. These tests are the only thing
-  // standing between that and a fleet-wide `agents devices sync` abort.
 
   it('assertValidDeviceName is SHAPE-ONLY, so observed names keep working', async () => {
     const { assertValidDeviceName } = await import('./registry.js');
-    // A tailnet node really can be called this. Sync must not care.
     for (const observed of ['auto', 'interactive', 'all', 'AUTO']) {
       expect(() => assertValidDeviceName(observed), observed).not.toThrow();
     }
@@ -223,16 +179,10 @@ describe('device-name validation — shape vs policy', () => {
       expect(() => assertRegistrableDeviceName(reserved), reserved).toThrow(/reserved/i);
     }
     expect(() => assertRegistrableDeviceName('mac-mini')).not.toThrow();
-    // A padded name fails the SHAPE check first, which is right — spaces are
-    // invalid in an ssh alias whether or not the word is reserved. Asserting
-    // /reserved/ there would have been asserting the wrong guard.
     expect(() => assertRegistrableDeviceName('  Interactive  ')).toThrow(/Invalid device name/);
   });
 
   it('upsertDevice accepts an observed reserved name — devices sync must not abort', async () => {
-    // The regression this exists for: `devices sync` upserts every observed node
-    // in a loop with no per-node catch, so one node named `auto` would abort the
-    // whole sync and register nothing after it.
     const { upsertDevice } = await import('./registry.js');
     await expect(
       upsertDevice('auto', {
@@ -244,16 +194,10 @@ describe('device-name validation — shape vs policy', () => {
   });
 
   it('addIgnored accepts one too — otherwise the node can be neither registered nor dismissed', async () => {
-    // With both strict, `agents devices ignore auto` threw and the node stayed
-    // pending, re-prompting on every sync with no way out.
     const { addIgnored, removeIgnored } = await import('./registry.js');
     try {
       await expect(addIgnored('auto')).resolves.toBeTruthy();
     } finally {
-      // The ignore list lives in `fleet.ignored` in agents.yaml, keyed off HOME
-      // rather than AGENTS_DEVICES_DIR, so this file's beforeEach cannot sweep
-      // it. Harmless while this is the last test; a trap for the next one
-      // appended after it.
       await removeIgnored('auto');
     }
   });

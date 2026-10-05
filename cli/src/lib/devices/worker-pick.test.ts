@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveWorkerDevice, formatNoWorkerError, type WorkerExclusion } from './worker-pick.js';
 import type { DevicePlacementSignal } from '../teams/scheduler.js';
 
-/** A probe that answers from a plain table, so a test states load, not plumbing. */
 const probeFrom = (table: Record<string, DevicePlacementSignal>) =>
   async (pool: string[]) =>
     new Map(pool.filter((k) => k in table).map((k) => [k, table[k]]));
@@ -29,7 +28,6 @@ describe('resolveWorkerDevice', () => {
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a', 'worker-b'],
       localMachine: 'laptop',
-      // worker-a would win on load if reachability were ignored.
       probe: probeFrom({ 'worker-a': { reachable: false, loadPercent: 1 }, 'worker-b': healthy(70) }),
     });
     expect(plan.device).toBe('worker-b');
@@ -40,7 +38,6 @@ describe('resolveWorkerDevice', () => {
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a', 'worker-b'],
       localMachine: 'laptop',
-      // worker-a is up; its relayed probe just did not answer inside the budget.
       probe: probeFrom({
         'worker-a': { reachable: false, timedOut: true, loadPercent: 1 },
         'worker-b': healthy(70),
@@ -64,7 +61,6 @@ describe('resolveWorkerDevice', () => {
   });
 
   it('throws instead of degrading when every candidate is excluded', async () => {
-    // The whole point of the module: never answer "run it here" by omission.
     await expect(resolveWorkerDevice({
       eligibleHosts: ['worker-a', 'worker-b'],
       localMachine: 'laptop',
@@ -104,14 +100,11 @@ describe('resolveWorkerDevice', () => {
       localMachine: 'laptop',
       probe: probeFrom({ 'worker-a': healthy(12), 'worker-b': healthy(80) }),
     });
-    // `laptop` joins too: no role excludes it, which is the documented rule.
     expect(plan.candidates.map((c) => c.device).sort()).toEqual(['laptop', 'worker-a', 'worker-b']);
     expect(plan.candidates.find((c) => c.device === 'worker-b')?.loadPercent).toBe(80);
   });
 
   it('adds the local box to the pool only when no role excludes it', async () => {
-    // The rule that keeps the suite off a box marked `personal`. Here nothing is
-    // marked, so `laptop` is a legitimate candidate -- and wins on load.
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a'],
       localMachine: 'laptop',
