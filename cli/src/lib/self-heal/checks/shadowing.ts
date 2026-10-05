@@ -1,8 +1,3 @@
-// shadowing check — when a harness's own launcher shadows our shim on PATH, adopt
-// it (symlink-only, reversible) so version management wins regardless of PATH order.
-// A REAL native binary is never moved — it's surfaced as needsAttention so the
-// interactive layer can inform the user once. POSIX-only (the launcher convention
-// and PATH-order problem are POSIX; Windows resolves via the registry PATH).
 
 import type { HealCheck, HealCtx, CheckResult } from '../types.js';
 import { resultOf } from '../types.js';
@@ -23,33 +18,26 @@ export const shadowingCheck: HealCheck = {
     const fixed: string[] = [];
     const needsAttention: string[] = [];
 
-    // Isolated-only agents are skipped outright. Adoption repoints the user's OWN
-    // launcher (e.g. the npm symlink ~/.npm-global/bin/codex) at our shim — the most
-    // invasive thing self-heal does, and the exact opposite of what `--isolated`
-    // promises. The `getGlobalDefault` guard below already blocked this in practice,
-    // since an isolated install never sets a default; but that made the boundary
-    // depend on an invariant enforced elsewhere. Any path that pins a default from
-    // an isolated copy would silently re-arm the adoption. Gate on the installs
-    // themselves so it cannot happen regardless of how a default got recorded.
+    // Isolated-only agents must never enter adoption: it repoints the user's own launcher.
     for (const agent of listAgentsWithNonIsolatedInstalledVersions()) {
-      if (!getGlobalDefault(agent)) continue; // only default agents, like the interactive flow
+      if (!getGlobalDefault(agent)) continue;
       const cmd = AGENTS[agent].cliCommand;
       const shadowedBy = getPathShadowingExecutable(agent);
       if (!shadowedBy) continue;
 
       if (ctx.dryRun) {
-        // Classify without mutating: adoption only ever touches a symlink.
         let isSymlink = false;
         try {
           const fs = await import('node:fs');
           isSymlink = fs.lstatSync(shadowedBy).isSymbolicLink();
-        } catch { /* treat as real binary */ }
+        } catch {  }
         if (isSymlink) fixed.push(`${cmd} launcher (${shadowedBy})`);
         else needsAttention.push(`${cmd}: real binary shadows the shim (${shadowedBy})`);
         continue;
       }
 
       const res = adoptShadowingLauncher(agent);
+      // Adopt managed symlinks automatically, but surface real binaries for human resolution.
       if (res.adopted) fixed.push(`adopted ${cmd} launcher (${res.launcher})`);
       else if (res.reason === 'not-a-symlink') {
         needsAttention.push(`${cmd}: real binary shadows the shim (${shadowedBy})`);

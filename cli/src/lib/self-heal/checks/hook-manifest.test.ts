@@ -1,7 +1,3 @@
-// Tests for the hook-manifest check. The scenario under test is the real
-// main-branch-guard failure: a manifest entry pointing outside <root>/hooks/
-// resolves to null, the hook is dropped without a word, and the config still
-// claims it is installed.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -40,8 +36,6 @@ describe('hook-manifest check', () => {
     expect(r.needsAttention).toHaveLength(1);
     expect(r.needsAttention[0]).toContain('main-branch-guard');
     expect(r.needsAttention[0]).toContain('silently never installed');
-    // Detect-only: guessing a destination could wire the wrong file into a
-    // PreToolUse gate.
     expect(r.fixed).toEqual([]);
   });
 
