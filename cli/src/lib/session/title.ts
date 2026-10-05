@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { AgentId } from '../types.js';
 import type { SessionTitleCandidateRow } from './db.js';
 
+// Stable cross-module sentinel: excludes the titler's own utility sessions; keep classifier/tests synchronized.
 export const SESSION_TITLE_PROMPT_MARKER = 'Generate a concise session headline';
 
 export const SESSION_TITLE_MAX_CHARS = 60;
@@ -81,6 +82,7 @@ export function sanitizeGeneratedTitle(raw: string | null | undefined): string |
   return title || undefined;
 }
 
+// Reject projections omitting generatedTitle; structural typing would silently drop this headline rung.
 type CarriesTitleRung<T> = 'generatedTitle' extends keyof T ? T : never;
 
 export function sessionHeadline<
@@ -111,6 +113,7 @@ export async function resolveSessionTitleAgent(): Promise<string | null> {
   return null;
 }
 
+// Title generation runs read-only in plan mode on the cheap model tier.
 export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSignal): Promise<string> {
   const [{ getAgentsInvocation }, { execFile }, { promisify }] = await Promise.all([
     import('../daemon/daemon.js'),

@@ -25,6 +25,7 @@ export interface R2Config {
   syncEncKey?: string;
 }
 
+// Background sync reads secrets agentOnly and must never raise biometric UI.
 function resolveR2Config(): R2Config {
   const { env } = readAndResolveBundleEnvSync(SYNC_BUNDLE, { caller: 'session-transport', agentOnly: true });
   const accountId = env.R2_ACCOUNT_ID?.trim();
@@ -68,6 +69,7 @@ export function loadR2Config(): R2Config {
   return cachedConfig;
 }
 
+// Memoize success only; missing or locked bundles are retried so later unlock works without restart.
 export function isSyncConfigured(_now: number = Date.now()): boolean {
   if (cachedConfig) return true;
   try {

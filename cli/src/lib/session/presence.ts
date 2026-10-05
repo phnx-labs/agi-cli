@@ -95,6 +95,7 @@ export function observedFromActive(
   return out;
 }
 
+// Disconnect action is interactive→reconnect, remote headless→keep-alive, and local headless→none.
 export function actionFor(record: PresenceRecord): PresenceAction {
   if (record.status !== 'disconnected') return 'none';
   if (record.interactive) return 'reconnect-nudge';
@@ -102,6 +103,7 @@ export function actionFor(record: PresenceRecord): PresenceAction {
   return 'none';
 }
 
+// The watchdog owns derived presence; emit actions only on transitions and retain rows through bounded recovery.
 export function reconcilePresence(
   prev: Record<string, PresenceRecord>,
   observed: ObservedSession[],

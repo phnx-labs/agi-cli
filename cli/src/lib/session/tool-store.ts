@@ -83,6 +83,7 @@ export function purgeMissingToolCallsInDirectory(
   return purged;
 }
 
+// parsedOffset is bytes for streaming harnesses and event count for full-file harnesses; meanings never cross agents.
 export interface ToolScanResumePoint {
   parserState: string;
   parsedOffset: number;
@@ -94,6 +95,8 @@ interface PersistToolCallsOptions {
   maxSessionBytes?: number;
 }
 
+// Full parses replace and matching resumes append; calls, source stamp, and resume state commit atomically.
+// FTS text is addressed by rowid because call_key is intentionally unindexed.
 export function persistToolCalls(
   db: Database.Database,
   session: SessionMeta,
@@ -262,6 +265,7 @@ export function persistToolCalls(
   txn();
 }
 
+// Resume only when extractor, source, growth, event count, and snapshot preserve the prior prefix.
 export function planEventToolResume(
   db: Database.Database,
   sessionId: string,

@@ -59,6 +59,7 @@ export function processStartTimesMatch(recorded: string | undefined, observed: s
 }
 
 export function pidSessionEntryMatchesLiveProcess(entry: PidSessionEntry, startTime?: string): boolean | undefined {
+  // PID alone is never ownership: require the recorded boot, namespace, init, and process incarnation.
   if (!Number.isInteger(entry.pid) || entry.pid < 1) return undefined;
   if (process.platform === 'darwin') {
     const exists = pidExists(entry.pid);
@@ -158,6 +159,7 @@ function restoreOwnership(entry: PidSessionEntry): PidSessionEntry {
 }
 
 export function writePidSessionEntry(entry: PidSessionEntry): void {
+  // Only the enrolled writer namespace may create slots; legacy or old-boot state cannot reserve a recycled PID.
   if (!Number.isInteger(entry.pid) || entry.pid < 1) return;
   try {
     const scope = process.platform === 'linux' ? writerProcessView() : undefined;
@@ -193,6 +195,7 @@ export function readPidSessionEntry(pid: number): PidSessionEntry | undefined {
 }
 
 export function readLivePidSessionEntry(pid: number, startTime?: string): PidSessionEntry | undefined {
+  // Legacy entries are upgraded only when their timestamp proves the same live incarnation.
   const entry = readPidSessionEntry(pid);
   if (!entry || !hostProcessView()) return undefined;
   if (process.platform === 'win32') return pidExists(pid) === true ? entry : undefined;
@@ -230,6 +233,7 @@ export function listPidSessionEntries(): PidSessionEntry[] {
   return out;
 }
 
+// Prune only in the writer namespace and under its lock so compare-and-delete cannot remove a successor.
 export function prunePidSessionRegistry(isAlive?: (pid: number, startedAtMs?: number) => boolean | undefined): void {
   let files: string[];
   try {

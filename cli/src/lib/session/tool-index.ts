@@ -143,6 +143,7 @@ interface ToolLedgerRow {
   parsed_offset: number | null;
 }
 
+// Warm ledger probes omit potentially-megabyte parser_state; load it only for sessions that need indexing.
 function readToolLedger(db: Database.Database, sessionId: string): ToolLedgerRow | undefined {
   return db.prepare(`
     SELECT file_path, file_mtime_ms, file_size, extractor_version, parsed_offset
@@ -166,6 +167,7 @@ function needsIndex(
     || row.extractor_version !== TOOL_INDEX_VERSION;
 }
 
+// Append only when source, extractor, size, offset, and snapshot preserve the prior prefix; otherwise replace.
 function planToolScan(
   db: Database.Database,
   sessionId: string,
@@ -242,6 +244,7 @@ interface ToolParseResult {
   resume: ToolScanResumePoint | null;
 }
 
+// Advance only past complete records; reread an unterminated tail and clear resume state after oversized drops.
 async function streamJsonlToolCalls(
   session: SessionMeta,
   from: { startOffset: number; snapshot?: ToolCallCollectorSnapshot } = { startOffset: 0 },
@@ -352,6 +355,7 @@ async function toolCallsForBackfill(
   return { calls: toolCallsFromEvents(parseSession(session.filePath, session.agent)), resume: null };
 }
 
+// The byte limit is a batch boundary: admit the first oversized transcript alone and charge bytes actually read.
 export async function ensureToolIndex(
   sessions: SessionMeta[],
   limits: { maxFiles?: number; maxBytes?: number; verifySourceStamps?: boolean } = {},

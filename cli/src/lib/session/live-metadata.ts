@@ -56,6 +56,7 @@ export function liveSessionMetas(
   return out;
 }
 
+// machine is the agent/transcript owner; offloadedFrom names only the launcher.
 export function fleetExecutionMachineById(
   fleet: ActiveSession[],
 ): Map<string, string> {
@@ -67,6 +68,7 @@ export function fleetExecutionMachineById(
   return byId;
 }
 
+// Correct only self-attributed transcript-less rows from positive peer evidence; absence never proves locality.
 export function reconcileLiveMetaMachine(
   metas: SessionMeta[],
   fleetExecutionMachine: Map<string, string>,
