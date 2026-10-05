@@ -11,7 +11,7 @@ interface WatchdogHistoryEntry {
   nudgeText?: string;
 }
 
-// History deliberately excludes raw transcript tails; only bounded summaries/actions leave the log layer.
+// History deliberately omits raw tailLines while exposing the event's summary and action fields.
 interface WatchdogHistoryOptions {
   limit?: number;
   sinceMs?: number;
