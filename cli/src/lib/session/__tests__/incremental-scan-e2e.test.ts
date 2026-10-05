@@ -55,7 +55,7 @@ async function runScan(): Promise<void> {
   await discover.discoverSessions({ agent: 'claude', all: true });
 }
 
-// Exclude Claude version: it is write-once launch metadata, not incremental parser output.
+// Exclude Claude version: it is persisted origin-version metadata whose DB upsert semantics are tested separately.
 const PARITY_FIELDS = [
   'agent', 'timestamp', 'lastActivity', 'project', 'cwd', 'gitBranch',
   'topic', 'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
