@@ -1,0 +1,101 @@
+{
+  "scope": "all",
+  "cycle": null,
+  "project": null,
+  "count": 3,
+  "issues": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "updatedAt": "2026-10-05T00:32:57.219Z",
+      "identifier": "PHNX-4234",
+      "title": "Verify AGI Menu quick to-do end to end",
+      "description": "Created from AGI Menu",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 1,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": {
+        "name": "Test Owner"
+      },
+      "delegate": null,
+      "project": {
+        "name": "AGI",
+        "id": "00000000-0000-4000-8000-000000000002"
+      },
+      "projectMilestone": null,
+      "cycle": {
+        "number": 31,
+        "name": "Cycle 31"
+      },
+      "dueDate": "2026-10-04",
+      "createdAt": "2026-10-05T00:32:57.219Z",
+      "url": "https://linear.app/example-team/issue/PHNX-4234/verify-agi-menu-quick-to-do-end-to-end"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "updatedAt": "2026-10-05T00:32:57.219Z",
+      "identifier": "PHNX-9001",
+      "title": "Assigned, no due date, not a quick to-do",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 1,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": {
+        "name": "Test Owner"
+      },
+      "delegate": null,
+      "project": {
+        "name": "AGI",
+        "id": "00000000-0000-4000-8000-000000000002"
+      },
+      "projectMilestone": null,
+      "cycle": {
+        "number": 31,
+        "name": "Cycle 31"
+      },
+      "dueDate": null,
+      "createdAt": "2026-10-05T00:40:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-4234/verify-agi-menu-quick-to-do-end-to-end"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "updatedAt": "2026-10-05T00:32:57.219Z",
+      "identifier": "PHNX-9002",
+      "title": "Assigned and overdue",
+      "description": null,
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 1,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": {
+        "name": "Test Owner"
+      },
+      "delegate": null,
+      "project": {
+        "name": "AGI",
+        "id": "00000000-0000-4000-8000-000000000002"
+      },
+      "projectMilestone": null,
+      "cycle": {
+        "number": 31,
+        "name": "Cycle 31"
+      },
+      "dueDate": "2026-10-03",
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-4234/verify-agi-menu-quick-to-do-end-to-end"
+    }
+  ]
+}

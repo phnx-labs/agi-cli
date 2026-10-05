@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 474 commands._
+_65 command groups · 479 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -472,6 +472,11 @@ agents projects remove <name>        Remove a project definition. Never touches 
 agents projects save                 Create or update one project from a complete ProjectDef JSON object on stdin.
 agents projects set <name>           Change one field on a project definition, preserving everything else.
 agents projects status [nameOrPath]  Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition. A path argument (., .., a ~-prefixed value, a /-containing value, or --path) auto-detects the project that CONTAINS that directory.
+agents projects todo                 Quick to-dos in Linear: add one from a line of text, list yours, mark one done, undo.
+agents projects todo add <text...>   Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).
+agents projects todo done <id>       Mark one issue Done in Linear.
+agents projects todo list            Your open quick to-dos and anything assigned to you due today or overdue (at most 6).
+agents projects todo undo <id>       Undo the last to-do action: reopen a Done issue, or cancel a quick to-do created moments ago.
 ```
 
 ## prune: Uninstall agent CLI versions. Moves version data to trash for recovery.

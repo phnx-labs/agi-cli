@@ -1,0 +1,4 @@
+Cannot mark done without proof. Provide at least one --proof:
+  --proof /path/to/screenshot.png   (file upload)
+  --proof https://example.com/result (URL)
+  --proof "Sent 15/30 emails"        (text)
