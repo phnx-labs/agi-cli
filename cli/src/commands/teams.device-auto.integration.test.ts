@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 describe.skipIf(process.platform === 'win32')('agents teams add --device auto (RUSH-2185)', () => {
+  // Real CLI + temp HOME proves `auto` is placement, not a hostname, and reaches
+  // the authoritative no-healthy-device failure.
   let home: string;
   const machineId = 'device-auto-test-box';
 

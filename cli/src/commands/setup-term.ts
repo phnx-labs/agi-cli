@@ -14,6 +14,8 @@ export function isTermCliInstalled(): boolean {
 }
 
 export async function runTermWizard(): Promise<boolean> {
+  // term ships independently and is spawned on demand; PATH presence is readiness.
+  // agents-cli must not rebundle, probe, or configure it.
   if (isTermCliInstalled()) {
     console.log(chalk.green('The standalone `term` CLI is installed.'));
     return true;

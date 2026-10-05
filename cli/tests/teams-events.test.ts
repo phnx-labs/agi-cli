@@ -24,6 +24,7 @@ function makeTempHome(): string {
   return home;
 }
 
+// Clear inherited AGENTS_EVENTS_PATH; semantic team events emit only after commits and remain module-filterable.
 function runCli(home: string, args: string[]) {
   return spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
     cwd: REPO_ROOT,

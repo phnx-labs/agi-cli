@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+// npm identity is @phnx-labs/agents-cli while the repository is phnx-labs/agi-cli; never derive one from the other.
 const NPM_PACKAGE = '@phnx-labs/agents-cli';
 const GITHUB_REPO = 'github.com/phnx-labs/agi-cli';
 

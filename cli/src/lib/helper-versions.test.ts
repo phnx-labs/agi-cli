@@ -13,6 +13,7 @@ const spec = (over: Partial<HelperSpec> = {}): HelperSpec => ({
   ...over,
 });
 
+// Helper tags are independent release trains, never CLI versions; list only helpers this CLI distributes, with space-free asset names.
 describe('helper release tags', () => {
   it('builds a URL from the HELPER version, never the CLI version', () => {
     const { zip, sha256 } = helperAssetUrls(spec(), '1.0.0');

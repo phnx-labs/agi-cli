@@ -14,6 +14,7 @@ function overdueJob(partial: Partial<OverdueJob> = {}): OverdueJob {
   };
 }
 
+// The notifier is async: swallow ENOENT or it can crash daemon loops after the caller returns.
 describe('notifyOverdue — missing desktop notifier must not crash the daemon', () => {
   const origPath = process.env.PATH;
   afterEach(() => {
@@ -35,6 +36,7 @@ describe('notifyOverdue — missing desktop notifier must not crash the daemon',
   });
 });
 
+// Sparse cron lookback must exceed one week; one-shot schedule shapes never replay.
 describe('detectOverdueJobs — schedules sparser than the old one-week lookback', () => {
   let home: string;
   let prevHome: string | undefined;

@@ -189,6 +189,7 @@ function latestClaudeVerdict(entries: ReturnType<typeof readAuthHealthCache>): A
 }
 
 export async function buildFactorySnapshot(overrides: Partial<SnapshotDependencies> = {}): Promise<FactorySnapshot> {
+  // Device state comes from the daemon-warmed cache; snapshotting never probes or writes reachability.
   const deps: SnapshotDependencies = {
     home: os.homedir(),
     now: () => new Date(),

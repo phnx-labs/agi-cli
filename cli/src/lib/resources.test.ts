@@ -236,6 +236,7 @@ function writeSkill(root: string, name: string, frontmatter: Record<string, unkn
   fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\n${yamlLines}\n---\nbody\n`);
 }
 
+// Canonical names outrank aliases across layers; alias-vs-alias only uses layer precedence.
 describe('resource aliases (RUSH-2504)', () => {
   it('resolves a skill by a declared alias, returning the canonical resource', () => {
     const home = makeHome();

@@ -26,6 +26,7 @@ afterEach(() => {
   fs.rmSync(TMP, { recursive: true, force: true });
 });
 
+// Strip only Claude-invalid bare skills and commands; agents targeting metadata survives. Repair preserves other fields and is dry-run safe and idempotent.
 describe('repairableManifestFields', () => {
   it('flags a bare-name skills array', () => {
     expect(repairableManifestFields({ name: 'code', skills: ['loop', 'review'] })).toEqual(['skills']);

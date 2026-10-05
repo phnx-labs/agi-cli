@@ -17,6 +17,8 @@ function buildAddGenericPasswordArgs(account: string, item: string): string[] {
 function buildAddGenericPasswordSpawnOptions(
   value: string,
 ): SpawnSyncOptions & { input: string; detached: boolean } {
+  // Bare security -w prompts twice. Pipe the value twice and detach so it reads
+  // stdin instead of promoting to the controlling /dev/tty.
   return {
     input: `${value}\n${value}\n`,
     stdio: ['pipe', 'pipe', 'pipe'],

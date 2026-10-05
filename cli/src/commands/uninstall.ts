@@ -120,6 +120,7 @@ export function registerUninstallCommands(program: Command): void {
   });
 
   cmd.action(async (options: UninstallOptions) => {
+    // Disable the memoized sink before moving ~/.agents or a late emit recreates it.
     process.env.AGENTS_DISABLE_EVENT_LOG = '1';
 
     const plan = planUninstall();

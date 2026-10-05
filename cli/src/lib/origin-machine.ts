@@ -10,6 +10,8 @@ export function localMachineId(): string {
 }
 
 export function machineForSessionFile(filePath: string, agent: string): string {
+  // Only backups/<agent>/<machine>/… encodes a remote origin; every other
+  // transcript is local. Keep this leaf free of session/database imports.
   if (!filePath) return localMachineId();
   const base = path.join(getHistoryDir(), 'backups', agent) + path.sep;
   if (filePath.startsWith(base)) {

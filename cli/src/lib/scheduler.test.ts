@@ -8,6 +8,7 @@ import { missedRunId } from './catchup.js';
 import * as activation from './routine-activation.js';
 import { getUserAgentsDir } from './state.js';
 
+// Reload rereads device activation instead of retaining stale constructor state.
 describe('JobScheduler.reloadAll — device activation refresh', () => {
   const name = 'rush1980-scheduler-test';
   const SELF = 'rush1980-self';
@@ -62,6 +63,7 @@ describe('JobScheduler.reloadAll — device activation refresh', () => {
   });
 });
 
+// Pin cron UTC and floor jitter so forward scheduling and catch-up derive the same occurrence key.
 describe('fireSlot — aligned, unconditional occurrence key (SING-15)', () => {
   it('floors a jittered fire instant to the aligned schedule boundary', () => {
     const cron = new Cron('0 9 * * 1-5', { paused: true, timezone: 'UTC' });
