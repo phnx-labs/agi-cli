@@ -7,8 +7,9 @@
   written once under `~/.agents/.cache/attachments/<session>/` so the editor can
   show them, including a paste larger than one timeline read. That record resumes
   from the next tick instead of freezing the row, and its image bytes are not
-  stored in the timeline cache. Plans rendered by the artifacts CLI join the row
-  by session id.
+  stored in the timeline cache. An unfinished record that still fits in one
+  read is left until its newline arrives, so a long turn that is still flushing
+  is not dropped. Plans rendered by the artifacts CLI join the row by session id.
   The projection comes from `@phnx-labs/sessions-cli@0.5.0` and is folded once
   in the daemon timeline pass. Older extensions ignore the new fields.
   Source: `cli/src/lib/session/glance-files.ts`, `cli/src/lib/session/timeline-pass.ts`,

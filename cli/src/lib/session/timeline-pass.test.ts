@@ -316,6 +316,27 @@ describe('runTimelinePass — the daemon\'s incremental fold', () => {
     expect(JSON.stringify(done.state)).not.toContain(data.slice(100, 180));
   });
 
+  it('leaves an unfinished tail unread until its newline fits in one read', () => {
+    const text = `see this ${'x'.repeat(300_000)}`;
+    const line = JSON.stringify({
+      type: 'user',
+      timestamp: '2026-10-02T22:13:00.000Z',
+      message: { role: 'user', content: text },
+    });
+    const file = path.join(tmpHome, 'tail-300.jsonl');
+    fs.writeFileSync(file, line);
+    expect(line.length).toBeGreaterThan(256 * 1024);
+    expect(line.length).toBeLessThan(pass.TIMELINE_PASS_MAX_BYTES_PER_SESSION);
+
+    const waiting = pass.runTimelinePassSync({ sessions: [row('tail-300', file)] });
+    expect(waiting).toMatchObject({ computed: 0, reused: 1 });
+    expect(db.readSessionTimelineEntry('tail-300')?.state.partialLine).toBeUndefined();
+
+    fs.appendFileSync(file, '\n');
+    expect(pass.runTimelinePassSync({ sessions: [row('tail-300', file)] })).toMatchObject({ computed: 1, reused: 0 });
+    expect(db.readSessionTimelineAny('tail-300')?.userTurns?.some(turn => turn.text.includes('see this'))).toBe(true);
+  });
+
   it('projects the glance model, and an older extractor version is refolded', () => {
     const file = path.join(tmpHome, 'glance.jsonl');
     fs.writeFileSync(file, JSON.stringify({

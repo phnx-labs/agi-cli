@@ -1060,7 +1060,8 @@ SSH access (§7); rendering sessions that no harness produced.
   remain on the folded event or in the persisted timeline state. A JSONL record
   larger than one timeline read MUST resume from `partialLine` with the offset
   advanced past the bytes already consumed, so a pasted image bigger than that
-  read does not freeze the fold. Artifact sidecars join `artifacts` by session id,
+  read does not freeze the fold. An unfinished record that still fits in one
+  read MUST stay unread until its newline is inside that read. Artifact sidecars join `artifacts` by session id,
   and a `plans` bucket sets `planFile`. Older clients ignore the new fields. A
   heavy filter (agent, tools, reasoning) is not on the row: one explicit
   `agents sessions <id> --include … --json` fetches it, never a selection change
