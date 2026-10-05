@@ -24,6 +24,7 @@ export function parseSubagentFrontmatter(filePath: string): SubagentFrontmatter 
 
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
+    // CRLF support is required for subagents checked out on Windows.
     const lines = content.split(/\r?\n/);
 
     if (lines[0] === '---') {
@@ -335,6 +336,7 @@ export function transformSubagentForCodex(subagentDir: string): string {
 
   const instructions = flattenSubagentInstructions(subagentDir);
 
+  // Escape backslashes and TOML multiline delimiters without changing the instruction text.
   const safeInstructions = instructions.replace(/\\/g, '\\\\').replace(/"""/g, '\\"""');
   const safeName = frontmatter.name.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const safeDesc = frontmatter.description.replace(/\\/g, '\\\\').replace(/"/g, '\\"');

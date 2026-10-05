@@ -80,6 +80,7 @@ function toTargetPortable(home: string, abs: string): string {
 }
 
 export function isBareRelative(home: string, p: string): boolean {
+  // Path flavor comes from the target home, not the controller OS.
   return !targetPath(home).isAbsolute(p) && !p.startsWith('~') && !p.startsWith('$HOME');
 }
 
@@ -97,6 +98,7 @@ function pause(
 }
 
 export function resolveRoutineExecutionContext(input: ExecutionContextInput): ResolvedExecutionContext {
+  // Placement and project ownership form one execution trust boundary.
   const { project, cwd, kind, mode, targetHome, projectResolution, probe } = input;
   const requestedCwd = cwd;
   const base = { project, requestedCwd, targetHome };
@@ -155,6 +157,7 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         return finalize(projBase, 'project_path_missing');
       }
       if (isBareRelative(targetHome, cwd)) {
+        // Project-relative cwd must remain contained by the resolved project base.
         const baseAbs = expandTargetHome(targetHome, projBase);
         const joinedAbs = targetPath(targetHome).resolve(baseAbs, cwd);
         if (!isInside(baseAbs, joinedAbs)) {
@@ -189,6 +192,7 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         return finalize(toTargetPortable(targetHome, resolved), 'cwd_missing');
       }
       if (mode === 'local') {
+        // Outside-home absolute paths are valid only on their originating local machine.
         return finalize(resolved, 'cwd_missing');
       }
       return pause(base, {
@@ -196,6 +200,7 @@ export function resolveRoutineExecutionContext(input: ExecutionContextInput): Re
         message: `absolute cwd '${cwd}' is outside the target home and cannot travel to ${mode} placement — use a home-relative path`,
       });
     }
+    // Unbound relative cwd anchors to target HOME; command-only jobs rely on this fallback.
     return finalize(toTargetPortable(targetHome, targetPath(targetHome).resolve(targetHome, cwd)), 'cwd_missing');
   }
 

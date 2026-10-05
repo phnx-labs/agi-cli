@@ -68,8 +68,10 @@ export class FeedSessionProjection {
       const { v: _v, streamId: _streamId, sequence: _sequence, ...payload } = event;
       return [this.state.emit(payload)];
     }
+    // Reset ownership stays per scope; one peer must never erase another peer's projection.
     const projected = sessionEvent ? this.sessions.apply(sessionEvent) : [];
     const next = new Map<string, { scope: string; item: AttentionItem }>();
+    // Attention keys remain stable and historical rows never become actionable.
     for (const [observer, items] of this.observations) for (const [rowKey, item] of items) {
       const row = this.sessions.rowForObservation(observer, rowKey);
       if (row && !row.previous && row.sourceDevice === observer) next.set(item.key, { scope: observer, item });
@@ -107,6 +109,7 @@ function isLive(agent: SessionWatchRow): boolean {
 }
 
 function reconcilerSession(agent: SessionWatchRow): import('../session/active.js').ActiveSession {
+  // Feed host names the source device; only reconciliation translates it into active-session scope.
   return { ...agent, context: agent.context as import('../session/active.js').ActiveSession['context'], host: agent.sourceDevice, viewingIn: undefined };
 }
 
@@ -154,6 +157,7 @@ export async function projectSessionEnvelope(event: SessionWatchEnvelope, state:
 }
 
 function watchAttentionStores(onChange: () => void): () => void {
+  // Resolutions are event-driven; create the lazy directory so answers do not degrade to polling.
   const feedDir = getFeedDir();
   const watchers: fs.FSWatcher[] = [];
   for (const dir of [feedDir, path.join(feedDir, 'resolutions')]) {
@@ -288,11 +292,13 @@ function remoteFeedWatchCommand(os: string): string {
 }
 
 export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
+  // Missing v1 fields are valid during rolling upgrades.
   if (event.type !== 'reset') return event;
   if (Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
   return { ...event, tools: event.tools ?? [], setup: event.setup ?? [] };
 }
 
+// One process-wide hub shares filesystem watchers and cursor scans across refcounted subscribers.
 let sharedLocal: FeedHub | null = null;
 
 export function sharedLocalFeedHub(): FeedHub {

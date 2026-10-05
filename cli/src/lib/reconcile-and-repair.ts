@@ -69,6 +69,7 @@ interface RepairAfterSyncOptions {
 
 
 function rewireUnwiredHooks(agent: AgentId | undefined, versions: string[] | undefined): HookRewireResult[] {
+  // Repair only missing wiring in the supported set; never delete user hook entries.
   const out: HookRewireResult[] = [];
   const agents = agent
     ? (HOOK_WIRING_FIX_AGENTS.includes(agent) ? [agent] : [])
@@ -136,6 +137,7 @@ function purgeStaleAgentsCliCopies(injection?: PurgeInjection): RemediateStaleIn
 
 
 export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<RepairAfterSyncReport> {
+  // Reconcile canonical resources before targeted fill/fix repairs.
   const healResult = await heal({
     mode: 'full',
     agent: opts.agent,
@@ -145,6 +147,7 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
 
   const hookRewire = rewireUnwiredHooks(opts.agent, opts.versions);
 
+  // Runtime repair is bounded by the requested agent/version filter.
   const hookRuntimeRepair = repairManagedHookRuntimeArtifacts({
     filter: runtimeRepairFilter(opts.agent, opts.versions),
   });
@@ -153,6 +156,7 @@ export async function repairAfterSync(opts: RepairAfterSyncOptions): Promise<Rep
     ? purgeStaleAgentsCliCopies(opts.purgeInjection)
     : null;
 
+  // Reproject account slots after sync so native homes cannot retain stale assignments.
   const slotProjection: SlotProjection[] = [];
   const slotProjectionErrors: string[] = [];
   const slotAgents = opts.agent ? [opts.agent] : ALL_AGENT_IDS.filter((a) => listInstalledVersions(a).length > 0);
@@ -190,6 +194,7 @@ export function repairChangedAnything(report: RepairAfterSyncReport): boolean {
 }
 
 export function repairHadFailures(report: RepairAfterSyncReport): boolean {
+  // Stale-install purge failures are reported separately, not as reconcile failure status.
   return (
     report.hookRewire.some((r) => r.failure !== undefined) ||
     report.hookRuntimeRepair.needsAttention.length > 0
