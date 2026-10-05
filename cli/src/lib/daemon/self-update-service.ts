@@ -57,6 +57,7 @@ import {
 import { tryAutoPullSystemRepo } from '../git.js';
 import { getSystemAgentsDir } from '../state.js';
 import { runUmbrellaSync } from '../sync-umbrella.js';
+import { upgradeOutdatedClis, type CliUpgradeResult } from '../cli-resources.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
@@ -487,5 +488,28 @@ export class SelfUpdateService extends BasePeriodicService {
           'process upgrades the install (`agents doctor` lists the shadow copy)',
       );
     }
+    await upgradeHostClis(ctx, signal);
+  }
+}
+
+/**
+ * Bring installed host CLIs (browser, secrets, computer, …) up to the npm pin
+ * their manifest declares. They are separate packages with their own release
+ * trains, so the agents-cli self-update above never moves them; without this a
+ * box kept whatever version it first installed (R5). A failure leaves that
+ * tool on its old version and is retried next tick.
+ */
+async function upgradeHostClis(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+  let results: CliUpgradeResult[];
+  try {
+    results = await upgradeOutdatedClis(signal);
+  } catch (err) {
+    ctx.log('WARN', `host-cli upgrade: could not read CLI manifests: ${(err as Error).message}`);
+    return;
+  }
+  for (const r of results) {
+    if (r.status === 'upgraded') ctx.log('INFO', `host-cli upgrade: ${r.name} ${r.from} -> ${r.to}`);
+    else if (r.status === 'failed') ctx.log('WARN', `host-cli upgrade: ${r.name} failed, left as is: ${r.reason}`);
+    else if (r.status === 'skipped' && r.reason.startsWith('outdated')) ctx.log('WARN', `host-cli upgrade: ${r.name} ${r.reason}`);
   }
 }

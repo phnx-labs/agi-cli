@@ -25,6 +25,7 @@ import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { execFileShellSpec } from './platform/exec.js';
 import { localBinDir } from './platform/posixpath.js';
+import { compareVersions } from './agent-spec/primitives.js';
 
 // ─── Validation primitives ───────────────────────────────────────────────────
 
@@ -668,6 +669,131 @@ export function installCli(
   cmdExistsCache.delete(manifest.name);
   const installed = isCliInstalled(manifest);
   return { manifest, method, installed };
+}
+
+// ─── Version pins ────────────────────────────────────────────────────────────
+//
+// A manifest's `npm: pkg@x.y.z` is a pin, not only a first-install hint: a host
+// whose binary reports an older version is outdated, and the daemon upgrades it
+// in place. Without this, `check` passed on any version, so once a tool was on a
+// box nothing ever moved it (the fleet sat on secrets-cli 0.1.6 for a release
+// that fixed `--durable`).
+
+const EXACT_SEMVER = /^\d+\.\d+\.\d+$/;
+const FIRST_SEMVER = /\d+\.\d+\.\d+/;
+
+/** The exact npm pin a manifest declares, or null when its npm method is unpinned or a tag. */
+export function npmPin(manifest: CliManifest): { pkg: string; version: string } | null {
+  const method = manifest.install.find((m): m is { npm: string } => 'npm' in m);
+  if (!method) return null;
+  const at = method.npm.lastIndexOf('@');
+  if (at <= 0) return null;
+  const version = method.npm.slice(at + 1);
+  return EXACT_SEMVER.test(version) ? { pkg: method.npm.slice(0, at), version } : null;
+}
+
+/** The version the host binary reports through its `version` check, or null if it reports none. */
+export async function installedCliVersion(manifest: CliManifest): Promise<string | null> {
+  const c = manifest.check;
+  if (c.kind !== 'version') return null;
+  try {
+    const { stdout } = await probeCapture(c.cmd, c.args, 10_000);
+    return FIRST_SEMVER.exec(stdout)?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Absolute, symlink-resolved path of `cmd` on PATH (POSIX), or null. */
+function resolveOnPath(cmd: string): string | null {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, cmd);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return fs.realpathSync(candidate);
+    } catch {
+      /* not in this dir */
+    }
+  }
+  return null;
+}
+
+/**
+ * The npm global prefix that owns the `cmd` PATH resolves, so an upgrade replaces
+ * the copy that actually runs. `npm install -g` alone targets npm's own prefix,
+ * which on a box with nvm differs from the `~/.local` install on PATH: the
+ * install "succeeds" and the old binary keeps answering.
+ */
+export function owningNpmPrefix(cmd: string, pkg: string): string | null {
+  const real = resolveOnPath(cmd);
+  if (!real) return null;
+  const marker = `${path.sep}lib${path.sep}node_modules${path.sep}${pkg.split('/').join(path.sep)}${path.sep}`;
+  const idx = real.indexOf(marker);
+  return idx > 0 ? real.slice(0, idx) : null;
+}
+
+export type CliUpgradeResult =
+  | { name: string; status: 'current'; version: string }
+  | { name: string; status: 'upgraded'; from: string; to: string }
+  | { name: string; status: 'skipped' | 'failed'; reason: string };
+
+const UPGRADE_TIMEOUT_MS = 5 * 60_000;
+
+function runNpmInstall(prefix: string, spec: string, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'npm',
+      ['install', '-g', '--prefix', prefix, spec],
+      { timeout: UPGRADE_TIMEOUT_MS, signal, maxBuffer: 16 * 1024 * 1024 },
+      (err, _stdout, stderr) => {
+        if (err) reject(new Error(`npm install -g --prefix ${prefix} ${spec} failed: ${String(stderr).trim().split('\n').pop() ?? err.message}`));
+        else resolve();
+      },
+    );
+  });
+}
+
+/**
+ * Bring one installed, npm-pinned CLI up to its pin. Never installs a missing
+ * tool (that stays an operator choice through `agents cli install`), never
+ * downgrades, and reports `upgraded` only after the binary on PATH answers with
+ * the pinned version. A failed install leaves the old version in place.
+ */
+export async function upgradeCliToPin(manifest: CliManifest, signal?: AbortSignal): Promise<CliUpgradeResult> {
+  const name = manifest.name;
+  const pin = npmPin(manifest);
+  if (!pin) return { name, status: 'skipped', reason: 'no exact npm pin' };
+  if (manifest.check.kind !== 'version') return { name, status: 'skipped', reason: 'check reports no version' };
+  const from = await installedCliVersion(manifest);
+  if (!from) return { name, status: 'skipped', reason: 'not installed or reports no version' };
+  if (compareVersions(from, pin.version) >= 0) return { name, status: 'current', version: from };
+  if (process.platform === 'win32') return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}); unattended upgrade is POSIX-only` };
+  const prefix = owningNpmPrefix(manifest.check.cmd, pin.pkg);
+  if (!prefix) {
+    return { name, status: 'skipped', reason: `outdated (${from} < ${pin.version}) but ${manifest.check.cmd} on PATH is not an npm install of ${pin.pkg}` };
+  }
+  try {
+    await runNpmInstall(prefix, `${pin.pkg}@${pin.version}`, signal);
+  } catch (err) {
+    return { name, status: 'failed', reason: (err as Error).message };
+  }
+  const to = await installedCliVersion(manifest);
+  if (to !== pin.version) {
+    return { name, status: 'failed', reason: `installed ${pin.pkg}@${pin.version} into ${prefix} but ${manifest.check.cmd} still reports ${to ?? 'no version'}` };
+  }
+  return { name, status: 'upgraded', from, to };
+}
+
+/** Upgrade every installed host CLI whose manifest pins a newer npm version. */
+export async function upgradeOutdatedClis(signal?: AbortSignal, cwd?: string): Promise<CliUpgradeResult[]> {
+  const { manifests } = listCliManifests(cwd);
+  const results: CliUpgradeResult[] = [];
+  for (const manifest of manifests) {
+    if (signal?.aborted) break;
+    results.push(await upgradeCliToPin(manifest, signal));
+  }
+  return results;
 }
 
 // ─── Status snapshot ─────────────────────────────────────────────────────────

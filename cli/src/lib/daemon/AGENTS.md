@@ -105,6 +105,16 @@ record of `null` for it.
   same in-flight guard) and answers "triggered" immediately, so a version-skewed
   `agents browser <verb>` — every one routes through this path — is never parked
   behind the full check→download→install→verify).
+  When the tick does not exit for a relaunch, it also brings installed host CLIs
+  up to their manifest pin (`upgradeOutdatedClis`, `cli-resources.ts`). A
+  `clis/<name>.yaml` entry such as `npm: "@phnx-labs/secrets-cli@0.1.8"` is a
+  floor: a binary reporting an older `--version` is reinstalled at the pin into
+  the npm prefix that owns the copy on PATH (not npm's own prefix, which differs
+  on an nvm box), then re-probed; `upgraded` is logged only when the binary on
+  PATH answers with the pin. It never installs a missing tool, never downgrades,
+  skips a binary that is not an npm install of the pinned package (logged), and
+  leaves the old version in place on a failed install. Async throughout, so the
+  event loop is never parked on `npm install`.
   Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`
