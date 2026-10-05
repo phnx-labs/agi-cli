@@ -34,6 +34,7 @@ interface ResolvedLaunchAccount {
 
 export interface ResolvedLocalAccountLaunch {
   agent: AgentId;
+  // Selects the binary only; account identity is resolved independently below.
   executableVersion: string;
   account: ResolvedLaunchAccount | null;
   execHome?: string;
@@ -96,6 +97,7 @@ export async function resolveLocalAccountLaunch(
   const selector = options.selector ?? (selected ? candidateSelector(selected) : undefined);
 
   if (selected && !selector) {
+    // Legacy labels locate an exact local home; they are not rediscovered identities.
     const execHome = getVersionHomePath(options.agent, selected.version);
     if (!fs.existsSync(execHome)) {
       throw new Error(`${selected.accountLabel || options.agent} has no local account home at ${execHome}.`);
