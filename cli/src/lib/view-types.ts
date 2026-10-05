@@ -12,7 +12,7 @@ export interface ViewJsonVersion {
   isDefault: boolean;
   isolated: boolean;
   isIsolatedDefault: boolean;
-  // signedIn is authentication state; launchable is the stricter runnable verdict.
+  // signedIn may reflect inherited auth; launchable is per-version spawn truth used for placement, and older peers may omit it.
   signedIn: boolean;
   launchable: boolean;
   authVerdict: AuthVerdict | null;
@@ -43,7 +43,7 @@ export interface ViewJsonVersion {
 }
 
 export interface ViewJsonRunReady {
-  // Computed from the same candidates as versions so Fleet does not contradict detail views.
+  // Computed from router candidates, including native slots—not versions[]; remote placement consumes this verdict.
   ready: boolean;
   reason: string;
   accounts: Array<{ name: string; ready: boolean; reason: string }>;
