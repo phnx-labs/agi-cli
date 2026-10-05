@@ -44,7 +44,6 @@ function dir(name: string): string {
   return made;
 }
 
-/** Put a real executable script on PATH for this test. */
 function script(binDir: string, name: string, body: string): string {
   const file = path.join(binDir, name);
   fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -52,7 +51,6 @@ function script(binDir: string, name: string, body: string): string {
   return file;
 }
 
-/** NUL-delimited argv a child script recorded, so an embedded newline is unambiguous. */
 function recordedArgv(file: string): string[] {
   const raw = fs.readFileSync(file, 'utf8');
   return raw.split('\0').slice(0, -1);
@@ -73,13 +71,10 @@ function questionBlock(sessionId: string, over: Partial<OpenBlock> = {}): OpenBl
   };
 }
 
-// --- attention key + local/remote choice ------------------------------------
 
 describe('attention key', () => {
   it('parses host, session and generation, and refuses a malformed key', () => {
     expect(parseAttentionKey('zion/sess-1/gen-9')).toEqual({ host: 'zion', sessionId: 'sess-1', generation: 'gen-9' });
-    // The old `slice(0, indexOf('/'))` turned a separator-less key into a
-    // truncated host and then routed the answer at that phantom machine.
     expect(() => parseAttentionKey('nohostorgeneration')).toThrow('Malformed attention key');
     expect(() => parseAttentionKey('zion/sess-1/')).toThrow('Malformed attention key');
   });
@@ -90,7 +85,6 @@ describe('attention key', () => {
   });
 });
 
-// --- the remote hop ---------------------------------------------------------
 
 describe('forwardFeedAnswer over a real ssh child', () => {
   /** A faithful `ssh`: real ssh hands its last argument to the remote login shell, so the fake
@@ -109,7 +103,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
       `printf '{"status":"delivered","delivery":"receipt","resolved":false,"attentionKey":"%s","receipt":{"msgId":"m1","status":"queued","at":"2026-09-13T00:00:00.000Z"}}\\n' "$3"`,
     ].join('\n'));
 
-    // Every metacharacter a naive join would let the remote shell evaluate.
     const answer = 'line one\nline two $(whoami) `id` "quoted" \'single\' ; rm -rf / && echo $HOME | cat > /tmp/x';
     const result = await forwardFeedAnswer({
       host: 'worker', attentionKey: 'worker/sess-remote/gen-1', text: answer, timeoutMs: 10_000,
@@ -118,7 +111,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
     expect(result.status).toBe('delivered');
     const argv = recordedArgv(argvFile);
     expect(argv).toEqual(['feed', 'answer', 'worker/sess-remote/gen-1', '--json', '--text', answer]);
-    // Nothing was evaluated on the way: the destructive fragments are still text.
     expect(argv[5]).toContain('$(whoami)');
     expect(argv[5]).toContain('\n');
     expect(fs.existsSync('/tmp/x')).toBe(false);
@@ -135,7 +127,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
     expect(result.delivery).toBe('unconfirmed');
     expect(result.resolved).toBe(false);
     expect(result.reason).toMatch(/Check delivery rather than resending/);
-    // Bounded: the whole call returns far inside the AGI Menu's 30s abandon.
     expect(Date.now() - startedAt).toBeLessThan(5_000);
   });
 
@@ -146,8 +137,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
     const result = await forwardFeedAnswer({
       host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
     });
-    // The remote DID run, so this is not a retry-safe failure — but its answer
-    // describes another item, so it is no evidence about this one either.
     expect(result.status).toBe('unknown');
     expect(result.delivery).toBe('unconfirmed');
     expect(result.receipt).toBeUndefined();
@@ -157,7 +146,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
   it('treats a delivered-then-truncated remote reply as unknown, not a safe retry', async () => {
     const bin = dir('bin');
     fakeSsh(bin);
-    // Wrote to the rail, then died before emitting its JSON receipt.
     script(bin, 'agents', 'echo "panic: connection reset" >&2\nexit 1');
     const result = await forwardFeedAnswer({
       host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
@@ -168,9 +156,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
 
   it('reports an ssh failure as UNKNOWN — non-delivery is unprovable once dispatched', async () => {
     const bin = dir('bin');
-    // Exit 255 covers BOTH "could not connect" and "connection dropped after the
-    // answer was delivered", and a dropped link can lose the stdout that would
-    // have distinguished them. So it can never license a retry.
     script(bin, 'ssh', 'echo "ssh: connect to host worker port 22: No route to host" >&2\nexit 255');
     const result = await forwardFeedAnswer({
       host: 'worker', attentionKey: 'worker/sess-mine/gen-1', text: 'go', timeoutMs: 10_000,
@@ -220,7 +205,6 @@ describe('forwardFeedAnswer over a real ssh child', () => {
   });
 });
 
-// --- targeting --------------------------------------------------------------
 
 describe('answer targeting', () => {
   it('never answers a different session that is also pending', async () => {
@@ -238,7 +222,6 @@ describe('answer targeting', () => {
     });
 
     expect(fs.readdirSync(path.join(mailboxRoot, 'mine', 'inbox'))).toHaveLength(1);
-    // The other operator's pending request was neither claimed nor delivered to.
     expect(fs.existsSync(path.join(mailboxRoot, 'theirs'))).toBe(false);
     expect(getAnswerRecord(blockIdForSession('theirs'), feedRoot)).toBeUndefined();
   });
@@ -251,7 +234,6 @@ describe('answer targeting', () => {
     publishBlock(first, feedRoot);
     const staleKey = reconcileAttention({ block: first, session, nowMs: Date.now() })!.key;
 
-    // The agent asked something else; the block generation moves with it.
     const second = questionBlock('moved', { ts: '2026-09-13T11:00:00.000Z', questions: [{ text: 'Roll back?' }] });
     publishBlock(second, feedRoot);
 
@@ -271,10 +253,8 @@ describe('answer targeting', () => {
   });
 });
 
-// --- PR enrichment is last, not first ---------------------------------------
 
 describe('PR enrichment', () => {
-  /** A `gh` that records every call and then stalls, so an eager read is visible AND slow. */
   function stallingGh(bin: string, marker: string): void {
     script(bin, 'gh', `touch "${marker}"\nsleep 20`);
   }
@@ -286,8 +266,6 @@ describe('PR enrichment', () => {
     const marker = path.join(tmp, 'gh-ran');
     stallingGh(bin, marker);
 
-    // A session carrying a PR — exactly the row whose enrichment used to be paid
-    // for before the requested key was even compared.
     const session = parkedSession('with-pr', { cwd: tmp, pr: { number: 7, url: 'https://example.test/pr/7' } } as Partial<ActiveSession>);
     publishBlock(questionBlock('with-pr'), feedRoot);
     const key = reconcileAttention({ block: questionBlock('with-pr'), session, nowMs: Date.now() })!.key;
@@ -325,7 +303,6 @@ describe('PR enrichment', () => {
   });
 });
 
-// --- receipts and idempotence ------------------------------------------------
 
 describe('claims reconciled against real receipts', () => {
   it('a repeat answer reports the FIRST delivery\'s real receipt and enqueues nothing new', async () => {
@@ -350,9 +327,6 @@ describe('claims reconciled against real receipts', () => {
     expect(classifyReceipt({ msgId: 'm', status: 'queued', at: 'x' })).toEqual({ delivery: 'receipt', resolved: false });
     expect(classifyReceipt({ msgId: 'm', status: 'consumed', at: 'x' })).toEqual({ delivery: 'receipt', resolved: true });
     expect(classifyReceipt({ msgId: 'm', status: 'continued', at: 'x' })).toEqual({ delivery: 'receipt', resolved: true });
-    // `dropped`/`expired` outrank `continued` in the monotonic WRITE rank, so a
-    // reader that equated "furthest along" with success reported a dead message
-    // as a resolved answer.
     expect(classifyReceipt({ msgId: 'm', status: 'dropped', at: 'x' })).toEqual({ delivery: 'failed', resolved: false });
     expect(classifyReceipt({ msgId: 'm', status: 'expired', at: 'x' })).toEqual({ delivery: 'failed', resolved: false });
   });
@@ -385,7 +359,6 @@ describe('claims reconciled against real receipts', () => {
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
 
-    // A claim written, then the process killed before any rail reported back.
     const markerDir = path.join(feedRoot, 'answered');
     fs.mkdirSync(markerDir, { recursive: true });
     fs.writeFileSync(path.join(markerDir, `${block.blockId}.json`), JSON.stringify({
@@ -399,7 +372,6 @@ describe('claims reconciled against real receipts', () => {
     expect(adopted.status).toBe('delivered');
     expect(adopted.receipt?.status).toBe('queued');
 
-    // Two retries after the strand window must not both deliver.
     const again = await claimAndRouteAttentionAnswer(common);
     expect(again.status).toBe('already_answered');
     expect(fs.readdirSync(path.join(mailboxRoot, 'stranded', 'inbox'))).toHaveLength(1);
@@ -426,7 +398,6 @@ describe('claims reconciled against real receipts', () => {
 });
 
 describe('stranded-claim replay is bound to the ask and the rail', () => {
-  /** Write an answered marker directly, as a killed run would leave behind. */
   function strandClaim(blockId: string, feedRoot: string, ageMs: number): string {
     const answeredAt = new Date(Date.now() - ageMs).toISOString();
     const dir = path.join(feedRoot, 'answered');
@@ -442,13 +413,11 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
     const mailboxRoot = dir('mail');
     const session = parkedSession('two-asks');
 
-    // Question 1 was answered and its message is still in the spool.
     enqueue(mailboxDir('two-asks', mailboxRoot), {
       to: 'two-asks', text: 'answer to the FIRST question', blockId: blockIdForSession('two-asks'),
       generation: '2026-09-13T10:00:00.000Z', attempt: '2026-09-13T10:00:01.000Z',
     });
 
-    // The agent has since asked question 2, whose claim a kill stranded.
     const q2 = questionBlock('two-asks', { ts: '2026-09-13T12:00:00.000Z', questions: [{ text: 'Second question?' }] });
     publishBlock(q2, feedRoot);
     const q2Key = reconcileAttention({ block: q2, session, nowMs: Date.now() })!.key;
@@ -460,8 +429,6 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
     });
     expect(result.status).toBe('delivered');
 
-    // The block id is shared, so a bare-blockId match would have "re-used" the
-    // first question's message and reported delivered while sending nothing.
     const spool = readBox(mailboxDir('two-asks', mailboxRoot));
     expect(spool).toHaveLength(2);
     expect(spool.map((m) => m.text).sort()).toEqual([
@@ -472,7 +439,6 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
   it('keeps a parked headless agent on its resume rail when a stranded claim is retried', async () => {
     const feedRoot = dir('feed');
     const mailboxRoot = dir('mail');
-    // Parked headless: the correct rail is resume, NOT the mailbox it will never drain.
     const session = parkedSession('parked-headless', {
       context: 'headless', status: 'input_required', activity: 'waiting_input',
       awaitingReason: 'question', tty: false,
@@ -481,9 +447,6 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
 
-    // A pending claim records an answer ON the block while leaving it open. If a
-    // consumer read `block.answer` truthiness instead of the canonical state, the
-    // route would silently downgrade to mailbox here.
     recordAnswer(block.blockId, { answeredFrom: 'feed', answeredBy: 'killed-run' }, feedRoot, { pending: true });
     const claimed = readBlock(block.blockId, feedRoot)!;
     expect(claimed.answer).toBeDefined();
@@ -492,7 +455,6 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
     expect(resolveAnswerRoute({ mailboxId: 'parked-headless', answer: 'go', block: claimed, session }).kind)
       .toBe('resume');
 
-    // And the operator's own feed still shows it as needing a human.
     expect(groupBlocksByOutcome([claimed])[0].counts.open).toBe(1);
     expect(fs.existsSync(path.join(mailboxRoot, 'parked-headless'))).toBe(false);
     expect(key).toContain('parked-headless');
@@ -513,10 +475,8 @@ describe('stranded-claim replay is bound to the ask and the rail', () => {
       claimAndRouteAttentionAnswer({ ...common, text: 'adopter B' }),
     ]);
 
-    // Exactly one delivers; the other reports rather than sending a second copy.
     expect(results.filter((r) => r.status === 'delivered')).toHaveLength(1);
     expect(fs.readdirSync(path.join(mailboxRoot, 'contended', 'inbox'))).toHaveLength(1);
-    // The release token must not be left behind.
     const answered = fs.readdirSync(path.join(feedRoot, 'answered'));
     expect(answered.filter((f) => f.endsWith('.release'))).toEqual([]);
   });
@@ -570,18 +530,14 @@ describe('claim release under REAL concurrency', () => {
       child.once('close', () => resolve());
       child.once('error', () => resolve());
     }));
-    // Give every child time to reach the gate, then release them together.
     await new Promise((r) => setTimeout(r, 1_500));
     fs.writeFileSync(gate, '');
     await Promise.all(exits);
 
     const lines = fs.readFileSync(outFile, 'utf8').trim().split('\n').filter(Boolean);
     expect(lines).toHaveLength(6);
-    // The whole point: the claim is handed to EXACTLY one process.
     expect(lines.filter((line) => line === 'adopted')).toHaveLength(1);
-    // The winner's marker survives — nobody deleted a claim they did not own.
     expect(getAnswerRecord(blockId, feedRoot)).toBeDefined();
-    // And no release token is left to wedge the next release.
     expect(fs.readdirSync(answeredDir).filter((f) => f.endsWith('.release'))).toEqual([]);
   }, 60_000);
 
@@ -597,8 +553,6 @@ describe('claim release under REAL concurrency', () => {
     const block = questionBlock('wedged');
     publishBlock(block, feedRoot);
 
-    // A token left by a process that no longer exists. Without recovery this
-    // claim could never be released again — the item would wedge forever.
     const token = path.join(answeredDir, `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
     fs.writeFileSync(token, JSON.stringify({ pid: 999_999, host: os.hostname(), at: Date.now() }));
 
@@ -609,10 +563,6 @@ describe('claim release under REAL concurrency', () => {
   });
 
   it('treats a token another process has created but not yet filled as held (PHNX-4131)', () => {
-    // The race behind the "two processes adopted one claim" failure: a peer that
-    // finds the token between its creation and its content read no owner, called
-    // it stale, deleted it and took the release too. A fresh, unreadable token
-    // belongs to a writer that is still mid-write.
     const feedRoot = dir('feed');
     const blockId = blockIdForSession('half-written-token');
     const answeredDir = path.join(feedRoot, 'answered');
@@ -631,8 +581,6 @@ describe('claim release under REAL concurrency', () => {
     expect(getAnswerRecord(blockId, feedRoot)).toBeDefined();
     expect(fs.existsSync(token)).toBe(true);
 
-    // The same unreadable token, abandoned long enough, is reclaimed so the claim
-    // cannot wedge.
     const old = new Date(Date.now() - RELEASE_TOKEN_STALE_MS - 5_000);
     fs.utimesSync(token, old, old);
     expect(rollbackAnswerClaim(blockId, answeredAt, { ...block, state: 'open', answer: undefined }, undefined, feedRoot))
@@ -652,7 +600,6 @@ describe('claim release under REAL concurrency', () => {
     const block = questionBlock('contended-token');
     publishBlock(block, feedRoot);
 
-    // This very process is a live owner, so the token must NOT be stolen.
     const token = path.join(answeredDir, `${blockId}.${answeredAt.replace(/[^0-9A-Za-z]/g, '')}.release`);
     fs.writeFileSync(token, JSON.stringify({ pid: process.pid, host: os.hostname(), at: Date.now() }));
 
@@ -662,7 +609,6 @@ describe('claim release under REAL concurrency', () => {
   });
 });
 
-// --- read-only delivery check -----------------------------------------------
 
 describe('checkAnswerDelivery', () => {
   it('reports the stored state and changes nothing — no claim, no message', () => {
@@ -688,7 +634,6 @@ describe('checkAnswerDelivery', () => {
     expect(consumed.status).toBe('already_answered');
     expect(consumed.resolved).toBe(true);
     expect(consumed.receipt?.msgId).toBe('m1');
-    // Still read-only: exactly the one receipt the rail recorded.
     expect(getBlockReceipts(block.blockId, feedRoot)).toHaveLength(1);
   });
 
@@ -699,14 +644,11 @@ describe('checkAnswerDelivery', () => {
     publishBlock(q1, feedRoot);
     const q1Key = reconcileAttention({ block: q1, session, nowMs: Date.now() })!.key;
 
-    // The session moved to a second question, which was answered and consumed.
     const q2 = questionBlock('two-questions', { ts: '2026-09-13T12:00:00.000Z', questions: [{ text: 'Roll back?' }] });
     publishBlock(q2, feedRoot);
     recordAnswer(q2.blockId, { answeredFrom: 'feed', answeredBy: 'op' }, feedRoot, { pending: true });
     recordMessageReceipt(q2.blockId, { msgId: 'q2', status: 'consumed', at: '2026-09-13T12:01:00.000Z', generation: q2.ts, attempt: getAnswerRecord(q2.blockId, feedRoot)!.answeredAt }, feedRoot);
 
-    // One block id serves both generations, so an unbound check would hand Q2's
-    // consumed receipt back as proof that Q1 was answered.
     const checked = checkAnswerDelivery(q1Key, feedRoot);
     expect(checked.status).toBe('unknown');
     expect(checked.resolved).toBe(false);
@@ -738,20 +680,16 @@ describe('a claim is not a resolution', () => {
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
 
-    // Phase 1 — claimed, not resolved: no tombstone, and the reconciler still
-    // surfaces the item, so an unconfirmed answer cannot hide the request.
     recordAnswer(block.blockId, { answeredFrom: 'feed', answeredBy: 'op' }, feedRoot, { pending: true });
     expect(readResolution(block.blockId, feedRoot)).toBeUndefined();
     const claimed = readBlock(block.blockId, feedRoot)!;
     expect(deriveBlockState(claimed)).toBe('open');
     expect(reconcileAttention({ block: claimed, session, nowMs: Date.now() })?.key).toBe(key);
 
-    // A `queued` receipt is the RAIL taking the answer — still not resolution.
     recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'queued', at: '2026-09-13T10:05:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
     expect(readResolution(block.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('open');
 
-    // The AGENT's own acknowledgement is what lets the card go.
     recordMessageReceipt(block.blockId, { msgId: 'm1', status: 'consumed', at: '2026-09-13T10:06:00.000Z', generation: block.ts, attempt: getAnswerRecord(block.blockId, feedRoot)!.answeredAt }, feedRoot);
     expect(readResolution(block.blockId, feedRoot)?.reason).toBe('answered');
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('answered');
@@ -774,8 +712,6 @@ describe('a claim is not a resolution', () => {
     expect(readResolution(block.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('open');
 
-    // The REAL drain records `consumed`, which promotes the claim to resolved.
-    // It resolves its feed store from the environment, exactly as in production.
     const priorFeedDir = process.env.AGENTS_FEED_DIR;
     process.env.AGENTS_FEED_DIR = feedRoot;
     try {
@@ -795,17 +731,13 @@ describe('a claim is not a resolution', () => {
     recordAnswer(q1.blockId, { answeredFrom: 'feed', answeredBy: 'op' }, feedRoot, { pending: true });
     const q1Attempt = getAnswerRecord(q1.blockId, feedRoot)!.answeredAt;
 
-    // The agent moved on. A new generation publishes a fresh block with no
-    // answer record — nothing has claimed THIS ask.
     const q2 = questionBlock('late-ack', { ts: '2026-09-13T12:00:00.000Z', questions: [{ text: 'Roll back?' }] });
     publishBlock(q2, feedRoot);
 
-    // Q1's slow rail finally acknowledges. It must not resolve Q2.
     recordMessageReceipt(q2.blockId, { msgId: 'q1-late', status: 'consumed', at: '2026-09-13T12:05:00.000Z', generation: q1.ts, attempt: q1Attempt }, feedRoot);
     expect(readResolution(q2.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(q2.blockId, feedRoot)!)).toBe('open');
 
-    // And an explicit confirm bound to Q1's identity is a no-op against Q2.
     expect(confirmAnswerResolution(q2.blockId, feedRoot, {
       generation: q1.ts, answeredAt: q1Attempt,
     })).toBe(false);
@@ -813,7 +745,6 @@ describe('a claim is not a resolution', () => {
   });
 });
 
-// --- the keystroke rail, against a real tmux pane ---------------------------
 
 const noTmux = isTmuxInstalled() ? null : 'tmux not installed';
 
@@ -822,7 +753,7 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
   let socket: string;
 
   beforeEach(() => { socket = path.join(dir('tmux'), 'srv.sock'); });
-  afterEach(async () => { try { await killAll(socket); } catch { /* best-effort */ } });
+  afterEach(async () => { try { await killAll(socket); } catch {  } });
 
   async function firstPane(): Promise<string> {
     const res = await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}'] });
@@ -833,7 +764,6 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
     const feedRoot = dir('feed');
     const paneCwd = dir('pane');
     const sink = path.join(paneCwd, 'typed.txt');
-    // `cat > file` records the exact bytes that reached the pty.
     await createSession({ name, socket, cmd: `cat > ${sink}`, cwd: paneCwd });
     const pane = await firstPane();
 
@@ -858,13 +788,9 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
       if (typed.includes('third line')) break;
       await new Promise((r) => setTimeout(r, 50));
     }
-    // Asserted against the literal DEC-2004 bytes, NOT the exported constant:
-    // comparing the output to the same constant that produced it would pass even
-    // if the constant were missing its ESC.
     const ESC = String.fromCharCode(0x1b);
     expect(BRACKETED_PASTE_START).toBe(`${ESC}[200~`);
     expect(BRACKETED_PASTE_END).toBe(`${ESC}[201~`);
-    // One paste, framed — every line rode in a single insert.
     expect(typed).toContain(`${ESC}[200~`);
     expect(typed).toContain(`${ESC}[201~`);
     expect(typed).toContain('first line');
@@ -888,7 +814,6 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
       attentionKey: key, text: 'one\ntwo', operator: { verified: false, label: 'op' },
       feedRoot, mailboxRoot: dir('mail'), sessions: [session],
     })).rejects.toThrow(/multiline answer cannot be typed|no addressable terminal/);
-    // Refused BEFORE the claim, so the item stays cleanly answerable.
     expect(getAnswerRecord(block.blockId, feedRoot)).toBeUndefined();
   });
 });

@@ -28,11 +28,6 @@ function loadRealSessions(): SessionDetail[] {
   );
 }
 
-/**
- * Build a derived fixture from a real session by mutating the smallest surface
- * needed to exercise a branch that does not naturally occur in /tmp/traces-real.
- * The shape stays a real SessionDetail; only the derived step signal changes.
- */
 function deriveFixture(base: SessionDetail, mutate: (s: SessionDetail) => void): SessionDetail {
   const clone = JSON.parse(JSON.stringify(base)) as SessionDetail;
   mutate(clone);
@@ -123,9 +118,6 @@ describe('deriveOutcome', () => {
   });
 
   it('returns human-takeover when the final substantive step asks the human', () => {
-    // No session in /tmp/traces-real ends on a human-facing ask, so this fixture
-    // derives the shape from a real completed session and changes only the last
-    // substantive step.
     const base = loadFixture('019fc247-6220-7d50-a11c-975d58f1e2e1');
     const session = deriveFixture(base, (s) => {
       const last = s.steps.filter((step) => step.kind === 'tool').pop();
@@ -139,9 +131,6 @@ describe('deriveOutcome', () => {
   });
 
   it('returns invalid-env when environment errors dominate', () => {
-    // No session in /tmp/traces-real is dominated by env/setup errors, so this
-    // fixture derives the shape from a real errored session and replaces its
-    // early steps with failing environment/setup commands.
     const base = loadFixture('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
     const session = deriveFixture(base, (s) => {
       s.meta.outcome = 'errored';

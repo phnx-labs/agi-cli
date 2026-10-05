@@ -71,8 +71,6 @@ describe('feed answer claim-before-route', () => {
   it('refuses to answer a request it could not verify is still pending (PHNX-3999)', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-'));
     const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-unverified-mailbox-'));
-    // A cloud-shaped row: no transcript cursor to check the hook's word against,
-    // and the permission prompt is well past the trust window.
     const session = { context: 'cloud', kind: 'claude', host: 'worker', sessionId: 'stale', agentId: 'stale', status: 'running' } as ActiveSession;
     const block: OpenBlock = {
       blockId: blockIdForSession('stale'), sessionId: 'stale', mailboxId: 'stale', host: 'worker', runtime: 'claude',

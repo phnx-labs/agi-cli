@@ -32,9 +32,6 @@ async function until(what: string, predicate: () => boolean, timeoutMs = 4_000):
   throw new Error(`timed out waiting for ${what}`);
 }
 
-/** The hub under test, with a controllable stand-in for the ssh fan-out. The
- *  assertion is on how many times the hub STARTED one, so the fan-out's own
- *  transport is deliberately not exercised here (peer-stream.test.ts covers it). */
 function hubWithControllableFanOut() {
   const starts: AbortSignal[] = [];
   let publish: ((event: FeedWatchEnvelope) => void) | undefined;
@@ -55,9 +52,8 @@ describe('shared feed hub over a real unix socket', () => {
     const server = new FeedHubServer(hub, endpoint);
     await server.start();
     expect(fs.existsSync(endpoint)).toBe(true);
-    // Bound 0600 so another local user cannot read the operator's stream.
     expect((fs.statSync(endpoint).mode & 0o777).toString(8)).toBe('600');
-    expect(starts).toHaveLength(0); // demand-gated: nothing dialed with no reader
+    expect(starts).toHaveLength(0);
 
     const first: FeedWatchEnvelope[] = [];
     const second: FeedWatchEnvelope[] = [];
@@ -68,7 +64,6 @@ describe('shared feed hub over a real unix socket', () => {
     const secondDone = streamFeedFromHub({ signal: secondController.signal, emit: (event) => second.push(event), endpoint });
     await until('the second reader to attach', () => server.clientCount === 2);
 
-    // Two processes' worth of readers, ONE collector.
     expect(starts).toHaveLength(1);
     expect(hub.readerCount).toBe(2);
 
@@ -151,7 +146,6 @@ describe('local and fleet readers share their own collectors', () => {
     const server = new FeedHubServer(fleet.hub, endpoint, local.hub);
     await server.start();
 
-    // Nothing is dialed until somebody asks — for EITHER collector.
     expect(fleet.starts).toHaveLength(0);
     expect(local.starts).toHaveLength(0);
 
@@ -166,7 +160,6 @@ describe('local and fleet readers share their own collectors', () => {
     await until('all four readers to attach', () => server.clientCount === 4);
     await until('both collectors to start', () => fleet.starts.length === 1 && local.starts.length === 1);
 
-    // Four readers, two collectors — one per topic, not one per reader.
     expect(fleet.starts).toHaveLength(1);
     expect(local.starts).toHaveLength(1);
     expect(fleet.hub.readerCount).toBe(2);
@@ -175,7 +168,6 @@ describe('local and fleet readers share their own collectors', () => {
     const upstream = new FeedWatchState();
     local.publish(upstream.emit({ type: 'reset', scope: 'this-box', capturedAt: 1, agents: [agentRow('local-1', 'this-box')], attention: [], tools: [], setup: [] }));
     await until('both local readers to receive it', () => seen.local.length >= 2);
-    // A local reader must never be served fleet traffic, and vice versa.
     expect(seen.local.every((event) => event.scope === 'this-box')).toBe(true);
     expect(seen.fleet).toEqual([]);
 
@@ -183,7 +175,6 @@ describe('local and fleet readers share their own collectors', () => {
     await until('both fleet readers to receive it', () => seen.fleet.length >= 2);
     expect(seen.fleet.every((event) => event.scope === 'peer-a')).toBe(true);
 
-    // Dropping the local readers releases ONLY the local collector.
     controllers[2]!.abort(); controllers[3]!.abort();
     await until('the local collector to be released', () => !local.hub.active);
     expect(fleet.hub.active).toBe(true);
@@ -194,9 +185,6 @@ describe('local and fleet readers share their own collectors', () => {
   });
 
   it('REJECTS a reader that sends no scope line instead of defaulting to fleet', async () => {
-    // Defaulting to fleet started ssh children to every peer on behalf of a
-    // client that never asked for them, and handed peer data to a client that may
-    // have wanted only this box.
     const endpoint = socketPath();
     const fleet = hubWithControllableFanOut();
     const local = hubWithControllableFanOut();
@@ -209,7 +197,6 @@ describe('local and fleet readers share their own collectors', () => {
     await new Promise((resolve) => socket.once('connect', resolve));
     await until('the silent reader to receive its rejection', () => lines.join('').includes('no scope line'));
     expect(server.rejectedHandshakes).toBe(1);
-    // Critically: no collector was started for it.
     expect(fleet.starts).toHaveLength(0);
     expect(local.starts).toHaveLength(0);
     expect(fleet.hub.readerCount).toBe(0);
@@ -252,7 +239,6 @@ describe('local and fleet readers share their own collectors', () => {
     await new Promise((resolve) => socket.once('connect', resolve));
     socket.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
     await until('the reader to attach', () => server.clientCount === 1);
-    // A second scope cannot retroactively change a settled subscription.
     socket.write(`${JSON.stringify({ v: 1, scope: 'local' })}\n`);
     await until('the late scope to be rejected', () => lines.join('').includes('already open'));
     socket.destroy();
@@ -260,8 +246,6 @@ describe('local and fleet readers share their own collectors', () => {
   });
 
   it('refuses a local reader when the server has no local collector', async () => {
-    // Serving the fleet hub instead would dial peers a local-only reader never
-    // asked for.
     const endpoint = socketPath();
     const fleet = hubWithControllableFanOut();
     const server = new FeedHubServer(fleet.hub, endpoint);
@@ -297,15 +281,11 @@ describe('local and fleet readers share their own collectors', () => {
 });
 
 
-/** A row whose serialized form is about `kib` KiB, so a few of them make a multi-MB envelope. */
 function fatRow(rowKey: string, kib: number): SessionWatchRow {
   return { ...agentRow(rowKey, 'zion'), preview: 'x'.repeat(kib * 1024) } as unknown as SessionWatchRow;
 }
 
 describe('a large snapshot reaches a healthy reader whole and in order', () => {
-  // The production failure: a 5 MB fleet reset was judged against the 4 MiB
-  // backlog budget the instant it was written, so a perfectly healthy reader got
-  // 8 KiB of it, no newline, then EOF.
   it('delivers a reset bigger than the backlog budget, then the live event behind it', async () => {
     const endpoint = socketPath();
     const { hub, publish } = hubWithControllableFanOut();
@@ -331,8 +311,6 @@ describe('a large snapshot reaches a healthy reader whole and in order', () => {
     expect(server.droppedForBacklog).toBe(0);
     expect(server.droppedForStall).toBe(0);
 
-    // A late reader's INITIAL frame is that same >4 MiB reset, served from held
-    // state, and its first live event queues behind it in order.
     const late: FeedWatchEnvelope[] = [];
     const lateController = new AbortController();
     const lateDone = streamFeedFromHub({ signal: lateController.signal, emit: (event) => late.push(event), endpoint });
@@ -350,9 +328,6 @@ describe('a large snapshot reaches a healthy reader whole and in order', () => {
 });
 
 describe('a cold collector delivers its initial resets to the first reader', () => {
-  // The exemption for the synchronous held-state replay is not enough: the FIRST
-  // reader attaches to an empty hub, and every peer's initial reset then arrives
-  // as a LIVE event after `startLive()`.
   it('delivers one >4 MiB initial reset, and a same-tick burst of peer resets totalling >4 MiB, whole and in order', async () => {
     const endpoint = socketPath();
     const { hub, publish } = hubWithControllableFanOut();
@@ -362,7 +337,7 @@ describe('a cold collector delivers its initial resets to the first reader', () 
     const controller = new AbortController();
     const done = streamFeedFromHub({ signal: controller.signal, emit: (event) => seen.push(event), endpoint });
     await until('the cold first reader to attach', () => server.clientCount === 1);
-    expect(hub.state.scopeNames).toEqual([]); // nothing held: everything below is live
+    expect(hub.state.scopeNames).toEqual([]);
 
     const upstream = new FeedWatchState();
     const big = upstream.emit({ type: 'reset', scope: 'peer-big', capturedAt: 1, agents: Array.from({ length: 20 }, (_, i) => fatRow(`big-${i}`, 256)), attention: [], tools: [], setup: [] });
@@ -371,8 +346,6 @@ describe('a cold collector delivers its initial resets to the first reader', () 
     await until('the >4 MiB initial reset to land', () => seen.length >= 1, 15_000);
     expect(seen[0]!.type === 'reset' && seen[0]!.agents.length).toBe(20);
 
-    // Thirteen peers answering at once: 6 × 1.25 MiB inside ONE tick, no
-    // event-loop turn for the reader to drain in between.
     const burst = Array.from({ length: 6 }, (_, p) => upstream.emit({ type: 'reset', scope: `peer-${p}`, capturedAt: 2, agents: Array.from({ length: 5 }, (_, i) => fatRow(`p${p}-${i}`, 256)), attention: [], tools: [], setup: [] }));
     expect(burst.reduce((sum, event) => sum + Buffer.byteLength(JSON.stringify(event)), 0)).toBeGreaterThan(HUB_CLIENT_BACKLOG_LIMIT);
     for (const event of burst) publish(event);
@@ -395,15 +368,12 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
     const server = new FeedHubServer(hub, endpoint, undefined, { backlogGraceMs: graceMs });
     await server.start();
 
-    // A raw socket that connects, asks for the stream, and then NEVER reads.
     const socket = net.createConnection(endpoint);
     await new Promise((resolve) => socket.once('connect', resolve));
     socket.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
     socket.pause();
     await until('the stalled reader to attach', () => server.clientCount === 1);
 
-    // Live events paced across ticks, the way a real stream arrives, until the
-    // budget is crossed and the grace has run out.
     const upstream = new FeedWatchState();
     const fat = fatRow('fat', 256);
     const eventBytes = Buffer.byteLength(JSON.stringify(upstream.emit({ type: 'agent.upsert', scope: 'zion', rowKey: 'probe', agent: fat }))) + 1;
@@ -420,20 +390,13 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
       if (crossedAt === null && pending > HUB_CLIENT_BACKLOG_LIMIT) crossedAt = Date.now();
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    // Dropped within the grace window (plus pacing slack) of crossing the budget…
     expect(crossedAt).not.toBeNull();
     expect(Date.now() - crossedAt!).toBeLessThan(graceMs + 500);
-    // …so the daemon never held more than the budget plus what the stream
-    // produced during that window — the true bound, counting the in-flight
-    // frame and the socket's own unflushed buffer, not just the queue.
     const ingressDuringGrace = Math.ceil((graceMs + 500) / 20) * eventBytes;
     expect(peakPending).toBeGreaterThan(HUB_CLIENT_BACKLOG_LIMIT);
     expect(peakPending).toBeLessThanOrEqual(HUB_CLIENT_BACKLOG_LIMIT + ingressDuringGrace);
-    // `destroy()` detaches on the socket's 'close', which lands a tick later,
-    // and everything held for the reader goes with it.
     await until('the dropped reader to be detached', () => server.clientCount === 0);
     expect(server.pendingBytes).toBe(0);
-    // The collector is released with it, so a wedged reader cannot pin the fleet.
     await until('the collector to be released', () => !hub.active);
 
     socket.destroy();
@@ -441,9 +404,6 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
   });
 
   it('reports the bytes of a stalled in-flight frame, not zero once the queue is empty', async () => {
-    // A single 5 MiB snapshot to a paused reader: the queue empties the moment
-    // the pump takes the line, so a queue-only gauge would read 0 while the
-    // daemon still holds the whole frame.
     const endpoint = socketPath();
     const { hub, publish } = hubWithControllableFanOut();
     const server = new FeedHubServer(hub, endpoint, undefined, { drainStallMs: 60_000 });
@@ -465,9 +425,6 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
     stalled.pause();
     await until('the stalled reader to attach', () => server.clientCount === 2);
     await new Promise((resolve) => setTimeout(resolve, 200));
-    // The kernel took what its buffers hold; the rest is still the daemon's.
-    // Only what the socket has accepted so far is unaccounted for, and that
-    // is bounded by one chunk plus node's high-water mark.
     const held = server.pendingBytes;
     expect(held).toBeGreaterThan(resetBytes - 2 * 1024 * 1024);
     expect(held).toBeLessThanOrEqual(resetBytes);
@@ -483,11 +440,9 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
   it('drops a reader that stops draining a large snapshot, without waiting on the live budget', async () => {
     const endpoint = socketPath();
     const { hub, publish } = hubWithControllableFanOut();
-    // A short stall deadline so the test observes the bound, not the 30 s default.
     const server = new FeedHubServer(hub, endpoint, undefined, { drainStallMs: 300 });
     await server.start();
 
-    // Seed a >4 MiB held reset through a healthy reader.
     const seed: FeedWatchEnvelope[] = [];
     const seedController = new AbortController();
     const seedDone = streamFeedFromHub({ signal: seedController.signal, emit: (event) => seed.push(event), endpoint });
@@ -496,7 +451,6 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
     publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: Array.from({ length: 20 }, (_, i) => fatRow(`fat-${i}`, 256)), attention: [], tools: [], setup: [] }));
     await until('the seed reset to land', () => seed.length >= 1, 15_000);
 
-    // A reader that asks for the stream and never reads a byte of its snapshot.
     const stalled = net.createConnection(endpoint);
     await new Promise((resolve) => stalled.once('connect', resolve));
     stalled.write(`${JSON.stringify({ v: 1, scope: 'fleet' })}\n`);
@@ -505,9 +459,8 @@ describe('a stalled reader cannot grow the daemon without bound', () => {
     const started = Date.now();
     await until('the stalled reader to be dropped for not draining', () => server.droppedForStall > 0, 5_000);
     expect(Date.now() - started).toBeLessThan(4_000);
-    expect(server.droppedForBacklog).toBe(0); // no live event was ever queued for it
+    expect(server.droppedForBacklog).toBe(0);
     await until('the dropped reader to be detached', () => server.clientCount === 1);
-    // The healthy reader is untouched.
     expect(seed).toHaveLength(1);
 
     stalled.destroy();
@@ -530,9 +483,6 @@ describe('the client tells a truncated stream from a finished one', () => {
     const upstream = new FeedWatchState();
     publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 10, agents: [agentRow('a1', 'zion')], attention: [], tools: [], setup: [] }));
     await until('the reset to land', () => seen.length >= 1);
-    // The daemon stops without the client asking: a FIN the client did not
-    // initiate is a failure, never a clean end — `agents feed watch` must not
-    // exit 0 on it.
     await server.stop();
     await expect(client).rejects.toThrow(/feed hub closed the stream/);
     expect(seen.map((event) => event.type)).toEqual(['reset']);
@@ -547,14 +497,12 @@ describe('the client tells a truncated stream from a finished one', () => {
     const whole = `${JSON.stringify(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 1, agents: [agentRow('a1', 'zion')], attention: [], tools: [], setup: [] }))}\n`;
     const half = JSON.stringify(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 2, agents: [fatRow('fat', 64)], attention: [], tools: [], setup: [] })).slice(0, 8192);
     const peer = net.createServer((socket) => {
-      // One complete line, then 8 KiB of the next with no newline, then FIN.
       socket.once('data', () => { socket.write(whole); socket.write(half); socket.end(); });
     });
     await new Promise<void>((resolve) => peer.listen(endpoint, resolve));
     const seen: FeedWatchEnvelope[] = [];
     const client = streamFeedFromHub({ signal: new AbortController().signal, emit: (event) => seen.push(event), endpoint });
     await expect(client).rejects.toThrow(/closed mid-frame: 8192 chars/);
-    // The complete frame was delivered; the truncated one was never emitted.
     expect(seen.map((event) => [event.type, event.sequence])).toEqual([['reset', 1]]);
     await new Promise<void>((resolve) => peer.close(() => resolve()));
   });
@@ -566,15 +514,12 @@ describe('the client tells a truncated stream from a finished one', () => {
     await server.start();
     const upstream = new FeedWatchState();
 
-    // A consumer that throws: the throw must land on THIS promise, not escape
-    // the socket's 'data' handler as an uncaught exception.
     const throwing = streamFeedFromHub({ signal: new AbortController().signal, emit: () => { throw new Error('renderer exploded'); }, endpoint });
     await until('the throwing reader to attach', () => server.clientCount === 1);
     publish(upstream.emit({ type: 'reset', scope: 'zion', capturedAt: 1, agents: [], attention: [], tools: [], setup: [] }));
     await expect(throwing).rejects.toThrow('renderer exploded');
     await until('the throwing reader to be detached', () => server.clientCount === 0);
 
-    // A `null` line is valid JSON and not an envelope; it used to throw on `.v`.
     const peer = net.createServer((socket) => { socket.once('data', () => { socket.write('null\n'); }); });
     const nullEndpoint = socketPath();
     await new Promise<void>((resolve) => peer.listen(nullEndpoint, resolve));
@@ -593,13 +538,11 @@ describe('the client tells a truncated stream from a finished one', () => {
     const silent = net.createConnection(endpoint);
     await new Promise((resolve) => silent.once('connect', resolve));
     const closed = new Promise<void>((resolve) => silent.once('close', () => resolve()));
-    // `server.close` waits for open sockets; a never-handshaking one held the
-    // daemon's shutdown for the whole 2 s grace.
     const started = Date.now();
     await server.stop();
     await closed;
     expect(Date.now() - started).toBeLessThan(HUB_HANDSHAKE_GRACE_MS / 2);
-    expect(server.rejectedHandshakes).toBe(0); // the grace timer was cleared, not fired
+    expect(server.rejectedHandshakes).toBe(0);
     expect(server.clientCount).toBe(0);
   });
 
@@ -608,7 +551,6 @@ describe('the client tells a truncated stream from a finished one', () => {
     const server = new FeedHubServer(hubWithControllableFanOut().hub, endpoint);
     await server.start();
     const seen: FeedWatchEnvelope[] = [];
-    // `local` on a server with no local collector is refused with a reason.
     const client = streamFeedFromHub({ signal: new AbortController().signal, emit: (event) => seen.push(event), endpoint, scope: 'local' });
     await expect(client).rejects.toThrow(/feed hub closed the stream/);
     expect(seen.map((event) => event.type)).toEqual(['error']);
@@ -628,7 +570,6 @@ describe('the client tells a truncated stream from a finished one', () => {
     await until('the server to detach the aborted reader', () => server.clientCount === 0);
     await until('the collector to be released', () => !hub.active);
     expect(server.pendingBytes).toBe(0);
-    // Aborting before the connect lands resolves too, never hangs.
     const early = new AbortController();
     early.abort();
     await expect(streamFeedFromHub({ signal: early.signal, emit: () => {}, endpoint })).resolves.toBeUndefined();
@@ -641,10 +582,7 @@ describe('startup readiness', () => {
     const endpoint = socketPath();
     const { hub } = hubWithControllableFanOut();
     const server = new FeedHubServer(hub, endpoint);
-    // Nothing is listening yet: the immediate probe must fail...
     expect(await waitForHub(endpoint, 0, 5)).toBe(false);
-    // ...and the bounded wait must succeed once the bind lands, which is the
-    // race `ensureDaemonStarted()` + an immediate retry used to lose.
     const late = setTimeout(() => { void server.start(); }, 150);
     expect(await waitForHub(endpoint, 5_000, 25)).toBe(true);
     clearTimeout(late);

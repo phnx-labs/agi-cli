@@ -27,23 +27,17 @@ export interface BlockQuestion {
 }
 
 export interface MessageReceipt {
-  /** The message id this receipt describes. */
   msgId: string;
-  /** Delivery lifecycle state. */
   status: 'queued' | 'consumed' | 'continued' | 'dropped' | 'expired';
-  /** ISO-8601 timestamp of the state transition. */
   at: string;
-  /** Optional sender label for the message. */
   from?: string;
   /** The ask this receipt is about: the block generation live when the answer was sent. A block
    * id is per session, so without this a late acknowledgement for question N would resolve
    * question N+1 (PHNX-3999). Carried durably on the queued message. */
   generation?: string;
-  /** The claim (attempt) this receipt is about — `AnswerRecord.answeredAt`. */
   attempt?: string;
 }
 
-/** The ask a receipt or queued message belongs to, plus the attempt that sent it. */
 export interface ReceiptOrigin {
   generation: string;
   attempt: string;
@@ -53,20 +47,16 @@ export interface ReceiptOrigin {
  * adopted stranded claim mints a new attempt and must still recognize its predecessor's message
  * or it enqueues a duplicate. An unbound (pre-field) receipt matches nothing (PHNX-3999). */
 export function receiptMatchesOrigin(receipt: MessageReceipt, origin: ReceiptOrigin): boolean {
+  // Generation is identity; attempt is provenance, and unbound legacy receipts match nothing.
   if (receipt.generation === undefined) return false;
   return receipt.generation === origin.generation;
 }
 
 export interface AnswerRecord {
-  /** ISO-8601 timestamp of when the answer was recorded. */
   answeredAt: string;
-  /** Surface that recorded the answer (e.g. 'feed', 'terminal', 'tmux', 'cloud', 'policy'). */
   answeredFrom: string;
-  /** Optional operator/agent label recorded as the sender. */
   answeredBy?: string;
-  /** Operator id from the local registry, if verified. */
   operatorId?: string;
-  /** Whether the operator identity was verified against the registry. */
   verified?: boolean;
 }
 
@@ -98,19 +88,14 @@ export interface OpenBlock {
    * mints a new one, so the previous generation's tombstone cannot suppress it. Derived from
    * `ts` when unstamped (blockGeneration). */
   generation?: string;
-  /** How this block came to exist. Derived from {@link kind} when absent — see {@link blockSource}. */
   source?: AttentionSource;
-  /** Lifecycle state. Derived from the answer/continue markers when absent — see {@link deriveBlockState}. */
   state?: AttentionState;
   /** Where in the source this generation sits, stamped at write time and carried onto its
    * tombstone. Without it a new generation is suppressed whenever `session.lastActivityMs` is
    * unresolvable (cloud, remote, index lag). */
   sourceCursor?: SourceCursor;
-  /** Indexed launch origin, added at read time when the live session is known. */
   origin?: 'cli' | 'routine';
-  /** Routine definition name when origin is `routine`. */
   routineName?: string;
-  /** Project/repo name this block belongs to (derived from cwd, worktree-aware). */
   project?: string;
   ts: string;
   questions: BlockQuestion[];
@@ -121,25 +106,15 @@ export interface OpenBlock {
   notificationType?: string;
   ticket?: string;
   pr?: string;
-  /** Worktree slug under `.agents/worktrees/` — soft outcome when no ticket/PR. */
   worktreeSlug?: string;
-  /** Epic / initiative label when no ticket/PR/worktree is known. */
   epic?: string;
-  /** Block class: approval has a safe default; decision requires human choice. */
   blockClass?: 'approval' | 'decision';
-  /** Consequence tag for authz. 'high' gates merge/deploy/admin-style answers. */
   consequence?: 'normal' | 'high' | string;
-  /** Operator ids allowed to answer a high-consequence block. Admins always pass. */
   allowedOperators?: string[];
-  /** Timeout in minutes before default-on-no-answer policy fires. */
   timeoutMinutes?: number;
-  /** Safe default answer for approval-class blocks. */
   safeDefault?: string;
-  /** Cost-of-delay for notification routing: low/medium/high. */
   costOfDelay?: 'low' | 'medium' | 'high';
-  /** Number of agents downstream of this blocked agent, when known. */
   downstreamAgents?: number;
-  /** Computed cost-of-delay rank metadata, stamped by `agents feed`. */
   delayRank?: {
     score: number;
     idleMinutes: number;
@@ -147,30 +122,22 @@ export interface OpenBlock {
     burnUsdPerHour: number;
     decisionIrreducibility: number;
   };
-  /** Token/cost runaway signal for synthetic feed control cards. */
   runaway?: {
     reason: string;
     tokPerSec?: number;
     burnUsdPerHour?: number;
     relaunchesPerTenMinutes?: number;
   };
-  /** Chronic-ask signal for synthetic feed control cards. */
   needy?: {
     askCountLastHour: number;
     threshold: number;
     totalAskCount: number;
   };
-  /** Set once the block has been answered; see `recordAnswer`. */
   answer?: AnswerRecord;
-  /** Per-message delivery receipts for answers to this block. */
   receipts?: MessageReceipt[];
-  /** ISO-8601 timestamp when the agent continued past the block. */
   continuedAt?: string;
-  /** ISO-8601 timestamp when an urgent block was paged to the phone. */
   notifiedAt?: string;
-  /** ISO-8601 timestamp when the approval safe-default was applied. */
   defaultedAt?: string;
-  /** ISO-8601 timestamp when a decision block was hard-parked. */
   parkedAt?: string;
 }
 
@@ -198,11 +165,8 @@ export type ResolutionReason =
  * advances past `sourceCursor`. One per block id, latest wins, so it never grows unbounded. */
 export interface AttentionResolution {
   blockId: string;
-  /** The generation this tombstone resolved — matched against a fresh candidate's generation. */
   generation: string;
-  /** ISO-8601 timestamp of the resolution. */
   resolvedAt: string;
-  /** Where in the source the resolved generation sat; the reconciler compares a candidate's cursor against it. */
   sourceCursor?: SourceCursor;
   reason: ResolutionReason;
 }
@@ -245,7 +209,6 @@ export function recordResolution(resolution: AttentionResolution, root?: string)
   atomicWriteJsonSync(path.join(dir, `${resolution.blockId}.json`), resolution);
 }
 
-/** Read the latest resolution tombstone for a block, if one exists. */
 export function readResolution(blockId: string, root?: string): AttentionResolution | undefined {
   return safeReadJson<AttentionResolution>(path.join(resolutionDir(root ?? getFeedDir()), `${blockId}.json`));
 }
@@ -280,7 +243,6 @@ function safeReadJson<T>(file: string): T | undefined {
   }
 }
 
-/** Read one block record. Returns undefined when missing or corrupt. */
 export function readBlock(blockId: string, root?: string): OpenBlock | undefined {
   const parsed = safeReadJson<Partial<OpenBlock>>(blockPath(root ?? getFeedDir(), blockId));
   if (!parsed || !parsed.blockId || !parsed.sessionId || !parsed.questions?.length) return undefined;
@@ -306,7 +268,6 @@ export function recordAnswer(
   const operatorId = answer.operatorId;
 
   if (block?.consequence && block.consequence !== 'normal') {
-    // Operators live in ~/.agents/operators.yaml — never the feed store root.
     if (!operatorId || answer.verified !== true || !isKnownOperator(operatorId)) {
       return {
         ok: false,
@@ -342,7 +303,6 @@ export function recordAnswer(
     verified: answer.verified,
   };
 
-  // Try to create the answered marker atomically.
   try {
     const fd = fs.openSync(marker, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o644);
     try {
@@ -364,6 +324,7 @@ export function recordAnswer(
   // the generation unresolved and state `open`, so the card stays until a rail reports a real
   // receipt (`confirmAnswerResolution`, PHNX-3999); `state` beats `answer` in deriveBlockState.
   if (block) {
+    // A pending first-answer claim stays open until a consumed/continued receipt confirms delivery.
     if (!options.pending) {
       recordResolution({
         blockId,
@@ -396,6 +357,7 @@ export function confirmAnswerResolution(
   // resolve the current one: a caller naming the ask gets a no-op on mismatch. Bound to the
   // generation, not the attempt, since adopting a stranded claim mints a new attempt.
   if (expected && blockGeneration(block) !== expected.generation) return false;
+  // Never synthesize acknowledgement: only a real consumed/continued receipt resolves the ask.
   recordResolution({
     blockId,
     generation: blockGeneration(block),
@@ -409,7 +371,6 @@ export function confirmAnswerResolution(
   return true;
 }
 
-/** Read the answer record for a block, if one exists. */
 export function getAnswerRecord(blockId: string, root?: string): AnswerRecord | undefined {
   return safeReadJson<AnswerRecord>(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
@@ -439,14 +400,9 @@ export function rollbackAnswerClaim(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   };
-  // Re-read INSIDE the token: a racer that released-and-re-claimed between our
-  // first read and the token acquisition would otherwise be clobbered.
   const held = safeReadJson<AnswerRecord>(marker);
   if (!held || held.answeredAt !== answeredAt) { dropToken(); return false; }
 
-  // Restore while the O_EXCL marker still excludes every other claimant. The
-  // marker is removed LAST; once another writer can win recordAnswer, this
-  // rollback has no state left to overwrite.
   publishBlock(previousBlock, dir);
   const resolutionFile = path.join(resolutionDir(dir), `${blockId}.json`);
   if (previousResolution) recordResolution(previousResolution, dir);
@@ -458,9 +414,6 @@ export function rollbackAnswerClaim(
   try { fs.unlinkSync(marker); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  // The token has done its job: this exact claim can never be released again,
-  // because the claim it names no longer exists. Leaving it would accumulate one
-  // dead file per released claim forever.
   dropToken();
   return true;
 }
@@ -474,11 +427,6 @@ export const RELEASE_TOKEN_STALE_MS = 60_000;
  * is provably gone (same host, no such pid) or which is stale is reclaimed once. */
 function acquireReleaseToken(release: string): boolean {
   const mine = { pid: process.pid, host: os.hostname(), at: Date.now() };
-  // Publish the token with its owner already in it: write a private temp file,
-  // then link() it into place. link fails with EEXIST atomically, like O_EXCL, but
-  // a peer can never observe the token empty. With O_EXCL-then-write, a peer that
-  // read between the two saw no owner, judged the token stale, deleted it and
-  // released the same claim too (PHNX-4131: two processes adopted one claim).
   const create = (): boolean => {
     const staged = `${release}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
     try {
@@ -495,8 +443,6 @@ function acquireReleaseToken(release: string): boolean {
   if (create()) return true;
 
   const held = safeReadJson<{ pid?: number; host?: string; at?: number }>(release);
-  // A token whose owner cannot be read (left by an older writer, or a crash
-  // mid-write) is aged by its mtime, never treated as infinitely old.
   let ageMs: number;
   if (held?.at) ageMs = Date.now() - held.at;
   else {
@@ -507,23 +453,19 @@ function acquireReleaseToken(release: string): boolean {
   }
   let ownerGone = false;
   if (held?.host === mine.host && typeof held.pid === 'number') {
-    // Signal 0 probes liveness without delivering anything.
     try { process.kill(held.pid, 0); } catch { ownerGone = true; }
   }
-  if (!ownerGone && ageMs < RELEASE_TOKEN_STALE_MS) return false; // a live peer owns it
+  if (!ownerGone && ageMs < RELEASE_TOKEN_STALE_MS) return false;
   try { fs.unlinkSync(release); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
-  // Exactly one reclaimer wins the re-create; the rest see EEXIST and back off.
   return create();
 }
 
-/** True when the block has already been answered. */
 export function isBlockAnswered(blockId: string, root?: string): boolean {
   return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
-/** Receipt lifecycle rank — higher means further along; never regress. */
 const RECEIPT_STATUS_RANK: Record<MessageReceipt['status'], number> = {
   queued: 0,
   consumed: 1,
@@ -548,7 +490,7 @@ export function recordMessageReceipt(
   if (idx >= 0) {
     const prev = receipts[idx];
     if (RECEIPT_STATUS_RANK[receipt.status] < RECEIPT_STATUS_RANK[prev.status]) {
-      return; // do not regress
+      return;
     }
     receipts[idx] = receipt;
   } else {
@@ -568,7 +510,6 @@ export function recordMessageReceipt(
   }
 }
 
-/** Read the receipt list for a block. */
 export function getBlockReceipts(blockId: string, root?: string): MessageReceipt[] {
   return readBlock(blockId, root)?.receipts ?? [];
 }
@@ -593,7 +534,6 @@ export function latestMessageReceipt(
   return best;
 }
 
-/** Mark a block as "continued" -- the agent consumed the answer and moved on. */
 export function recordContinued(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
@@ -611,7 +551,6 @@ export function recordContinued(blockId: string, root?: string): void {
   publishBlock(block, dir);
 }
 
-/** Mark a decision-class block as hard-parked (no safe default existed). */
 export function recordParked(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
@@ -620,7 +559,6 @@ export function recordParked(blockId: string, root?: string): void {
   publishBlock(block, dir);
 }
 
-/** Mark that the approval safe-default was applied by policy. */
 export function recordDefaulted(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
@@ -629,7 +567,6 @@ export function recordDefaulted(blockId: string, root?: string): void {
   publishBlock(block, dir);
 }
 
-/** Mark that an urgent block was paged to the phone. */
 export function recordNotified(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
@@ -638,19 +575,16 @@ export function recordNotified(blockId: string, root?: string): void {
   publishBlock(block, dir);
 }
 
-/** Remove answered marker and receipts for a block (used by block removal/GC). */
 function clearBlockLifecycle(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   for (const sub of [answeredDir(dir), receiptDir(dir)]) {
     try {
       fs.unlinkSync(path.join(sub, `${blockId}.json`));
     } catch {
-      // ignore missing
     }
   }
 }
 
-/** Identity of the agent declaring a block — the subset of `PostIdentity` it needs. */
 export interface DeclaringAgent {
   sessionId: string;
   mailboxId: string;
@@ -660,13 +594,9 @@ export interface DeclaringAgent {
 }
 
 interface DeclareBlockInput {
-  /** What the agent needs from the user, front-loaded. */
   text: string;
-  /** Answerable choices, if the ask is a pick-one. */
   options?: string[];
-  /** A safe default makes this an approval; without one it is a decision. */
   safeDefault?: string;
-  /** Minutes before the default-on-no-answer policy may fire. */
   timeoutMinutes?: number;
   ts?: string;
 }
@@ -693,14 +623,9 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     host: agent.host,
     runtime: agent.runtime,
     ts,
-    // A declared block is an explicit, agent-raised attention record: it opens the
-    // lifecycle here, sourced `declared`, with `ts` as its generation so a later
-    // `--blocked` in the same session mints a fresh generation past any tombstone.
     generation: ts,
     source: 'declared',
     state: 'open',
-    // Write-time cursor so a new generation is not suppressed when
-    // session.lastActivityMs is unresolvable (cloud / remote / index-lag).
     sourceCursor: { lastActivityMs: Date.parse(ts) },
     kind: 'declared',
     questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
@@ -712,7 +637,6 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
   };
 }
 
-/** Atomic write a block record to the feed store. Clears stale lifecycle state. */
 export function publishBlock(block: OpenBlock, root?: string): void {
   const dir = root ?? getFeedDir();
   fs.mkdirSync(dir, { recursive: true });
@@ -720,7 +644,6 @@ export function publishBlock(block: OpenBlock, root?: string): void {
   atomicWriteJsonSync(target, block);
 }
 
-/** Read all block records. Returns them sorted by stable block filename. */
 export function listBlocks(root?: string): OpenBlock[] {
   const dir = root ?? getFeedDir();
   let names: string[];
@@ -738,13 +661,11 @@ export function listBlocks(root?: string): OpenBlock[] {
         blocks.push(parsed as OpenBlock);
       }
     } catch {
-      // skip corrupt / partial files
     }
   }
   return blocks;
 }
 
-/** Read per-session ask history written by the feed publish hook. */
 export function listAskStats(root?: string): FeedAskStats[] {
   const dir = askStatsDir(root ?? getFeedDir());
   let names: string[];
@@ -769,7 +690,6 @@ export function listAskStats(root?: string): FeedAskStats[] {
   return stats;
 }
 
-/** Remove a block record and its lifecycle sidecars. Returns true if the file was deleted. */
 export function removeBlock(blockId: string, root?: string): boolean {
   const dir = root ?? getFeedDir();
   // Record a resolution tombstone before the block file and answered marker go, so a stale
@@ -788,6 +708,7 @@ export function removeBlock(blockId: string, root?: string): boolean {
       reason,
     }, dir);
   }
+  // Persist the tombstone before unlinking so stale lifecycle reads cannot resurrect the block.
   clearBlockLifecycle(blockId, dir);
   try {
     fs.unlinkSync(blockPath(dir, blockId));
@@ -797,9 +718,6 @@ export function removeBlock(blockId: string, root?: string): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Hook installation
-// ---------------------------------------------------------------------------
 
 /** The feed-publish PreToolUse hook script (Python), embedded so it ships with the compiled CLI
  * and installs to the user hooks dir. */
@@ -825,10 +743,6 @@ import socket
 import tempfile
 from datetime import datetime, timezone
 
-# Notification subtypes that mean something is PENDING. Claude's idle_prompt is
-# deliberately absent: it fires a minute after the turn ended with the operator
-# idle, which is a finished turn, not a request -- publishing it put an
-# Approve/Deny banner on a session that had already answered "pong" (PHNX-3999).
 WAITING_NOTIFICATION_TYPES = {
     "permission_prompt",
     "elicitation_dialog",
@@ -838,10 +752,6 @@ CLEAR_EVENTS = {
     "Stop",
     "SessionEnd",
 }
-# Codex emits a PermissionRequest event (not Claude's Notification) when it
-# blocks on an approval prompt. Claude never fires PermissionRequest, so the
-# same script handles both: PermissionRequest maps to an approval-class block
-# with a high cost-of-delay so 'agents feed --dispatch' pages it as urgent.
 
 
 def read_json(path):
@@ -892,7 +802,6 @@ def main():
     except Exception:
         return
 
-    # Sub-agent gate.
     if payload.get("agent_type"):
         return
 
@@ -910,30 +819,15 @@ def main():
     hook_event = payload.get("hook_event_name", "PreToolUse")
 
     if hook_event in CLEAR_EVENTS:
-        # A declared block (\`agents feed post --blocked\`) is the agent explicitly
-        # saying it is stuck. Unlike a question/notification/approval block -- which
-        # tracks an in-flight harness prompt that a lifecycle event resolves -- a
-        # declared block stays open until it is actually ANSWERED. So while it is
-        # still UNANSWERED, Stop/SessionEnd/PostToolUse must never silently drop it:
-        # otherwise the needs-you record vanishes the moment the agent parks the block
-        # and its turn ends -- exactly when the owner still needs to see and answer it.
-        # Once it IS answered (an answered marker exists), it clears like any other
-        # block by falling through below -- which frees that marker too, so a later
-        # \`--blocked\` in the same session is not falsely locked as already-answered
-        # (recordAnswer creates the marker with O_EXCL).
         try:
             with open(target) as existing_file:
                 existing = json.load(existing_file)
             answered = os.path.exists(os.path.join(answered_dir, f"{block_id}.json"))
+            # Ordinary lifecycle hooks cannot clear a declared block before it is answered.
             if existing.get("kind") == "declared" and not answered:
                 return
         except Exception:
             pass
-        # A matcher-less PostToolUse clear (registered for Codex so an approved
-        # tool clears its approval card) must NOT wipe an open AskUserQuestion
-        # while an unrelated tool runs mid-question -- those are cleared only by
-        # the AskUserQuestion-matched PostToolUse. So on PostToolUse, keep a
-        # 'question' block; approval/notification blocks clear once the tool runs.
         if hook_event == "PostToolUse":
             try:
                 with open(target) as existing_file:
@@ -948,8 +842,6 @@ def main():
             pass
         except Exception:
             pass
-        # Also clear the answered marker so a future question for this session
-        # is not permanently locked.
         try:
             os.unlink(os.path.join(answered_dir, f"{block_id}.json"))
         except FileNotFoundError:
@@ -958,11 +850,6 @@ def main():
             pass
         return
 
-    # Terminal answers (human typed in the TUI) record an answered marker and
-    # remove the block file so the feed stops showing it within one poll cycle.
-    # The marker stays behind so a concurrent surface cannot double-answer.
-    # A resolution tombstone is written BEFORE unlink (matching TS recordAnswer)
-    # so a stale lifecycle re-read cannot resurrect this generation.
     if hook_event == "UserPromptSubmit":
         os.makedirs(answered_dir, exist_ok=True)
         marker = os.path.join(answered_dir, f"{block_id}.json")
@@ -979,8 +866,6 @@ def main():
             pass
         except Exception:
             pass
-        # Tombstone first, then drop the open-block view. A missing/corrupt
-        # block means there is nothing to resolve; fail open.
         existing = read_json(target)
         if isinstance(existing, dict):
             generation = existing.get("generation") or existing.get("ts")
@@ -998,7 +883,6 @@ def main():
                     os.path.join(feed_dir, "resolutions", f"{block_id}.json"),
                     tombstone,
                 )
-        # Remove the visible block so the feed drops the answered question.
         try:
             os.unlink(target)
         except FileNotFoundError:
@@ -1013,10 +897,6 @@ def main():
         notification_type = payload.get("notification_type", "")
         if notification_type not in WAITING_NOTIFICATION_TYPES:
             return
-        # Claude emits a generic permission notification after presenting an
-        # AskUserQuestion. Keep the structured questions and options already
-        # published for this session instead of replacing them with that less
-        # useful notification text.
         try:
             with open(target) as existing_file:
                 existing = json.load(existing_file)
@@ -1034,12 +914,6 @@ def main():
         }]
         kind = "notification"
     elif hook_event == "PermissionRequest":
-        # Codex approval prompt. The payload mirrors PreToolUse (tool_name,
-        # tool_input) but carries no questions -- Codex is asking to run a tool,
-        # not asking the operator a multiple-choice question. Publish it as a
-        # notification-kind approval block naming the tool so the feed and the
-        # phone notifier can surface it, and so AGI EXT can bridge
-        # it to a VS Code notification.
         tool_name = payload.get("tool_name") or "a tool"
         tool_input = payload.get("tool_input", {})
         command = ""
@@ -1087,7 +961,6 @@ def main():
             return
         kind = "question"
 
-    # Identity from env (set by agents-cli at spawn).
     mailbox_id = os.path.basename(
         os.environ.get("AGENTS_MAILBOX_DIR", "").rstrip("/")
     ) or session_id
@@ -1101,8 +974,6 @@ def main():
     if not isinstance(recent, list):
         recent = []
     recent.append(now_iso)
-    # Keep enough history for rolling one-hour needy detection without unbounded
-    # per-session files. The TypeScript reader applies the exact time window.
     recent = recent[-200:]
     write_json(stats_path, {
         "sessionId": session_id,
@@ -1128,8 +999,6 @@ def main():
         "host": host,
         "runtime": runtime,
         "ts": now_iso,
-        # Write-time cursor so a new generation is not suppressed when
-        # session.lastActivityMs is unresolvable (cloud / remote / index-lag).
         "sourceCursor": {"lastActivityMs": now_ms},
         "questions": normalized_questions,
         "kind": kind,
@@ -1139,20 +1008,11 @@ def main():
     if notification_type:
         block["notificationType"] = notification_type
 
-    # A Codex PermissionRequest is a real approval gate: mark it approval-class
-    # with a high cost-of-delay so 'agents feed --dispatch' classifies it urgent
-    # (isPhoneUrgent gates on costOfDelay >= phoneNotifyThreshold, default
-    # 'medium') and pages the phone. A plain 'deny' is the safe default.
     if codex_approval:
         block["blockClass"] = "approval"
         block["costOfDelay"] = "high"
         block["safeDefault"] = "deny"
 
-    # Optional multi-operator control metadata passed by the agent in the
-    # AskUserQuestion tool_input. Defaults keep the existing behavior. A Codex
-    # PermissionRequest carries tool ARGS in tool_input (command/path), not
-    # operator controls, so it is excluded here -- its class/cost is stamped
-    # above from codex_approval.
     controls = payload.get("tool_input", {}) if hook_event not in ("Notification", "PermissionRequest") else {}
     block_class = controls.get("blockClass") if isinstance(controls, dict) else None
     if block_class in ("approval", "decision"):
@@ -1173,8 +1033,6 @@ def main():
     if cost in ("low", "medium", "high"):
         block["costOfDelay"] = cost
 
-    # Publishing a new question clears any stale answered marker from the
-    # previous question in this session.
     try:
         os.unlink(os.path.join(answered_dir, f"{block_id}.json"))
     except FileNotFoundError:
@@ -1182,9 +1040,6 @@ def main():
     except Exception:
         pass
 
-    # Python's expanduser() ignores HOME on Windows, while agents-cli honors a
-    # HOME override on every platform. Use the same anchor so hooks and the CLI
-    # always read/write one feed store (including temp-home and sandbox runs).
     os.makedirs(feed_dir, exist_ok=True)
 
     fd, tmp = tempfile.mkstemp(dir=feed_dir, suffix=".tmp")
@@ -1203,7 +1058,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        pass  # fail open
+        pass
 `;
 
 /** Installs the feed-publish hook script into the user hooks dir and its manifest entry into the
@@ -1238,9 +1093,6 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
         script: '10-feed-publish.py',
         timeout: 5,
       },
-      // idle_prompt is not matched: an idle reminder is a finished turn, not a
-      // pending request (PHNX-3999). An installed agents.yaml that still carries
-      // the old matcher is harmless -- the script drops the subtype itself.
       'feed-publish-notification': {
         agents: ['claude', 'codex'],
         events: ['Notification'],
@@ -1248,8 +1100,6 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
         script: '10-feed-publish.py',
         timeout: 5,
       },
-      // Codex-specific approval gate: Codex emits PermissionRequest (Claude does
-      // not), so this hook is where a blocked Codex agent surfaces to the feed.
       'feed-publish-permission': {
         agents: ['claude', 'codex'],
         events: ['PermissionRequest'],

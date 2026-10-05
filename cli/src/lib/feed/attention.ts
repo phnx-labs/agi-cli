@@ -31,7 +31,6 @@ export type AttentionKind =
   | 'review'
   | 'unverified';
 
-/** How an answer can be routed back to the waiting agent. */
 export type ReplyCapability = 'terminal' | 'tmux' | 'cloud' | 'team' | 'none';
 
 /** One answerable choice: extends BlockOption with a stable `id` the UI echoes back and an
@@ -45,7 +44,6 @@ export interface AttentionChoice extends BlockOption {
 /** The canonical operator-facing attention record: one reconciled thing that needs a human. A
  * public envelope with a stability contract. */
 export interface AttentionItem {
-  /** Stable identity: `host/session/generation`. A new generation is a new item. */
   key: string;
   sessionId: string;
   mailboxId: string;
@@ -54,7 +52,6 @@ export interface AttentionItem {
   kind: AttentionKind;
   source: AttentionSource;
   state: AttentionState;
-  /** ISO-8601 timestamp the ask opened. */
   openedAt: string;
   question?: BlockQuestion;
   choices?: AttentionChoice[];
@@ -63,7 +60,6 @@ export interface AttentionItem {
   /** Clusters identical asks across agents for batch triage: a hash of the raw question intent
    * (kind, verbatim text, option labels), deliberately not the UI-normalized display text. */
   fingerprint: string;
-  /** Where in the source this generation sits — the fence a resolution compares against. */
   sourceCursor?: SourceCursor;
 }
 
@@ -73,7 +69,6 @@ export interface PullRequestAttentionSignal {
   number: number;
   title?: string;
   url?: string;
-  /** True when the PR is in a state that needs a human decision (review / merge). */
   needsHuman: boolean;
   reviewDecision?: string;
   mergeable?: string;
@@ -81,13 +76,11 @@ export interface PullRequestAttentionSignal {
   isDraft?: boolean;
 }
 
-/** A candidate plus the generation the reconciler resolves suppression against. */
 interface AttentionCandidate {
   item: AttentionItem;
   generation: string;
 }
 
-/** Stable attention key: host + session + generation (see the proposed C4 diagram). */
 function attentionKey(host: string, sessionId: string, generation: string): string {
   return `${host}/${sessionId}/${generation}`;
 }
@@ -100,7 +93,6 @@ export function attentionFingerprint(kind: AttentionKind, question?: BlockQuesti
   return createHash('sha1').update(material).digest('hex').slice(0, 16);
 }
 
-/** Convert a session-engine {@link StructuredQuestion} into the feed {@link BlockQuestion} shape. */
 function structuredToBlockQuestion(sq: StructuredQuestion): BlockQuestion {
   const options = sq.options?.length
     ? sq.options.map((o) => ({ label: o.label, ...(o.description ? { description: o.description } : {}) }))
@@ -112,7 +104,6 @@ function structuredToBlockQuestion(sq: StructuredQuestion): BlockQuestion {
   };
 }
 
-/** A label slugged to the `[a-z0-9-]+` id shape the notify argv and UIs echo back. */
 function slugId(label: string): string {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
@@ -123,9 +114,6 @@ function questionChoices(question?: BlockQuestion, structured?: StructuredQuesti
   const options = question?.options;
   if (!options?.length) return undefined;
   return options.map((o, i) => {
-    // The harness-native selection key, when the state engine parsed one. A feed
-    // block carries no per-option key, so `deliveryKey` stays absent and the
-    // router matches the label to a TUI digit (readable in the mailbox fallback).
     const key = structured?.options?.[i]?.key;
     const choice: AttentionChoice = { ...o, id: slugId(o.label) || key || String(i + 1) };
     if (key) choice.deliveryKey = key;
@@ -143,7 +131,6 @@ function permissionChoices(harness: string): AttentionChoice[] {
   return choices;
 }
 
-/** Plan-review canonical choices: approve the plan (option 1) or send it back (Esc/keep planning). */
 function planReviewChoices(): AttentionChoice[] {
   return [
     { id: 'approve', label: 'Approve plan', deliveryKey: '1' },
@@ -166,12 +153,10 @@ function choicesForItem(
   return questionChoices(question, structured);
 }
 
-/** Harness id behind a session — the profile name when set, else the host process. */
 export function harnessOf(session: ActiveSession): string {
   return session.harness ?? session.kind ?? '';
 }
 
-/** Which reply rail reaches the agent behind this session. */
 function replyCapabilityForSession(session: ActiveSession): ReplyCapability {
   if (session.host === 'tmux') return 'tmux';
   switch (session.context) {
@@ -182,8 +167,6 @@ function replyCapabilityForSession(session: ActiveSession): ReplyCapability {
     case 'terminal':
       return 'terminal';
     default:
-      // A headless run with no tmux pane has no addressable reply rail. Say so
-      // loudly rather than pretend 'terminal' — Track B routes on this verdict.
       return 'none';
   }
 }
@@ -192,13 +175,11 @@ function sessionCursor(session: ActiveSession): SourceCursor | undefined {
   return session.lastActivityMs != null ? { lastActivityMs: session.lastActivityMs } : undefined;
 }
 
-/** Best-available ISO stamp for when the ask opened. */
 function openedAtForSession(session: ActiveSession, nowMs: number): string {
   const ms = session.lastActivityMs ?? session.startedAtMs ?? nowMs;
   return new Date(ms).toISOString();
 }
 
-/** A session's generation tracks its transcript cursor, so a newer turn is a new generation. */
 function generationForSession(session: ActiveSession): string {
   return session.lastActivityMs != null ? `t${session.lastActivityMs}` : `s${session.sessionId ?? ''}`;
 }
@@ -218,13 +199,13 @@ function kindFromNotification(notificationType: string | undefined): AttentionKi
     case 'elicitation_dialog':
       return 'question';
     case 'idle_prompt':
+      // Idle is not evidence that the agent requested a decision.
       return undefined;
     default:
       return 'unverified';
   }
 }
 
-/** The attention kind an open block carries, or undefined when the block is not a request. */
 function kindFromBlock(block: OpenBlock): AttentionKind | undefined {
   switch (block.kind) {
     case 'declared':
@@ -253,6 +234,7 @@ function resolvedByLaterEvidence(block: OpenBlock, session: ActiveSession): bool
  * transcript is the pending dialog; without one, the hook's word is trusted only while younger
  * than UNVERIFIED_PROMPT_AGE_MS. */
 function permissionVerifiable(block: OpenBlock, session: ActiveSession, nowMs: number): boolean {
+  // Missing cursor evidence is trusted only inside the bounded prompt window.
   if (block.sourceCursor?.lastActivityMs != null && session.lastEventMs != null) return true;
   const openedMs = Date.parse(block.ts);
   return Number.isFinite(openedMs) && nowMs - openedMs < UNVERIFIED_PROMPT_AGE_MS;
@@ -281,7 +263,6 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
     question,
     choices: choicesForItem(kind, harnessOf(session), question),
     replyCapability: replyCapabilityForSession(session),
-    // A safe default is an automatic answer; an unconfirmed prompt gets none.
     safeDefault: kind === 'unverified' ? undefined : block.safeDefault,
     fingerprint: attentionFingerprint(kind, question),
     sourceCursor: block.sourceCursor ?? sessionCursor(session),
@@ -310,8 +291,6 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
   const item: AttentionItem = {
     key: attentionKey(host, sessionId, generation),
     sessionId,
-    // No mailbox rides an ActiveSession row; the feed store's own default is
-    // `mailbox = session id`, so mirror it here rather than invent a second rule.
     mailboxId: sessionId,
     host,
     project: session.project ?? undefined,
@@ -328,7 +307,6 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
   return { item, generation };
 }
 
-/** A CLI-supplied PR signal that a human decision is pending. */
 function attentionFromPullRequest(
   session: ActiveSession,
   nowMs: number,
@@ -341,8 +319,6 @@ function attentionFromPullRequest(
     text: `Review PR #${pr.number}${pr.title ? `: ${pr.title}` : ''}`,
     header: 'Review',
   };
-  // A review's generation is its PR number + decision/state, so a state change
-  // (review requested -> approved) is a new generation, not a stuck one.
   const generation = `pr${pr.number}:${pr.reviewDecision ?? pr.state ?? ''}`;
   const item: AttentionItem = {
     key: attentionKey(host, sessionId, generation),
@@ -362,7 +338,6 @@ function attentionFromPullRequest(
   return { item, generation };
 }
 
-/** The temporal fence a resolution tombstone draws: its own cursor, else its wall-clock time. */
 function resolutionFenceMs(resolution: AttentionResolution): number | undefined {
   const cursor = resolution.sourceCursor?.lastActivityMs;
   if (cursor != null) return cursor;
@@ -374,6 +349,7 @@ function resolutionFenceMs(resolution: AttentionResolution): number | undefined 
  * session and either the generation was resolved or the cursor has not advanced strictly past
  * the fence. With no comparable cursor it covers, so a resolved item stays gone (RUSH-1522). */
 function coveredByResolution(candidate: AttentionCandidate, resolution?: AttentionResolution): boolean {
+  // A tombstone covers its generation and stale cursors, but not a strictly newer turn.
   if (!resolution) return false;
   if (resolution.blockId !== blockIdForSession(candidate.item.sessionId)) return false;
   if (candidate.generation === resolution.generation) return true;
@@ -392,9 +368,6 @@ export function reconcileAttention(input: {
   resolution?: AttentionResolution;
   nowMs: number;
 }): AttentionItem | undefined {
-  // An open block that is not a request (an idle reminder) or that the session
-  // has moved past yields nothing, and the lifecycle then speaks for itself — a
-  // finished turn reads as idle, a trailing prose question as the inferred ask.
   const fromBlock =
     input.block && deriveBlockState(input.block) === 'open'
       ? attentionFromBlock(input.block, input.session, input.nowMs)

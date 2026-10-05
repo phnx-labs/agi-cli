@@ -26,7 +26,6 @@ function needsHuman(value: Omit<PullRequestStatus, 'needsHuman'>): boolean {
   return value.reviewDecision !== 'APPROVED' || (value.mergeable === 'MERGEABLE' && checksSettled);
 }
 
-/** CLI-owned bounded-TTL source shared by feed attention and PR-board consumers. */
 export const PR_STATUS_DEFAULT_TIMEOUT_MS = 15_000;
 
 /** `options.timeoutMs` bounds the underlying `gh` call. A caller on a deadline (the feed answer

@@ -31,45 +31,35 @@ export const HUB_DRAIN_STALL_MS = 30_000;
  * instead of copying it into the heap at once. */
 export const HUB_WRITE_CHUNK_BYTES = 64 * 1024;
 
-/** Optional overrides for the transport bounds. Tests exercise both bounds fast. */
 export type FeedHubLimits = { backlogBytes?: number; backlogGraceMs?: number; drainStallMs?: number; chunkBytes?: number };
 
 /** How long a reader gets to send its scope line before it is rejected. The handshake is
  * required: defaulting a missing or garbled scope to `fleet` subscribed silent readers to every
  * peer (ssh children and peer data nobody asked for). */
 export const HUB_HANDSHAKE_GRACE_MS = 2_000;
-/** Bytes of handshake accepted before the reader is rejected outright. */
 const HUB_HANDSHAKE_MAX_BYTES = 1024;
-/** The scopes a reader may ask for. */
 const HUB_SCOPES = new Set(['fleet', 'local']);
 
-/** The canonical socket path (POSIX) / pipe-name key (Windows). */
 export function feedHubSocketPath(): string {
   return path.join(getHelpersDir(), 'feed', SOCKET_NAME);
 }
 
-/** The address a server listens on and a client connects to. */
 export function feedHubEndpoint(socketPath = feedHubSocketPath()): string {
   return ipcEndpoint(socketPath);
 }
 
-/** Why a reader was dropped; each counts on its own server counter. */
 type DropReason = 'backlog' | 'stall';
 
 /** One reader's ordered outbound queue; every line (snapshot, live events, refusal error) goes
  * through it so none lands inside another. Written in HUB_WRITE_CHUNK_BYTES chunks awaiting
  * 'drain'; dropped on a chunk stalled `drainStallMs` or a backlog over budget past the grace. */
 class ReaderWriter {
-  /** Lines not yet handed to the socket; `live` marks the ones the budget counts. */
   private readonly queue: Array<{ bytes: Buffer; live: boolean }> = [];
-  /** Bytes queued since the snapshot finished enqueuing; the budgeted part. */
   private liveBytes = 0;
   private live = false;
   private running = false;
   private closeAfterFlush = false;
-  /** Armed while the live queue is over budget; fires the drop if it still is. */
   private overBudget: NodeJS.Timeout | null = null;
-  /** Bytes of the line being pumped that have not yet been handed to the socket. */
   private activeRemaining = 0;
 
   constructor(
@@ -85,7 +75,6 @@ class ReaderWriter {
     return this.queue.reduce((sum, line) => sum + line.bytes.length, 0) + this.activeRemaining + this.socket.writableLength;
   }
 
-  /** Everything enqueued from now on is a live event and counts against the budget. */
   startLive(): void { this.live = true; }
 
   write(line: string): void {
@@ -96,13 +85,11 @@ class ReaderWriter {
     void this.pump();
   }
 
-  /** FIN once everything queued has been handed to the socket. */
   end(): void {
     this.closeAfterFlush = true;
     void this.pump();
   }
 
-  /** Release the timers; the socket is gone. */
   dispose(): void {
     if (this.overBudget) { clearTimeout(this.overBudget); this.overBudget = null; }
     this.queue.length = 0;
@@ -111,6 +98,7 @@ class ReaderWriter {
   }
 
   private judgeBacklog(): void {
+    // Backlog must stay over budget for the grace period; a drain stall is judged separately.
     if (this.liveBytes <= this.limits.backlogBytes) {
       if (this.overBudget) { clearTimeout(this.overBudget); this.overBudget = null; }
       return;
@@ -146,7 +134,6 @@ class ReaderWriter {
     }
   }
 
-  /** Resolve true on `'drain'`; false when the socket closed or the stall deadline passed. */
   private drained(): Promise<boolean> {
     return new Promise((resolve) => {
       const settle = (ok: boolean) => {
@@ -172,15 +159,11 @@ class ReaderWriter {
 export class FeedHubServer {
   private server: net.Server | null = null;
   private readonly detachers = new Map<net.Socket, () => void>();
-  /** Which collector each reader is attached to, so a failure reaches only its own. */
   private readonly attachedTo = new Map<net.Socket, FeedHub>();
   private readonly writers = new Map<net.Socket, ReaderWriter>();
   private readonly limits: Required<FeedHubLimits>;
-  /** Readers dropped for queueing live bytes past the budget. Observability. */
   droppedForBacklog = 0;
-  /** Readers dropped for not draining a chunk within the stall deadline. Observability. */
   droppedForStall = 0;
-  /** Readers refused for a missing, invalid, or late scope line. Observability. */
   rejectedHandshakes = 0;
 
   /** `hub` is the fleet collector; `localHub` is the local-only collector served for `scope:
@@ -197,15 +180,11 @@ export class FeedHubServer {
       drainStallMs: limits.drainStallMs ?? HUB_DRAIN_STALL_MS,
       chunkBytes: limits.chunkBytes ?? HUB_WRITE_CHUNK_BYTES,
     };
-    // A collector that cannot start is reported to every reader attached to it
-    // and the connection is ended, so a consumer sees a failure instead of an
-    // indefinitely silent stream it cannot distinguish from an idle fleet.
     for (const collector of [hub, localHub]) {
       if (collector) collector.onFailure = (error) => this.failReaders(collector, error);
     }
   }
 
-  /** Report a collector failure to its readers and end those connections. */
   private failReaders(collector: FeedHub, error: Error): void {
     for (const [socket, attached] of this.attachedTo) {
       if (attached !== collector || socket.destroyed) continue;
@@ -215,10 +194,8 @@ export class FeedHubServer {
     }
   }
 
-  /** Subscribers currently connected. Observability + tests. */
   get clientCount(): number { return this.detachers.size; }
 
-  /** Bytes queued for every reader and not yet handed to a socket. Observability + tests. */
   get pendingBytes(): number {
     let total = 0;
     for (const writer of this.writers.values()) total += writer.pendingBytes;
@@ -232,12 +209,9 @@ export class FeedHubServer {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     if (!IS_WINDOWS) {
       fs.chmodSync(dir, 0o700);
-      // A crashed daemon leaves the socket file behind; it accepts nothing, so
-      // removing it is the only way to bind. Named pipes vanish with their owner.
-      try { fs.unlinkSync(socketPath); } catch { /* nothing stale to remove */ }
+      try { fs.unlinkSync(socketPath); } catch {  }
     }
     this.server = net.createServer((socket) => {
-      // The scope line is REQUIRED and must arrive within the grace window.
       const grace = setTimeout(() => reject(`no scope line within ${HUB_HANDSHAKE_GRACE_MS}ms`), HUB_HANDSHAKE_GRACE_MS);
       grace.unref();
       const end = () => {
@@ -249,21 +223,15 @@ export class FeedHubServer {
         this.writers.delete(socket);
       };
       socket.on('close', end);
-      // A reader that dies mid-write surfaces as an error, not a close, and
-      // leaving it subscribed would hold every peer connection open forever.
       socket.on('error', end);
 
       const writer = new ReaderWriter(socket, this.limits, (reason, message) => {
         if (socket.destroyed) return;
         if (reason === 'backlog') this.droppedForBacklog += 1; else this.droppedForStall += 1;
-        // `destroy` rather than `end`: a reader this far behind is not going
-        // to drain a graceful FIN either, and the point is to release the
-        // queued bytes now. 'close' fires and detaches it.
         socket.destroy(new Error(message));
       });
       this.writers.set(socket, writer);
 
-      /** Refuse this reader, telling it why rather than hanging up silently. */
       const reject = (reason: string) => {
         clearTimeout(grace);
         if (socket.destroyed) return;
@@ -274,23 +242,17 @@ export class FeedHubServer {
 
       const attach = (hub: FeedHub) => {
         if (socket.destroyed || this.detachers.has(socket)) return;
-        // `subscribe` emits the catch-up snapshot synchronously before it
-        // returns, so every line enqueued until then is snapshot and the first
-        // live event can only ever queue behind it.
+        // subscribe synchronously queues catch-up before this writer admits live events.
         const detach = hub.subscribe((event) => writer.write(JSON.stringify(event)));
         writer.startLive();
         this.detachers.set(socket, detach);
         this.attachedTo.set(socket, hub);
-        // A collector that ALREADY failed must not leave this reader waiting for
-        // a stream that is never coming.
         if (hub.lastFailure) this.failReaders(hub, hub.lastFailure);
       };
 
       let handshake = '';
       socket.on('data', (chunk: Buffer) => {
         if (socket.destroyed) return;
-        // A line arriving AFTER this reader is attached is a protocol error: the
-        // scope is settled and a second one cannot retroactively change it.
         if (this.detachers.has(socket)) { reject('scope sent after the stream was already open'); return; }
         handshake += chunk.toString('utf-8');
         const newline = handshake.indexOf('\n');
@@ -302,13 +264,12 @@ export class FeedHubServer {
         let scope: unknown;
         try { scope = (JSON.parse(handshake.slice(0, newline)) as { scope?: unknown }).scope; }
         catch { reject('scope line is not valid JSON'); return; }
+        // Scope is mandatory: silently defaulting a local reader would trigger fleet fan-out.
         if (typeof scope !== 'string' || !HUB_SCOPES.has(scope)) {
           reject(`unknown scope ${JSON.stringify(scope)}; expected "fleet" or "local"`);
           return;
         }
         if (scope === 'local' && !this.localHub) {
-          // Serving the fleet collector instead would start peer connections a
-          // local-only reader never asked for.
           reject('this server has no local collector');
           return;
         }
@@ -335,9 +296,6 @@ export class FeedHubServer {
 
   async stop(): Promise<void> {
     for (const detach of this.detachers.values()) detach();
-    // Every connection, including one still in its handshake: `server.close`
-    // waits for open sockets, and a reader that never sent its scope line
-    // would otherwise hold the daemon's shutdown for the whole grace window.
     for (const [socket, writer] of this.writers) { writer.dispose(); socket.destroy(); }
     this.detachers.clear();
     this.attachedTo.clear();
@@ -375,7 +333,6 @@ export function streamFeedFromHub(options: {
   signal: AbortSignal;
   emit: (event: FeedWatchEnvelope) => void;
   endpoint?: string;
-  /** Which collector to attach to. Defaults to the whole fleet. */
   scope?: 'fleet' | 'local';
 }): Promise<void> {
   return new Promise<void>((resolve, reject) => {
@@ -383,17 +340,11 @@ export function streamFeedFromHub(options: {
     let aborted = false;
     let failure: Error | undefined;
     const fail = (error: Error) => { failure ??= error; socket.destroy(); };
-    // Registered before anything else touches the socket: a connect failure on
-    // a missing socket path is emitted as an 'error' with no listener attached
-    // yet, which node raises as an uncaught exception rather than rejecting.
     socket.on('error', (error) => { failure ??= error as Error; });
     const stop = () => { aborted = true; socket.destroy(); };
     options.signal.addEventListener('abort', stop, { once: true });
     if (options.signal.aborted) stop();
 
-    // Pieces of the line in progress; only the newest chunk is searched for a
-    // newline, so an 8 MB reset arriving in 64 KiB chunks is not rescanned from
-    // its start on every chunk.
     const partial: string[] = [];
     let partialBytes = 0;
     socket.setEncoding('utf-8');
@@ -411,10 +362,7 @@ export function streamFeedFromHub(options: {
         try { event = JSON.parse(line); }
         catch { fail(new Error(`feed hub sent a line that is not JSON (${line.length} chars)`)); return; }
         if (typeof event !== 'object' || event === null) { fail(new Error(`feed hub sent a line that is not an envelope: ${line.slice(0, 80)}`)); return; }
-        // Protocol only: an unversioned line is not a feed envelope.
         if ((event as FeedWatchEnvelope).v !== 1) continue;
-        // A consumer that throws ends the read as a failure of THIS promise; left
-        // to escape the socket's 'data' handler it is an uncaught exception.
         try { options.emit(event as FeedWatchEnvelope); }
         catch (error) { fail(error instanceof Error ? error : new Error(String(error))); return; }
       }
@@ -425,6 +373,7 @@ export function streamFeedFromHub(options: {
     socket.on('close', () => {
       options.signal.removeEventListener('abort', stop);
       if (aborted) { resolve(); return; }
+      // Unsolicited close, including a partial frame, is failure; clients do not fall back locally.
       if (failure) { reject(failure); return; }
       if (partialBytes > 0) { reject(new Error(`feed hub closed mid-frame: ${partialBytes} chars of an unterminated line`)); return; }
       reject(new Error('feed hub closed the stream'));

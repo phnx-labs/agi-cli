@@ -1,6 +1,3 @@
-// Cloudflare orchestration for the private agents-traces store. The generic
-// request primitives live in cloudflare/provision; only the isolated traces resource
-// choices and Worker template belong here.
 
 import { randomBytes } from 'node:crypto';
 import {
@@ -19,7 +16,6 @@ interface ProvisionOptions {
   request?: CloudflareRequester;
 }
 
-/** Bind the Phoenix identity base URL used to verify every trace read and write. */
 async function setPhoenixIdBaseSecret(
   apiToken: string,
   accountId: string,
@@ -41,7 +37,6 @@ interface ProvisionTracesOptions extends ProvisionOptions {
   domain?: string;
 }
 
-/** Provision the complete isolated traces deployment using the canonical Worker template. */
 export async function provisionTraces(opts: ProvisionTracesOptions): Promise<{ baseUrl: string }> {
   const domain = opts.domain ?? DEFAULT_TRACES_DOMAIN;
   const requestOpts = opts.request ? { request: opts.request } : {};

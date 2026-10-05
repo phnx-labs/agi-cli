@@ -6,15 +6,12 @@ import * as path from 'node:path';
 import { getActivityDir } from '../state.js';
 import { ACTIVITY_TAIL_BYTES, parseActivityLine, type ActivityEvent } from './activity.js';
 
-/** How often the stream falls back to a full directory stat sweep. */
 const ACTIVITY_SWEEP_MS = 5_000;
-/** Bytes behind the cursor re-verified before appended bytes are trusted. */
 const ACTIVITY_ANCHOR_BYTES = 64;
 
 const NEWLINE = 0x0a;
 const EMPTY = Buffer.alloc(0);
 
-/** What one `stat` tells this reader about a log. */
 interface FileStat {
   identity: string;
   size: number;
@@ -22,7 +19,6 @@ interface FileStat {
   ctimeNs: number;
 }
 
-/** Could this file have changed since its cursor last looked? */
 function changed(cursor: FileCursor, stat: FileStat): boolean {
   return stat.identity !== cursor.identity
     || stat.size !== cursor.size
@@ -31,13 +27,9 @@ function changed(cursor: FileCursor, stat: FileStat): boolean {
 }
 
 interface FileCursor {
-  /** `dev:ino` of the tracked inode; a change means the path was replaced. */
   identity: string;
-  /** Bytes of this inode already consumed. */
   offset: number;
-  /** Trailing bytes after the last newline, waiting for the line to finish. */
   partial: Buffer;
-  /** True when `partial` starts mid-record and must not be parsed. */
   partialIsFragment: boolean;
   /** The last ACTIVITY_ANCHOR_BYTES already consumed. Growth alone cannot distinguish an append
    * from a longer in-place rewrite, so these bytes are re-verified on the same read and a
@@ -52,14 +44,11 @@ interface FileCursor {
 }
 
 interface ActivityStreamOptions {
-  /** Override the activity dir (tests). */
   root?: string;
   /** Newest bytes read from one file in one tick; a larger burst keeps only the tail, like
    * `readRecentActivity`. */
   maxBytesPerRead?: number;
-  /** Full stat sweep cadence, covering anything the directory watcher misses. */
   sweepMs?: number;
-  /** Subscribe to directory change notifications (default true). */
   watch?: boolean;
 }
 
@@ -74,9 +63,7 @@ export class ActivityStream {
   private watcher?: fs.FSWatcher;
   private watchRequested: boolean;
   private lastSweepMs = 0;
-  /** False during the opening scan, so it registers history without reading it. */
   private started = false;
-  /** Bytes read from activity logs since construction. Observability + tests. */
   bytesRead = 0;
 
   constructor(options: ActivityStreamOptions = {}) {
@@ -106,18 +93,13 @@ export class ActivityStream {
     return out;
   }
 
-  /** Release the directory watcher. Safe to call more than once. */
   close(): void {
     this.watchRequested = false;
     this.watcher?.close();
     this.watcher = undefined;
   }
 
-  /** Which log names could have changed since the previous tick. */
   private candidates(nowMs: number): string[] {
-    // A watcher that never armed (unsupported filesystem, or a directory that
-    // did not exist at construction) means every tick sweeps. That is the
-    // fallback: never a silent no-op that would drop events.
     if (!this.watcher) this.armWatcher();
     if (!this.watcher || nowMs - this.lastSweepMs >= this.sweepMs) this.sweep(nowMs);
     const names = [...this.dirty];
@@ -133,7 +115,7 @@ export class ActivityStream {
     try {
       names = fs.readdirSync(this.dir).filter((name) => name.endsWith('.jsonl'));
     } catch {
-      return; // The directory appears with the first logged event.
+      return;
     }
     const seen = new Set<string>();
     for (const name of names) {
@@ -142,8 +124,7 @@ export class ActivityStream {
       if (!stat) continue;
       const cursor = this.cursors.get(name);
       if (!cursor) {
-        // A log first seen after the opening scan is new work: left
-        // unregistered so `readFile` opens it from a bounded tail.
+        // Opening discovery registers history at EOF; files discovered later are live work.
         if (this.started) this.dirty.add(name);
         else this.cursors.set(name, {
           identity: stat.identity, offset: stat.size, partial: EMPTY, partialIsFragment: false,
@@ -170,11 +151,10 @@ export class ActivityStream {
         ctimeNs: Number(st.ctimeNs),
       };
     } catch {
-      return undefined; // Deleted between readdir and stat.
+      return undefined;
     }
   }
 
-  /** A cursor starting at a bounded tail of the file as it stands right now. */
   private freshCursor(stat: FileStat): FileCursor {
     const offset = Math.max(0, stat.size - this.maxBytesPerRead);
     return {
@@ -183,7 +163,6 @@ export class ActivityStream {
     };
   }
 
-  /** Read and parse only the bytes appended to one log since its cursor. */
   private readFile(name: string, restarted = false): ActivityEvent[] {
     const stat = this.statOf(name);
     if (!stat) { this.cursors.delete(name); return []; }
@@ -200,8 +179,6 @@ export class ActivityStream {
     cursor.mtimeNs = stat.mtimeNs;
     cursor.ctimeNs = stat.ctimeNs;
     if (stat.size <= cursor.offset) return [];
-    // A burst larger than the budget keeps the newest bytes; the skipped span is
-    // exactly what the bounded-tail reader would have dropped as well.
     const start = Math.max(cursor.offset, stat.size - this.maxBytesPerRead);
     if (start > cursor.offset) {
       cursor.partial = EMPTY;
@@ -210,10 +187,9 @@ export class ActivityStream {
     }
     const verify = Math.min(cursor.anchor.length, start);
     const buf = this.readRange(name, start - verify, stat.size - start + verify);
-    if (buf === undefined) return []; // Transient I/O error: retry next tick.
+    // I/O failure never advances the consumed offset, so a future candidate can retry these bytes.
+    if (buf === undefined) return [];
     if (verify > 0 && !buf.subarray(0, verify).equals(cursor.anchor.subarray(cursor.anchor.length - verify))) {
-      // The bytes behind the cursor changed, so this file was rewritten rather
-      // than appended to. Restart it once from a bounded tail.
       if (restarted) return [];
       this.cursors.delete(name);
       return this.readFile(name, true);
@@ -224,15 +200,10 @@ export class ActivityStream {
     const chunk = Buffer.concat([cursor.partial, fresh]);
     const fragment = cursor.partialIsFragment;
     const end = chunk.lastIndexOf(NEWLINE);
-    // Hold an unterminated trailing line: the writer appends whole
-    // newline-terminated records (`appendActivityEvent`), so a tail without a
-    // newline is a write in progress and completes on a later tick.
     cursor.partial = end < 0 ? chunk : chunk.subarray(end + 1);
     cursor.partialIsFragment = end < 0 ? fragment : false;
     if (end < 0) return [];
     const lines = chunk.subarray(0, end).toString('utf-8').split('\n');
-    // A range that began mid-file starts inside a record; that leading fragment
-    // is not one, exactly as the bounded-tail reader drops it.
     if (fragment) lines.shift();
     const events: ActivityEvent[] = [];
     for (const line of lines) {
@@ -263,8 +234,6 @@ export class ActivityStream {
       this.watcher = fs.watch(this.dir, (_event, name) => {
         if (typeof name === 'string' && name.endsWith('.jsonl')) this.dirty.add(name);
       });
-      // A watch error (the directory is removed) degrades to sweeping rather
-      // than taking down the watcher process.
       this.watcher.on('error', () => { this.watcher?.close(); this.watcher = undefined; });
     } catch {
       this.watcher = undefined;

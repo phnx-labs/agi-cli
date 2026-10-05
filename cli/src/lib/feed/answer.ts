@@ -34,9 +34,7 @@ import { getAgentsInvocation } from '../daemon/daemon.js';
 /** Total budget for one answer; below the AGI Menu's 30s abandon so the operator gets a typed
  * verdict, not a timeout. */
 export const ANSWER_DEADLINE_MS = 20_000;
-/** Slice of the budget the optional PR-review enrichment may spend. */
 export const PR_ENRICHMENT_BUDGET_MS = 4_000;
-/** Budget for the forwarded leg — the remote repeats the local work under its own deadline. */
 export const REMOTE_ANSWER_TIMEOUT_MS = 25_000;
 /** A claim older than this with no receipt was stranded by a kill: it exceeds a full local
  * deadline plus the remote leg. */
@@ -49,7 +47,6 @@ export const RESUME_SETTLE_MS = 2_000;
 export const HOLDER_RECEIPT_WAIT_MS = 400;
 const HOLDER_RECEIPT_POLL_MS = 20;
 
-/** Why an answer could not be delivered — the discriminant the operator UI branches on. */
 export type AnswerFailureCode =
   | 'malformed_key'
   | 'no_session'
@@ -63,7 +60,6 @@ export type AnswerFailureCode =
   | 'timeout'
   | 'remote_failed';
 
-/** A CONFIRMED failure: nothing reached a rail, the claim is released, retry is safe. */
 export class AnswerError extends Error {
   constructor(message: string, readonly code: AnswerFailureCode) {
     super(message);
@@ -91,20 +87,15 @@ export type AnswerDelivery = 'receipt' | 'unconfirmed' | 'failed';
 
 export interface FeedAnswerResult {
   status: AnswerStatus;
-  /** How much the CLI can actually vouch for. */
   delivery: AnswerDelivery;
-  /** The block's real receipt. Absent means no rail ever reported one. */
   receipt?: MessageReceipt;
   /** The agent's own evidence of receipt (`consumed` or `continued`). A `queued` receipt is
    * delivery, not resolution, so it leaves this false. */
   resolved: boolean;
-  /** Human explanation for a failure, an unknown, or an unconfirmed delivery. */
   reason?: string;
-  /** Set when `status` is `failed`. */
   code?: AnswerFailureCode;
   attentionKey: string;
   blockId?: string;
-  /** The device that owns the item — the exact target a delivery check re-queries. */
   host?: string;
   /** Stable identity of the delivery attempt (the claim timestamp), so a delivery check can tell
    * "still unconfirmed" from "a newer attempt". */
@@ -113,7 +104,6 @@ export interface FeedAnswerResult {
 
 interface VerifiedOperator { id?: string; verified: boolean; label?: string }
 
-// --- attention key ----------------------------------------------------------
 
 export interface ParsedAttentionKey { host: string; sessionId: string; generation: string }
 
@@ -137,23 +127,21 @@ export function answerOwnerIsLocal(host: string, self: string = machineId()): bo
   return normalizeHost(host) === normalizeHost(self);
 }
 
-/** A PR-review generation (`pr<number>:<decision>`) — the only kind a `gh` read can produce. */
 function isPullRequestGeneration(generation: string): boolean {
   return /^pr\d+:/.test(generation);
 }
 
-// --- receipt semantics ------------------------------------------------------
 
 /** What a stored receipt proves: `queued` is delivery, never resolution; `consumed`/`continued`
  * is the agent's own ack and resolves; `dropped`/`expired` is terminal failure (ranked top on
  * write so it cannot regress) and must not read as success. */
 export function classifyReceipt(receipt: MessageReceipt): { delivery: AnswerDelivery; resolved: boolean } {
+  // Queued and unconfirmed delivery remain unresolved; only consumption/continuation is proof.
   if (receipt.status === 'consumed' || receipt.status === 'continued') return { delivery: 'receipt', resolved: true };
   if (receipt.status === 'queued') return { delivery: 'receipt', resolved: false };
   return { delivery: 'failed', resolved: false };
 }
 
-// --- deadline ---------------------------------------------------------------
 
 interface Deadline { endMs: number }
 function startDeadline(totalMs: number): Deadline { return { endMs: Date.now() + totalMs }; }
@@ -178,7 +166,6 @@ async function withinDeadline<T>(work: Promise<T>, deadline: Deadline, what: str
   }
 }
 
-// --- resolution -------------------------------------------------------------
 
 function blockFromAttention(attention: AttentionItem, session: ActiveSession): OpenBlock {
   return {
@@ -188,9 +175,6 @@ function blockFromAttention(attention: AttentionItem, session: ActiveSession): O
     state: 'open', sourceCursor: attention.sourceCursor, project: attention.project,
     ts: attention.openedAt, questions: [attention.question ?? { text: 'Continue from this attention item.' }],
     kind: attention.kind === 'permission' ? 'notification' : attention.kind === 'declared' ? 'declared' : attention.source === 'system' ? 'control' : 'question',
-    // A notification block is a permission only by its recorded subtype
-    // (attention.ts kindFromNotification), so the reconstructed block must carry
-    // it or a re-read classifies the same item as unverified.
     ...(attention.kind === 'permission' ? { notificationType: 'permission_prompt' } : {}),
     safeDefault: attention.safeDefault,
   };
@@ -217,8 +201,6 @@ function matchSession(
   });
   if (attention?.key === attentionKey) {
     if (attention.kind === 'unverified') {
-      // No confirmed prompt to land a reply in: an answer typed into the session
-      // could hit an empty prompt line or a different dialog (PHNX-3999).
       throw new AnswerError(
         `'${attentionKey}' could not be verified as a pending request — open the session and answer it there.`,
         'unverified',
@@ -229,9 +211,6 @@ function matchSession(
     publishBlock(reconstructed, root);
     return { hit: { block: reconstructed, attention, session } };
   }
-  // The winning caller advances the block to answered before a concurrent loser
-  // resolves it. Reconstruct only this block's original generation so the loser
-  // reaches the claim check and reports the real outcome, without routing again.
   if (block && getAnswerRecord(blockId, root)) {
     const original = reconcileAttention({
       block: { ...block, state: 'open', answer: undefined }, session: projected, nowMs: Date.now(),
@@ -248,8 +227,6 @@ async function resolveTarget(
   deadline: Deadline,
   root?: string,
 ): Promise<ResolvedTarget> {
-  // The key names its session, so only that session can produce it. Narrowing
-  // here is also what keeps an answer off an unrelated operator's pending item.
   const candidates = sessions.filter((session) => session.sessionId && session.sessionId === key.sessionId);
   if (candidates.length === 0) {
     throw new AnswerError(`No live session '${key.sessionId}' here to answer '${attentionKey}'.`, 'no_session');
@@ -262,8 +239,6 @@ async function resolveTarget(
     observed ??= outcome.observed;
   }
 
-  // Enrichment pass — only a review key can come from a PR read, and only the
-  // named session is fetched, under whatever budget is left.
   if (isPullRequestGeneration(key.generation)) {
     for (const session of candidates) {
       const budget = Math.min(PR_ENRICHMENT_BUDGET_MS, remainingMs(deadline));
@@ -276,8 +251,6 @@ async function resolveTarget(
     }
   }
 
-  // The session is live but has moved on — a different generation, or none. That
-  // is a STALE request, not a missing one: the operator answered yesterday's card.
   throw new AnswerError(
     observed
       ? `'${attentionKey}' is no longer the open request for '${key.sessionId}' — it is now '${observed.key}'.`
@@ -286,14 +259,10 @@ async function resolveTarget(
   );
 }
 
-// --- claim reconciliation ---------------------------------------------------
 
 interface ClaimOutcome {
-  /** The claim this call may deliver under, or undefined when another holder owns it. */
   claim?: AnswerRecord;
-  /** True when the claim was inherited from a killed run rather than created here. */
   adopted: boolean;
-  /** Set when the claim belongs to someone else — the truthful report for the loser. */
   lost?: FeedAnswerResult;
 }
 
@@ -303,15 +272,13 @@ interface ClaimOutcome {
 function adoptStrandedClaim(
   block: OpenBlock, stranded: AnswerRecord, operator: VerifiedOperator, verified: boolean, root?: string,
 ): AnswerRecord | undefined {
+  // Adoption is restricted to the replay-safe mailbox path by claimOrReconcile's caller.
   let released: boolean;
   try {
     released = rollbackAnswerClaim(
       block.blockId, stranded.answeredAt, { ...block, state: 'open', answer: undefined }, undefined, root,
     );
   } catch {
-    // The release is a read-compare-then-unlink, so a racing adopter that got
-    // there first leaves this one unlinking a marker that is already gone. That
-    // is losing the race, not an error — fall through and let the loser report.
     return undefined;
   }
   if (!released) return undefined;
@@ -372,9 +339,6 @@ async function claimOrReconcile(
   deadline: Deadline,
   root?: string,
 ): Promise<ClaimOutcome> {
-  // PENDING: claimed, not resolved. The card stays in the operator's feed until
-  // a rail reports a receipt, so a claim whose delivery never lands cannot make
-  // the request silently disappear.
   const claim = recordAnswer(block.blockId, {
     answeredBy: operator.label, answeredFrom: 'feed', operatorId: operator.id, verified,
   }, root, { pending: true });
@@ -386,22 +350,16 @@ async function claimOrReconcile(
   if ('unauthorized' in claim) throw new AnswerError(claim.reason, 'unauthorized');
 
   const existing = getAnswerRecord(block.blockId, root) ?? claim.existing;
-  // Scope every receipt read to THIS ask and THIS attempt, so a leftover receipt
-  // from an earlier question on the same session cannot answer for this one.
   const origin: ReceiptOrigin = { generation, attempt: existing.answeredAt };
   const claimedAtMs = Date.parse(existing.answeredAt);
   const stranded = Number.isFinite(claimedAtMs) && nowMs - claimedAtMs >= STRANDED_CLAIM_MS;
 
-  // A fresh claim with no receipt is a delivery IN FLIGHT (the double-clicked
-  // answer), so give the holder a moment to record it rather than reporting a
-  // scary unknown for what is about to be a receipt.
   const receipt = stranded
     ? latestMessageReceipt(block.blockId, root, origin)
     : await awaitHolderReceipt(block.blockId, Math.max(0, Math.min(HOLDER_RECEIPT_WAIT_MS, remainingMs(deadline))), origin, root);
   if (receipt) return { adopted: false, lost: heldClaimResult(block, attentionKey, host, existing, receipt) };
 
-  // No receipt and the claim predates any possible live delivery: a kill cut it
-  // between the claim and the receipt.
+  // Other rails cannot prove whether a timed-out handoff landed, so they must not replay.
   if (stranded && replayable) {
     const adopted = adoptStrandedClaim(block, existing, operator, verified, root);
     if (adopted) return { claim: adopted, adopted: true };
@@ -409,11 +367,9 @@ async function claimOrReconcile(
   return { adopted: false, lost: heldClaimResult(block, attentionKey, host, existing, undefined) };
 }
 
-// --- delivery ---------------------------------------------------------------
 
 interface DeliveryOutcome { receipt: MessageReceipt; reason?: string }
 
-/** A multiline free-text answer needs a rail that inserts rather than submits per line. */
 function isMultilineFreeText(route: AnswerRoute, answer: string): boolean {
   return (route.payload ?? '') === answer && answer.includes('\n');
 }
@@ -460,7 +416,6 @@ async function deliverResume(
     child.once('error', () => { clearTimeout(timer); resolve(1); });
     child.once('close', (code) => { clearTimeout(timer); resolve(code ?? 1); });
   });
-  // Detach either way — the agent's turn outlives the operator's deadline.
   child.stderr?.destroy();
   child.unref();
   if (exit !== undefined && exit !== 0) {
@@ -483,8 +438,6 @@ async function deliverInject(
   route: AnswerRoute, block: OpenBlock, answer: string, claimedAt: string, operator: VerifiedOperator,
   origin: ReceiptOrigin, deadline: Deadline,
 ): Promise<DeliveryOutcome> {
-  // The rail gets the remaining budget, so it cancels its own process group and
-  // never starts a write the deadline can no longer cover.
   const delivered = await injectIntoTerminal(route.inject as NonNullable<AnswerRoute['inject']>, route.payload as string, {
     enter: route.enter ?? true, combined: false, deadlineMs: Math.max(0, remainingMs(deadline)),
     ...(isMultilineFreeText(route, answer) ? { paste: true } : {}),
@@ -525,7 +478,6 @@ function preflightRoute(route: AnswerRoute, answer: string, attentionKey: string
   }
 }
 
-// --- entry points -----------------------------------------------------------
 
 /** Read-only reconciliation of delivery state, behind "Check delivery". Never claims, routes,
  * adopts or resends; reports the stored claim and real receipt. */
@@ -536,8 +488,6 @@ export function checkAnswerDelivery(
   const blockId = blockIdForSession(key.sessionId);
   const base = { attentionKey, blockId, host: key.host };
   const claim = getAnswerRecord(blockId, feedRoot);
-  // Scoped to the requested ask AND the attempt being checked, so a receipt left
-  // by a different question or a superseded attempt is never read as this one's.
   const receipt = claim
     ? latestMessageReceipt(blockId, feedRoot, {
       generation: key.generation, attempt: expectedAttempt ?? claim.answeredAt,
@@ -556,8 +506,6 @@ export function checkAnswerDelivery(
       ...base,
     };
   }
-  // An attempt the caller did not ask about is a DIFFERENT delivery — say so
-  // rather than answering about someone else's.
   if (expectedAttempt !== undefined && claim && claim.answeredAt !== expectedAttempt) {
     return {
       status: 'unknown', delivery: 'unconfirmed', resolved: false,
@@ -583,8 +531,6 @@ export function checkAnswerDelivery(
       ...base, attempt: claim.answeredAt,
     };
   }
-  // No claim at all is the one state that IS a confirmed non-delivery: nothing
-  // ever took the item, so the operator can safely answer it again.
   return {
     status: 'failed', delivery: 'failed', resolved: false, code: 'rail_failed',
     reason: `No answer has been claimed for '${attentionKey}'.`,
@@ -592,7 +538,6 @@ export function checkAnswerDelivery(
   };
 }
 
-/** Atomically claim the first answer, then route it over the session's recorded reply rail. */
 export async function claimAndRouteAttentionAnswer(input: {
   attentionKey: string;
   choiceId?: string;
@@ -618,8 +563,6 @@ export async function claimAndRouteAttentionAnswer(input: {
   const answer = input.text ?? choice?.deliveryKey ?? choice?.label;
   if (!answer) throw new AnswerError('Answer is empty.', 'empty_answer');
 
-  // The route is pure, so it is resolved BEFORE the claim: a refusal or an
-  // incapable rail then fails with nothing claimed and nothing delivered.
   const route = resolveAnswerRoute({ mailboxId: block.mailboxId, answer, block, session });
   preflightRoute(route, answer, input.attentionKey);
 
@@ -631,13 +574,9 @@ export async function claimAndRouteAttentionAnswer(input: {
   );
   if (outcome.lost) return outcome.lost;
   const claim = outcome.claim as AnswerRecord;
-  // Every receipt this delivery writes names the ask and the attempt it belongs
-  // to, so a late acknowledgement can never be read against a different question.
   const origin: ReceiptOrigin = { generation: key.generation, attempt: claim.answeredAt };
   const base = { attentionKey: input.attentionKey, blockId: block.blockId, host: key.host, attempt: claim.answeredAt };
 
-  // An adopted claim was created by the killed run, so releasing it means
-  // restoring the pre-claim OPEN state, not the tombstone that claim wrote.
   const restoreBlock: OpenBlock = outcome.adopted ? { ...block, state: 'open', answer: undefined } : block;
   const restoreResolution: AttentionResolution | undefined = outcome.adopted ? undefined : previousResolution;
 
@@ -674,8 +613,6 @@ export async function claimAndRouteAttentionAnswer(input: {
       });
     }
   } catch (error) {
-    // The answer IS on the rail; only the bookkeeping failed. Reporting a
-    // failure here would invite a resend of something already delivered.
     return {
       status: 'unknown', delivery: 'unconfirmed', resolved: false,
       reason: `Delivered over ${route.kind}, but the receipt could not be recorded: ${error instanceof Error ? error.message : String(error)}.`,
@@ -779,8 +716,6 @@ function remoteResultProblem(
   if (parsed.blockId !== undefined && parsed.blockId !== blockIdForSession(parseAttentionKey(attentionKey).sessionId)) {
     return `reported block '${parsed.blockId}', which is not this key's block`;
   }
-  // An answer about a DIFFERENT attempt than the one asked about is not evidence
-  // for this one, even though the key matches.
   if (requestedAttempt !== undefined && parsed.attempt !== undefined && parsed.attempt !== requestedAttempt) {
     return `reported attempt '${parsed.attempt}', not the requested '${requestedAttempt}'`;
   }
@@ -789,11 +724,9 @@ function remoteResultProblem(
     if (!RECEIPT_STATUSES.includes(parsed.receipt.status)) {
       return `reported an unknown receipt status '${parsed.receipt.status}'`;
     }
-    // A dead message is a failure, not a delivery.
     if (parsed.receipt.status === 'dropped' || parsed.receipt.status === 'expired') {
       return `reported delivery 'receipt' for a '${parsed.receipt.status}' message`;
     }
-    // The receipt must be about the ASK that was requested.
     const generation = parseAttentionKey(attentionKey).generation;
     if (parsed.receipt.generation !== undefined && parsed.receipt.generation !== generation) {
       return `returned a receipt for ask '${parsed.receipt.generation}', not '${generation}'`;
@@ -802,8 +735,6 @@ function remoteResultProblem(
       && parsed.receipt.attempt !== parsed.attempt) {
       return `returned a receipt for attempt '${parsed.receipt.attempt}', not its own '${parsed.attempt}'`;
     }
-    // `resolved` means the agent itself acknowledged — only consumed/continued
-    // can support it. A `queued` receipt claiming resolution is inconsistent.
     const acknowledged = parsed.receipt.status === 'consumed' || parsed.receipt.status === 'continued';
     if (parsed.resolved !== acknowledged) {
       return `reported resolved=${parsed.resolved} for a '${parsed.receipt.status}' receipt`;

@@ -14,8 +14,6 @@ import {
 } from './events.js';
 import { resetActorCache } from '../actor.js';
 
-// RUSH-2215: quarantine only I/O-heavy event-bus suites on win32; pure
-// event-kind / level tables still run (review: do not skip platform-neutral guards).
 const describeEventsIo = process.platform === 'win32' ? describe.skip : describe;
 const describeEvents = describe;
 
@@ -29,7 +27,7 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   delete process.env.AGENTS_DISABLE_EVENT_LOG;
@@ -102,9 +100,6 @@ describeEventsIo('events', () => {
       expect(last.event).toBe('secrets.get');
     });
 
-    // PHNX-3695: emitAsync is the non-blocking twin for daemon tick paths — it
-    // acquires the event-log lock with withFileLockAsync (no sleepSync), and must
-    // write the same record emit does.
     it('emitAsync writes the same JSONL record as emit, without a sync lock', async () => {
       const logsDir = setupLogsDir();
       await emitAsync('info', { module: 'test', input: 'async-hello' });
@@ -119,15 +114,14 @@ describeEventsIo('events', () => {
     it('emitAsync does not freeze the loop while a peer holds the event-log lock', async () => {
       const logsDir = setupLogsDir();
       const logPath = path.join(logsDir, 'events.jsonl');
-      fs.writeFileSync(logPath, ''); // exist so the lock target is present
-      // Hold the event-log lock out-of-band for ~500ms.
+      fs.writeFileSync(logPath, '');
       const release = await lockfile.lock(logPath, { stale: 2_500 });
       setTimeout(() => { void release(); }, 500);
       let timerFired = false;
       const t = setTimeout(() => { timerFired = true; }, 100);
-      await emitAsync('info', { module: 'test' }); // must wait for the lock without blocking the loop
+      await emitAsync('info', { module: 'test' });
       clearTimeout(t);
-      expect(timerFired).toBe(true); // the loop kept turning while contending for the lock
+      expect(timerFired).toBe(true);
     }, 20_000);
 
     it('assigns warn level to warn events', () => {
@@ -139,7 +133,6 @@ describeEventsIo('events', () => {
     });
 
     it('stamps the resolved actor + kind on every record (RUSH-2020)', () => {
-      // Force an inherited actor via env so the resolve is deterministic offline.
       process.env.AGENTS_ACTOR = 'ada@example.com';
       process.env.AGENTS_ACTOR_KIND = 'human';
       resetActorCache();
@@ -165,13 +158,10 @@ describeEventsIo('events', () => {
         setupLogsDir();
         emit('info', { module: 'test' });
         const rec = query({})[0];
-        // Full untruncated session id — the new floor field, stamped unconditionally
-        // (unlike the caller-gated 8-char `session`, which needs CLAUDECODE/terminal env).
         expect(rec.sessionId).toBe('11111111-2222-3333-4444-555555555555');
         expect(rec.agent).toBe('claude');
         expect(rec.launchId).toBe('launch-abc');
         expect(rec.parentSessionId).toBe('99999999-8888-7777-6666-555555555555');
-        // machineId is always present and joinable (normalized).
         expect(rec.machineId).toBeDefined();
         expect(rec.machineId).toBe(rec.machineId!.toLowerCase());
       } finally {
@@ -186,7 +176,6 @@ describeEventsIo('events', () => {
       process.env.AGENTS_AGENT_NAME = 'claude';
       try {
         setupLogsDir();
-        // cloud.dispatch passes its own task agent — it must win over the env default.
         emit('cloud.dispatch', { module: 'cloud', agent: 'codex' });
         const rec = query({})[0];
         expect(rec.agent).toBe('codex');
@@ -736,9 +725,6 @@ describeEventsIo('events', () => {
 
 describeEvents('event-kind table (the drift guard for out-of-process producers)', () => {
   it('exposes every union member at runtime, including the factory.* kinds', () => {
-    // EVENT_TYPES is derived from a Record<EventType, true>, so tsc already
-    // rejects a union member with no table entry. This pins the runtime half:
-    // isEventType is what `agents events emit` uses to reject an unknown kind.
     for (const kind of ['factory.command', 'factory.action', 'factory.uri', 'factory.launch']) {
       expect(EVENT_TYPES).toContain(kind);
       expect(isEventType(kind)).toBe(true);
@@ -778,15 +764,11 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(EVENT_TYPES).toContain('run.launch');
     expect(isEventType('run.launch')).toBe(true);
     expect(levelFor('run.launch')).toBe('audit');
-    // Same lane as its finalize-time sibling, so `--level audit --include runs`
-    // surfaces both.
     expect(levelFor('run.dispatched')).toBe('audit');
   });
 
   it('classifies factory.uri as audit and the other factory kinds as info', () => {
-    // An external process driving the user's editor is a "who reached in" fact.
     expect(levelFor('factory.uri')).toBe('audit');
-    // A palette press is not.
     expect(levelFor('factory.command')).toBe('info');
     expect(levelFor('factory.action')).toBe('info');
     expect(levelFor('factory.launch')).toBe('info');
@@ -835,8 +817,6 @@ describeEventsIo('emit() timestamp override', () => {
     setupLogsDir();
     const forged = '1999-01-01T00:00:00.000Z';
 
-    // ts stays in RESERVED_META_KEYS: only the explicit override channel may set
-    // it, so an arbitrary payload cannot backdate a record.
     emit('factory.command', { ts: forged } as unknown as Record<string, unknown>);
 
     const records = query({});

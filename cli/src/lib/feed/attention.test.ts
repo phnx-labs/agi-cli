@@ -27,7 +27,6 @@ function tmpFeedDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-attention-test-'));
 }
 
-/** Minimal ActiveSession — only the fields the reconciler reads matter. */
 function session(partial: Partial<ActiveSession>): ActiveSession {
   return {
     context: 'terminal',
@@ -38,7 +37,6 @@ function session(partial: Partial<ActiveSession>): ActiveSession {
   } as ActiveSession;
 }
 
-/** An open question block as the harness hook would write it (no explicit lifecycle fields). */
 function openQuestionBlock(partial: Partial<OpenBlock> = {}): OpenBlock {
   return {
     blockId: blockIdForSession('sess-1'),
@@ -59,8 +57,6 @@ describe('reconcileAttention', () => {
     ['plan review', 'gemini', 'plan_review', undefined, 'lifecycle', 'plan_review'],
     ['prose fallback', 'opencode', 'question', undefined, 'heuristic', 'question'],
     ['no hook event', 'kimi', 'question', [{ label: 'Continue' }], 'lifecycle', 'question'],
-    // A lifecycle `permission` is a claim only an older peer's state engine still
-    // makes (from elapsed time, not a harness event): unverified, never approvable.
     ['older-peer permission claim', 'claude', 'permission', undefined, 'heuristic', 'unverified'],
   ] as const)('%s uses the shared lifecycle projection', (_fixture, kind, reason, options, source, expectedKind) => {
     const item = reconcileAttention({
@@ -81,7 +77,6 @@ describe('reconcileAttention', () => {
       kind: 'notification', questions: [{ text: 'Claude needs your permission to use Bash', header: 'Permission needed' }],
       ...partial,
     });
-    /** A live Claude row whose last transcript event (the tool call) precedes the block. */
     const pending = (partial: Partial<ActiveSession> = {}) => session({
       sessionId: 'sess-n', activity: 'working', pidAlive: true,
       lastEventMs: Date.parse('2026-09-10T10:00:03.000Z'), lastActivityMs: Date.parse('2026-09-10T10:00:05.400Z'), ...partial,
@@ -164,15 +159,12 @@ describe('reconcileAttention', () => {
     expect(item!.source).toBe('hook');
     expect(item!.state).toBe('open');
     expect(item!.question?.text).toBe('Which reconciliation rule?');
-    // Discrete options become slug-id choices. A feed block carries no per-option
-    // key, so deliveryKey stays absent and the router matches the label to a digit.
     expect(item!.choices).toEqual([
       { label: 'Augment', id: 'augment' },
       { label: 'Replace', id: 'replace' },
     ]);
   });
 
-  /** The permission_prompt block the harness hook writes, with its write-time cursor. */
   function permissionBlock(sessionId: string, runtime: string): OpenBlock {
     return {
       blockId: blockIdForSession(sessionId), sessionId, mailboxId: sessionId, host: 'zion', runtime,
@@ -245,7 +237,7 @@ describe('reconcileAttention', () => {
         sessionId: 'sess-3',
         activity: 'waiting_input',
         awaitingReason: 'question',
-        question: { text: 'Did that work?', reason: 'question' }, // no options => prose
+        question: { text: 'Did that work?', reason: 'question' },
         lastActivityMs: 4000,
       }),
       nowMs: 10_000,
@@ -299,8 +291,6 @@ describe('reconcileAttention', () => {
       sourceCursor: { lastActivityMs: 3000 },
       reason: 'answered',
     };
-    // The session still reports waiting_input at the SAME (or older) cursor: it is a
-    // stale re-read of the ask that was already answered, so it must not resurface.
     const stale = reconcileAttention({
       session: session({
         sessionId: 'sess-4',
@@ -314,8 +304,6 @@ describe('reconcileAttention', () => {
     });
     expect(stale).toBeUndefined();
 
-    // The transcript advances strictly past the tombstone's fence: a genuinely NEW
-    // turn, a new generation, is allowed through.
     const fresh = reconcileAttention({
       session: session({
         sessionId: 'sess-4',
@@ -345,7 +333,7 @@ describe('reconcileAttention', () => {
         activity: 'waiting_input',
         awaitingReason: 'question',
         question: { text: 'inferred prose?', reason: 'question' },
-        lastActivityMs: 6000, // at or before the fence => expired, suppressed
+        lastActivityMs: 6000,
       }),
       resolution,
       nowMs: 10_000,
@@ -396,7 +384,6 @@ describe('reconcileAttention', () => {
 
     const item = reconcileAttention({
       block,
-      // No lastActivityMs — the session-derived fallback cannot prove advancement.
       session: session({ sessionId: 'sess-cloud', activity: 'working' }),
       resolution,
       nowMs: Date.parse(ts),
@@ -408,9 +395,6 @@ describe('reconcileAttention', () => {
   });
 
   it('an open block whose generation was already resolved cannot resurrect', () => {
-    // The write-ordering window the plan names: the tombstone is appended BEFORE
-    // the open-block view is cleared, so a still-'open' block of the resolved
-    // generation must stay suppressed.
     const block = openQuestionBlock({ generation: 'gen-1', state: 'open', sourceCursor: { lastActivityMs: 3000 } });
     const resolution: AttentionResolution = {
       blockId: block.blockId,
@@ -493,9 +477,6 @@ describe('feed lifecycle emission (real store, no mocking)', () => {
     expect(tombstone?.reason).toBe('answered');
     expect(tombstone?.generation).toBe(block.generation);
 
-    // The session engine still momentarily reports waiting_input on a stale cursor:
-    // the answered block is no longer open, and the tombstone suppresses the
-    // lifecycle fallback, so nothing needs a human.
     const item = reconcileAttention({
       block: answered,
       session: session({
@@ -538,7 +519,6 @@ describe('feed lifecycle emission (real store, no mocking)', () => {
 
     expect(removeBlock(blockId, dir)).toBe(true);
     expect(readBlock(blockId, dir)).toBeUndefined();
-    // The tombstone survives the removal — that is what prevents resurrection.
     expect(readResolution(blockId, dir)?.reason).toBe('session_advanced');
   });
 });

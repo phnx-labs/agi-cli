@@ -25,7 +25,7 @@ function resolveOnPath(name: string): string {
   for (const dir of (process.env.PATH ?? '').split(path.delimiter)) {
     if (!dir) continue;
     const candidate = path.join(dir, name);
-    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* keep looking */ }
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch {  }
   }
   throw new Error(`${name} not found on PATH for test children`);
 }
@@ -39,9 +39,7 @@ const EVENTS_FILE = path.join(EVENTS_ROOT, 'events.jsonl');
 process.env.AGENTS_EVENTS_PATH = EVENTS_FILE;
 
 interface FakeTool {
-  /** Directory holding bin/<name>; add to PATH. */
   binDir: string;
-  /** Absolute executable the symlink resolves to. */
   executable: string;
   probeLog: string;
 }
@@ -70,7 +68,6 @@ function makeFakeTool(root: string, tool: string, statusBody: string, opts: { pr
   return { binDir, executable, probeLog: opts.probeLog };
 }
 
-/** PATH that sees only the fake tools (plus a real coreutils for the shell). */
 function toolPath(fake: FakeTool | FakeTool[]): string {
   const dirs = (Array.isArray(fake) ? fake : [fake]).map((f) => f.binDir);
   return [...dirs, '/usr/bin', '/bin'].join(path.delimiter);
@@ -116,9 +113,6 @@ it('concurrent refreshes from separate processes coalesce into ONE probe (shared
     const { getCachedToolSetup } = await import('../setup-tool-status.js');
     try {
       const cacheDir = path.join(root, 'cache');
-      // Two OVERLAPPING child processes ask for an explicit refresh. The probe
-      // sleeps 1.5s, so without coalescing each process would exec the tool
-      // (2 probes, ~3s wall). With the disk lock + fresh-cache skip: 1 probe.
       const script = childScript(
         `const rows = await refreshToolSetup('browser', { cacheDir: '${cacheDir}' });`
         + ` console.log(JSON.stringify(rows.find(r => r.tool === 'browser')));`);
@@ -128,10 +122,7 @@ it('concurrent refreshes from separate processes coalesce into ONE probe (shared
         expect(JSON.parse(run.stdout)).toMatchObject({ tool: 'browser', installed: true, readiness: 'ready' });
       }
       expect(probeCount(fake)).toBe(1);
-      // The loser of the lock waited rather than double-probing: both children
-      // together finish well under two sequential 1.5s probes.
       expect(Math.max(...both.map((r) => r.ms))).toBeLessThan(2 * 1500 + 8000);
-      // And the coalesced result is what a plain read serves afterwards.
       const [row] = getCachedToolSetup({ cacheDir });
       expect(row).toMatchObject({ tool: 'browser', readiness: 'ready' });
       expect(row.checkedAtMs).toBeTypeOf('number');
@@ -158,16 +149,13 @@ it('warm reads and the armed watcher issue ZERO probes; install changes invalida
       await refreshToolSetup('browser', { cacheDir });
       expect(probeCount(fake)).toBe(1);
 
-      // Warm-idle budget: repeated reads (what a UI row render does) and an
-      // armed subscription (what the settings pane holds) must not exec the
-      // tool. This is the "no per-minute per-tool polling" guarantee.
       const emissions: string[] = [];
       const stop = subscribeToolSetup((rows) => emissions.push(JSON.stringify(rows)), { cacheDir });
       try {
         for (let i = 0; i < 25; i++) getCachedToolSetup({ cacheDir });
         await new Promise((r) => setTimeout(r, 900));
-        expect(probeCount(fake)).toBe(1); // still just the explicit refresh
-        expect(emissions).toHaveLength(0); // nothing changed, nothing emitted
+        expect(probeCount(fake)).toBe(1);
+        expect(emissions).toHaveLength(0);
 
         // An install change invalidates the health row from metadata only; the tool is still not
         // exec'd. A real install replaces files by rename, and only a rename fires a Linux
@@ -177,7 +165,7 @@ it('warm reads and the armed watcher issue ZERO probes; install changes invalida
         fs.renameSync(staged, fake.executable);
         const pkgJson = path.join(root, 'pkg', 'browser', 'package.json');
         fs.writeFileSync(pkgJson, JSON.stringify({ name: '@phnx-labs/browser-cli', version: '0.0.1-test' }));
-        await new Promise((r) => setTimeout(r, 700)); // debounce 150ms + fs event slack
+        await new Promise((r) => setTimeout(r, 700));
         expect(probeCount(fake)).toBe(1);
         expect(emissions.length).toBeGreaterThan(0);
         const latest = JSON.parse(emissions[emissions.length - 1]!) as Array<{ tool: string; version?: string; checkedAtMs: number | null; readiness: string }>;
@@ -195,7 +183,6 @@ it('a slow health probe is bounded, never blocks a concurrent reader, and the st
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-delivery-slow-probe-'));
   try {
     const probeLog = path.join(root, 'probes.log');
-    // Tool that hangs far past the 8s probe budget.
     const fake = makeFakeTool(root, 'browser', '{"running":true}', { probeLog, statusDelayMs: 30_000 });
     const savedPath = process.env.PATH;
     delete process.env.BROWSER_BIN;
@@ -215,10 +202,7 @@ it('a slow health probe is bounded, never blocks a concurrent reader, and the st
         `const rows = await refreshToolSetup('browser', { cacheDir: '${cacheDir}' });`
         + ` console.log(JSON.stringify(rows.find(r => r.tool === 'browser')));`),
         { TOOL_PROBE_HANG: '1' });
-      // Give the refresh time to enter the probe…
       await new Promise((r) => setTimeout(r, 800));
-      // …and a plain warm read — what the daemon/UI does — still answers
-      // instantly from the STALE cache instead of queueing behind the probe.
       const readStart = Date.now();
       const read = await runSetupChild(childScript(
         `console.log(JSON.stringify(getCachedToolSetup({ cacheDir: '${cacheDir}' })));`));
@@ -226,13 +210,11 @@ it('a slow health probe is bounded, never blocks a concurrent reader, and the st
       expect(JSON.parse(read.stdout)[0]).toMatchObject({ tool: 'browser', readiness: 'ready' });
       expect(Date.now() - readStart).toBeLessThan(3_000);
 
-      // The probe itself is bounded by the probeCapture budget (~8s), reports
-      // unknown honestly, and the concurrent refresh did not double-probe.
       const done = await refresh;
       expect(done.code).toBe(0);
       expect(done.ms).toBeLessThan(8_000 + 6_000);
       expect(JSON.parse(done.stdout)).toMatchObject({ tool: 'browser', readiness: 'unknown' });
-      expect(probeCount(fake)).toBe(2); // seed probe + one bounded attempt
+      expect(probeCount(fake)).toBe(2);
     } finally {
       process.env.PATH = savedPath;
     }
@@ -244,8 +226,6 @@ it('a slow health probe is bounded, never blocks a concurrent reader, and the st
 it('secrets is never exec\'d from a status read or refresh (no broker unlock); other tools probe once per explicit refresh only', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tool-delivery-no-probe-'));
   try {
-    // Per-tool probe logs — a shared log would make each tool count another's
-    // execs and false-positive the never-probed assertions.
     const computer = makeFakeTool(root, 'computer', '{"installed":true,"running":true,"trusted":true}', { probeLog: path.join(root, 'computer-probes.log') });
     const secrets = makeFakeTool(root, 'secrets', '{"ok":true}', { probeLog: path.join(root, 'secrets-probes.log') });
     const browser = makeFakeTool(root, 'browser', '{"running":true}', { probeLog: path.join(root, 'browser-probes.log') });
@@ -262,14 +242,9 @@ it('secrets is never exec\'d from a status read or refresh (no broker unlock); o
       expect(rows.find((r) => r.tool === 'computer')).toMatchObject({ installed: true, readiness: 'ready' });
       expect(rows.find((r) => r.tool === 'secrets')).toMatchObject({ installed: true, readiness: 'unknown' });
       expect(rows.find((r) => r.tool === 'browser')).toMatchObject({ installed: true, readiness: 'ready' });
-      // The explicit refresh probed computer and browser once each. Secrets was
-      // never exec'd — unlocking the broker to paint a settings row is exactly
-      // what this contract forbids.
       expect(probeCount(computer)).toBe(1);
       expect(probeCount(secrets)).toBe(0);
       expect(probeCount(browser)).toBe(1);
-      // Warm reads — presence is metadata, health is the cached last explicit
-      // check — never exec anything.
       for (let i = 0; i < 25; i++) getCachedToolSetup({ cacheDir });
       expect(probeCount(computer)).toBe(1);
       expect(probeCount(secrets)).toBe(0);
@@ -282,11 +257,7 @@ it('secrets is never exec\'d from a status read or refresh (no broker unlock); o
   }
 });
 
-/* ------------------------------------------------------------------------ */
-/* Feed track: event-driven tool-activity delivery and the shared hub.      */
-/* ------------------------------------------------------------------------ */
 
-/** A real-shaped computer run row for the projection seams. */
 function runRow(invocationId: string, verbs: string[], scope = 'dev-a'): ComputerRunRow {
   const now = Date.now();
   return {
@@ -301,7 +272,6 @@ function runRow(invocationId: string, verbs: string[], scope = 'dev-a'): Compute
   };
 }
 
-/** A real-shaped browser session row (task kind, one capture). */
 function browserTaskRow(task: string): BrowserSessionRow {
   const now = Date.now();
   const artifact: BrowserArtifact = { kind: 'screenshot', name: `${task}-0.png`, path: `/tmp/${task}/${task}-0.png`, bytes: 10, mtimeMs: now };
@@ -340,15 +310,12 @@ it('collector warm-idle: a warm watch does ZERO reads; one change re-projects ex
     });
     try {
       expect(watch.armed()).toBe(true);
-      // Drain directory-creation notifications delivered asynchronously on macOS.
       await sleep(400);
       const warmCalls = { ...calls };
       await sleep(650);
       expect(calls).toEqual(warmCalls);
       expect(diffs).toHaveLength(0);
 
-      // One real change under a watched root: exactly one re-projection, and
-      // the diff carries ONLY the new row — never a full snapshot.
       browserRows = [browserTaskRow('task-1')];
       fs.writeFileSync(path.join(rootA, 'capture.png'), 'png');
       await until(() => diffs.length === 1, 3000, 'first tool diff');
@@ -356,15 +323,12 @@ it('collector warm-idle: a warm watch does ZERO reads; one change re-projects ex
       expect(diffs[0]!.upserts.map((r) => r.task)).toEqual(['task-1']);
       expect(diffs[0]!.removes).toEqual([]);
 
-      // fs noise with no source change: a re-projection runs (dirty bit) but
-      // the set is unchanged, so NOTHING is emitted — no snapshot spam.
       const callsAfterFirstDiff = { ...calls };
       fs.writeFileSync(path.join(rootB, 'unrelated.tmp'), 'x');
       await sleep(400);
       expect(diffs).toHaveLength(1);
       expect(calls.browser).toBe(callsAfterFirstDiff.browser + 1);
 
-      // A vanished row comes back as a remove under its own rowKey.
       const firstKey = diffs[0]!.upserts[0]!.rowKey;
       browserRows = [];
       fs.writeFileSync(path.join(rootA, 'capture2.png'), 'png');
@@ -383,8 +347,6 @@ it('collector warm-idle: a warm watch does ZERO reads; one change re-projects ex
 it('collector degradation is stated, not silent: an unarmed watch still delivers identical diffs on the sweep', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-tool-watch-unarmed-'));
   try {
-    // A root path whose parent is a regular file cannot be mkdir'd or watched:
-    // the collector must report armed=false and fall back to the sweep.
     const blocker = path.join(root, 'blocker');
     fs.writeFileSync(blocker, 'not a dir');
     const unarmedRoot = path.join(blocker, 'nope');
@@ -424,9 +386,6 @@ it('hub: two socket clients share ONE fleet fan-out — one ssh child per peer, 
     fs.mkdirSync(devicesDir, { recursive: true });
     const sshLog = path.join(shimDir, 'ssh-spawns.log');
     const agentsLog = path.join(shimDir, 'agents-spawns.log');
-    // The fake peer's ssh: emit one recorded reset envelope, then hold the
-    // connection open. `exec sleep` makes the shim itself the sleep, so a
-    // SIGTERM (peer loss / teardown) reaps it with no orphan.
     const peerRow = projectComputerToolRow('peer-a', runRow('inv-peer-1', ['click', 'type'], 'peer-a'));
     fs.writeFileSync(path.join(shimDir, 'reset.jsonl'), `${JSON.stringify({
       v: 1, type: 'reset', streamId: 'peer-a-stream', sequence: 1, scope: 'peer-a',
@@ -444,8 +403,6 @@ else
   exit 1
 fi
 `, { mode: 0o755 });
-    // A fake `agents` on PATH proves the local process NEVER shells out to the
-    // CLI per tool/per device: tool rows arrive while this counter stays 0.
     fs.writeFileSync(path.join(binDir, 'agents'), `#!/bin/sh\necho "local agents exec: $@" >> "${agentsLog}"\nexit 99\n`, { mode: 0o755 });
     process.env.PATH = [binDir, ...(savedPath ?? '').split(path.delimiter).filter(Boolean)].join(path.delimiter);
     process.env.AGENTS_DEVICES_DIR = devicesDir;
@@ -473,31 +430,23 @@ fi
         if (reset?.type !== 'reset') throw new Error('missing peer reset');
         expect(reset.tools.map((t) => t.rowKey)).toEqual([peerRow.rowKey]);
       }
-      // THE PROCESS BUDGET: two consumers, one ssh child for the peer, and no
-      // local `agents` CLI exec at all. A second consumer must not mean a
-      // second connection: that is the double-connection bug class.
       const sshSpawns = () => fs.readFileSync(sshLog, 'utf-8').trim().split('\n').filter(Boolean);
       expect(sshSpawns()).toHaveLength(1);
       expect(fs.existsSync(agentsLog)).toBe(false);
 
-      // A LATE subscriber is served the held state as a synthesized reset —
-      // zero new dials, zero waiting on the peer.
       running.push(connect(2));
       await until(() => clients[2]!.some((e) => e.type === 'reset' && e.scope === 'peer-a'), 5000, 'late subscriber synthesized reset');
       const late = clients[2]!.find((e) => e.type === 'reset' && e.scope === 'peer-a');
       if (late?.type !== 'reset') throw new Error('missing late reset');
       expect(late.tools.map((t) => t.rowKey)).toEqual([peerRow.rowKey]);
-      expect(late.sequence).toBeGreaterThanOrEqual(1); // its own stream, starting at 1
+      expect(late.sequence).toBeGreaterThanOrEqual(1);
       expect(sshSpawns()).toHaveLength(1);
 
-      // Peer goes away mid-hold: kill the shim, then make re-dials fail.
       const heldPid = Number(/pid=(\d+)/.exec(sshSpawns()[0]!)?.[1]);
       process.kill(heldPid, 'SIGTERM');
       fs.rmSync(path.join(shimDir, 'peer-up'));
       await until(() => sshSpawns().length === 4, 8000, 'backoff ladder: 3 failed re-dials after the hold died');
       await until(() => clients[0]!.some((e) => e.type === 'scope' && e.scope === 'peer-a' && String(e.reason).includes('parked')), 5000, 'parked reason reaches client 1');
-      // The retry budget parks: the next attempt is a full backoff rung away,
-      // not a tight respawn loop.
       await sleep(900);
       expect(sshSpawns()).toHaveLength(4);
 
@@ -512,7 +461,6 @@ fi
         expect(last.tools.map((t) => t.rowKey)).toEqual([peerRow.rowKey]);
       }
 
-      // Recovery: the peer comes back and the registry nudge re-dials ONCE.
       fs.writeFileSync(path.join(shimDir, 'peer-up'), '');
       fs.writeFileSync(path.join(devicesDir, 'registry.json'), JSON.stringify({
         'peer-a': {
@@ -524,8 +472,6 @@ fi
       await until(() => sshSpawns().length === 5, 8000, 'registry-touch re-dial');
       await until(() => clients[0]!.filter((e) => e.type === 'reset' && e.scope === 'peer-a').length >= 2, 5000, 'recovered peer re-announces');
 
-      // Detaching readers one at a time keeps the fan-out up for the rest;
-      // the LAST detach stops it (an idle box holds no peer connections).
       signals[0]!.abort();
       await sleep(300);
       expect(hub.readerCount).toBe(2);
@@ -533,7 +479,7 @@ fi
       signals[1]!.abort();
       signals[2]!.abort();
       await until(() => hub.readerCount === 0 && !hub.active, 5000, 'fan-out stops on last detach');
-      await sleep(600); // no re-dial after stop
+      await sleep(600);
       expect(sshSpawns()).toHaveLength(5);
     } finally {
       for (const s of signals) s.abort();
@@ -570,9 +516,9 @@ it('peer retry budget: past the park ladder a peer is RETIRED to a slow recheck 
     try {
       await until(() => reasons.some((r) => r.includes('retired')), 6000, 'retired reason');
       const spawns = () => fs.readFileSync(sshLog, 'utf-8').trim().split('\n').filter(Boolean);
-      expect(spawns()).toHaveLength(4); // exactly the ladder: no 5th dial on the 60s recheck cadence
+      expect(spawns()).toHaveLength(4);
       expect(reasons[reasons.length - 1]).toContain('retired after 4 failed connections');
-      await sleep(800); // far past the 400ms cap; a retired peer does not churn
+      await sleep(800);
       expect(spawns()).toHaveLength(4);
     } finally {
       controller.abort();
@@ -595,7 +541,6 @@ it('hub state: resets are per-scope, removals isolate, unavailable retains rows,
   held.apply(state.emit({ type: 'tool.remove', scope: 'dev-b', rowKey: toolB.rowKey }));
   held.apply(state.emit({ type: 'scope', capturedAt: 3, scope: 'dev-a', status: 'unavailable', reason: 'parked' }));
 
-  // A peer's reset/reconnect must never erase another scope's rows.
   const late = new FeedWatchState();
   const snapshot = held.snapshot(late);
   const resets = snapshot.filter((e) => e.type === 'reset');
@@ -604,13 +549,10 @@ it('hub state: resets are per-scope, removals isolate, unavailable retains rows,
   const resetB = resets.find((e) => e.scope === 'dev-b');
   if (resetA?.type !== 'reset' || resetB?.type !== 'reset') throw new Error('missing scope resets');
   expect(resetA.tools.map((t) => t.rowKey).sort()).toEqual([toolA1.rowKey, toolA2.rowKey].sort());
-  expect(resetB.tools).toEqual([]); // the remove was applied, only to dev-b
+  expect(resetB.tools).toEqual([]);
   const marker = snapshot.find((e) => e.type === 'scope' && e.scope === 'dev-a');
   expect(marker).toMatchObject({ status: 'unavailable', reason: 'parked' });
-  // Synthesized streams are sequence-contiguous from 1 — the published
-  // "order by streamId + sequence" contract a consumer relies on.
   expect(snapshot.map((e, i) => e.sequence)).toEqual(snapshot.map((_, i) => i + 1));
-  // And a live event after the snapshot applies cleanly on top.
   const toolA3 = projectComputerToolRow('dev-a', runRow('inv-a3', ['screenshot'], 'dev-a'));
   held.apply(state.emit({ type: 'tool.upsert', scope: 'dev-a', rowKey: toolA3.rowKey, tool: toolA3 }));
   const late2 = new FeedWatchState();
@@ -625,9 +567,8 @@ it('tool rows: a computer run is history, never a live session with a stop contr
   const manyVerbs = Array.from({ length: TOOL_ACTION_LIMIT + 10 }, (_, i) => `verb${i % 3}`);
   const computer = projectComputerToolRow('dev-a', runRow('inv-history', manyVerbs, 'dev-a'));
   expect(computer.live).toBe(false);
-  expect('closeCommand' in computer).toBe(false); // no invented stop-run semantics
-  expect(computer.actions).toHaveLength(TOOL_ACTION_LIMIT); // bounded per-row payload
-  // …while the counts describe the WHOLE run, not just the retained window.
+  expect('closeCommand' in computer).toBe(false);
+  expect(computer.actions).toHaveLength(TOOL_ACTION_LIMIT);
   expect(computer.actionCounts).toEqual({ verb0: 20, verb1: 20, verb2: 20 });
 
   const bound = projectBrowserToolRow('dev-a', browserTaskRow('task-live'), { name: 'task-live', url: 'https://example.test', device: 'dev-a' });
@@ -645,9 +586,9 @@ it('tool rows carry paths and redacted URLs only — no credential value reaches
   for (const forbidden of ['user:pass', 'SECRETTOKEN', 'MYSIG', 'FRAGSECRET']) {
     expect(json).not.toContain(forbidden);
   }
-  expect(row.url).toContain('ok=1'); // the non-credential parameter survives
+  expect(row.url).toContain('ok=1');
   expect(row.url).not.toContain('#');
-  expect(redactToolUrl('not a url at all')).toBeUndefined(); // unparsable is dropped, never published raw
+  expect(redactToolUrl('not a url at all')).toBeUndefined();
   expect(redactToolUrl(undefined)).toBeUndefined();
 });
 
@@ -655,9 +596,6 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-cross-slow-'));
   const savedPath = process.env.PATH;
   try {
-    // The events ledger for this file was pinned at module scope (eventsPath
-    // caches its resolution at first call); append straight to it and the
-    // local collector's fs.watch fires.
     const probeLog = path.join(root, 'browser-probes.log');
     const fake = makeFakeTool(root, 'browser', '{"running":true}', { probeLog, statusDelayMs: 30_000 });
     delete process.env.BROWSER_BIN;
@@ -667,7 +605,7 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
     const devicesDir = path.join(root, 'devices');
     fs.mkdirSync(devicesDir, { recursive: true });
     const savedDevicesDir = process.env.AGENTS_DEVICES_DIR;
-    process.env.AGENTS_DEVICES_DIR = devicesDir; // empty registry: local scope only
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
     const hub = new FeedHub({ watch: (options) => watchLocalFeed({ ...options, scope: 'dev-x' }), reconnectMs: 300 });
     const server = new FeedHubServer(hub, socketPath);
     await server.start();
@@ -677,25 +615,19 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
     try {
       await until(() => events.some((e) => e.type === 'reset'), 8000, 'local reset reaches the hub client');
 
-      // Start an EXPLICIT setup refresh IN THIS PROCESS against a tool whose
-      // health probe hangs 30s (bounded by the ~8s probe budget). While it
-      // runs, the hub must keep delivering — slow probes never block IPC.
       const { refreshToolSetup } = await import('../setup-tool-status.js');
       const cacheDir = path.join(root, 'cache');
       let probeSettled = false;
       const refresh = refreshToolSetup('browser', { cacheDir }).then((rows) => { probeSettled = true; return rows; });
-      await sleep(800); // the probe is now in flight inside this process
+      await sleep(800);
 
-      // A real computer.action lands in the durable ledger — the event-driven
-      // collector (sweep-bounded) must turn it into a tool.upsert for the hub
-      // client BEFORE the slow probe resolves.
       const line = JSON.stringify({
         v: 1, event: 'computer.action', command: 'click', ts: new Date().toISOString(),
         pid: 7777, invocationId: 'inv-cross-track', host: 'dev-x', runtime: 'headless',
       });
       fs.appendFileSync(EVENTS_FILE, `${line}\n`);
       await until(() => events.some((e) => e.type === 'tool.upsert' && e.tool.kind === 'computer'), 7500, 'tool row delivered during the hanging probe');
-      expect(probeSettled).toBe(false); // delivery happened while the probe was still in flight
+      expect(probeSettled).toBe(false);
 
       const rows = await refresh;
       expect(rows.find((r) => r.tool === 'browser')).toMatchObject({ readiness: 'unknown' });

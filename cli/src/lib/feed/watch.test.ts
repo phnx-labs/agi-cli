@@ -10,13 +10,9 @@ function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession 
 
 describe('cross-version peer envelopes', () => {
   it('reads an older peer\'s tool-less reset as a peer with no tool rows', () => {
-    // A peer on a pre-tools CLI is a correct v1 producer. Before this the
-    // projection read `event.tools.map` and took the whole fan-out down with a
-    // TypeError the moment one such peer connected.
     const older = { v: 1, type: 'reset', streamId: 'peer', sequence: 1, scope: 'worker', capturedAt: 1, agents: [], attention: [] } as unknown as FeedWatchEnvelope;
     const normalized = normalizePeerEnvelope(older);
     expect(normalized.type === 'reset' && normalized.tools).toEqual([]);
-    // Same for `setup`, added in the same protocol-v1 extension.
     expect(normalized.type === 'reset' && normalized.setup).toEqual([]);
     expect(() => new FeedSessionProjection().apply(normalized)).not.toThrow();
   });
@@ -88,8 +84,6 @@ describe('feed watch operator projection', () => {
  * confirmed (a registered project definition contains its cwd). */
 describe('confirmedProject rides the serialized feed stream (PHNX-3999 F08/F09)', () => {
   it('carries explicit null for an unbound directory through reset and upsert', async () => {
-    // No project definitions exist under this test HOME, so nothing is confirmed —
-    // and an unbound cwd must read as null (Uncategorized), never as `tmp`.
     const live = session('unbound', { cwd: '/tmp/some-loose-dir' });
     const sessions = new SessionWatchState('peer-stream');
     const feed = new FeedWatchState('coordinator-stream');
@@ -98,8 +92,6 @@ describe('confirmedProject rides the serialized feed stream (PHNX-3999 F08/F09)'
     const resetRow = JSON.parse(JSON.stringify(reset)).agents[0];
     expect(resetRow.sessionId).toBe('unbound');
     expect(resetRow.confirmedProject).toBeNull();
-    // The historical join key is untouched — it is a bucket key, not a claim of
-    // project membership, and consumers join rows on it.
     expect('confirmedProject' in resetRow).toBe(true);
 
     const [upsert] = await projectSessionEnvelope(
@@ -187,7 +179,6 @@ describe('tool-setup rows ride the local stream', () => {
       },
     });
 
-    // The reset is projected through a promise chain, so give it a turn to land.
     const deadline = Date.now() + 4_000;
     while (!events.some((event) => event.type === 'reset') && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 20));
@@ -196,7 +187,6 @@ describe('tool-setup rows ride the local stream', () => {
     expect(reset?.type === 'reset' && reset.setup.map((row) => [row.tool, row.readiness])).toEqual([
       ['browser', 'stopped'], ['computer', 'needs-setup'], ['secrets', 'unknown'],
     ]);
-    // Publication reads the CACHE once; it never triggers a health probe.
     expect(reads).toBe(1);
 
     current = rows('ready');
@@ -207,14 +197,12 @@ describe('tool-setup rows ride the local stream', () => {
     const snapshot = events.find((event) => event.type === 'setup.snapshot');
     expect(snapshot?.type === 'setup.snapshot' && snapshot.setup[0]!.readiness).toBe('ready');
 
-    // An identical notification is not a change and publishes nothing.
     const before = events.length;
     notify!(rows('ready'));
     expect(events).toHaveLength(before);
 
     controller.abort();
     await run;
-    // The subscription is released with the stream.
     expect(notify).toBeUndefined();
   });
 });

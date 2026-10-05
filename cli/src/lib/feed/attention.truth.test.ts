@@ -5,9 +5,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// watch.ts resolves the feed dir from HOME at module load, so pin it before the
-// imports below — the stream projection must read the same store the fixtures
-// are copied into.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-truth-'));
 process.env.HOME = TEST_HOME;
 
@@ -27,7 +24,6 @@ afterAll(() => {
   for (const dir of [TEST_HOME, ...scratch]) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** Copy a transcript fixture to a scratch path and pin its mtime just after its last line. */
 function transcript(fixture: string, lastLineIso: string): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-truth-tx-'));
   scratch.push(dir);
@@ -38,7 +34,6 @@ function transcript(fixture: string, lastLineIso: string): string {
   return file;
 }
 
-/** Put a block fixture into the real feed store under the id the hook would have used. */
 function installBlock(fixture: string, sessionId: string): void {
   fs.mkdirSync(getFeedDir(), { recursive: true });
   fs.copyFileSync(path.join(TESTDATA, fixture), path.join(getFeedDir(), `${blockIdForSession(sessionId)}.json`));
@@ -61,7 +56,6 @@ function watchRow(row: ActiveSession): SessionWatchRow {
   return { ...row, rowKey: `k-${row.sessionId}`, sourceDevice: 'zion', previous: false, resumable: true, unwatched: false, viewingIn: null, recovery: null } as SessionWatchRow;
 }
 
-/** The `feed watch --json` envelopes one live-row upsert projects to. */
 async function project(row: ActiveSession): Promise<FeedWatchEnvelope[]> {
   return projectSessionEnvelope(
     { version: 1, type: 'upsert', streamId: 's', sequence: 1, capturedAt: Date.now(), scope: 'zion', rowKey: `k-${row.sessionId}`, row: watchRow(row) },
@@ -72,7 +66,6 @@ async function project(row: ActiveSession): Promise<FeedWatchEnvelope[]> {
 const DONE = 'fixture-trivial-done';
 const PENDING = 'fixture-permission-pending';
 const PROSE = 'fixture-prose-question';
-/** One minute after the idle reminder fired; 25 s after the permission dialog opened. */
 const NOW = Date.parse('2026-09-10T10:02:04.000Z');
 
 beforeEach(() => {
@@ -112,8 +105,6 @@ describe('a real permission prompt is a permission with the harness choices, unt
   it('reconciles to `permission` keyed on the block generation, and the notifier posts one approvable banner', async () => {
     installBlock('block-permission-prompt.json', PENDING);
     const row = liveRow(PENDING, transcript('claude-permission-pending.jsonl', '2026-09-10T10:00:03.000Z'), NOW);
-    // The transcript alone says only "a tool call is in flight" — no permission is
-    // inferred from it; the hook block is the evidence, corroborated by the cursor.
     expect(row.activity).toBe('working');
     expect(row.awaitingReason).toBeUndefined();
     expect(row.lastEventMs).toBe(Date.parse('2026-09-10T10:00:03.000Z'));
@@ -172,8 +163,6 @@ describe('a real permission prompt is a permission with the harness choices, unt
     const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW });
     await service.tick({ log: () => {} }, new AbortController().signal);
     expect(posts).toHaveLength(1);
-    // The operator swipes the banner away. Nothing in the store changes, so the
-    // reconciled record — what the menu and the stream render — is still open.
     const later = NOW + 10 * 60_000;
     const item = reconcileAttention({ block: readBlock(blockIdForSession(PENDING), getFeedDir()), session: row, nowMs: later });
     expect(item).toMatchObject({ kind: 'permission', key: posts[0].key });
@@ -192,9 +181,6 @@ describe('a time-based inference expires from the transcript stamps, not the fil
     expect(item.question?.text).toContain('Which browser data directory should I use');
     expect(item.choices).toBeUndefined();
 
-    // Same file, same mtime, same memoized parse — 31 minutes later the verdict
-    // has expired. Before PHNX-3999 the mtime-keyed memo returned the frozen
-    // "waiting" state here for as long as the transcript went untouched.
     const stale = liveRow(PROSE, file, askedMs + 31 * 60_000);
     expect(stale.activity).toBe('idle');
     expect(reconcileAttention({ session: stale, nowMs: askedMs + 31 * 60_000 })).toBeUndefined();

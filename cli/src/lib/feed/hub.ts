@@ -9,15 +9,12 @@ import type { ActivityEvent } from './activity.js';
 import type { ToolRow } from './tools.js';
 import { FeedWatchState, type FeedWatchEnvelope } from './envelope.js';
 
-/** Activity events replayed to a late subscriber. The lane is a rolling view,
- *  so a bounded tail is the honest amount of history to hand over. */
 export const HUB_ACTIVITY_REPLAY = 50;
 
 interface ScopeState {
   agents: Map<string, SessionWatchRow>;
   attention: Map<string, AttentionItem>;
   tools: Map<string, ToolRow>;
-  /** Whole-set, replaced at once — see the `setup.snapshot` docblock. */
   setup: ToolSetupRow[];
   capturedAt: number;
   status?: { status: SessionWatchScopeStatus; reason?: string };
@@ -44,7 +41,6 @@ export class FeedHubState {
     const scope = this.scope(event.scope);
     switch (event.type) {
       case 'reset':
-        // One scope only. A peer reconnecting must not erase another's rows.
         scope.agents = new Map(event.agents.map((agent) => [agent.rowKey, agent]));
         scope.attention = new Map(event.attention.map((item) => [item.key, item]));
         scope.tools = new Map(event.tools.map((tool) => [tool.rowKey, tool]));
@@ -59,8 +55,6 @@ export class FeedHubState {
       case 'tool.remove': scope.tools.delete(event.rowKey); break;
       case 'setup.snapshot': scope.setup = event.setup; break;
       case 'scope':
-        // Rows are deliberately RETAINED: transient fleet loss is not session
-        // death, the same rule `watchLocalSessions` states for its own scope.
         scope.status = { status: event.status, ...(event.reason ? { reason: event.reason } : {}) };
         break;
       case 'activity.append':
@@ -71,7 +65,6 @@ export class FeedHubState {
     }
   }
 
-  /** The envelopes that bring a fresh subscriber to the current state. */
   snapshot(state: FeedWatchState): FeedWatchEnvelope[] {
     const out: FeedWatchEnvelope[] = [];
     for (const [name, scope] of this.scopes) {
@@ -82,27 +75,23 @@ export class FeedHubState {
       }));
       if (scope.status) out.push(state.emit({ type: 'scope', scope: name, capturedAt: Date.now(), ...scope.status }));
     }
-    // Chronological, matching the order they were first delivered in.
     for (const event of this.activity) {
       out.push(state.emit({ type: 'activity.append', scope: normalizeHost(machineId()), event }));
     }
     return out;
   }
 
-  /** Scopes the hub has seen. Observability + tests. */
   get scopeNames(): string[] { return [...this.scopes.keys()]; }
 }
 
 type Subscriber = { emit: (event: FeedWatchEnvelope) => void; state: FeedWatchState };
 
-/** The collector a hub owns: it runs until the signal aborts, emitting envelopes. */
 export type HubFanOut = (options: {
   signal: AbortSignal;
   emit: (event: FeedWatchEnvelope) => void;
   reconnectMs?: number;
 }) => Promise<void>;
 
-/** Told to every attached reader when the shared fan-out cannot start. */
 export type HubFailureListener = (error: Error) => void;
 
 interface FeedHubOptions {
@@ -110,7 +99,6 @@ interface FeedHubOptions {
    * module depends on neither and `watch.ts` can depend on this one for its shared local
    * collector. */
   watch: HubFanOut;
-  /** Forwarded to the fan-out. */
   reconnectMs?: number;
 }
 
@@ -123,7 +111,6 @@ export class FeedHub {
   /** Bumped on every start/stop; a completion handler clears state only if its generation is
    * current, so a winding-down run cannot clear a newer controller. */
   private generation = 0;
-  /** The most recent fan-out failure, if the current generation hit one. */
   lastFailure: Error | null = null;
   /** Called when the fan-out rejects. Without it the failure lived in a dropped promise and
    * readers saw an idle stream instead of an error. Settable so the socket server can attach
@@ -135,11 +122,8 @@ export class FeedHub {
     this.watch = options.watch;
   }
 
-  /** Readers currently attached. The fan-out runs iff this is > 0. */
   get readerCount(): number { return this.subscribers.size; }
-  /** Is the single shared fan-out running right now? */
   get active(): boolean { return this.controller !== null; }
-  /** The held per-scope state, for observability and tests. */
   get state(): FeedHubState { return this.held; }
 
   /** Attaches a reader: it gets a snapshot of held state, then every later event. Returns the
@@ -147,6 +131,7 @@ export class FeedHub {
   subscribe(emit: (event: FeedWatchEnvelope) => void): () => void {
     const subscriber: Subscriber = { emit, state: new FeedWatchState() };
     this.subscribers.add(subscriber);
+    // Catch-up is synchronous so one ordered writer emits it before live events.
     for (const event of this.held.snapshot(subscriber.state)) emit(event);
     this.start();
     let detached = false;
@@ -158,18 +143,16 @@ export class FeedHub {
     };
   }
 
-  /** Stop the fan-out and detach every reader. */
   async close(): Promise<void> {
     this.subscribers.clear();
     this.stop();
     const running = this.running;
     this.running = null;
-    if (running) await running.catch(() => { /* teardown must not throw */ });
+    if (running) await running.catch(() => {  });
   }
 
-  /** Await the in-flight fan-out's teardown. Tests assert no overlap with it. */
   async settled(): Promise<void> {
-    await this.running?.catch(() => { /* only the timing matters here */ });
+    await this.running?.catch(() => {  });
   }
 
   /** Starts the single fan-out, waiting for any previous one to finish: `stop()` returns
@@ -177,16 +160,15 @@ export class FeedHub {
    * reattach (window reload, popover reopen) started a second fan-out alongside the dying one. */
   private start(): void {
     if (this.controller) return;
+    // Generation fences stop a stale collector from publishing after restart.
     const generation = ++this.generation;
     this.lastFailure = null;
     const controller = new AbortController();
     this.controller = controller;
     const previous = this.running ?? Promise.resolve();
     this.running = previous
-      .catch(() => { /* a previous run's failure must not block the next */ })
+      .catch(() => {  })
       .then(() => {
-        // The readers may all have left while we waited for the old run to
-        // drain; starting then would dial every peer for nobody.
         if (generation !== this.generation || controller.signal.aborted) return;
         return this.watch({
           signal: controller.signal,
@@ -198,16 +180,12 @@ export class FeedHub {
         });
       })
       .catch((error: unknown) => {
-        // Surfaced, never swallowed: a reader attached to a dead collector would
-        // otherwise be indistinguishable from a quiet fleet.
         if (generation === this.generation) {
           this.lastFailure = error instanceof Error ? error : new Error(String(error));
           this.onFailure?.(this.lastFailure);
         }
       })
       .finally(() => {
-        // Only clear if this is still the live run: a stop/start cycle may have
-        // replaced it, and clearing then would strand the newer controller.
         if (generation === this.generation) this.controller = null;
       });
   }

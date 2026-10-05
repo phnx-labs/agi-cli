@@ -8,27 +8,19 @@ import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { BrowserSessionRow, ArtifactKind } from '../browser/sessions-list.js';
 import type { ComputerRunRow } from '../computer/sessions-list.js';
 
-/** Newest captures retained per row. A task with hundreds of screenshots must
- *  not turn one stream envelope into a megabyte. */
 export const TOOL_CAPTURE_LIMIT = 20;
-/** Newest actions retained per computer row, for the same reason. */
 export const TOOL_ACTION_LIMIT = 50;
 
 export type ToolKind = 'browser' | 'computer';
 
-/** Why a row carries no owning session: `linked` resolved one, `unresolved` has
- *  an id that no indexed session matches, `unlinked` never had one. Mirrors the
- *  status both source modules already publish. */
 export type ToolLinkStatus = 'linked' | 'unresolved' | 'unlinked';
 
-/** One artifact a tool produced. Path only — never contents. */
 export interface ToolCapture {
   kind: ArtifactKind;
   name: string;
   /** Absolute path on `ToolCapture.host`. A capture lives on the machine whose browser produced
    * it, so a reader on another box must open it through that host. */
   path: string;
-  /** The device that holds this file. */
   host: string;
   bytes?: number;
   atMs: number;
@@ -41,7 +33,6 @@ export interface ToolTab {
   id: string;
   url?: string;
   title?: string;
-  /** The tab URL-less verbs act on. */
   current?: boolean;
   /** The task drives this tab but did not open it, so no close path touches it; keeps a UI from
    * offering to close someone else's tab. */
@@ -57,7 +48,6 @@ export interface ToolCommand {
   runOn: string;
 }
 
-/** The agent session that drove the tool, as a click-through target. */
 export interface ToolOwner {
   sessionId: string;
   device: string;
@@ -67,13 +57,9 @@ export interface ToolOwner {
 
 interface ToolRowBase {
   kind: ToolKind;
-  /** Opaque, stable identity for this row within one device scope. */
   rowKey: string;
-  /** The observing device that reported the row. */
   scope: string;
-  /** The DRIVEN machine — for `--device` runs this differs from `scope`. */
   device: string;
-  /** Is this a resource that still exists and can be acted on? */
   live: boolean;
   task?: string;
   sessionId?: string;
@@ -83,7 +69,6 @@ interface ToolRowBase {
   linkStatus: ToolLinkStatus;
   startedAtMs: number;
   updatedAtMs: number;
-  /** Newest first, bounded by {@link TOOL_CAPTURE_LIMIT}. */
   captures: ToolCapture[];
   captureCounts: Record<string, number>;
 }
@@ -91,7 +76,6 @@ interface ToolRowBase {
 export interface BrowserToolRow extends ToolRowBase {
   kind: 'browser';
   profile: string;
-  /** Redacted by {@link redactToolUrl}; absent when the binding recorded none. */
   url?: string;
   /** Tabs the task has open, newest-known first. Absent means unknown here (task bound to
    * another device, or ended leaving only captures); `[]` means genuinely none. */
@@ -106,13 +90,10 @@ export interface BrowserToolRow extends ToolRowBase {
 
 export interface ComputerToolRow extends ToolRowBase {
   kind: 'computer';
-  /** Always false: see the module docblock. A run is history, not a session. */
   live: false;
   bundle?: string;
-  /** Newest first, bounded by {@link TOOL_ACTION_LIMIT}. */
   actions: { verb: string; atMs: number; host?: string; bundle?: string }[];
   actionCounts: Record<string, number>;
-  /** Total actions for a row whose per-verb detail the ledger already pruned. */
   recoveredActionCount?: number;
 }
 
@@ -126,22 +107,17 @@ export interface LiveBrowserTask {
   profile?: string;
   label?: string;
   tabs?: ToolTab[];
-  /** `Task.createdAt` — when the task was opened. */
   startedAtMs?: number;
-  /** `Task.lastActionAt` — refreshed by every task-scoped action. */
   lastActionAtMs?: number;
   sessionId?: string;
   launchId?: string;
-  /** `Task.actor` — who launched it, when the record carries one. */
   actor?: string;
 }
 
-/** Stable identity for one tool row within one device scope. */
 export function toolRowKey(scope: string, kind: ToolKind, identity: string): string {
   return createHash('sha256').update(`${scope}\0${kind}\0${identity}`).digest('base64url').slice(0, 22);
 }
 
-/** Query parameters whose value is a credential, not a locator. */
 const CREDENTIAL_PARAM = /(token|secret|password|passwd|pwd|api[-_]?key|auth|session|signature|sig|code)/i;
 const REDACTED = '<redacted>';
 
@@ -156,8 +132,6 @@ export function redactToolUrl(raw: string | undefined): string | undefined {
   for (const key of [...url.searchParams.keys()]) {
     if (CREDENTIAL_PARAM.test(key)) url.searchParams.set(key, REDACTED);
   }
-  // A fragment is where OAuth implicit flows put the token, and nothing on a
-  // status row needs it.
   if (url.hash) url.hash = '';
   return url.toString();
 }
@@ -180,7 +154,6 @@ function ownerOf(sessionId: string | undefined, linkedSession: SessionMeta | nul
   };
 }
 
-/** A machine name, or undefined for the `unknown` not-identified sentinel. */
 function knownMachine(machine: string | undefined): string | undefined {
   return machine && machine !== 'unknown' ? machine : undefined;
 }
@@ -212,24 +185,15 @@ export function projectBrowserToolRow(
   live?: LiveBrowserTask,
 ): BrowserToolRow {
   const host = normalizeHost(scope);
-  // Live means the task still EXISTS: either this host's browser holds a live
-  // record for it, or the task index still routes it (which is the case for a
-  // task whose browser runs on another device).
   const isLive = Boolean(row.task) && (live !== undefined || binding !== undefined);
   const captures = row.artifacts.slice(0, TOOL_CAPTURE_LIMIT).map((artifact) => ({
     kind: artifact.kind, name: artifact.name, path: artifact.path, host, bytes: artifact.bytes, atMs: artifact.mtimeMs,
   }));
   const oldest = row.artifacts.length > 0 ? row.artifacts[row.artifacts.length - 1]!.mtimeMs : row.latestMtimeMs;
   const url = redactToolUrl(binding?.url);
-  // One effective identity for the row AND its owner link, resolved before either
-  // is built: durable capture history first (it survives the task), then the live
-  // record, then the device binding.
   const sessionId = row.sessionId ?? live?.sessionId ?? binding?.sessionId;
   const launchId = row.launchId ?? live?.launchId ?? binding?.launchId;
   const owner = ownerOf(sessionId, row.linkedSession, host);
-  // Tabs are only knowable from a LIVE task record on THIS host; a row projected
-  // from captures alone, or from a binding pointing at another device, genuinely
-  // does not know them and says so by omitting the field.
   const tabs = live?.tabs;
   const showTab = tabs?.find((tab) => tab.current && !tab.borrowed)?.id
     ?? tabs?.find((tab) => !tab.borrowed)?.id;
@@ -260,9 +224,6 @@ export function projectBrowserToolRow(
     profile: row.profile || live?.profile || '',
     ...(url ? { url } : {}),
     ...(tabs ? { tabs } : {}),
-    // `runOn` is the OBSERVING host, not `device`: the binding that resolves the
-    // task's device lives here, and passing `--device` to a later verb is
-    // refused outright. See {@link ToolCommand}.
     ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'tab', 'focus', showTab, '--task', row.task!], runOn: host } } : {}),
     ...(isLive ? { closeCommand: { command: 'agents' as const, args: ['browser', 'done', '--task', row.task!], runOn: host } } : {}),
   };
@@ -321,7 +282,6 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
   };
 }
 
-/** Newest first across both kinds — the order a consumer renders. */
 export function sortToolRows(rows: ToolRow[]): ToolRow[] {
   return [...rows].sort((a, b) => b.updatedAtMs - a.updatedAtMs);
 }

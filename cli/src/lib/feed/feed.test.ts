@@ -452,7 +452,6 @@ describe('feed store', () => {
     });
     expect(publish.status).toBe(0);
     expect(listBlocks(feedDir)).toEqual([]);
-    // The ask ledger is untouched too: an idle reminder is not an ask.
     expect(fs.existsSync(path.join(feedDir, 'asks'))).toBe(false);
   });
 
@@ -485,7 +484,6 @@ describe('feed store', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-declared-persist-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
     fs.mkdirSync(feedDir, { recursive: true });
-    // `agents feed post --blocked` writes a declared block here (CLI side).
     const agent: DeclaringAgent = {
       sessionId: 'session-declared',
       mailboxId: 'session-declared',
@@ -496,9 +494,6 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toHaveLength(1);
     expect(listBlocks(feedDir)[0].kind).toBe('declared');
 
-    // The agent parks the block and its turn ends: Stop fires, then SessionEnd,
-    // and any PostToolUse in between. None may drop it -- the owner still has to
-    // answer it, and it must stay in `agents feed` until they do.
     for (const hook_event_name of ['Stop', 'SessionEnd', 'PostToolUse'] as const) {
       const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
         input: JSON.stringify({ session_id: 'session-declared', hook_event_name }),
@@ -509,8 +504,6 @@ describe('feed store', () => {
     }
     expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
 
-    // Contrast: a notification block (harness permission prompt) STILL clears on
-    // Stop -- the fix is scoped to declared blocks, not a blanket "never clear on Stop".
     spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'session-notif',
@@ -529,12 +522,8 @@ describe('feed store', () => {
     });
     expect(clearNotif.status).toBe(0);
     expect(listBlocks(feedDir).some(b => b.sessionId === 'session-notif')).toBe(false);
-    // The declared block for the other session is still present.
     expect(listBlocks(feedDir).filter(b => b.kind === 'declared')).toHaveLength(1);
 
-    // Once the declared block is ANSWERED, a lifecycle clear DOES remove it AND its
-    // answered marker -- so a later --blocked in the same session is not falsely
-    // locked as already-answered (recordAnswer creates the marker with O_EXCL).
     const declaredBlockId = blockIdForSession('session-declared');
     recordAnswer(declaredBlockId, { answeredFrom: 'terminal' }, feedDir);
     expect(isBlockAnswered(declaredBlockId, feedDir)).toBe(true);
@@ -617,20 +606,15 @@ describe('feed store', () => {
     const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-padding-'));
     fs.mkdirSync(userDir, { recursive: true });
     const agentsYaml = path.join(userDir, 'agents.yaml');
-    // The committed form uses unpadded flow sequences. The yaml emitter defaults
-    // to padded output, so re-writing this file used to flip [claude] -> [ claude ]
-    // and leave the git-backed ~/.agents tree permanently dirty, blocking pulls.
     const committed = 'hooks:\n  notify-owner:\n    command: [agents, notify, "{message}"]\n    agents: [claude, codex]\n    events: [Stop]\n    script: notify.sh\n';
     fs.writeFileSync(agentsYaml, committed);
     expect(ensureFeedPublishHook(userDir)).toEqual({ installed: true });
     const updated = fs.readFileSync(agentsYaml, 'utf-8');
-    // The pre-existing flow sequences must round-trip byte-identically — no padding.
     expect(updated).toContain('command: [agents, notify, "{message}"]');
     expect(updated).toContain('agents: [claude, codex]');
     expect(updated).toContain('events: [Stop]');
     expect(updated).not.toMatch(/\[ /);
     expect(updated).not.toMatch(/ \]/);
-    // And the hooks were still added (semantics intact).
     expect(updated).toContain('feed-publish:');
   });
 
@@ -638,10 +622,8 @@ describe('feed store', () => {
     const userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-install-'));
     expect(ensureFeedPublishHook(userDir)).toEqual({ installed: true });
     const yamlText = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf-8');
-    // The Codex-only approval hook subscribes to PermissionRequest.
     expect(yamlText).toContain('feed-publish-permission:');
     expect(yamlText).toContain('PermissionRequest');
-    // Every feed hook lists codex so its harness parity is documented.
     const doc = yaml.parse(yamlText) as { hooks: Record<string, { agents?: string[] }> };
     for (const name of ['feed-publish', 'feed-publish-notification', 'feed-publish-permission', 'feed-clear-answered', 'feed-clear-permission', 'feed-clear-lifecycle']) {
       expect(doc.hooks[name].agents).toContain('codex');
@@ -660,9 +642,6 @@ describe('feed store', () => {
     expect(doc.hooks['feed-clear-permission'].agents).toEqual(['codex']);
     expect(doc.hooks['feed-clear-permission'].agents).not.toContain('claude');
     expect(doc.hooks['feed-clear-permission'].matcher).toBeUndefined();
-    // The ONLY PostToolUse feed hook Claude still registers is the answered
-    // clear, and it is matcher-scoped to AskUserQuestion -- so an unrelated
-    // Claude tool completion never touches a notification-kind block.
     expect(doc.hooks['feed-clear-answered'].agents).toContain('claude');
     expect(doc.hooks['feed-clear-answered'].events).toEqual(['PostToolUse']);
     expect(doc.hooks['feed-clear-answered'].matcher).toBe('AskUserQuestion');
@@ -689,9 +668,6 @@ describe('feed store', () => {
     expect(publish.status).toBe(0);
     expect(listBlocks(feedDir)).toMatchObject([{ kind: 'notification', notificationType: 'permission_prompt' }]);
 
-    // A plain (non-AskUserQuestion) PostToolUse -- what feed-clear-permission
-    // delivered for EVERY Claude tool before the fix -- clears the card. The
-    // question-guard at feed.ts:546-553 preserves only kind == 'question'.
     const plainPostToolUse = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'notif-clear-sess',
@@ -725,8 +701,6 @@ describe('feed store', () => {
 
   it('recordAnswer refuses unverified answers to high-consequence blocks', () => {
     const dir = tmpFeedDir();
-    // operators.yaml under the feed root must NOT authorize (RUSH-1618) —
-    // the registry lives at ~/.agents/operators.yaml only.
     fs.writeFileSync(path.join(dir, 'operators.yaml'), 'operators:\n  muqsit:\n    admin: true\n', 'utf-8');
     publishBlock(makeBlock('sess-authz', 'Deploy to prod?', {
       consequence: 'merge',
@@ -740,7 +714,6 @@ describe('feed store', () => {
       expect('unauthorized' in unverified).toBe(true);
     }
 
-    // verified:false still refused even with a known-looking operatorId.
     const claimed = recordAnswer(blockId, {
       answeredFrom: 'feed',
       answeredBy: 'Muqsit',
@@ -752,9 +725,6 @@ describe('feed store', () => {
 
   it('recordAnswer ignores operators.yaml colocated with the feed store (RUSH-1618)', () => {
     const dir = tmpFeedDir();
-    // Only the feed root has operators.yaml — the canonical registry is separate.
-    // Claiming verified:true for an id that exists ONLY here must still fail
-    // when that id is not in the real ~/.agents registry. Use a unique id.
     fs.writeFileSync(
       path.join(dir, 'operators.yaml'),
       'operators:\n  feed-only-operator-xyz:\n    admin: true\n',
@@ -800,7 +770,6 @@ describe('feed store', () => {
     const blockId = blockIdForSession('sess-mono');
 
     recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'consumed', at: '2026-01-01T00:00:01.000Z' }, dir);
-    // Late enqueue writer races after drain already recorded consumed.
     recordMessageReceipt(blockId, { msgId: 'msg-1', status: 'queued', at: '2026-01-01T00:00:02.000Z' }, dir);
 
     const block = readBlock(blockId, dir)!;
@@ -900,14 +869,12 @@ describe('feed store', () => {
       lastActivityMs: cursorMs,
     } as ActiveSession;
 
-    // Same cursor as the answered generation: a stale re-read, must stay gone.
     expect(reconcileAttention({
       session: staleSession,
       resolution: tombstone,
       nowMs: cursorMs + 10_000,
     })).toBeUndefined();
 
-    // A strictly later turn is a new generation and is allowed through.
     const fresh = reconcileAttention({
       session: { ...staleSession, lastActivityMs: cursorMs + 1, question: { text: 'A later ask?', reason: 'question' } },
       resolution: tombstone,
@@ -956,7 +923,6 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toMatchObject([{ questions: [{ text: 'Second?' }] }]);
   });
 
-  // --- RUSH-2039: Codex approval prompts publish urgent feed blocks ---------
 
   it.runIf(hasPython)('real hook publishes a Codex PermissionRequest as an urgent approval block', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-perm-'));
@@ -982,7 +948,6 @@ describe('feed store', () => {
       costOfDelay: 'high',
       safeDefault: 'deny',
     });
-    // The block names the tool and its command so the operator can judge it.
     expect(blocks[0].questions[0].text).toContain('Bash');
     expect(blocks[0].questions[0].text).toContain('rm -rf build');
     expect(blocks[0].questions[0].header).toBe('Approval needed');
@@ -1004,7 +969,6 @@ describe('feed store', () => {
     expect(publish.status).toBe(0);
     expect(listBlocks(feedDir)).toHaveLength(1);
 
-    // Codex runs the approved tool -> matcher-less PostToolUse clears the card.
     const clear = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'codex-sess-2',
@@ -1033,7 +997,6 @@ describe('feed store', () => {
     expect(publish.status).toBe(0);
     expect(listBlocks(feedDir)).toHaveLength(1);
 
-    // An unrelated tool completing must NOT clear the open question.
     const unrelated = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'sess-q-guard',
@@ -1046,7 +1009,6 @@ describe('feed store', () => {
     expect(unrelated.status).toBe(0);
     expect(listBlocks(feedDir)).toMatchObject([{ kind: 'question', questions: [{ text: 'Which approach?' }] }]);
 
-    // The AskUserQuestion PostToolUse still clears it.
     const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
       input: JSON.stringify({
         session_id: 'sess-q-guard',
@@ -1061,7 +1023,6 @@ describe('feed store', () => {
   });
 
   it('feed --dispatch classifies a Codex approval block as urgent and surfaces it', () => {
-    // Mirror the block the hook publishes for a Codex PermissionRequest.
     const block = makeBlock('codex-dispatch', 'Codex needs approval to run Bash: rm -rf build', {
       runtime: 'headless',
       kind: 'notification',
@@ -1072,12 +1033,10 @@ describe('feed store', () => {
       questions: [{ text: 'Codex needs approval to run Bash: rm -rf build', header: 'Approval needed' }],
     });
 
-    // Not suppressed as a stall, and classified as an approval.
     const filtered = filterBlocksForFeed([block]);
     expect(filtered.surfaced).toHaveLength(1);
     expect(classifyBlock(block).class).toBe('approval');
 
-    // Urgent under the default policy (costOfDelay high >= threshold medium).
     expect(isPhoneUrgent(block, DEFAULT_POLICY)).toBe(true);
   });
 });

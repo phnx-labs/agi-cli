@@ -10,12 +10,9 @@ import { buildComputerSessionRows, standaloneComputerActionsDir, type ComputerRu
 import type { LiveBrowserTask, ToolTab } from './tools.js';
 import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, sortToolRows, type ToolRow } from './tools.js';
 
-/** Re-projection cadence used only while no directory watcher could arm. */
 export const TOOL_SWEEP_MS = 5_000;
-/** Computer ledger rows read per projection. Bounds the newest-first window. */
 const TOOL_COMPUTER_LIMIT = 500;
 
-/** What one re-projection changed. Empty on both sides means nothing moved. */
 export interface ToolDiff {
   upserts: ToolRow[];
   removes: string[];
@@ -39,6 +36,7 @@ export interface ToolSnapshot {
 /** Projects every browser task and computer run this machine knows into canonical tool rows,
  * newest first. The three readers are injectable so tests drive real temp stores. */
 export function collectToolRows(scope: string, sources: ToolSources = {}): ToolSnapshot {
+  // Failed reads produce an incomplete snapshot, never authoritative removals.
   let complete = true;
   const read = <T>(source: () => T, empty: T): T => {
     try { return source(); } catch { complete = false; return empty; }
@@ -79,7 +77,6 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
 export class ToolRowSet {
   private readonly rows = new Map<string, string>();
 
-  /** The diff from the current set to `next`, and adopt `next` as current. */
   diff(next: ToolRow[]): ToolDiff {
     const upserts: ToolRow[] = [];
     const seen = new Set<string>();
@@ -99,7 +96,6 @@ export class ToolRowSet {
     return { upserts, removes };
   }
 
-  /** Adopt `rows` as the current set without emitting a diff (a reset). */
   reset(rows: ToolRow[]): void {
     this.rows.clear();
     for (const row of rows) this.rows.set(row.rowKey, JSON.stringify(row));
@@ -109,15 +105,10 @@ export class ToolRowSet {
 interface ToolWatchOptions {
   scope: string;
   signal: AbortSignal;
-  /** Called with every non-empty diff. */
   onDiff: (diff: ToolDiff) => void;
-  /** Re-projection cadence while no watcher is armed. */
   sweepMs?: number;
-  /** Roots to watch (tests pass temp dirs). */
   roots?: string[];
-  /** Row sources, forwarded to {@link collectToolRows}. */
   sources?: ToolSources;
-  /** Seed the set so the first diff reports only later changes. */
   initial?: ToolRow[];
 }
 
@@ -136,16 +127,13 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
   let raw: string;
   try { raw = fs.readFileSync(file, 'utf8'); }
   catch (error) {
-    // Only "it isn't there" is benign. Anything else is a read we cannot trust.
+    // Only absence means no live tasks; malformed or inaccessible state is incomplete.
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
   let parsed: unknown;
   try { parsed = JSON.parse(raw); }
   catch (error) {
-    // A JSON error is NOT benign: the browser rewrites this file in place, so a
-    // parse failure usually means we caught a write in progress — and the tasks
-    // are still very much alive.
     throw new Error(`unreadable live task state at ${file}: ${(error as Error).message}`);
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -155,9 +143,6 @@ function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
   for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!value || typeof value !== 'object') continue;
     const record = value as Record<string, unknown>;
-    // `tabs` maps the task's SHORT id -> the engine's target id. The short id is
-    // what `browser tab focus` takes and what stays stable across a reconnect,
-    // so it is the id published; the target id is never surfaced.
     const borrowed = new Set(Array.isArray(record.borrowedTabs) ? record.borrowedTabs.filter((id): id is string => typeof id === 'string') : []);
     const tabs: ToolTab[] = [];
     if (record.tabs && typeof record.tabs === 'object') {
@@ -214,44 +199,31 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
   if (options.initial) set.reset(options.initial);
   let dirty = false;
   let stopped = false;
-  /** One entry per root; `undefined` means that root needs re-arming. */
   const watchers = new Map<string, fs.FSWatcher | undefined>(roots.map((root) => [root, undefined]));
   const armRoot = (root: string): void => {
     if (stopped || watchers.get(root)) return;
     try {
-      // A root that does not exist yet (no browser has ever run here) cannot be
-      // watched, and would never be retried. Creating it arms the watcher now.
       fs.mkdirSync(root, { recursive: true });
-      // Recursive: a capture lands in <root>/<profile>/sessions/<task>/, several
-      // levels below the root, and a non-recursive watch never sees it.
       const watcher = fs.watch(root, { recursive: true }, () => { dirty = true; });
       watcher.on('error', () => {
         watcher.close();
-        // Release the slot AND mark dirty: the events this watcher dropped
-        // between failing and being replaced have to be picked up by a sweep,
-        // or a change that landed inside that gap is lost for good.
         if (watchers.get(root) === watcher) watchers.set(root, undefined);
         dirty = true;
       });
       watchers.set(root, watcher);
-    } catch { /* reported by armed(); the sweep covers it until it arms */ }
+    } catch {  }
   };
   for (const root of roots) armRoot(root);
+  // Watchers can die after startup, so armed is live state and sweeps keep re-arming.
   const armed = () => [...watchers.values()].every((watcher) => watcher !== undefined);
   const reproject = () => {
     const snapshot = collectToolRows(options.scope, options.sources);
-    // An incomplete read is not evidence a task closed. Keep the rows we have and
-    // stay dirty so the next tick retries — publishing removes here is what made
-    // live rows flicker out on a transient failure.
     if (!snapshot.complete) { dirty = true; return; }
     const diff = set.diff(snapshot.rows);
     if (diff.upserts.length > 0 || diff.removes.length > 0) options.onDiff(diff);
   };
   const timer = setInterval(() => {
     for (const root of roots) armRoot(root);
-    // Fully-armed watchers mean a tick with nothing reported does NOTHING — no
-    // directory read, no projection. That is the warm-idle guarantee, and it is
-    // conditional on every root actually being watched right now.
     if (armed() && !dirty) return;
     dirty = false;
     reproject();

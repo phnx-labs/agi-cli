@@ -24,11 +24,6 @@ interface SessionStepBase {
   ordinal: number;
   startMs: number;
   durationMs: number;
-  /**
-   * Whether `durationMs` was measured from a paired result (`false`) or inferred
-   * from the next event (`true`). Mandatory — the console must visually
-   * distinguish measured from inferred duration.
-   */
   durationEstimated: boolean;
   outcome: StepOutcome;
   label: string;
@@ -44,7 +39,6 @@ interface ExecutionBase extends SessionStepBase {
   kind: 'execution';
   lane: string;
   callId?: string;
-  /** The tool call this execution targets (hook/permission → the guarded call). */
   targetCallId?: string;
 }
 
@@ -79,7 +73,6 @@ export interface BashAction {
   ordinal: number;
   source: string;
   argv: string[];
-  /** false when a dynamic node (substitution/expansion) kept argv incomplete. */
   argvComplete: boolean;
   program?: string;
   categories: BashCategory[];
@@ -89,9 +82,7 @@ export interface BashAction {
 
 export interface BashExecution extends ToolExecutionBase {
   executionType: 'bash';
-  /** Redacted outer command. */
   command: string;
-  /** Redacted shell payload after unwrapping `/bin/zsh -lc "…"`. */
   unwrappedCommand: string;
   parseStatus: 'parsed' | 'partial' | 'unparseable';
   parseDiagnostics: string[];
@@ -168,7 +159,6 @@ export interface GenericToolExecution extends ToolExecutionBase {
   input?: TextPreview;
 }
 
-/** A permission request/decision — a first-class sibling, NOT a fake tool. */
 export interface PermissionExecution extends ExecutionBase {
   executionType: 'permission';
   lane: 'permission';
@@ -179,7 +169,6 @@ export interface PermissionExecution extends ExecutionBase {
   reason?: TextPreview;
 }
 
-/** A hook firing — a first-class sibling, NOT a fake tool. */
 export interface HookExecution extends ExecutionBase {
   executionType: 'hook';
   lane: 'hook';

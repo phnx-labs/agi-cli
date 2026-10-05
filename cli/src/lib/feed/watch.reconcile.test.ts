@@ -2,8 +2,6 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// The feed and activity dirs derive from HOME at module load, so this has to be
-// set before the modules under test are imported.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-watch-reconcile-'));
 process.env.HOME = TEST_HOME;
 
@@ -27,7 +25,6 @@ interface Harness {
   stop: () => Promise<void>;
 }
 
-/** Start the real local feed watcher over the temp HOME with one live row. */
 function start(options: {
   reconcileMs: number; sessionId?: string; withFeedDir?: boolean;
   pr?: { url: string; number: number };
@@ -57,7 +54,6 @@ function start(options: {
   return { events, stop: async () => { controller.abort(); await watching; } };
 }
 
-/** The one open block an `agents feed post --blocked` would have written. */
 function writeBlock(sessionId: string): void {
   fs.writeFileSync(path.join(getFeedDir(), `block-${sessionId}.json`), JSON.stringify({
     blockId: `block-${sessionId}`,
@@ -70,8 +66,6 @@ function writeBlock(sessionId: string): void {
 
 describe('feed watch reconcile cadence', () => {
   it('drains appended activity every tick without reconciling attention on any of them', async () => {
-    // A reconcile window far beyond the test run: attention traffic here could
-    // only come from a per-tick pass, which is the regression being pinned.
     const harness = start({ reconcileMs: 3_600_000, sessionId: 'live-quiet' });
     await settle(80);
     appendActivityEvent({ sessionId: 'live-quiet', event: 'status.posted', ts: new Date().toISOString(), detail: 'first' });
@@ -83,14 +77,12 @@ describe('feed watch reconcile cadence', () => {
     const appended = harness.events.filter((event) => event.type === 'activity.append');
     expect(appended.map((event) => (event as Extract<FeedWatchEnvelope, { type: 'activity.append' }>).event.detail))
       .toEqual(['first', 'second']);
-    // ~16 ticks ran in that window. The startup reset carries attention; no tick
-    // after it re-read the attention stores for an unchanged row.
     expect(harness.events.filter((event) => event.type === 'attention.upsert' || event.type === 'attention.remove')).toEqual([]);
   });
 
   it('reconciles a row as soon as a block is written, without waiting for the PR-status cadence', async () => {
     const harness = start({ reconcileMs: 3_600_000, sessionId: 'live-blocked' });
-    await settle(120); // Let the startup reset land and the dir watcher arm.
+    await settle(120);
     const beforeBlock = harness.events.length;
     writeBlock('live-blocked');
     await settle(300);
@@ -142,11 +134,9 @@ describe('feed watch PR status on agent rows', () => {
     });
     const upsertsBefore = harness.events.filter((event) => event.type === 'agent.upsert').length;
 
-    // Same status across several reconcile passes: no row re-emit.
     await settle(150);
     expect(harness.events.filter((event) => event.type === 'agent.upsert').length).toBe(upsertsBefore);
 
-    // The PR merges (the 45 s cache is cleared as its TTL would): exactly one re-emit.
     response = prView('MERGED', [{ conclusion: 'SUCCESS' }]);
     resetPullRequestStatusCache();
     await settle(200);

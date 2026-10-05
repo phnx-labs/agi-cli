@@ -1,9 +1,3 @@
-/**
- * End-to-end: build a rich schema-2 shard from a synthesized session, assert it
- * satisfies the CONSUMER contract (mirrors prix/web's decodeSessionDetail field
- * requirements), and write it to testdata so the shard shape is pinned. If the
- * consumer decoder changes, this fixture is the producer-side canary.
- */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,46 +22,30 @@ const META: SessionMeta = {
   costUsd: 0.12,
 };
 
-/** A session exercising every schema-2 step kind. */
 function richSession(): SessionEvent[] {
   const e: SessionEvent[] = [];
   e.push({ type: 'thinking', agent: 'claude', timestamp: at(0), content: 'plan the change' } as SessionEvent);
-  // bash: multi-segment, one destructive
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(1), tool: 'Bash', callId: 'c1', command: `/bin/zsh -lc 'bun test && rm -rf dist'`, args: { command: `/bin/zsh -lc 'bun test && rm -rf dist'` } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(3), tool: 'Bash', callId: 'c1', outcome: 'ok', success: true, exitCode: 0, output: '42 pass 0 fail' } as SessionEvent);
-  // read
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(4), tool: 'Read', callId: 'c2', args: { file_path: '/repo/types.ts', offset: 1, limit: 200 } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(5), tool: 'Read', callId: 'c2', outcome: 'ok', success: true, output: 'a\nb\nc' } as SessionEvent);
-  // grep
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(6), tool: 'Grep', callId: 'c3', args: { pattern: 'decodeSessionDetail', path: 'src', output_mode: 'files' } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(7), tool: 'Grep', callId: 'c3', outcome: 'ok', success: true, output: 'a.ts\nb.ts\nc.ts' } as SessionEvent);
-  // edit then revert
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(8), tool: 'Edit', callId: 'c4', args: { file_path: '/repo/f.ts', old_string: 'OLD', new_string: 'NEW' } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(9), tool: 'Edit', callId: 'c4', outcome: 'ok', success: true } as SessionEvent);
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(10), tool: 'Edit', callId: 'c5', args: { file_path: '/repo/f.ts', old_string: 'NEW', new_string: 'OLD' } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(11), tool: 'Edit', callId: 'c5', outcome: 'ok', success: true } as SessionEvent);
-  // write
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(12), tool: 'Write', callId: 'c6', args: { file_path: '/repo/n.ts', content: 'x\ny' } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(13), tool: 'Write', callId: 'c6', outcome: 'ok', success: true } as SessionEvent);
-  // generic
   e.push({ type: 'tool_use', agent: 'claude', timestamp: at(14), tool: 'WebFetch', callId: 'c7', args: { url: 'https://example.com/docs' } } as SessionEvent);
   e.push({ type: 'tool_result', agent: 'claude', timestamp: at(15), tool: 'WebFetch', callId: 'c7', outcome: 'ok', success: true, output: 'ok' } as SessionEvent);
-  // hook
   e.push({ type: 'hook', agent: 'claude', timestamp: at(16), hookName: 'main-branch-guard', hookEvent: 'PreToolUse', success: false } as SessionEvent);
   return e;
 }
 
-/**
- * Structural validation mirroring prix/web's decodeSessionDetail. Not the exact
- * decoder (it lives in the consumer repo) but the same field-presence contract, so
- * a producer regression that would fail the real decoder fails here too.
- */
 function assertValidSchema2(d: SessionDetailV2): void {
   expect(d.schema).toBe(2);
   expect(typeof d.id).toBe('string');
-  // Tested contract: the producer deliberately OMITS category / risk / metrics —
-  // the consumer backfills neutral defaults (coerceCategory/coerceRisk never throw).
-  // If a future change starts emitting them, this assertion forces a conscious update.
   for (const k of ['category', 'risk', 'categoryMetrics'] as const) {
     expect(d).not.toHaveProperty(k);
   }
@@ -100,7 +78,6 @@ function assertValidSchema2(d: SessionDetailV2): void {
       expect(exec.lane).toBe('permission');
       continue;
     }
-    // a tool execution
     expect(['bash', 'edit', 'write', 'read', 'grep', 'generic']).toContain(exec.executionType);
     expect(typeof exec.tool).toBe('string');
     expect(exec.result && typeof exec.result === 'object').toBe(true);

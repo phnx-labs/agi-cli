@@ -15,7 +15,6 @@ describe('classifyCause', () => {
 
 describe('classifyTopic', () => {
   it('uses repository metadata and tool mix without transcript content', () => {
-    // A fix/* branch is a bug fix, not generic "engineering".
     expect(classifyTopic({ gitBranch: 'fix/session-cache', toolMix: { Edit: 3 } })).toEqual({
       group: 'code', key: 'bugfix', label: 'Bug fixes',
     });
@@ -52,7 +51,6 @@ describe('computeDriftSignal', () => {
   }
 
   it('returns degrading when errorDelta exceeds threshold', () => {
-    // history: 7 days of 10% error rate; today: 35% → delta +0.25 → degrading
     const history = makeHistory([0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], [0, 0, 0, 0, 0, 0, 0]);
     const today: BucketStats[] = [{ key: 'engineering', date: '2026-08-08', count: 10, errorRate: 0.35, stallRate: 0 }];
     const signals = computeDriftSignal(history, today);
@@ -62,7 +60,6 @@ describe('computeDriftSignal', () => {
   });
 
   it('returns improving when errorDelta is below negative threshold', () => {
-    // history: 7 days of 40% error rate; today: 10% → delta −0.30 → improving
     const history = makeHistory([0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4], [0, 0, 0, 0, 0, 0, 0]);
     const today: BucketStats[] = [{ key: 'engineering', date: '2026-08-08', count: 10, errorRate: 0.1, stallRate: 0 }];
     const signals = computeDriftSignal(history, today);
@@ -78,7 +75,6 @@ describe('computeDriftSignal', () => {
   });
 
   it('skips buckets with fewer than 3 historical days', () => {
-    // Only 2 days of history for this bucket
     const history = makeHistory([0.1, 0.1], [0, 0]);
     const today: BucketStats[] = [{ key: 'engineering', date: '2026-08-03', count: 10, errorRate: 0.9, stallRate: 0.9 }];
     expect(computeDriftSignal(history, today)).toHaveLength(0);
