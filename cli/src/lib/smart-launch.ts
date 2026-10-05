@@ -45,7 +45,7 @@ export function sampleWeighted(
 }
 
 export function listOnlineDeviceNames(localName: string = localMachineId()): string[] {
-  // Automatic placement excludes personal devices; after a worker is marked the default narrows to workers unless auto.pool=all.
+  // Automatic placement excludes personal/desktop devices; after a worker is marked the default narrows to workers unless auto.pool=all.
   const names = new Set<string>([normalizeHost(localName)]);
   try {
     const reg = loadDevicesSync();
