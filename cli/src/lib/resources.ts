@@ -22,9 +22,7 @@ import {
 import { isNameActiveInResourceProfile, type ProfiledResourceKind } from './resource-profiles.js';
 import { resolveSnapshotSha } from './git.js';
 
-// ─── Resource resolver ────────────────────────────────────────────────────────
 
-/** Resource kind — matches the subdirectory name under each repo root. */
 export type ResourceKind =
   | 'commands'
   | 'skills'
@@ -39,10 +37,8 @@ export type ResourceKind =
   | 'routers'
   | 'secrets';
 
-/** A resource resolved with its origin. */
 export interface ResolvedResource {
   name: string;
-  /** Absolute path to the resource file or directory. */
   path: string;
   /** Source layer: 'project' | 'user' | 'system' for built-in layers, or the alias name (e.g.
    * 'rush') for extra repos registered in agents.yaml. */
@@ -69,7 +65,6 @@ function resourceAliases(kind: ResourceKind, resourcePath: string): string[] {
   return [];
 }
 
-/** Build a ResolvedResource with lazy, memoized `snapshotSha` and `aliases` getters. */
 function withProvenance(
   base: { name: string; path: string; source: string; repoRoot: string },
   kind: ResourceKind,
@@ -84,8 +79,6 @@ function withProvenance(
     get aliases() {
       if (!aliasesComputed) {
         const found = resourceAliases(kind, base.path);
-        // Undefined (not []) when none, so a strict toEqual on a ResolvedResource
-        // ignores it — the same convention snapshotSha uses.
         aliasesCache = found.length > 0 ? found : undefined;
         aliasesComputed = true;
       }
@@ -125,6 +118,7 @@ const DOC_BASENAMES = new Set(['readme', 'agents', 'claude', 'gemini']);
  * Exported so every enumerator shares one definition: `listCentralCommands` and `discoverCommands`
  * scan on their own and would otherwise list a `README` that `resolveResource` refuses to open. */
 export function isDirectoryDoc(kind: ResourceKind, rawName: string): boolean {
+  // Directory docs are never resources; rules/AGENTS.md is the deliberate exception.
   if (kind === 'rules') return false;
   return DOC_BASENAMES.has(rawName.toLowerCase());
 }
@@ -137,6 +131,8 @@ export function resolveResource(
   name: string,
   cwd?: string,
 ): ResolvedResource | null {
+  // Resolve canonical names across every layer before alias fallback. Normal
+  // layer precedence wins, and sorted entries make alias collisions deterministic.
   const projectDir = getProjectAgentsDir(cwd);
   const extraRepos = getEnabledExtraRepos();
 
@@ -150,7 +146,6 @@ export function resolveResource(
   for (const [dir, source, repoRoot] of candidates) {
     if (!fs.existsSync(dir)) continue;
 
-    // Try exact name (for directories like skills/subagents)
     const exactPath = path.join(dir, name);
     if (fs.existsSync(exactPath)) {
       if (resourceIsActive(kind, name, source)) {
@@ -159,8 +154,6 @@ export function resolveResource(
       continue;
     }
 
-    // Try with common file extensions. A directory doc (README/AGENTS/CLAUDE/
-    // GEMINI) describes the directory and is never itself a resource.
     if (isDirectoryDoc(kind, name)) continue;
     for (const ext of ['.md', '.yaml', '.yml']) {
       const withExt = exactPath + ext;
@@ -192,7 +185,6 @@ export function resolveResource(
         const resourcePath = path.join(dir, entry.name);
         if (!resourceAliases(kind, resourcePath).includes(name)) continue;
         if (!resourceIsActive(kind, rawName, source)) continue;
-        // Resolve to the canonical resource (its real name), not the alias.
         return withProvenance({ name: rawName, path: resourcePath, source, repoRoot }, kind);
       }
     }
@@ -223,6 +215,8 @@ export function listResources(
   // would name the resource `pre-tool-use`, so `system:*` misses nested scripts and `agents sync
   // --force` leaves stale copies. No hooks.ts import, so vi.mock of hooks.js doesn't break it.
   if (kind === 'hooks') {
+    // Hooks use one event-group level: script children are resources, while a
+    // fixture-only directory remains a bundle so cleanup sees the same shape as sync.
     const HOOK_SCRIPT_EXTS = new Set([
       '.sh', '.bash', '.zsh', '.py', '.js', '.ts', '.mjs', '.cjs', '.rb', '.pl', '.ps1', '.cmd', '.bat',
     ]);
@@ -255,7 +249,6 @@ export function listResources(
         if (stat.isSymbolicLink()) continue;
         if (stat.isFile()) {
           if (!isHookScriptName(name, stat.mode)) continue;
-          // Docs that live beside hooks (README/AGENTS) are not resources.
           const raw = name.replace(/\.(md|yaml|yml)$/, '');
           if (isDirectoryDoc(kind, raw)) continue;
           if (seen.has(name)) continue;
@@ -302,7 +295,6 @@ export function listResources(
             }, kind));
           }
         } else {
-          // Fixture-only directory bundle (hooks/tests/fixtures/…).
           if (seen.has(name)) continue;
           if (!resourceIsActive(kind, name, source)) continue;
           seen.add(name);
@@ -347,28 +339,23 @@ export function listResources(
   return results;
 }
 
-/** A single installed resource (command, skill, memory file, or hook). */
 export interface ResourceEntry {
   name: string;
   path: string;
   scope: 'user' | 'project';
-  /** One-line description pulled from frontmatter; not all resource kinds have one. */
   description?: string;
 }
 
-/** A skill resource entry with optional rule count. */
 export interface SkillResourceEntry extends ResourceEntry {
   ruleCount?: number;
 }
 
-/** An MCP server resource entry. */
 interface McpResourceEntry {
   name: string;
   scope: 'user' | 'project';
   version?: string;
 }
 
-/** All resources installed for a specific agent. */
 interface AgentResources {
   agentId: AgentId;
   commands: ResourceEntry[];
@@ -380,13 +367,10 @@ interface AgentResources {
   workflows: ResourceEntry[];
 }
 
-/** Options for resource discovery. */
 interface GetAgentResourcesOptions {
   cwd?: string;
   scope?: 'user' | 'project' | 'all';
-  /** For MCP scanning - whether the CLI is installed */
   cliInstalled?: boolean;
-  /** Version home to scan for user-scoped resources */
   home?: string;
 }
 
@@ -404,7 +388,6 @@ export function getAgentResources(
     return resourceScope === scope;
   };
 
-  // Commands
   const commands: ResourceEntry[] = [];
   for (const cmd of listInstalledCommandsWithScope(agentId, cwd, { home })) {
     if (shouldInclude(cmd.scope)) {
@@ -412,7 +395,6 @@ export function getAgentResources(
     }
   }
 
-  // Skills
   const skills: SkillResourceEntry[] = [];
   const skillErrors: SkillParseError[] = [];
   for (const skill of listInstalledSkillsWithScope(agentId, cwd, { home, errors: skillErrors })) {
@@ -427,11 +409,9 @@ export function getAgentResources(
     }
   }
 
-  // MCP
   const mcp: McpResourceEntry[] = [];
   const mcpByName = new Map<string, McpResourceEntry>();
 
-  // Project/user-scoped MCP definitions from .agents/mcp
   for (const server of listMcpServerConfigs(cwd)) {
     const scope = server.scope || 'user';
     if (shouldInclude(scope) && !mcpByName.has(server.name)) {
@@ -451,7 +431,6 @@ export function getAgentResources(
 
   mcp.push(...mcpByName.values());
 
-  // Memory/Instructions
   const memory: ResourceEntry[] = [];
   for (const instr of listInstalledInstructionsWithScope(agentId, cwd, { home })) {
     if (instr.exists && shouldInclude(instr.scope)) {
@@ -463,9 +442,6 @@ export function getAgentResources(
     }
   }
 
-  // Hooks — routed through the resource-inventory chokepoint (RUSH-2238) so
-  // inspect/doctor/view share one listing and one (absolute-hooksDir-safe)
-  // path resolution.
   const hooks: ResourceEntry[] = [];
   for (const ref of listOnDiskHooks(agentId, { cwd, home })) {
     const hookScope = ref.source as 'user' | 'project';
@@ -474,7 +450,6 @@ export function getAgentResources(
     }
   }
 
-  // Workflows
   const workflows: ResourceEntry[] = [];
   if (isCapable(agentId, 'workflows')) {
     for (const w of WorkflowsHandler.listAll(agentId as Parameters<typeof WorkflowsHandler.listAll>[0], cwd)) {

@@ -37,7 +37,6 @@ import { padToWidth, stringWidth } from './text/width.js';
 export { applyUsageHonesty };
 import chalk from 'chalk';
 
-/** Compact usage gauge in the USAGE column — same length as the pre-T3 inline bar. */
 const LISTING_USAGE_BAR_LEN = 5;
 
 /**
@@ -84,65 +83,30 @@ export function groupNativeAccountRows(rows: Array<{ agent: AgentId; version: st
     .sort((a, b) => a.agent.localeCompare(b.agent) || a.display.localeCompare(b.display));
 }
 
-/** Discover signed-in harness-native identities without copying their auth files. */
 export async function discoverNativeAccounts(): Promise<NativeAccountCatalogEntry[]> {
   const rows = await collectNativeHomeRows();
   return groupNativeAccountRows(rows.map(r => ({ agent: r.agent, version: r.label, accountKey: r.accountKey, email: r.email, signedIn: r.signedIn })));
 }
 
-// ---------------------------------------------------------------------------
-// Account-first read model (PHNX-3940)
-//
-// `agents accounts` / `agents accounts view` present the ACCOUNT and its
-// connection first; the release and home are secondary diagnostics. This model
-// is the one place that fold: it groups every installed native home by identity,
-// merges the registered account name + connect home, and derives a connection
-// state that reflects the LIVE credential rather than the registry label — a
-// registered account whose home is signed out reads `reconnect-needed`, never a
-// bare `connected`. `view.ts` consumes it so the human list and the per-account
-// view share one truth. It is additive; the discovery helpers above stay.
-// ---------------------------------------------------------------------------
 
-/** One installed home carrying an identity — the secondary "release/home" facts. */
 export interface AccountHome {
-  /** The installation label (version-dir basename). */
   label: string;
-  /** The vendor release the home currently carries, when the record is present. */
   releaseVersion: string | null;
-  /** Whether this exact home currently has a live signed-in credential. */
   signedIn: boolean;
 }
 
-/**
- * A live credential state, derived from the homes rather than the registry:
- * - `connected` — at least one home for this identity is signed in.
- * - `reconnect-needed` — the account is registered but no home currently
- *   holds a live credential; the label alone is not a connection.
- *   `agents accounts login <harness>#<name>` re-authenticates it.
- */
 export type AccountConnectionState = 'connected' | 'reconnect-needed';
 
-/** Account-first row for a native (harness-owned OAuth) identity. */
 export interface NativeAccountCatalogRow {
   kind: 'native';
   agent: AgentId;
   identityKey: string;
-  /** Registered account name/label, or null for an unnamed discovered login. */
   name: string | null;
-  /** Registered stable account id, or null when unnamed. */
   id: string | null;
   email: string | null;
   display: string;
-  /**
-   * The LOCAL installation home for this identity on THIS box: the recorded
-   * connect home when installed here, else the local home carrying the login.
-   * Null when no local home exists (the identity may be connected on another
-   * box). Per-host by construction — never a label another box minted.
-   */
   home: string | null;
-  /** Every installed home carrying this identity (secondary diagnostics). */
   installations: AccountHome[];
-  /** Whether the harness's configured default account points at this identity. */
   isDefault: boolean;
   state: AccountConnectionState;
   identityLabel: string;
@@ -155,7 +119,6 @@ export interface NativeAccountCatalogRow {
    * (session 5h, week 7d) render via `formatUsageSummary`/`pickCompactUsageWindows` instead of the
    * single max-percent bar. Non-breaking for JSON clients. */
   usageSnapshot?: UsageSnapshot | null;
-  /** Raw usage fetch error, for headless/unverified labeling alongside the bars. */
   usageError?: string | null;
   /**
    * The token FACT for this account ON THIS BOX (PHNX-4116): the credential kind
@@ -164,11 +127,6 @@ export interface NativeAccountCatalogRow {
    * `no token` when the credential file is absent. A fact, never a verdict word.
    */
   token: string;
-  /**
-   * The auth FACT for this account ON THIS BOX (PHNX-4116): `last used ok 12m
-   * ago` / `last auth failure 401 Sep 20 14:02` / `rate-limited until 15:00` /
-   * `not used on this box yet`, from the recorded run outcome (or a real probe).
-   */
   lastAuth: string;
   fix: string | null;
 }
@@ -180,7 +138,6 @@ export interface AccountDeviceVerdict {
   checkedAt?: string;
 }
 
-/** Account-first row for a durable provider (API-key / token) account. */
 export interface ProviderAccountCatalogRow {
   kind: 'provider';
   name: string;
@@ -188,9 +145,7 @@ export interface ProviderAccountCatalogRow {
   provider: string;
   auth: string;
   baseUrl?: string;
-  /** Harnesses this credential can authenticate. Empty = listed under Other accounts. */
   harnesses: AgentId[];
-  /** Harnesses whose configured default points at this account. */
   defaultFor: AgentId[];
   identityLabel: string;
   verdict: Extract<AccountVerdict, 'ready' | 'missing'>;
@@ -200,26 +155,9 @@ export interface ProviderAccountCatalogRow {
 interface AccountCatalog {
   native: NativeAccountCatalogRow[];
   provider: ProviderAccountCatalogRow[];
-  /**
-   * Set when the standalone `secrets` CLI could not be reached to read the
-   * provider (durable-credential) accounts — missing, unreachable, or timed out
-   * on this box. The native rows (harness OAuth logins, read from config files,
-   * not `secrets`) still render; only the provider section is unavailable. A
-   * read-only surface (`agents view`, `agents accounts`) surfaces this as one
-   * clear line and renders the rest rather than hanging or crashing (PHNX-3989).
-   */
   secretsUnavailable?: { code: string; message: string };
 }
 
-/**
- * The provider (durable-credential) accounts read through `secrets`, tolerant of
- * an unreachable standalone. Native OAuth logins never touch `secrets`, so a
- * missing/broken standalone must NOT take down the whole account view — the
- * provider section is simply reported unavailable. Only a TRANSPORT-level
- * failure (missing binary, timeout, non-JSON, spawn error) degrades; a genuine
- * data error still throws so it is never silently swallowed. DIST-1 holds: there
- * is no fallback to an embedded engine, the standalone just could not answer.
- */
 function readProviderRowsTolerant(meta: Meta): {
   rows: ProviderAccountCatalogRow[];
   error: SecretsClientError | null;
@@ -230,20 +168,15 @@ function readProviderRowsTolerant(meta: Meta): {
       .sort((a, b) => a.name.localeCompare(b.name));
     return { rows, error: null };
   } catch (err) {
+    // Degrade only standalone-secrets transport failures; data errors fail loud with no embedded fallback.
     if (isSecretsTransportError(err)) return { rows: [], error: err };
     throw err;
   }
 }
 
-/**
- * One account in the public JSON v2 projection (`accounts list --json`, `view --json`).
- * A provider credential that authenticates several harnesses is one entry per
- * harness (same `id`, each with its own `harness`); an orphan is `harness: null`.
- */
 export interface AccountListEntryJson {
   kind: 'native' | 'provider';
   id: string;
-  /** Null for a provider credential no harness authenticates. */
   harness: AgentId | null;
   name: string | null;
   identityLabel: string;
@@ -257,19 +190,9 @@ export interface AccountListEntryJson {
     verdict: AccountDeviceVerdict['verdict'];
   }>;
   usage: QuotaSummary | null;
-  /** The live usage snapshot backing `usage`, when available — additive, not breaking. */
   usageSnapshot?: UsageSnapshot | null;
   usageError?: string | null;
-  /**
-   * The token FACT for this account on the box that emitted this JSON (PHNX-4116):
-   * `sk-ant-oat01 (Sep 16)` / `api key (present)` / `no token`. A fact, not a verdict.
-   */
   token: string;
-  /**
-   * The auth FACT for this account on the box that emitted this JSON (PHNX-4116):
-   * `last used ok 12m ago` / `last auth failure 401 Sep 20 14:02` / `not used on
-   * this box yet`. Reflects the emitting box only; `devices[]` carries the fleet.
-   */
   lastAuth: string;
   fix: string | null;
 }
@@ -279,7 +202,6 @@ interface AccountListJson {
   accounts: AccountListEntryJson[];
 }
 
-/** One installed home probed for its native identity — the raw input to the fold. */
 export interface NativeHomeRow {
   agent: AgentId;
   label: string;
@@ -289,7 +211,6 @@ export interface NativeHomeRow {
   signedIn: boolean;
 }
 
-/** Probe every installed home of every inspectable harness for its native identity. */
 export async function collectNativeHomeRows(): Promise<NativeHomeRow[]> {
   const rows: NativeHomeRow[] = [];
   for (const agent of ALL_AGENT_IDS.filter(supportsAccountInspection)) {
@@ -302,7 +223,6 @@ export async function collectNativeHomeRows(): Promise<NativeHomeRow[]> {
         releaseVersion: readInstallation(agent, label)?.releaseVersion ?? null,
         accountKey: info.accountKey,
         email: info.email,
-        // Strict: a live credential in THIS home, not a bare metadata identity.
         signedIn: isLaunchableSignedIn(agent, home, info),
       });
     }
@@ -310,18 +230,8 @@ export async function collectNativeHomeRows(): Promise<NativeHomeRow[]> {
   return rows;
 }
 
-/** The subset of Meta the pure builder reads — the registered native accounts + defaults. */
 type CatalogMeta = Pick<Meta, 'accounts' | 'deviceAccounts'>;
 
-/**
- * Fold installed homes + the registry into account-first native rows (pure).
- *
- * Every home carrying an identity contributes an `AccountHome`; the identity is
- * the group key. A registered account (name/id/connect home) is merged onto its
- * identity, and — crucially — a registered account whose identity has NO live
- * home still appears, as `reconnect-needed`, so a stale/expired login is never
- * silently dropped from the list nor shown as connected.
- */
 export function buildNativeCatalog(
   rows: NativeHomeRow[],
   meta: CatalogMeta,
@@ -339,7 +249,6 @@ export function buildNativeCatalog(
   const groups = new Map<string, Group>();
   const keyOf = (agent: AgentId, identity: string) => `${agent}:${identity}`;
 
-  // Every installed home that carries a resolvable identity seeds a group.
   for (const row of rows) {
     const identity = row.accountKey ?? row.email?.toLowerCase();
     if (!identity) continue;
@@ -367,11 +276,7 @@ export function buildNativeCatalog(
     const homes = [...group.homes].sort((a, b) => a.label.localeCompare(b.label));
     const signedIn = homes.some(h => h.signedIn);
 
-    // The configured per-harness account default is AUTHORITATIVE: when present,
-    // only the matching native account is the default — an explicit default that
-    // names a provider (or a stale name) never invents a native default. Only
-    // when NO account default is configured does the global-default installation
-    // home decide (diagnostic fallback).
+    // Any explicit account default, including stale/provider refs, suppresses global-home fallback.
     const defaultRef = defaults[group.agent];
     let isDefault: boolean;
     if (defaultRef !== undefined) {
@@ -381,14 +286,13 @@ export function buildNativeCatalog(
       isDefault = !!gd && homes.some(h => h.label === gd);
     }
 
-    // The home is a PER-HOST fact: this box's recorded connect home when it is
-    // actually installed here, else the local home carrying the identity. A home
-    // label recorded on another box is never assumed to exist locally.
+    // A recorded home is usable only when that installation exists on this host.
     const recordedHome = account ? (meta.deviceAccounts?.homes?.[account.id] ?? null) : null;
     const home = (recordedHome && homes.some(h => h.label === recordedHome))
       ? recordedHome
       : (homes.find(h => h.signedIn)?.label ?? homes[0]?.label ?? null);
 
+    // Credential presence without a probe is no_evidence, never claimed verification.
     out.push({
       kind: 'native',
       agent: group.agent,
@@ -403,10 +307,6 @@ export function buildNativeCatalog(
       state: signedIn ? 'connected' : 'reconnect-needed',
       identityLabel: email ?? account?.name ?? group.identityKey,
       provisioning: provisioningFor(group.agent),
-      // A credential is present but nothing has probed or run it here yet — that
-      // is `no_evidence` ("we did not look"), not `unverified` (PHNX-4116). The
-      // real per-box verdict is recomputed in loadAccountCatalog; the display is
-      // a fact (token + run outcomes), never this word.
       verdict: signedIn ? 'no_evidence' : 'missing',
       checkedAt: null,
       devices: [],
@@ -424,7 +324,6 @@ export function buildNativeCatalog(
       }),
     });
   }
-  // Named accounts first, then default, then a stable display order.
   return out.sort((a, b) =>
     a.agent.localeCompare(b.agent)
     || Number(!!b.name) - Number(!!a.name)
@@ -438,7 +337,6 @@ function provisioningFor(agent: AgentId): AccountProvisioning {
 
 const TOKEN_FACT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** `Sep 16` — the credential file's date, the only mutable part of the token fact. */
 function tokenFileDate(mtimeMs: number): string {
   const d = new Date(mtimeMs);
   return `${TOKEN_FACT_MONTHS[d.getMonth()]} ${d.getDate()}`;
@@ -448,6 +346,7 @@ function tokenFileDate(mtimeMs: number): string {
  * `token`). NEVER the secret body: only a fixed, publicly documented prefix, so the fact can be
  * printed and fleet-synced safely (root AGENTS.md Security). */
 function safeTokenPrefix(raw: string): string {
+  // Expose fixed public scheme names only; never return token body bytes.
   const value = raw.trim();
   if (value.startsWith('sk-ant-oat01')) return 'sk-ant-oat01';
   if (value.startsWith('sk-ant')) return 'sk-ant';
@@ -465,12 +364,12 @@ export function readTokenFact(agent: AgentId, dir: string | null): string {
       const stat = fs.statSync(oauth);
       const prefix = safeTokenPrefix(fs.readFileSync(oauth, 'utf-8'));
       return `${prefix} (${tokenFileDate(stat.mtimeMs)})`;
-    } catch { /* fall through to the native-credential check */ }
+    } catch {  }
     try {
       const creds = path.join(dir, '.claude', '.credentials.json');
       const stat = fs.statSync(creds);
       return `native login (${tokenFileDate(stat.mtimeMs)})`;
-    } catch { /* no credential file */ }
+    } catch {  }
     return 'no token';
   }
   return credentialPresence(agent, dir).perVersion ? 'credential present' : 'no token';
@@ -521,13 +420,9 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const localHome = row.installations.find((home) => home.label === row.home)
       ?? row.installations.find((home) => home.signedIn)
       ?? row.installations[0];
+    // Slot credential truth comes from slotDir and cache key slot:<id>;
+    // version-home state is only the no-slot fallback.
     const slot = row.id ? localSlots[row.id] : undefined;
-    // A slot account's local truth is the SLOT — its own credential file and its
-    // own daemon probe row (keyed `slot:<id>`) — never the version home its label
-    // happens to match. Reading the version home here is what rendered a
-    // signed-in slot MISSING: the slot record held ensureSlot's `unconfigured`
-    // default, the daemon never probed the slot, and `signedIn` came from an
-    // unrelated home.
     const slotSignedIn = slot
       ? await getAccountInfo(row.agent, slot.slotDir)
           .then((info) => isLaunchableSignedIn(row.agent, slot.slotDir, info))
@@ -543,10 +438,7 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
       verdict: observation.verdict,
       ...(observation.checkedAt ? { checkedAt: observation.checkedAt } : {}),
     };
-    // Registered accounts join fleet state on their stable id ONLY — two
-    // accounts may share one email label, so a label join would cross-attribute
-    // one account's revoked verdict to the other. The label index exists solely
-    // for unnamed legacy logins, which have no registry id to key on.
+    // Registered fleet observations join only by stable ID; email labels are not unique.
     const fromFleet = row.id
       ? (shared.get(`${row.agent}:${row.id}`) ?? [])
       : (shared.get(`label:${row.agent}:${row.identityLabel}`) ?? []);
@@ -560,10 +452,7 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const inv = localHome ? inventoryByHome.get(`${row.agent}:${localHome.label}`) : undefined;
     row.usageSnapshot = inv?.snapshot ?? null;
     row.usageError = inv?.usageError ?? null;
-    // The per-box FACTS (PHNX-4116): the token file on disk and the recorded run
-    // (or probe) outcome — never a verdict word. `cached` is the same row the
-    // observation used (slot key first, then the version-home label), so the
-    // fact and the internal verdict read the same evidence.
+    // Slot accounts read token facts from the slot directory; version homes are only the non-slot fallback.
     const credentialDir = slot?.slotDir ?? (localHome ? getVersionHomePath(row.agent, localHome.label) : null);
     row.token = readTokenFact(row.agent, credentialDir);
     row.lastAuth = formatAuthFact((cached as AuthHealth | undefined) ?? null);
@@ -582,13 +471,6 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     : { native, provider };
 }
 
-/**
- * The one clear line a read-only surface prints when the provider section could
- * not be read (PHNX-3989) — so a missing/broken standalone is stated plainly
- * while the native rows and the rest of the output still render. Null when the
- * catalog is complete. Printed to stderr by the command so it never corrupts
- * `--json` stdout.
- */
 export function secretsUnavailableNote(catalog: Pick<AccountCatalog, 'secretsUnavailable'>): string | null {
   const err = catalog.secretsUnavailable;
   if (!err) return null;
@@ -611,8 +493,6 @@ function providerListEntry(
     checkedAt: null,
     devices: [],
     usage: null,
-    // A durable provider credential is a key, not a run-tracked login: state its
-    // presence as the token fact; there is no per-run auth evidence to render.
     token: row.verdict === 'ready' ? 'api key (present)' : 'no key',
     lastAuth: 'not used on this box yet',
     fix: row.fix,
@@ -664,13 +544,6 @@ export function accountListJson(
   };
 }
 
-/**
- * A state worth an operator's attention, rendered at the END of the row.
- * `live`, `ready`, `unverified` and `per-device` are the ordinary cases: they
- * were on every row of the old table and pushed it past the terminal width
- * without telling anyone anything. They stay in `accounts list --fleet`,
- * `accounts view <name>` and `--json`.
- */
 function verdictNote(verdict: AccountVerdict): string | null {
   if (verdict === 'rate_limited') return chalk.yellow('rate-limited');
   if (verdict === 'expired' || verdict === 'revoked' || verdict === 'missing') {
@@ -679,21 +552,9 @@ function verdictNote(verdict: AccountVerdict): string | null {
   return null;
 }
 
-/**
- * Device coverage, but only when it SPLITS the fleet: some boxes can use the
- * account and some cannot. Full coverage is the ordinary case, and "none of
- * them" is already exactly what the row's state note says, so both render
- * nothing — `accounts list --fleet` is the per-device table.
- */
 export function coverageNote(row: NativeAccountCatalogRow, localDevice: string): string | null {
   const names = [...new Set(row.devices.map((device) => device.device))];
-  // Peers on an older release do not publish slot verdicts, so the only
-  // observation is this box — that is a gap in what we can see, not a gap in
-  // provisioning, so it is not an alarm.
   if (names.length === 1 && names[0] === localDevice) return null;
-  // Per-device accounts are provisioned per box; name the boxes it is NOT on
-  // rather than a usable/total fraction — the fraction would hide that each box
-  // is its own account.
   if (row.provisioning === 'per-device') {
     const absent = row.devices.filter((device) => device.verdict === 'missing').map((device) => device.device);
     return absent.length > 0 && absent.length < row.devices.length ? `not on ${absent.join(', ')}` : null;
@@ -706,20 +567,9 @@ export function coverageNote(row: NativeAccountCatalogRow, localDevice: string):
 
 export const OVERVIEW_MAX_USAGE_WINDOWS = 2;
 
-/**
- * The one line under an account listing. It explains the two marks a row can
- * carry and names where the columns the listing no longer prints — identity,
- * per-device state — still live. Shared with `agents view` so the two surfaces
- * cannot drift.
- */
 export const ACCOUNT_LISTING_LEGEND =
   '* stale usage · a healthy account carries no state · identity + per-box state: agents accounts list --fleet';
 
-/**
- * When a usage reading arrived from ANOTHER box's poller over the fleet store,
- * name its origin — `(from zion)` — so the number reads as a synced fact, not a
- * local capture (PHNX-4116). Local captures (statusline/poll) carry no suffix.
- */
 function usageOriginSuffix(snapshot: UsageSnapshot | null | undefined): string {
   const poller = snapshot?.freshness?.source === 'sync' ? snapshot.freshness.poller : undefined;
   return poller ? ` ${chalk.gray(`(from ${poller})`)}` : '';
@@ -746,7 +596,6 @@ function usageText(row: NativeAccountCatalogRow, maxWindows?: number): string {
 
 interface ListingLine {
   name: string;
-  /** Trailing notes, already colored: state, coverage, then the repair command. */
   notes: string[];
   usage: string;
   isDefault: boolean;
@@ -763,13 +612,7 @@ export function authFactNote(lastAuth: string): string {
 
 function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindows?: number): ListingLine {
   return {
-    // A discovered login nobody has named is still identified by what it is:
-    // the row no longer carries an IDENTITY column, so the identity IS the name.
     name: row.name ?? row.identityLabel,
-    // FACTS, in order: the token on disk, what happened when it was last used, a
-    // signed-out flag when there is no credential at all, fleet coverage, then the
-    // repair. The auth fact already carries a throttle/failure with its time, so
-    // there is no separate verdict word (PHNX-4116).
     notes: [
       chalk.gray(row.token),
       authFactNote(row.lastAuth),
@@ -818,7 +661,6 @@ function pushGroup(
   out.push('');
 }
 
-/** Shared text renderer used by both `accounts list` and account-first `view`. */
 export function renderAccountRows(
   rows: NativeAccountCatalogRow[],
   opts: {
@@ -826,18 +668,8 @@ export function renderAccountRows(
     footer?: boolean;
     harnessHeadings?: boolean;
     providers?: ProviderAccountCatalogRow[];
-    /** When set, emit only this harness's group — never a sibling or empty group. */
     harness?: AgentId;
-    /**
-     * Cap for compact usage windows — overview (no harness filter) passes 2,
-     * single-harness view leaves it undefined to show all blocking windows.
-     * Mirrors `OVERVIEW_MAX_USAGE_WINDOWS` in view.ts.
-     */
     maxUsageWindows?: number;
-    /**
-     * Device name treated as "this box" in WHERE when it is the only reporter.
-     * The command layer passes `machineId()`; this renderer never resolves it.
-     */
     localDevice: string;
   },
 ): string {
@@ -889,9 +721,6 @@ export function renderAccountRows(
     if (orphans.length > 0) pushGroup(out, 'Other accounts', orphans, widths, true);
   }
   if (footer) {
-    // "Need you" is an actionable repair, not an unread usage probe. Unverified
-    // (a worker whose token lacks the usage scope) has no fix and must not
-    // inflate the count.
     const count = visibleNative.filter((row) => !!row.fix).length
       + visibleProviders.filter((row) => !!row.fix).length;
     out.push(chalk.gray(`${count} accounts need you · add: agents accounts add <harness>`));
@@ -937,11 +766,6 @@ export function readSharedAccountVerdicts(
   return out;
 }
 
-/**
- * Devices whose daemon-state file exists but carries no account verdicts —
- * typically an older release that has not started publishing the T3 envelope.
- * The fleet matrix lists them in a coverage note rather than as blank columns.
- */
 export function listDevicesWithoutAccountVerdicts(
   userAgentsDir?: string,
 ): string[] {
@@ -956,31 +780,18 @@ function normalizeAuthVerdict(
   verdict: AuthVerdict | undefined,
   signedIn: boolean,
 ): AccountDeviceVerdict['verdict'] {
-  // `unconfigured` is the slot record's DEFAULT (ensureSlot), not a probe
-  // result — the daemon never publishes it (probeLocalFleetAuth drops those
-  // rows). So it says nothing about the credential on disk; the live signedIn
-  // read of the slot decides, exactly as it does when no verdict exists at all.
-  // No probe row, or one that says nothing about the credential: a present
-  // credential with no evidence either way is `no_evidence`, never a word that
-  // claims we looked (PHNX-4116).
+  // unconfigured is ensureSlot's default, not probe evidence.
   if (verdict === 'unconfigured') return signedIn ? 'no_evidence' : 'missing';
   if (verdict === 'error') return signedIn ? 'no_evidence' : 'missing';
   return verdict ?? (signedIn ? 'no_evidence' : 'missing');
 }
 
-/** The T1 slot store's per-account observation of the local verdict. */
 interface LocalSlotObservation {
   authMode: AccountDeviceVerdict['authMode'];
   verdict: AuthVerdict;
   checkedAt?: string;
 }
 
-/**
- * Merge the two writers of the same local truth — the T1 slot store and the
- * daemon's auth-health cache — by NEWEST observation. A naive `??` chain lets
- * an older slot `live` permanently mask a newer daemon `revoked`, so a revoked
- * account would keep rendering LIVE on its own device. Pure.
- */
 export function resolveLocalAccountObservation(
   slot: LocalSlotObservation | undefined,
   cached: { verdict: AuthVerdict; checkedAt: number } | undefined,
@@ -990,6 +801,7 @@ export function resolveLocalAccountObservation(
   authMode?: AccountDeviceVerdict['authMode'];
   checkedAt?: string;
 } {
+  // The slot store and daemon cache are concurrent writers; newest timestamp wins.
   const slotAt = slot?.checkedAt ? Date.parse(slot.checkedAt) : null;
   const cachedAt = cached?.checkedAt ?? null;
   const preferSlot = !!slot && (!cached || (slotAt !== null && (cachedAt === null || slotAt >= cachedAt)));
@@ -1019,14 +831,8 @@ export function aggregateAccountVerdict(
   const verdicts = devices.map((row) => row.verdict);
   if (verdicts.includes('revoked')) return 'revoked';
   if (verdicts.includes('expired')) return 'expired';
-  // LIMITED comes from the usage snapshot only (PHNX-3940/4051): an account's
-  // quota is one shared identity and `deriveUsageStatusFromSnapshot` already
-  // applies the freshness gate (expired windows -> staleWindows), so a
-  // `last_seen` snapshot whose blocking windows are below 100% is trustworthy
-  // for "not throttled". A remote `rate_limited` (probe 429) never sets STATE;
-  // only the local `QuotaSummary.status` (`rate_limited`/`out_of_credits` via
-  // `applyUsageHonesty`) does. When this box has no usage snapshot at all
-  // (no windows, `usedPercent === null`), the remote `rate_limited` may stand.
+  // A usable local usage snapshot owns quota state; remote 429 stands only without it.
+  // applyUsageHonesty applies the local quota-derived state after this aggregation.
   const hasLocalSnapshot = !!localQuota && localQuota.usedPercent !== null && localQuota.usedPercent !== undefined;
   if (!hasLocalSnapshot && verdicts.includes('rate_limited')) return 'rate_limited';
   if (verdicts.includes('live')) return 'live';

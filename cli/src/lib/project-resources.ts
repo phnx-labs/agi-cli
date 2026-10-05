@@ -56,6 +56,8 @@ export function syncProjectResourcesToAgent(
   syncProjectSubagents(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
   syncProjectWorkflows(agent, version, projectAgentsDir, projectRoot, agentRoot, result, next);
 
+  // Launch-time copies are clone-local: manifest-owned paths go to Git's
+  // per-clone exclude, never the tracked .gitignore.
   if (next.size > 0 || manifest) {
     writeProjectManifest(agentRoot, Array.from(next).sort());
     // The sync is a code generator whose per-harness dir would dirty `git status`, so it owns an
@@ -99,6 +101,7 @@ function gitignoreMarkers(agent: AgentId): { begin: string; end: string } {
  * (the worktree root for info/exclude). Drops paths escaping the harness dir (grok, PHNX-3718); the
  * manifest holds only sync-generated paths, so committed files are never masked. */
 export function managedGitignoreEntries(agentRoot: string, referenceRoot: string, managed: string[]): string[] {
+  // Ignore only manifest-owned paths inside the harness root, anchored to the worktree.
   const root = path.resolve(agentRoot);
   const entries = new Set<string>();
   for (const rel of managed) {
@@ -113,11 +116,7 @@ export function managedGitignoreEntries(agentRoot: string, referenceRoot: string
 }
 
 interface GitExcludeTarget {
-  /** Absolute path to the ignore file managed entries are written into —
-   *  `<git-common-dir>/info/exclude`. */
   excludePath: string;
-  /** Absolute path to the top of the working tree; anchored `/…` entries
-   *  resolve against this, since git anchors info/exclude patterns there. */
   worktreeRoot: string;
 }
 
@@ -125,6 +124,8 @@ interface GitExcludeTarget {
  * subdir, or linked worktree/submodule (shared common dir via `--git-path info/exclude`).
  * `--path-format=absolute` forces absolute paths. Null outside a git repo (fails open). */
 function resolveGitExcludeTarget(dir: string): GitExcludeTarget | null {
+  // Git resolves common-dir/worktree layout; guessing .git breaks linked worktrees and submodules.
+  // Non-absolute output fails open rather than writing an uncertain path.
   try {
     const out = execFileSync(
       'git',
@@ -143,7 +144,6 @@ function resolveGitExcludeTarget(dir: string): GitExcludeTarget | null {
   }
 }
 
-/** True when git tracks `absPath` in the repo `dir` sits in. */
 function isTrackedByGit(dir: string, absPath: string): boolean {
   try {
     execFileSync('git', ['-C', dir, 'ls-files', '--error-unmatch', '--', absPath], {
@@ -159,11 +159,13 @@ function isTrackedByGit(dir: string, absPath: string): boolean {
  * `.gitignore` when entries is `[]`). Replace, not append: appending would move the block behind
  * other agents' on each resync and rewrite the file every launch. Null for an unparseable block. */
 function applyManagedBlock(content: string, begin: string, end: string, entries: string[]): string | null {
+  // Replace blocks in place for convergence. An orphan begin marker is corruption,
+  // so never treat the user's remaining excludes as managed content.
   const lines = content.split('\n');
   const bi = lines.indexOf(begin);
   if (bi !== -1) {
     const ei = lines.indexOf(end, bi + 1);
-    if (ei === -1) return null; // orphaned begin marker — never truncate to EOF
+    if (ei === -1) return null;
     if (entries.length > 0) {
       return [...lines.slice(0, bi), begin, ...entries, end, ...lines.slice(ei + 1)].join('\n');
     }
@@ -177,7 +179,7 @@ function applyManagedBlock(content: string, begin: string, end: string, entries:
     const rest = [...before, ...after].join('\n').replace(/\n+$/, '');
     return rest.length > 0 ? `${rest}\n` : '';
   }
-  if (entries.length === 0) return content; // no block, nothing to add
+  if (entries.length === 0) return content;
   const body = content.replace(/\n+$/, '');
   const block = [begin, ...entries, end].join('\n');
   return body.length > 0 ? `${body}\n\n${block}\n` : `${block}\n`;
@@ -192,12 +194,10 @@ function reconcileManagedIgnore(
   agentRoot: string,
   managed: string[],
 ): void {
-  // Migrate away from the old tracked-.gitignore location first, so an already
-  // dirtied repo cleans itself even if git resolution below fails.
   stripLegacyManagedGitignoreBlock(projectRoot, agent);
 
   const target = resolveGitExcludeTarget(projectRoot);
-  if (!target) return; // not a git repo — fail open
+  if (!target) return;
 
   const { begin, end } = gitignoreMarkers(agent);
   // Ignore the manifest marker file too: the sync always writes `<agentRoot>/.agents-managed.json`,
@@ -214,7 +214,7 @@ function reconcileManagedIgnore(
 
   const next = applyManagedBlock(original, begin, end, entries);
   if (next === null || next === original) return;
-  fs.mkdirSync(path.dirname(target.excludePath), { recursive: true }); // create info/ if missing
+  fs.mkdirSync(path.dirname(target.excludePath), { recursive: true });
   const tmp = target.excludePath + '.tmp';
   fs.writeFileSync(tmp, next);
   fs.renameSync(tmp, target.excludePath);
@@ -224,18 +224,16 @@ function reconcileManagedIgnore(
  * Strips ONLY the fenced block, never creates the file, and removes it if that empties an untracked
  * file we created (it would read as `?? .gitignore`). */
 function stripLegacyManagedGitignoreBlock(projectRoot: string, agent: AgentId): void {
+  // Migration removes only the legacy generated block and preserves every user rule.
   const gitignorePath = path.join(projectRoot, '.gitignore');
   let original: string;
   try {
     original = fs.readFileSync(gitignorePath, 'utf-8');
   } catch {
-    return; // no .gitignore — nothing to migrate
+    return;
   }
 
   const { begin, end } = gitignoreMarkers(agent);
-  // Empty entries → applyManagedBlock prunes the block; returns `original`
-  // unchanged when there is no block, or null on an orphaned begin marker
-  // (which we refuse to touch rather than truncate the user's rules).
   const stripped = applyManagedBlock(original, begin, end, []);
   if (stripped === null || stripped === original) return;
 
@@ -255,8 +253,10 @@ const DETRACK_END = '# END agents-cli detracked (managed)';
  * `.gitignore` (PHNX-3718). The `git rm --cached` is COMMITTED (a bare one leaves a dirty staged
  * deletion) so peers converge. Idempotent; fails open outside git. */
 export function detrackViaGitExclude(repoDir: string, relPath: string): boolean {
+  // The automatic commit must contain only relPath, keep its working file, and
+  // roll back a staged deletion if any Git step fails.
   const target = resolveGitExcludeTarget(repoDir);
-  if (!target) return false; // not a git repo — nothing to de-track or ignore.
+  if (!target) return false;
 
   let untrackedNow = false;
   const abs = path.join(repoDir, relPath);
@@ -287,13 +287,12 @@ export function detrackViaGitExclude(repoDir: string, relPath: string): boolean 
         execFileSync('git', ['-C', repoDir, 'reset', '-q', '--', relPath], {
           stdio: ['ignore', 'ignore', 'ignore'],
         });
-      } catch { /* nothing staged to reset */ }
+      } catch {  }
       untrackedNow = false;
     }
   }
 
-  // Anchor to the worktree root so the pattern matches only the top-level file,
-  // exactly like git anchors a leading-slash info/exclude entry.
+  // Root anchoring keeps this clone-local exclusion from matching unrelated files.
   const entry = '/' + relPath.split(path.sep).join('/');
   let original = '';
   try { original = fs.readFileSync(target.excludePath, 'utf-8'); } catch { original = ''; }
@@ -309,7 +308,6 @@ export function detrackViaGitExclude(repoDir: string, relPath: string): boolean 
   return untrackedNow;
 }
 
-/** The entries currently inside a `begin`/`end` managed block, or `[]`. */
 function extractManagedEntries(content: string, begin: string, end: string): string[] {
   const lines = content.split('\n');
   const bi = lines.indexOf(begin);
@@ -333,7 +331,6 @@ function removePath(p: string): void {
     if (st.isSymbolicLink() || st.isFile()) fs.unlinkSync(p);
     else if (st.isDirectory()) fs.rmSync(p, { recursive: true, force: true });
   } catch {
-    // already absent
   }
 }
 
@@ -370,6 +367,7 @@ function projectEntries(projectAgentsDir: string, kind: ProjectKind): fs.Dirent[
  * them POSIX-style: `path.join` yields `skills\myskill` on Windows, which wouldn't match on
  * macOS/Linux. Normalizing on write and read repairs old manifests. */
 function toPosixRel(rel: string): string {
+  // Manifests stay POSIX so state written on Windows is removable on POSIX peers.
   return rel.replace(/\\/g, '/');
 }
 
@@ -544,7 +542,6 @@ function syncProjectSubagents(
       target.write(dir, sub);
       record('subagents', sub.name, occupied.map((entry) => path.relative(agentRoot, entry.path)), result, manifestPaths);
     } catch {
-      // Malformed source or unsupported transform; skip this item.
     }
   }
 }

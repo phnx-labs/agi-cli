@@ -7,12 +7,6 @@ export interface AccountProviderAdapter {
   authKinds: readonly AccountAuthKind[];
   envFor(host: AgentId, kind: AccountAuthKind): string;
   connectionEnvFor(host: AgentId): Record<string, string>;
-  /**
-   * The env var a per-account BASE_URL override should be written to for this
-   * host, or null when the provider has no endpoint env on that host. Derived
-   * from the provider's own connection env so the base-url key lives in one
-   * place instead of being re-guessed by callers.
-   */
   baseUrlEnvFor(host: AgentId): string | null;
   validate(kind: AccountAuthKind, value: string): void;
 }
@@ -42,6 +36,7 @@ function fixed(
       return connectionEnvByHost[host] ?? {};
     },
     baseUrlEnvFor(host) {
+      // The provider adapter owns its endpoint environment key; callers never guess it.
       const connection = connectionEnvByHost[host] ?? {};
       return baseUrlEnvByHost[host] ?? Object.keys(connection).find(key => key.endsWith('_BASE_URL')) ?? null;
     },
@@ -103,6 +98,7 @@ export function providerAuthenticatesHarness(
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Only the expected host-mapping miss is false; invalid configuration fails loud.
     if (message.includes('cannot authenticate')) return false;
     throw err;
   }

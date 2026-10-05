@@ -5,7 +5,7 @@
 interface ParsedPattern {
   negate: boolean;
   source: string;
-  name: string; // '*' = wildcard
+  name: string;
 }
 
 export function parsePattern(p: string): ParsedPattern {
@@ -18,7 +18,6 @@ export function parsePattern(p: string): ParsedPattern {
   return { negate, source: raw.slice(0, colon), name: raw.slice(colon + 1) };
 }
 
-/** Returns true if the string is a legacy plain name with no source: prefix. */
 export function isLegacyName(p: string): boolean {
   return !p.startsWith('!') && !p.includes(':');
 }
@@ -37,7 +36,6 @@ export function expandPatterns(
     try {
       const { negate, source, name } = parsePattern(p);
       const target = negate ? excluded : included;
-      // Comma-grouped names: "system:brain-scan,mq" → ['brain-scan', 'mq']
       const names = name === '*' ? ['*'] : name.split(',').map(n => n.trim()).filter(Boolean);
       for (const n of names) {
         if (n === '*') {
@@ -49,7 +47,6 @@ export function expandPatterns(
         }
       }
     } catch {
-      // Skip malformed patterns
     }
   }
 

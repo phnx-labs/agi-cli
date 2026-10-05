@@ -67,26 +67,16 @@ export interface ResourceDiff {
   name: string;
   status: DiffStatus;
   source?: SourceLayer;
-  /** Absolute path to the resolved source file/dir (when source is known). */
   sourcePath?: string;
-  /** Absolute path to the file/dir inside the version home (when present). */
   homePath?: string;
-  /** Human-readable specifics for a divergent row — e.g. for a stale plugin:
-   *  "0.6.1→0.7.0, missing skills: ship, learn". Currently set for plugins. */
   detail?: string;
 }
 
-/** A source layer (user / system / an extra repo) that is behind its upstream —
- *  reconciled against stale truth. Attached to the report by the doctor command
- *  (needs a git probe, kept out of the pure per-version diff). */
 export interface SourceLayerBehind {
   layer: 'user' | 'system' | 'extra';
-  /** Human label for the layer's on-disk root (e.g. `~/.agents`). */
   label: string;
-  /** `agents repo pull` alias for the remediation hint. */
   alias: string;
   behind: number;
-  /** Upstream ref the layer trails (e.g. `origin/main`). */
   branch: string;
 }
 
@@ -103,13 +93,8 @@ export interface VersionResourceReport {
   };
   kinds: Record<DoctorKind, ResourceDiff[]>;
   summary: { ok: number; diff: number; missing: number; extra: number };
-  /** Wiring inspection for the version's native settings.json (claude/droid).
-   *  Populated only when the `hooks` kind is in scope. */
   hookWiring?: HookWiringReport;
-  /** Harness-scoped hook state from the shared inventory engine. */
   hookInventory?: ResourceInventory;
-  /** Source layers behind their upstream. Filled by the doctor command (a git
-   *  probe), not the pure diff — undefined when uncomputed. */
   sourceBehind?: SourceLayerBehind[];
 }
 
@@ -129,7 +114,6 @@ const ALL_KINDS: DoctorKind[] = [
 interface SourceCandidate {
   layer: SourceLayer;
   path: string;
-  /** Optional alias when layer === 'extra'. */
   alias?: string;
 }
 
@@ -153,14 +137,13 @@ function fileExists(p: string | null | undefined): p is string {
  * `core.symlinks=false`) holding only the link target; `lstat` misses it, so alias files looked
  * unreconcilable (PHNX-3187). Signal: no newline and resolves to a sibling path. */
 export function isCheckedOutSymlink(filePath: string): boolean {
+  // Windows may check repository symlinks out as one-line alias files.
   let content: string;
   try {
     content = fs.readFileSync(filePath, 'utf-8');
   } catch {
     return false;
   }
-  // A git symlink blob is the bare target with no newline; any newline means
-  // this is real file content, not a link.
   if (content.length === 0 || content.length > 255 || /[\r\n]/.test(content)) return false;
   const target = content.trim();
   if (!target) return false;
@@ -219,19 +202,15 @@ function resolveSourceDirsByName(
   return out;
 }
 
-// ─── commands ─────────────────────────────────────────────────────────────────
 
 function diffCommands(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
+  // Mirror the writer: command-as-skill hosts compare wrappers, a real same-named
+  // skill owns that slot, plugin commands own their kind, and unsupported hosts emit nothing.
   const agentConfig = AGENTS[agent];
   const isToml = agentConfig.format === 'toml';
   const ext = isToml ? '.toml' : '.md';
   const homeDir = getVersionCommandsDir(agent, version);
-  // Command-as-skill agents (kimi, codex>=0.117, grok) install every command as a
-  // SKILL wrapper at <agentDir>/skills/<cmd>/SKILL.md, not a native command file.
-  // The compare must follow that or every command false-reports as drifted.
   const asSkill = shouldInstallCommandAsSkill(agent, version);
-  // Agents that hold commands neither natively nor as skills (e.g. goose) must not
-  // report source commands as "missing" — they structurally can't take them.
   if (!asSkill && !supports(agent, 'commands', version).ok) return [];
   const agentDir = path.join(getVersionHomePath(agent, version), agentConfigDirName(agent));
   const installed = new Set(listCommandsInVersionHome(agent, version));
@@ -254,8 +233,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     }
   }
 
-  // The trusted skill roots the commands-as-skills writer consults to decide
-  // whether a real skill of the same name already owns a command's target slot.
   const skillRoots = asSkill ? trustedSkillRoots() : [];
 
   const rows: ResourceDiff[] = [];
@@ -282,7 +259,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
       continue;
     }
     if (asSkill) {
-      // Compare against the installed command-skill wrapper, not a native path.
       const matches = commandSkillMatches(agentDir, name, src.path);
       rows.push({
         kind: 'commands',
@@ -295,7 +271,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
       continue;
     }
     if (agent === 'goose') {
-      // Compare against the installed Goose recipe YAML + slash_commands registration.
       const matches = gooseCommandMatches(getVersionHomePath(agent, version), name, src.path);
       rows.push({
         kind: 'commands',
@@ -332,9 +307,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   const pluginCommands = listPluginCommandNames();
   for (const name of installed) {
     if (seen.has(name)) continue;
-    // Directory docs are excluded from the source scan above; a leftover copy in
-    // the home is not a command orphan — leave it out of the command diff
-    // entirely rather than flip it to a spurious `extra` row.
     if (isDirectoryDoc('commands', name)) continue;
     if (pluginCommands.has(name)) continue;
     const extraHome = asSkill
@@ -348,7 +320,6 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── skills ───────────────────────────────────────────────────────────────────
 
 function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject = false): ResourceDiff[] {
   // Native ~/.agents/skills consumers (Gemini, ...) read central skills directly: the orchestrator
@@ -400,16 +371,13 @@ function diffSkills(agent: AgentId, version: string, cwd: string, excludeProject
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── hooks ────────────────────────────────────────────────────────────────────
 
 function diffHooks(agent: AgentId, version: string, cwd: string, inventory: ResourceInventory): ResourceDiff[] {
+  // Project hooks are intentionally excluded from global hook sync for security.
   if (!AGENTS[agent].supportsHooks) return [];
   const installedByName = new Map(inventory.onDisk.map((e) => [e.name, e]));
-  // Sync intentionally excludes project/.agents/hooks/ — mirror that.
   const layerBases = buildLayerBases(cwd, 'hooks', { excludeProject: true });
 
-  // Group source files the same way the hook installer does (basename across
-  // script + sidecar data file); first-layer wins on name collision.
   const sourceByName = new Map<string, { layer: SourceLayer; alias?: string; entry: ReturnType<typeof listHookEntriesFromDir>[number] }>();
   for (const base of layerBases) {
     if (!fs.existsSync(base.path)) continue;
@@ -456,9 +424,9 @@ function diffHooks(agent: AgentId, version: string, cwd: string, inventory: Reso
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── rules / memory ───────────────────────────────────────────────────────────
 
 function listRulesNames(cwd: string, excludeProject = false): Map<string, SourceCandidate> {
+  // Alias files are not independent rules; cursor's non-md instructions file is handled later.
   const projectDir = excludeProject ? null : getProjectAgentsDir(cwd);
   const userRules = getUserRulesDir();
   const systemRules = getResolvedRulesDir();
@@ -498,11 +466,9 @@ function expectedRuleContent(agent: AgentId, name: string, version: string, sour
     try {
       return composeRulesFromState({ preset: getActiveRulesPreset(agent, version) }).content;
     } catch {
-      // No rules.yaml / unknown preset — the writer skips too; treat as unknown.
       return null;
     }
   }
-  // Any sibling top-level rules file syncs as a raw copy.
   return readSafe(sourcePath);
 }
 
@@ -573,7 +539,6 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── mcp (content-aware) ────────────────────────────────────────────────────
 
 function diffMcp(
   agent: AgentId,
@@ -586,8 +551,6 @@ function diffMcp(
   const syncedSet = new Set(synced);
   const availableSet = new Set(available);
   const homePath = getMcpConfigPathForHome(agent, versionHome);
-  // Resolve each available server's source def once (project trust off — this is
-  // a read-only diff, and the writer applies the same servers).
   const sourceByName = new Map(
     getMcpServersByName(available, { cwd, enforceProjectTrust: false }).map((s) => [s.name, s]),
   );
@@ -613,7 +576,6 @@ function diffMcp(
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── permissions (content-aware where the native format allows) ──────────────
 
 function diffPermissions(
   agent: AgentId,
@@ -625,6 +587,7 @@ function diffPermissions(
   const syncedSet = new Set(synced);
   const availableSet = new Set(available);
   const representable = PERMISSIONS_REPRESENTABLE.has(agent);
+  // Lossy permission formats are presence-only and must not claim content verification.
   const rows: ResourceDiff[] = [];
   for (const name of available) {
     if (!syncedSet.has(name)) {
@@ -635,9 +598,6 @@ function diffPermissions(
       const matches = permissionsGroupMatches(agent, versionHome, name);
       rows.push({ kind: 'permissions', name, status: matches ? 'ok' : 'diff' });
     } else {
-      // Lossy TOML/flag harness — the on-disk format carries no faithful
-      // per-group rule provenance, so we can only attest presence. Say so
-      // explicitly rather than fake a verified `ok` (PHNX-3504).
       rows.push({ kind: 'permissions', name, status: 'ok', detail: 'format cannot verify content' });
     }
   }
@@ -647,7 +607,6 @@ function diffPermissions(
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── subagents (content-aware) ───────────────────────────────────────────────
 
 function diffSubagents(
   agent: AgentId,
@@ -659,9 +618,6 @@ function diffSubagents(
   const versionHome = getVersionHomePath(agent, version);
   const syncedSet = new Set(synced);
   const availableSet = new Set(available);
-  // Resolve sources across the SAME layers `available` was built from
-  // (getAvailableResources is project-inclusive), so every available name finds
-  // its source dir for the content compare rather than false-diffing.
   const sourceByName = resolveSourceDirsByName('subagents', cwd, false, (dir) =>
     fs.existsSync(path.join(dir, 'AGENT.md')),
   );
@@ -687,7 +643,6 @@ function diffSubagents(
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── workflows (content-aware) ───────────────────────────────────────────────
 
 function diffWorkflows(
   agent: AgentId,
@@ -720,24 +675,23 @@ function diffWorkflows(
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── memory (knowledge facts — content-aware) ────────────────────────────────
 
 /** Diff synced knowledge-fact memory (~/.agents/memory/*.md fanned into capable homes), bounded by
  * the `.agents-cli-memory.json` manifest so a user-authored native memory file is never mistaken
  * for drift (PHNX-3504). */
 function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[] {
+  // Only manifest-named memory files are managed extras; user-authored files are untouched.
   if (!supports(agent, 'memory', version).ok) return [];
   const versionHome = getVersionHomePath(agent, version);
   const targetDir = path.join(versionHome, memoryTargetDir(agent));
   const facts = listMemoryFacts(cwd);
 
-  // The manifest names exactly the fact files agents-cli wrote (plus 'MEMORY').
   const managedManifestPath = path.join(targetDir, '.agents-cli-memory.json');
   let managed: string[] = [];
   try {
     const raw = JSON.parse(fs.readFileSync(managedManifestPath, 'utf-8')) as { facts?: unknown };
     if (Array.isArray(raw.facts)) managed = raw.facts.filter((f): f is string => typeof f === 'string');
-  } catch { /* no manifest → nothing managed yet */ }
+  } catch {  }
   const managedSet = new Set(managed);
 
   const rows: ResourceDiff[] = [];
@@ -758,9 +712,6 @@ function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[
       homePath,
     });
   }
-  // A managed fact still on disk but no longer in the canonical set is an orphan
-  // the next sync would prune — surface it as extra. Never flag 'MEMORY' (the
-  // index, always regenerated) or an unmanaged native file (not ours to reconcile).
   for (const name of managedSet) {
     if (name === 'MEMORY' || factNames.has(name)) continue;
     const homePath = path.join(targetDir, `${name}.md`);
@@ -769,7 +720,6 @@ function diffMemory(agent: AgentId, version: string, cwd: string): ResourceDiff[
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── plugins (content-aware) ───────────────────────────────────────────────
 
 function listPluginSkillDirs(pluginDir: string): string[] {
   const d = path.join(pluginDir, 'skills');
@@ -841,7 +791,7 @@ function diffPlugins(agent: AgentId, version: string, cwd: string): ResourceDiff
   const seen = new Set<string>();
 
   for (const p of discoverPlugins({ cwd })) {
-    if (seen.has(p.name)) continue; // dedupe across marketplaces for the readout
+    if (seen.has(p.name)) continue;
     seen.add(p.name);
     if (!synced.has(p.name)) {
       rows.push({ kind: 'plugins', name: p.name, status: 'missing', sourcePath: p.root });
@@ -865,11 +815,9 @@ function diffPlugins(agent: AgentId, version: string, cwd: string): ResourceDiff
   return rows.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ─── public API ───────────────────────────────────────────────────────────────
 
 interface DiffOptions {
   cwd?: string;
-  /** Restrict to specific kinds; undefined = all. */
   kinds?: DoctorKind[];
   /** Drop the project (`<cwd>/.agents/`) layer from resolution. Used by the heal path: the global
    * version home is reconciled only against user/system/extra sources; project resources are
@@ -882,13 +830,13 @@ export function diffVersionResources(
   version: string,
   options: DiffOptions = {},
 ): VersionResourceReport {
+  // excludeProject applies to command, skill, and rule writers; hooks always exclude project.
+  // Capability-gated kinds zero unavailable sources so stale installs still surface as extras.
   const rawCwd = options.cwd ?? process.cwd();
   const excludeProject = options.excludeProject ?? false;
   const home = getVersionHomePath(agent, version);
   const requested = new Set<DoctorKind>(options.kinds ?? ALL_KINDS);
 
-  // When excluding the project layer, resolve every per-cwd lookup against a
-  // neutral cwd so no `<cwd>/.agents/` is ever discovered.
   const cwd = rawCwd;
   const projectDir = excludeProject ? null : getProjectAgentsDir(cwd);
 
@@ -912,9 +860,6 @@ export function diffVersionResources(
   if (requested.has('skills')) empty.skills = diffSkills(agent, version, cwd, excludeProject);
   const hookInventory = requested.has('hooks') ? getResourceInventory(agent, version, 'hooks', { cwd }) : undefined;
   if (hookInventory) empty.hooks = diffHooks(agent, version, cwd, hookInventory);
-  // Wiring check: a hook FILE can be present and byte-identical to source (ok
-  // above) yet never referenced in settings.json, so it never fires. Only
-  // meaningful when hooks are in scope.
   const hookWiring = hookInventory?.wiring;
   if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
   if (requested.has('mcp')) empty.mcp = diffMcp(agent, version, cwd, available.mcp, synced.mcp);
@@ -939,8 +884,6 @@ export function diffVersionResources(
     );
   }
   if (requested.has('plugins')) empty.plugins = diffPlugins(agent, version, cwd);
-  // Workflows are version-gated too (e.g. grok >= 0.2.111); zero the available
-  // set below the floor so a source workflow is not phantom-missing drift.
   if (requested.has('workflows')) {
     empty.workflows = diffWorkflows(
       agent,

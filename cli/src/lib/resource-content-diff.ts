@@ -5,7 +5,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** OS metadata / local tooling that is never synced into a version home. */
 const RESOURCE_CONTENT_IGNORE = new Set([
   '.DS_Store',
   '.git',
@@ -15,7 +14,6 @@ const RESOURCE_CONTENT_IGNORE = new Set([
   'node_modules',
 ]);
 
-/** CRLF → LF and trim, so line-ending / trailing-newline skew is not drift. */
 export function normalizeResourceContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
 }

@@ -59,7 +59,6 @@ function runInventory(agent: string, version: string, opts: { register?: boolean
   return JSON.parse(out);
 }
 
-/** Seed a hook script inside a version home (nested relativeScript allowed). */
 function seedVersionHook(agent: string, version: string, configDir: string, relativeScript: string): string {
   const hooksDir = path.join(userDir, '.history', 'versions', agent, version, 'home', configDir, 'hooks');
   const scriptPath = path.join(hooksDir, relativeScript);
@@ -68,14 +67,12 @@ function seedVersionHook(agent: string, version: string, configDir: string, rela
   return hooksDir;
 }
 
-/** Declare a hook at the system layer (a file under <system>/hooks/). */
 function seedDeclaredHook(name: string): void {
   const dir = path.join(systemDir, 'hooks');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${name}.sh`), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
 }
 
-/** Seed a system-layer hook manifest entry + the script in a claude version home. */
 function seedClaudeVersionWithHook(version: string, hookName: string, event: string): void {
   fs.writeFileSync(
     path.join(systemDir, 'agents.yaml'),
@@ -161,7 +158,6 @@ describe('getResourceInventory (hooks)', () => {
 
     expect(inv.declared.map((r) => r.name)).toContain('guard');
     expect(inv.onDisk.map((r) => r.name)).toEqual(expect.arrayContaining(['guard', 'rogue']));
-    // 'guard' is declared → managed; 'rogue' is on disk but declared nowhere.
     expect(inv.unmanaged.map((r) => r.name)).toEqual(['rogue']);
   });
 
@@ -191,7 +187,6 @@ describe('getResourceInventory (hooks)', () => {
   });
 
   it('reports capable=false below the version gate without touching disk', () => {
-    // codex hooks gate at 0.116.0 — an older pinned version is not capable.
     const inv = runInventory('codex', '0.100.0');
 
     expect(inv.capable).toBe(false);
@@ -227,7 +222,6 @@ describe('getResourceInventory (hooks)', () => {
 
       const inv = runInventory(agent, '1.0.0');
 
-      // Format is known, but parse failed — must not report authoritative wired:0.
       expect(inv.wiringSupported).toBe(false);
       expect(inv.wired).toEqual([]);
       expect(inv.onDisk.map((r) => r.name)).toContain('guard');

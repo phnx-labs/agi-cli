@@ -11,11 +11,8 @@ import { toHomeRelative, expandLocalHome } from './project-root.js';
 import { resolveProjectKey } from './project-key.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 
-/** A git repo bound to a project, with an optional monorepo subpath. */
 export interface ProjectRepo {
-  /** GitHub slug `owner/repo`. */
   slug: string;
-  /** Optional path within the repo an agent working this project cares about. */
   subpath?: string;
   /** Optional home-relative local checkout of this repo. The def's `root` knows only the primary
    * repo; `path` opts an additional repo into workspace probing (`projects status`). */
@@ -26,18 +23,14 @@ export interface ProjectRepo {
  * the pull verifies the remote first. `expectedSlug` is absent when a bound dir declares none (the
  * pull still fast-forwards, skipping the slug check). */
 export interface ProjectRepoTarget {
-  /** Home-relative path — re-roots on each fleet device. */
   path: string;
-  /** Expected GitHub slug (`owner/repo`) for the remote; absent = unchecked. */
   expectedSlug?: string;
 }
 
 /** A described context anchor: a subdirectory plus its `purpose`, so agents know where to look; the
  * richer form of the single monorepo-focus dir. */
 export interface ProjectContext {
-  /** Path relative to the project root (e.g. `apps/web`). */
   path: string;
-  /** One line on how this subtree relates to the project. */
   purpose: string;
 }
 
@@ -45,59 +38,39 @@ export interface ProjectContext {
  * key result, e.g. "p95 < 200ms"). Milestones (dated Linear checkpoints) and live work
  * (agents/PRs/artifacts) show how far along it is. */
 export interface ProjectGoal {
-  /** The outcome, in a line. */
   objective: string;
-  /** Optional key result — how success is measured. */
   measure?: string;
 }
 
-/** An external context source hung off the project (surfaced in `projects show`). */
 export interface ProjectIntegration {
-  /** e.g. `gdrive`, `notion`, `figma`, `url`. */
   kind: string;
   url: string;
   label?: string;
 }
 
-/** The parsed `~/.agents/projects/<name>.yaml`. */
 export interface ProjectDef {
-  /** Stable id; matches the filename; what `--project` takes. */
   name: string;
   description?: string;
-  /** Repo / monorepo root, home-relative for portability. */
   root?: string;
-  /** Where an agent's cwd lands. Defaults to `root` when unset. */
   defaultPath?: string;
-  /** Primary GitHub slug (`owner/repo`) — for PR / CI / status roll-up. */
   repo?: string;
-  /** All bound repos, each with an optional monorepo subpath. */
   repos?: ProjectRepo[];
-  /** Described starting points inside the project. */
   contexts?: ProjectContext[];
-  /** The outcomes this project serves (OKR-shaped); a project may have several. */
   goals?: ProjectGoal[];
-  /** External context sources (Drive, docs, …). */
   integrations?: ProjectIntegration[];
-  /** Linear project link — reuses the existing GraphQL path. */
   linear?: { projectId?: string; url?: string; name?: string };
-  /** Free-form doc links surfaced in `projects show`. */
   docs?: string[];
   /** Auto-dispatch settings: when `enabled` and `maxAgents > 0` and the project has a
    * `linear.projectId`, the daemon polls Linear for delegated-Todo tickets and dispatches up to the
    * concurrency cap. */
   dispatch?: {
-    /** Opt-in: enable auto-dispatch for this project (default: off). */
     enabled?: boolean;
-    /** Per-project concurrency cap for auto-dispatched agents. */
     maxAgents?: number;
-    /** Optional provider pin: 'rush' | 'codex' | 'factory' | 'host' | … */
     provider?: string;
-    /** For provider='host': which machine to dispatch onto (name/device/cap tag). */
     host?: string;
   };
 }
 
-/** A project name safe to use as a filename: no separators, `..`, or leading dot. */
 export function isSafeProjectName(name: string): boolean {
   return (
     typeof name === 'string' &&
@@ -109,7 +82,6 @@ export function isSafeProjectName(name: string): boolean {
   );
 }
 
-/** Absolute path to a project's YAML definition. Throws on an unsafe name. */
 export function projectDefPath(name: string): string {
   if (!isSafeProjectName(name)) {
     throw new Error(`Invalid project name: "${name}" (letters, digits, ., _, - only)`);
@@ -125,8 +97,6 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     throw new Error(`Project ${sourceName ?? ''} is not a YAML mapping`.trim());
   }
   const o = raw as Record<string, unknown>;
-  // The filename is the identity; a `name:` field is optional but, when present,
-  // must be a valid slug — a malformed one is a loud error, not a silent fallback.
   const hasNameField = 'name' in o && o.name !== undefined && o.name !== null;
   let name: string | undefined;
   if (hasNameField) {
@@ -140,8 +110,6 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
   if (!name || !isSafeProjectName(name)) {
     throw new Error('Project definition is missing a valid "name"');
   }
-  // The filename IS the stable id — a def whose `name:` disagrees with its
-  // filename would resolve under one name and list under another.
   if (hasNameField && sourceName && name !== sourceName) {
     throw new Error(`Project ${sourceName}: "name" (${JSON.stringify(name)}) must match the filename — the filename is the stable id`);
   }
@@ -156,8 +124,6 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     def.repos = o.repos.flatMap((r) => {
       if (r && typeof r === 'object' && typeof (r as Record<string, unknown>).slug === 'string') {
         const rr = r as Record<string, unknown>;
-        // A malformed `path` sinks the whole entry, like any other malformed
-        // list row — a half-valid repo must not probe a surprising location.
         if (rr.path !== undefined && typeof rr.path !== 'string') return [];
         const repo: ProjectRepo = { slug: rr.slug as string };
         if (typeof rr.subpath === 'string') repo.subpath = rr.subpath;
@@ -238,7 +204,7 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
     raw = fs.readFileSync(projectDefPath(name), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      return undefined; // absent — not a defined project
+      return undefined;
     }
     throw error;
   }
@@ -250,9 +216,6 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
   try {
-    // Definitions are `<name>.yaml` (what projectDefPath/loadProjectDef read). We
-    // deliberately do NOT list `.yml` here — accepting it would then ENOENT in the
-    // loader and silently drop the project. One extension, one code path.
     files = fs.readdirSync(getProjectsDir()).filter((f) => f.endsWith('.yaml'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
@@ -283,7 +246,6 @@ export function writeProjectDef(def: ProjectDef): string {
       return repo;
     }),
   };
-  // Drop undefined keys so the YAML stays clean.
   const clean = Object.fromEntries(
     Object.entries(normalized).filter(([, v]) => v !== undefined),
   );
@@ -293,7 +255,6 @@ export function writeProjectDef(def: ProjectDef): string {
   return target;
 }
 
-/** Delete a project definition. Returns true if a file was removed. Never touches the repo. */
 export function removeProjectDef(name: string): boolean {
   try {
     fs.unlinkSync(projectDefPath(name));
@@ -324,6 +285,8 @@ function projectDirList(
     joinSubpath: boolean;
   },
 ): string[] {
+  // Spawn paths may join declared subpaths; remote resolution keeps paths that
+  // do not exist on this machine instead of filtering another host's checkout.
   const raw = [
     opts.primary,
     ...(def.repos ?? []).map((r) => {
@@ -336,8 +299,6 @@ function projectDirList(
   const seen = new Set<string>();
   const out: string[] = [];
   for (const p of raw) {
-    // Dedupe on the absolute local path so `~/src/x` and an already-expanded
-    // `/home/me/src/x` in a hand-edited def collapse to one entry.
     const abs = path.resolve(expandLocalHome(p));
     if (seen.has(abs)) continue;
     seen.add(abs);
@@ -351,6 +312,7 @@ function projectDirList(
  * missing checkouts so a peer can answer `missing`. The single expansion behind both `projects
  * status` and `projects pull`, so they act on the same directories. */
 export function projectRepoTargetsForDef(def: ProjectDef): ProjectRepoTarget[] {
+  // Repository probes anchor at repo roots, not narrowed spawn subpaths, and keep missing targets.
   const targets: ProjectRepoTarget[] = [];
   const seen = new Set<string>();
 
@@ -384,14 +346,11 @@ export function projectDirsAbs(
   return projectDirList(def, {
     primary: opts.primary ?? projectBasePath(def, opts.forRemote),
     forRemote: opts.forRemote,
-    // A remote spawn must not be filtered by THIS box's filesystem: the target
-    // host has its own checkouts, and a dir missing here may well be there.
     keepMissing: opts.forRemote,
     joinSubpath: true,
   });
 }
 
-/** A project plus its repo root as an absolute local path, for cwd matching. */
 interface ProjectRootAbs {
   name: string;
   /** One absolute, normalized path this project claims. A project contributes several (root,
@@ -404,6 +363,7 @@ interface ProjectRootAbs {
 }
 
 function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
+  // A narrowed defaultPath is the strong claim; its enclosing root is only fallback attribution.
   const out: ProjectRootAbs[] = [];
   const push = (name: string, raw: string | undefined) => {
     if (!raw) return;
@@ -423,7 +383,6 @@ function projectRootsAbs(defs: ProjectDef[]): ProjectRootAbs[] {
     if (defaultAbs && defaultAbs !== rootAbs) out.push({ name: def.name, abs: defaultAbs });
     for (const r of def.repos ?? []) {
       push(def.name, r.path);
-      // A repo pinned to a monorepo subpath anchors at that subpath too.
       if (r.path && r.subpath) push(def.name, path.join(expandLocalHome(r.path), r.subpath));
     }
   }
@@ -450,7 +409,6 @@ export function repoPathClaims(def: ProjectDef): Array<{ slug: string; prefix: s
   return out;
 }
 
-/** True when `child` is `parent` or nested under it (path-segment aware). */
 function isUnder(child: string, parent: string): boolean {
   if (child === parent) return true;
   const withSep = parent.endsWith(path.sep) ? parent : parent + path.sep;
@@ -461,6 +419,7 @@ function isUnder(child: string, parent: string): boolean {
  * nested project beats its parent; undefined if none. Compared against the LOCAL home, so sessions
  * from different-home machines won't match until the fleet-wide variant lands. */
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
+  // Longest strong multi-repo/subpath ownership wins before any weak umbrella root.
   if (!cwd) return undefined;
   const abs = path.resolve(expandLocalHome(cwd));
   let best: string | undefined;
@@ -488,6 +447,7 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
 let projectDefsMemo: { stamp: string; defs: ProjectDef[] } | null = null;
 
 function projectDefsStamp(): string | null {
+  // This feeds a 2 Hz path: per-file mtime+size catches retargeting, while unreadable state is uncached.
   try {
     const dir = getProjectsDir();
     const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yaml')).sort();
@@ -497,7 +457,6 @@ function projectDefsStamp(): string | null {
           const st = fs.statSync(path.join(dir, f));
           return `${f}:${st.mtimeMs}:${st.size}`;
         } catch {
-          // Removed between readdir and stat — its absence is part of the stamp.
           return `${f}:gone`;
         }
       })
@@ -509,7 +468,6 @@ function projectDefsStamp(): string | null {
 
 export function listProjectDefsCached(): ProjectDef[] {
   const stamp = projectDefsStamp();
-  // No projects dir (or unreadable): nothing is confirmed, and nothing to cache.
   if (stamp === null) return [];
   if (projectDefsMemo && projectDefsMemo.stamp === stamp) return projectDefsMemo.defs;
   const defs = listProjectDefs();
@@ -517,7 +475,6 @@ export function listProjectDefsCached(): ProjectDef[] {
   return defs;
 }
 
-/** Drop the {@link listProjectDefsCached} memo — for tests that rewrite the dir within one mtime tick. */
 export function resetProjectDefsCache(): void {
   projectDefsMemo = null;
 }
@@ -529,6 +486,7 @@ export function confirmedProjectForCwd(
   cwd: string | undefined | null,
   defs: ProjectDef[] = listProjectDefsCached(),
 ): string | undefined {
+  // Confirmed means a registered definition; best-effort repository keys belong only to resolveProjectNameForCwd.
   if (!cwd) return undefined;
   return projectNameForCwd(cwd, defs);
 }
@@ -550,6 +508,7 @@ export function resolveDefinedProjectPath(
   forRemote: boolean,
 ): string | undefined {
   if (worktree) {
+    // @worktree paths live under the repo root, never a narrowed defaultPath.
     const rootRaw = def.root ?? def.defaultPath;
     if (!rootRaw) return undefined;
     const wt = `${rootRaw}/.agents/worktrees/${worktree}`;

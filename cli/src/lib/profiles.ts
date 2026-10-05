@@ -22,7 +22,6 @@ import { addAccount, findAccount, resolveCredentialAccount } from './account-reg
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { listAccountProviders } from './account-provider-registry.js';
 
-/** A named profile binding an agent host, env vars, and optional keychain auth. */
 export interface Profile {
   name: string;
   host: {
@@ -30,7 +29,6 @@ export interface Profile {
     version?: string;
   };
   env: Record<string, string>;
-  /** Default durable credential account. A per-run --account overrides it. */
   account?: string;
   auth?: {
     envVar: string;
@@ -63,24 +61,20 @@ export interface Profile {
  * so consumers can group profiles without reparsing host strings. */
 export interface ProfileSummary {
   name: string;
-  /** Human-facing header label — always derived from `name` via the vendor/brand table. */
   label: string;
   agent: AgentId;
   host: string;
-  /** Host version pin, or null when the harness follows the host's default. */
   hostVersion: string | null;
   provider: string;
   model: string;
   auth: string;
   path: string;
   description: string | null;
-  /** Native agent id or custom harness this one was forked from, if recorded. */
   forkedFrom: string | null;
 }
 
 const PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]{0,48}$/i;
 
-/** Get the directory where profile YAML files are stored. */
 function getProfilesDir(): string {
   return path.join(getUserAgentsDir(), 'profiles');
 }
@@ -89,20 +83,17 @@ function profilePath(name: string): string {
   return path.join(getProfilesDir(), `${name}.yml`);
 }
 
-/** Return the on-disk YAML path for a profile name. */
 export function getProfilePath(name: string): string {
   validateProfileName(name);
   return profilePath(name);
 }
 
-/** Validate a profile name against the allowed pattern. Throws on invalid input. */
 export function validateProfileName(name: string): void {
   if (!PROFILE_NAME_PATTERN.test(name)) {
     throw new Error(`Invalid profile name '${name}'. Use letters, digits, dash, underscore (max 48 chars).`);
   }
 }
 
-/** Check whether a profile YAML file exists on disk. */
 export function profileExists(name: string): boolean {
   return fs.existsSync(profilePath(name));
 }
@@ -114,7 +105,6 @@ export function isCustomHarnessName(name: string): boolean {
   return !(ALL_AGENT_IDS as readonly string[]).includes(name) && profileExists(name);
 }
 
-/** Read and parse a profile from disk. Throws if not found or malformed. */
 export function readProfile(name: string): Profile {
   validateProfileName(name);
   const file = profilePath(name);
@@ -138,6 +128,8 @@ export function readProfile(name: string): Profile {
 }
 
 function migrateLegacyProfileAuth(profile: Profile, file: string): void {
+  // Persist the portable account name, resolve its device-local secret at exec,
+  // and delete the legacy item only after no sibling profile references it.
   if (!profile.auth || profile.account) return;
   if (!profile.provider) {
     throw new Error(`Profile '${profile.name}' owns a legacy credential without a provider. Add a durable account with 'agents accounts add', then set account: <name> in ${file}.`);
@@ -171,7 +163,6 @@ function migrateLegacyProfileAuth(profile: Profile, file: string): void {
   if (!stillReferenced) deleteKeychainTokenSync(oldItem);
 }
 
-/** Write a profile to disk atomically (write-to-tmp then rename). */
 export function writeProfile(profile: Profile): void {
   validateProfileName(profile.name);
   const dir = getProfilesDir();
@@ -183,7 +174,6 @@ export function writeProfile(profile: Profile): void {
   fs.renameSync(tmp, file);
 }
 
-/** Delete a profile from disk. Returns false if it did not exist. */
 export function deleteProfile(name: string): boolean {
   validateProfileName(name);
   const file = profilePath(name);
@@ -192,7 +182,6 @@ export function deleteProfile(name: string): boolean {
   return true;
 }
 
-/** List all valid profiles, sorted by name. Malformed files are silently skipped. */
 export function listProfiles(): Profile[] {
   const dir = getProfilesDir();
   if (!fs.existsSync(dir)) return [];
@@ -203,18 +192,15 @@ export function listProfiles(): Profile[] {
     try {
       profiles.push(readProfile(name));
     } catch {
-      // Skip malformed profile files; surfacing via `agents harness view <name>`.
     }
   }
   return profiles.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Format the host harness and optional pinned version for display. */
 export function profileHostLabel(profile: Profile): string {
   return profile.host.version ? `${profile.host.agent}@${profile.host.version}` : profile.host.agent;
 }
 
-/** Return the configured provider name, deriving it from the shared keychain item when needed. */
 export function profileProviderLabel(profile: Profile): string {
   return profile.provider || profile.auth?.keychainItem?.split('.')[1] || '-';
 }
@@ -228,7 +214,6 @@ const MODEL_ENV_KEYS = [
   'OPENCODE_MODEL',
 ] as const;
 
-/** Return the configured model env value for display. */
 export function profileModelLabel(profile: Profile): string {
   const key = profileModelEnvKey(profile);
   return key ? profile.env[key] : '-';
@@ -289,6 +274,8 @@ function inlineAuthToken(profile: Profile): string | undefined {
  * inline opaque token is masked prefix/suffix; keychain auth shows provider + "stored"/"missing"
  * without prompting; no auth shows the provider only. */
 export function profileAuthLabel(profile: Profile): string {
+  // Labels expose a JWT identity claim or a masked opaque token. Keychain-backed
+  // auth checks presence without reading the secret or triggering a prompt.
   const provider = profileProviderLabel(profile);
   const token = inlineAuthToken(profile);
   if (token) {
@@ -302,12 +289,11 @@ export function profileAuthLabel(profile: Profile): string {
     return `${provider} ${maskToken(token)}`;
   }
   if (profile.auth) {
-    // A status row, like the provider-account rows: a wedged or missing
-    // standalone degrades this one label instead of aborting the whole render.
     let stored: boolean;
     try {
       stored = hasKeychainTokenSync(profile.auth.keychainItem);
     } catch (err) {
+      // Only standalone transport failure degrades availability; data errors fail loud.
       if (isSecretsTransportError(err)) return `${provider} unavailable`;
       throw err;
     }
@@ -353,7 +339,6 @@ export function profileLabel(profile: Profile): string {
   return profile.name.split(/[-_]/).map(tokenToDisplayName).join(' ');
 }
 
-/** Build a stable, machine-readable summary for list and view surfaces. */
 export function profileSummary(profile: Profile): ProfileSummary {
   return {
     name: profile.name,
@@ -398,23 +383,19 @@ const MODEL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   codex: 'OPENAI_MODEL',
 };
 
-/** Base-URL env var per host, for the OpenAI/Anthropic-compatible hosts where it applies. */
 const BASE_URL_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   claude: 'ANTHROPIC_BASE_URL',
   codex: 'OPENAI_BASE_URL',
 };
 
-/** Return the model-override env var for a host (known hosts mapped; else `<HOST>_MODEL`). */
 export function modelEnvKeyForHost(host: AgentId): string {
   return MODEL_ENV_KEY_BY_HOST[host] ?? `${host.toUpperCase()}_MODEL`;
 }
 
-/** Return the base-URL env var for a host, or null when the host has no known override var. */
 export function baseUrlEnvKeyForHost(host: AgentId): string | null {
   return BASE_URL_ENV_KEY_BY_HOST[host] ?? null;
 }
 
-/** Env var each host reads its auth token from, for custom-endpoint (`--auth-provider`) harnesses. */
 const AUTH_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   claude: 'ANTHROPIC_AUTH_TOKEN',
   codex: 'OPENAI_API_KEY',
@@ -422,19 +403,14 @@ const AUTH_ENV_KEY_BY_HOST: Partial<Record<AgentId, string>> = {
   opencode: 'OPENCODE_API_KEY',
 };
 
-/** Return the auth-token env var for a host, or null when unknown. */
 export function authEnvKeyForHost(host: AgentId): string | null {
   return AUTH_ENV_KEY_BY_HOST[host] ?? null;
 }
 
-/** Options for {@link profileFromHostModel}. */
 interface HostModelOptions {
   version?: string;
-  /** Base URL for OpenAI/Anthropic-compatible hosts (claude, codex). Ignored for hosts without a known var. */
   baseUrl?: string;
-  /** Provider label + keychain namespace; only needed when the host requires a token. */
   provider?: string;
-  /** Env var the host reads its auth token from; pair with `provider` to attach keychain auth. */
   authEnvVar?: string;
   description?: string;
 }
@@ -463,20 +439,12 @@ export function profileFromHostModel(name: string, host: AgentId, model: string,
   return profile;
 }
 
-/** Overrides applied on top of the source when forking a harness. */
 export interface ForkProfileOptions {
-  /** Translate the fork onto a different native harness host. */
   host?: AgentId;
-  /** Swap the pinned model. Written onto the source's model env key when it has
-   *  one, else onto the host's canonical model var. */
   model?: string;
-  /** Swap the endpoint. Only applied for hosts with a known base-URL var. */
   baseUrl?: string;
-  /** Repoint auth at a different provider's keychain item. */
   provider?: string;
-  /** Env var the host reads its token from; pair with `provider`. */
   authEnvVar?: string;
-  /** Re-pin (or unpin, with an empty string) the host CLI version. */
   version?: string;
   description?: string;
 }
@@ -484,6 +452,8 @@ export interface ForkProfileOptions {
 /** Copy a harness under a new name with overrides. A full copy (env, auth binding, fallback model),
  * so the two diverge and deleting the source never affects the fork. */
 export function forkProfile(source: Profile, name: string, opts: ForkProfileOptions = {}): Profile {
+  // Cross-host forks translate model, endpoint, and auth keys. Explicit model,
+  // endpoint, or host changes drop stale preset identity.
   validateProfileName(name);
   const sourceHost = source.host.agent;
   const host = opts.host ?? sourceHost;
@@ -511,8 +481,6 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     name,
     host: { agent: host, ...(opts.version ? { version: opts.version } : host === sourceHost && source.host.version ? { version: source.host.version } : {}) },
     env,
-    // The source's description names the source's model, so inheriting it
-    // across a model swap would describe the fork wrongly.
     description: opts.description ?? (opts.model || host !== sourceHost
       ? `Forked from ${source.name}: ${model ?? host}`
       : source.description),
@@ -523,8 +491,6 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
     if (!envVar) throw new Error(`Host '${host}' has no known auth env var; the source auth binding cannot be translated.`);
     forked.auth = { ...forked.auth, envVar };
   }
-  // A fork that repoints the model or endpoint is no longer that preset — keep
-  // the preset link only while the fork still matches what the preset defines.
   if (opts.model || opts.baseUrl || host !== sourceHost) delete forked.preset;
   if (opts.provider) {
     const envVar = opts.authEnvVar ?? source.auth?.envVar ?? authEnvKeyForHost(host);
@@ -543,8 +509,6 @@ export function forkProfile(source: Profile, name: string, opts: ForkProfileOpti
  * writing it; callers persist with `writeProfile`. */
 export function editProfile(source: Profile, opts: ForkProfileOptions = {}): Profile {
   const edited = forkProfile(source, source.name, opts);
-  // forkProfile sets forkedFrom = source.name; for an in-place edit that would
-  // be a self-reference. Restore the original lineage instead.
   edited.forkedFrom = source.forkedFrom;
   return edited;
 }
@@ -563,7 +527,6 @@ export function renameProfile(oldName: string, newName: string): void {
   profile.name = newName;
   writeProfile(profile);
   deleteProfile(oldName);
-  // Rewrite forkedFrom in every other profile that referenced the old name.
   for (const other of listProfiles()) {
     if (other.name !== newName && other.forkedFrom === oldName) {
       other.forkedFrom = newName;
@@ -575,6 +538,8 @@ export function renameProfile(oldName: string, newName: string): void {
 /** Resolve a profile into the env block injected into the spawned agent, reading the token from the
  * keychain at exec time so YAML never holds secrets. */
 export function resolveProfileEnv(profile: Profile): Record<string, string> {
+  // Optional auth injects nothing when absent so the host's native login survives;
+  // required auth fails loud. All secrets resolve only at execution time.
   const env: Record<string, string> = { ...profile.env };
   if (profile.account) {
     if (!findAccount(profile.account)) {
@@ -591,9 +556,6 @@ export function resolveProfileEnv(profile: Profile): Record<string, string> {
     Object.assign(env, account.env);
   }
   if (profile.auth) {
-    // Optional auth (host manages its own login) with no stored token: inject
-    // nothing and let the host use its own credentials. Only required auth
-    // hard-fails on a missing keychain item.
     if (profile.authOptional && !hasKeychainTokenSync(profile.auth.keychainItem)) {
       return env;
     }
@@ -601,8 +563,6 @@ export function resolveProfileEnv(profile: Profile): Record<string, string> {
     try {
       token = getKeychainTokenSync(profile.auth.keychainItem);
     } catch (err) {
-      // The standalone deliberately reports only a code, so name the item and
-      // the repair here — a bare `NOT_FOUND` gives the user nothing to act on.
       if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
       throw new Error(
         `Harness '${profile.name}' needs a ${profile.provider ?? 'provider'} key, but its keychain item ` +
@@ -616,7 +576,6 @@ export function resolveProfileEnv(profile: Profile): Record<string, string> {
   return env;
 }
 
-/** Resolved profile data ready for spawning an agent process. */
 interface ResolvedProfileRun {
   agent: AgentId;
   version?: string;
@@ -642,6 +601,7 @@ function resolveProfileTierModel(
   profile: Profile,
   tier: ModelTier,
 ): { model: string; clampedFrom?: ModelTier } | null {
+  // Tier tokens resolve against this profile's catalog and clamp only downward.
   if (!profile.models) return null;
   const idx = MODEL_TIERS.indexOf(tier);
   for (let i = idx; i >= 0; i--) {
@@ -664,6 +624,7 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
     env,
     profileName: profile.name,
   };
+  // Same-host fallback swaps only this model value so auth and endpoint survive the retry.
   if (profile.fallback_model) {
     const envKey = profileModelEnvKey(profile);
     if (envKey) {
@@ -676,9 +637,6 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
       const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost(profile.host.agent);
       env[envKey] = tierPick.model;
       resolved.resolvedModel = tierPick.model;
-      // Mirror the native-harness tier block (lib/exec.ts's resolveTier callers):
-      // a clamp is always announced, never silent, so a user asking for "ultra"
-      // on a harness that only configures "best" knows what it actually got.
       if (tierPick.clampedFrom) {
         resolved.tierNote = `no "${requestedModel}" model configured on profile '${profile.name}'; using its "${tierPick.clampedFrom}" tier (${tierPick.model})`;
       }
@@ -689,6 +647,7 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
   // OpenCode doesn't honor OPENCODE_MODEL, so copy the pin into resolvedModel so buildExecCommand
   // emits `--model`. An explicit `--model` (even a cost-tier token the caller may discard) wins.
   if (resolved.resolvedModel === undefined && !requestedModel && profile.host.agent === 'opencode') {
+    // OpenCode ignores OPENCODE_MODEL unless the same pin is also carried into argv.
     const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost('opencode');
     const pinned = env[envKey];
     if (pinned) resolved.resolvedModel = pinned;
