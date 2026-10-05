@@ -633,4 +633,15 @@ describe('projects prs — list is the default, merge owns its flags', () => {
     const missing = await run(['prs', 'comment', 'merge', '--repo', 'acme/mono', '--number', '7', '--body-file', path.join(projectsDir, 'nope.md')]);
     expect(missing.err).toContain('Could not read --body-file');
   });
+
+  it('`prs automerge` needs --sha to turn on and refuses --method with --off, before touching GitHub', async () => {
+    const noSha = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7']);
+    expect(noSha.exit).toBe(1);
+    expect(noSha.err).toContain('Pass --sha <head-sha>');
+    const offMethod = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7', '--off', '--method', 'rebase']);
+    expect(offMethod.exit).toBe(1);
+    expect(offMethod.err).toContain('--method only applies when turning auto-merge on');
+    const method = await run(['prs', 'automerge', 'merge', '--repo', 'acme/mono', '--number', '7', '--sha', 'abc1234', '--method', 'fast']);
+    expect(method.err).toContain('--method expects one of rebase, squash, merge');
+  });
 });

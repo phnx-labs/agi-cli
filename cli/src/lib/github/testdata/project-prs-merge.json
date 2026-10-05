@@ -1,0 +1,10 @@
+{
+  "_comment": "Recorded gh answers for the merge/auto-merge paths (2026-10-04). repo-* are `gh api repos/{r} --jq <readRepoMergeSettings jq>` for a repository with classic protection (agi-cli) and one with only a ruleset (agi-menu); protection-* are `.../branches/main/protection --jq .enforce_admins.enabled` and the stderr line gh prints for an unprotected branch. refusal-405 is GitHub's PUT pulls/{n}/merge answer while a required check is pending.",
+  "repo-protected": "{\"admin\":true,\"autoMerge\":true,\"defaultBranch\":\"main\",\"merge\":true,\"rebase\":true,\"squash\":true}\n",
+  "repo-nonadmin": "{\"admin\":false,\"autoMerge\":false,\"defaultBranch\":\"main\",\"merge\":true,\"rebase\":false,\"squash\":true}\n",
+  "protection-enforced": "true\n",
+  "protection-not-enforced": "false\n",
+  "protection-404-stderr": "gh: Branch not protected (HTTP 404)\n",
+  "refusal-405-stderr": "gh: Required status check \"test\" is expected. (HTTP 405)\n",
+  "refusal-405-two-stderr": "gh: Required status checks \"test\", \"gitleaks\" are expected. (HTTP 405)\n"
+}
