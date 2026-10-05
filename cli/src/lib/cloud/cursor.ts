@@ -1,4 +1,3 @@
-/** Cursor Cloud Agents provider backed by the public v1 REST API. */
 
 import type {
   CloudEvent,
@@ -46,7 +45,6 @@ interface CursorCreateBody {
   envVars?: Record<string, string>;
 }
 
-/** Translate unified dispatch options into Cursor's documented v1 create shape. */
 export function buildCursorCreateBody(options: DispatchOptions): CursorCreateBody {
   const repos = resolveDispatchRepos(options);
   const body: CursorCreateBody = { prompt: { text: options.prompt } };
@@ -62,7 +60,6 @@ export function buildCursorCreateBody(options: DispatchOptions): CursorCreateBod
   return body;
 }
 
-/** Map one Cursor agent/run pair into the provider-neutral task shape. */
 export function parseCursorTask(agent: CursorAgent, run: CursorRun, prompt = ''): CloudTask {
   const branch = run.git?.branches?.[0];
   return {
@@ -81,7 +78,6 @@ export function parseCursorTask(agent: CursorAgent, run: CursorRun, prompt = '')
   };
 }
 
-/** Parse one complete SSE frame into a shared cloud event. */
 export function parseCursorSseFrame(frame: string): CloudEvent | undefined {
   let eventName = 'message';
   const data: string[] = [];
@@ -92,7 +88,7 @@ export function parseCursorSseFrame(frame: string): CloudEvent | undefined {
   if (!data.length) return undefined;
   const raw = data.join('\n');
   let value: unknown = raw;
-  try { value = JSON.parse(raw); } catch { /* Cursor may send plain text. */ }
+  try { value = JSON.parse(raw); } catch {  }
   const obj = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
   const timestamp = typeof obj.timestamp === 'string' ? obj.timestamp : undefined;
 
@@ -122,10 +118,9 @@ export function parseCursorSseFrame(frame: string): CloudEvent | undefined {
   return { type: 'unknown', name: eventName, data: raw, timestamp };
 }
 
-/** Turn Cursor's structured API errors into actionable provider errors. */
 export function cursorApiError(action: string, status: number, text: string): Error {
   let parsed: CursorErrorBody = {};
-  try { parsed = JSON.parse(text) as CursorErrorBody; } catch { /* preserve raw body */ }
+  try { parsed = JSON.parse(text) as CursorErrorBody; } catch {  }
   const detail = typeof parsed.error === 'object' ? parsed.error : undefined;
   const code = detail?.code;
   const message = detail?.message ?? (typeof parsed.error === 'string' ? parsed.error : text.slice(0, 500));

@@ -21,10 +21,6 @@ describe('isTmuxVersionSupported', () => {
 
 describe('runTmux timeoutMs', () => {
   it('kills the child and rejects when a tmux command hangs past the timeout', async () => {
-    // Start a real server, then `wait-for` on a never-signaled channel — the client
-    // blocks until another client signals it, a genuine hang against a live server.
-    // This exercises the actual timeout/kill path (no mocking) and skips cleanly
-    // where tmux isn't installed.
     const socket = path.join(os.tmpdir(), `agents-cli-tmux-timeout-${process.pid}.sock`);
     try {
       await runTmux({ socket, args: ['new-session', '-d', '-s', 'timeout-probe'], throwOnError: false, timeoutMs: 5000 });
@@ -32,10 +28,10 @@ describe('runTmux timeoutMs', () => {
         runTmux({ socket, args: ['wait-for', 'never-signaled'], throwOnError: false, timeoutMs: 300 }),
       ).rejects.toThrow(/timed out/);
     } catch (e) {
-      if (e instanceof TmuxUnavailableError) return; // no tmux on this box — skip
+      if (e instanceof TmuxUnavailableError) return;
       throw e;
     } finally {
-      try { await runTmux({ socket, args: ['kill-server'], throwOnError: false, timeoutMs: 2000 }); } catch { /* server may not exist */ }
+      try { await runTmux({ socket, args: ['kill-server'], throwOnError: false, timeoutMs: 2000 }); } catch {  }
     }
   });
 });

@@ -1,13 +1,3 @@
-/**
- * Tests for the Terminal Engine injection primitive (Gap 2).
- *
- * Two layers, no mocks:
- *   1. Pure builders (tmux argv / iTerm+Ghostty AppleScript) — asserted
- *      directly, including the macOS paths that can't execute on Linux.
- *   2. A real tmux round-trip: spawn a pane, inject through `injectIntoTerminal`,
- *      and read the pane back to prove the bytes + Enter actually landed. Skipped
- *      cleanly when tmux isn't installed.
- */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -29,7 +19,6 @@ import {
 
 const linuxCtx: EngineContext = { platform: 'linux', env: {} as NodeJS.ProcessEnv };
 
-/** The first (only) pane id of a freshly-created single-pane session, e.g. `%3`. */
 async function firstPaneId(name: string, socket: string): Promise<string> {
   const res = await runTmux({ socket, args: ['list-panes', '-t', name, '-F', '#{pane_id}'] });
   return res.stdout.trim().split('\n')[0];
@@ -75,9 +64,7 @@ describe('itermInjectScript', () => {
     const s = itermInjectScript('continue', { enter: true });
     expect(s).toContain('tell application "iTerm2"');
     expect(s).toContain('tell current session of current window');
-    // Focus-safe: never activates iTerm or steals the frontmost split.
     expect(s).not.toContain('activate');
-    // Ink-safe: text without a fused newline, then a SEPARATE lone CR.
     expect(s).toContain('write text "continue" newline no');
     expect(s).toContain('write text (character id 13) newline no');
     expect(s.indexOf('write text "continue"')).toBeLessThan(s.indexOf('character id 13'));
@@ -113,7 +100,6 @@ describe('vscodiumInjectUri', () => {
     const uri = vscodiumInjectUri('vscodium', 'sess-uuid', 'continue', { enter: true, combined: false });
     expect(uri.startsWith('vscodium://swarmify.swarm-ext/inject?p=')).toBe(true);
     const p = uri.split('p=')[1];
-    // base64url alphabet only — survives VS Code's single percent-decode of uri.query.
     expect(p).toMatch(/^[A-Za-z0-9_-]+$/);
     const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
     expect(payload).toEqual({ terminalId: 'sess-uuid', text: 'continue', enter: true, combined: false });
@@ -186,8 +172,6 @@ describe('injectIntoTerminal — macOS backends off-darwin', () => {
   });
 
   it('ghostty write-count tracks enter alone (its coarse script ignores combined)', async () => {
-    // The keystroke path always emits keystroke + a separate Return, so combined
-    // does NOT fuse it — the count must stay 2, not collapse to 1.
     const combined = await injectIntoTerminal({ backend: 'ghostty' }, 'hi', { dryRun: true, combined: true });
     expect(combined.writes).toBe(2);
     const noEnter = await injectIntoTerminal({ backend: 'ghostty' }, 'hi', { dryRun: true, enter: false });
@@ -233,12 +217,11 @@ describe.skipIf(skipReason)('injectIntoTerminal — real tmux round-trip', () =>
   });
 
   afterEach(async () => {
-    try { await killAll(socket); } catch { /* best-effort */ }
-    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* gone */ }
+    try { await killAll(socket); } catch {  }
+    try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch {  }
   });
 
   it('delivers text + Enter so a shell actually runs the injected command', async () => {
-    // A pane running an interactive shell — the exact shape a stalled agent sits in.
     await createSession({ name, socket, cmd: 'sh', cwd: tempDir });
     const pane = await firstPaneId(name, socket);
 
@@ -246,10 +229,8 @@ describe.skipIf(skipReason)('injectIntoTerminal — real tmux round-trip', () =>
     const res = await injectIntoTerminal({ backend: 'tmux', pane, socket }, `touch ${marker}`);
     expect(res.ok).toBe(true);
     expect(res.backend).toBe('tmux');
-    // Ink-safe default: literal text write, then a separate Enter write.
     expect(res.writes).toBe(2);
 
-    // Poll for the side effect — proof the Enter actually submitted the line.
     let landed = false;
     for (let i = 0; i < 40 && !landed; i++) {
       if (fs.existsSync(marker)) { landed = true; break; }

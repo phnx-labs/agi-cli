@@ -1,24 +1,3 @@
-/**
- * Factory (Droid) cloud provider.
- *
- * Dispatches to a Factory **Droid Computer** — a persistent cloud VM (managed
- * by Factory, or bring-your-own via `droid computer register`). There is no
- * `droid cloud run`; remote execution = reach the computer over the Droid relay
- * (`droid computer ssh <name>`) and run a headless `droid exec` there.
- *
- * `droid exec` is synchronous (it runs to completion and exits, unlike Codex
- * Cloud which is async server-side). So `dispatch()` runs the remote exec to
- * completion with `--output-format stream-json`, buffers the NDJSON events, and
- * `stream()` replays them. The task id is droid's own `session_id` (captured
- * from the run output), so it lines up with `droid exec -s <id>` for future
- * resume support.
- *
- * Transport note: the exact relay SSH composition (user + ProxyCommand) is
- * built in `buildSshArgs()` and must be confirmed against a live provisioned
- * Droid Computer (Factory auth required). `capabilities().available` gates on
- * the droid binary + a configured computer so the provider fails with a clear
- * message rather than misfiring when unconfigured.
- */
 
 import { spawn, execFileSync } from 'child_process';
 import * as fs from 'fs';
@@ -42,7 +21,6 @@ const SHIMS_DIR = getShimsDir();
 const DEFAULT_AUTONOMY: DroidAutonomy = 'high';
 const VALID_AUTONOMY = new Set<DroidAutonomy>(['low', 'medium', 'high']);
 
-/** Locate the droid binary, checking agents-cli shims first then PATH. */
 function findDroidBinary(): string | null {
   const shim = path.join(SHIMS_DIR, 'droid');
   if (fs.existsSync(shim)) return shim;
@@ -53,14 +31,12 @@ function findDroidBinary(): string | null {
   }
 }
 
-/** Normalize an autonomy value, falling back to the safe cloud default (`high`). */
 export function resolveAutonomy(value: unknown, fallback: DroidAutonomy = DEFAULT_AUTONOMY): DroidAutonomy {
   return typeof value === 'string' && VALID_AUTONOMY.has(value as DroidAutonomy)
     ? (value as DroidAutonomy)
     : fallback;
 }
 
-/** Run the droid CLI and capture output (used for `computer list`). */
 function runDroid(bin: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     const proc = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -73,21 +49,14 @@ function runDroid(bin: string, args: string[]): Promise<{ stdout: string; stderr
   });
 }
 
-/**
- * Parse `droid computer list` text into targets. Defensive: the exact column
- * layout isn't documented, so we take the first whitespace token of each data
- * row as the computer name and keep the remainder as a label, skipping headers,
- * separators, and status messages. The interactive picker degrades to free-text
- * entry if this yields nothing, so an unexpected layout never blocks a dispatch.
- */
 export function parseComputerList(text: string): CloudTarget[] {
   const out: CloudTarget[] = [];
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (!line) continue;
-    if (/^(name|computer|status|id)\b/i.test(line)) continue;   // header row
-    if (/^[-=_\s|]+$/.test(line)) continue;                      // separator rule
-    if (/^(no |failed|error|warning)\b/i.test(line)) continue;   // status message
+    if (/^(name|computer|status|id)\b/i.test(line)) continue;
+    if (/^[-=_\s|]+$/.test(line)) continue;
+    if (/^(no |failed|error|warning)\b/i.test(line)) continue;
     const name = line.split(/\s+/)[0];
     if (!name) continue;
     const label = line.slice(name.length).trim() || undefined;
@@ -96,10 +65,6 @@ export function parseComputerList(text: string): CloudTarget[] {
   return out;
 }
 
-/**
- * Build the remote `droid exec` argv. Headless, stream-json output, given
- * autonomy. `sessionId` (when resuming) maps to `-s`.
- */
 export function buildExecArgs(
   prompt: string,
   opts: { autonomy: DroidAutonomy; sessionId?: string },
@@ -110,15 +75,6 @@ export function buildExecArgs(
   return args;
 }
 
-/**
- * Build the `ssh` argv that runs a remote command on a Droid Computer through
- * the Droid relay. The relay is used as an OpenSSH ProxyCommand
- * (`droid computer ssh <name> --proxy`), so the connection rides Factory's
- * brokered tunnel rather than a directly reachable host.
- *
- * `remoteArgv` is the already-built remote command (e.g. droid exec argv); it is
- * shell-quoted into a single remote command string.
- */
 export function buildSshArgs(
   computer: string,
   remoteBin: string,
@@ -141,24 +97,16 @@ export function buildSshArgs(
   ];
 }
 
-/** POSIX single-quote a shell argument. */
 function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-/** Map a droid stream-json `result.subtype` / `is_error` to a CloudTaskStatus. */
 export function mapResultStatus(line: { is_error?: boolean; subtype?: string }): CloudTaskStatus {
   if (line.is_error) return 'failed';
   if (line.subtype && /cancel/i.test(line.subtype)) return 'cancelled';
   return 'completed';
 }
 
-/**
- * Map one parsed droid stream-json event to a CloudEvent. The stream-json
- * schema is only partially documented, so this is defensive: known shapes map
- * to typed events, everything else surfaces as `unknown` rather than being
- * dropped (mirrors the rest of the cloud event pipeline).
- */
 export function mapDroidEvent(obj: Record<string, unknown>): CloudEvent {
   const ts = new Date().toISOString();
   const type = String(obj.type ?? '');
@@ -199,7 +147,6 @@ export function mapDroidEvent(obj: Record<string, unknown>): CloudEvent {
   return { type: 'unknown', name: type || 'unknown', data: JSON.stringify(obj), timestamp: ts };
 }
 
-/** Pull a text string out of the varied droid message shapes. */
 function extractText(obj: Record<string, unknown>): string {
   if (typeof obj.text === 'string') return obj.text;
   if (typeof obj.content === 'string') return obj.content;
@@ -213,7 +160,6 @@ function extractText(obj: Record<string, unknown>): string {
   return '';
 }
 
-/** A completed droid run, buffered in-process for `stream()` to replay. */
 interface BufferedRun {
   events: CloudEvent[];
   task: CloudTask;
@@ -226,7 +172,6 @@ export class FactoryCloudProvider implements CloudProvider {
 
   private defaultComputer?: string;
   private defaultAutonomy: DroidAutonomy;
-  /** session_id → buffered run, populated by dispatch, drained by stream. */
   private runs = new Map<string, BufferedRun>();
 
   constructor(config?: { computer?: string; autonomy?: DroidAutonomy }) {
@@ -238,8 +183,6 @@ export class FactoryCloudProvider implements CloudProvider {
     const droid = findDroidBinary() !== null;
     const computer = Boolean(this.defaultComputer);
     return {
-      // Reachable only when the droid binary exists AND a computer is set.
-      // (A per-dispatch --computer can still override the missing default.)
       available: droid && computer,
       dispatch: droid,
       status: droid,
@@ -253,7 +196,6 @@ export class FactoryCloudProvider implements CloudProvider {
     };
   }
 
-  /** Enumerate Droid Computers via `droid computer list`. Throws if not signed in. */
   async listTargets(): Promise<CloudTarget[]> {
     const droidBin = findDroidBinary();
     if (!droidBin) {
@@ -261,8 +203,6 @@ export class FactoryCloudProvider implements CloudProvider {
     }
     const { stdout, stderr, code } = await runDroid(droidBin, ['computer', 'list']);
     if (code !== 0) {
-      // Surface droid's own message verbatim — e.g. "No authenticated user with
-      // organization available" when the user hasn't logged in.
       throw new Error((stderr.trim() || stdout.trim() || `droid computer list exited ${code}`));
     }
     return parseComputerList(stdout);
@@ -309,7 +249,6 @@ export class FactoryCloudProvider implements CloudProvider {
     return task;
   }
 
-  /** Run the remote droid exec to completion, collecting events + final result. */
   private runRemote(sshArgs: string[]): Promise<{ events: CloudEvent[]; status: CloudTaskStatus; summary?: string; sessionId?: string }> {
     return new Promise((resolve, reject) => {
       const proc = spawn('ssh', sshArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -327,7 +266,6 @@ export class FactoryCloudProvider implements CloudProvider {
         try {
           obj = JSON.parse(trimmed);
         } catch {
-          // Non-JSON line (banner, ssh notice) — surface it, don't drop it.
           events.push({ type: 'unknown', name: 'stdout', data: trimmed, timestamp: new Date().toISOString() });
           return;
         }
@@ -352,7 +290,6 @@ export class FactoryCloudProvider implements CloudProvider {
       proc.on('close', (code) => {
         if (stdoutBuf) handleLine(stdoutBuf);
         if (code !== 0 && events.every((e) => e.type !== 'done')) {
-          // Surface the auth error verbatim — it's the common first-run failure.
           const detail = stderr.trim() || `ssh exited ${code}`;
           reject(new Error(`Factory dispatch failed: ${detail}`));
           return;
@@ -365,12 +302,10 @@ export class FactoryCloudProvider implements CloudProvider {
   async status(taskId: string): Promise<CloudTask> {
     const run = this.runs.get(taskId);
     if (run) return run.task;
-    // No remote task registry — the command layer falls back to the local store.
     throw new Error(`No live status for Factory task ${taskId} (synchronous run; see local cache).`);
   }
 
   async list(): Promise<CloudTask[]> {
-    // Factory has no remote task list; `agents cloud list` reads the local store.
     return [...this.runs.values()].map((r) => r.task);
   }
 

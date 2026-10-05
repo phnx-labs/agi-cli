@@ -28,7 +28,6 @@ describe('iterm backend', () => {
   it('split: right = "split vertically", down = "split horizontally"', () => {
     expect(itermSplitScript('/d', CMD, 'right')).toContain('split vertically with default profile command');
     expect(itermSplitScript('/d', CMD, 'down')).toContain('split horizontally with default profile command');
-    // falls back to a window when none is open (can't split nothing)
     expect(itermSplitScript('/d', CMD, 'right')).toContain('create window with default profile command');
   });
   it('buildTab/buildSplit route through osascript', () => {
@@ -52,7 +51,6 @@ describe('ghostty backend', () => {
     const right = ghosttySplitScript('/d', CMD, 'right');
     expect(right).toContain('split (focused terminal of selected tab of front window) direction right with configuration cfg');
     expect(ghosttySplitScript('/d', CMD, 'down')).toContain('direction down with configuration cfg');
-    // window when none open
     expect(right).toContain('new window with configuration cfg');
   });
 });
@@ -69,7 +67,6 @@ describe('tmux backend', () => {
   });
 });
 
-// Decode the base64url `p` payload the way the swarm-ext handler does.
 const payloadOf = (url: string): any => {
   const p = new URLSearchParams(url.split('?')[1]).get('p')!;
   return JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
@@ -82,7 +79,6 @@ describe('vscodium-agent backend', () => {
     expect(argv.argv[1]).toBe('--open-url');
     const url = argv.argv[2];
     expect(url.startsWith('vscodium://swarmify.swarm-ext/spawn?p=')).toBe(true);
-    // the editor terminal is already an interactive login shell — no zsh -ilc wrap
     expect(url).not.toContain('zsh');
     const payload = payloadOf(url);
     expect(payload.cwd).toBe('/Users/me/dev');
@@ -95,7 +91,6 @@ describe('vscodium-agent backend', () => {
   });
   it('spawnUri survives &, spaces, and = in cwd + command (base64url payload, URL-safe)', () => {
     const url = spawnUri('vscodium', '/Users/me/my project', ['claude', '--resume', 'a b&c=d']);
-    // base64url payload — no raw special chars VS Code would decode or mis-split on
     const query = url.split('?')[1];
     expect(query.startsWith('p=')).toBe(true);
     expect(/^p=[A-Za-z0-9_-]+$/.test(query)).toBe(true);

@@ -48,8 +48,6 @@ describe('specForRequest', () => {
 
 describe('openSurface never throws', () => {
   it('an invalid --device target degrades to a failed result, not a throw', async () => {
-    // 'bad;host' is rejected by the SSH transport's target guard (throws
-    // synchronously before any ssh spawn); openSurface must catch it.
     const res = await openSurface({
       backend: 'tmux', layout: 'tab', cwd: '/x', command: ['echo', 'hi'], host: 'bad;host',
     });
@@ -77,7 +75,6 @@ describe('remoteCommand (serialize argv for ssh)', () => {
   it('leaves shell-safe args bare, single-quotes the rest into one string', () => {
     const spec = { argv: ['osascript', '-e', 'tell app "iTerm2"\nactivate'] };
     const s = remoteCommand(spec);
-    // osascript and -e are shell-safe (bare); the multi-line applescript is one quoted arg
     expect(s).toBe("osascript -e 'tell app \"iTerm2\"\nactivate'");
   });
   it('escapes embedded single quotes safely', () => {

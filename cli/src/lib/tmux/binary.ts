@@ -15,19 +15,10 @@ import { existsSync } from 'fs';
 let cachedBin: string | null | undefined;
 let cachedVersion: string | null | undefined;
 
-/** Oldest tmux release with `run-shell -C`, required by the managed pane-died hook. */
 export const MIN_TMUX_VERSION = '3.2';
 
-/**
- * Locate the tmux binary on PATH. Cached after first call — tmux either is or
- * isn't installed for the duration of the process.
- *
- * Returns null when tmux is not installed.
- */
 export function findTmuxBinary(): string | null {
   if (cachedBin !== undefined) return cachedBin;
-  // Try `which` first (respects PATH); fall back to common Homebrew/Linux paths
-  // so a stripped CI shell with a sparse PATH still works.
   const fromWhich = spawnSync('sh', ['-c', 'command -v tmux'], { encoding: 'utf8' });
   if (fromWhich.status === 0) {
     const out = fromWhich.stdout.trim();
@@ -46,12 +37,10 @@ export function findTmuxBinary(): string | null {
   return null;
 }
 
-/** True when tmux is installed somewhere on PATH. */
 export function isTmuxInstalled(): boolean {
   return findTmuxBinary() !== null;
 }
 
-/** Best-effort tmux version string (e.g. "tmux 3.6a"). Returns null when not installed or version probe fails. */
 export function getTmuxVersion(): string | null {
   if (cachedVersion !== undefined) return cachedVersion;
   const bin = findTmuxBinary();
@@ -65,7 +54,6 @@ export function getTmuxVersion(): string | null {
   return cachedVersion;
 }
 
-/** True for a `tmux -V` string at or above the supported 3.2 floor. */
 export function isTmuxVersionSupported(version: string | null): boolean {
   if (!version) return false;
   const match = /^tmux\s+(\d+)\.(\d+)/.exec(version.trim());
@@ -75,10 +63,6 @@ export function isTmuxVersionSupported(version: string | null): boolean {
   return major > 3 || (major === 3 && minor >= 2);
 }
 
-/**
- * Throw a user-friendly error when tmux isn't installed. Command handlers call
- * this first thing so the error message is the same shape every time.
- */
 export function assertTmuxAvailable(): string {
   const bin = findTmuxBinary();
   if (!bin) {
@@ -120,30 +104,13 @@ export class TmuxCommandError extends Error {
 }
 
 interface RunTmuxOptions {
-  /** Socket path (default: shared server socket). */
   socket?: string;
-  /** Args after `tmux -S <socket>` — e.g. `['has-session', '-t', 'foo']`. */
   args: string[];
-  /** Throw on nonzero exit. Defaults true. */
   throwOnError?: boolean;
-  /** Child process env. */
   env?: NodeJS.ProcessEnv;
-  /**
-   * Kill the child and reject after this many ms. Unset = wait forever (the
-   * historical behavior). A wedged tmux server would otherwise hang the caller
-   * indefinitely — the active-session scan passes a bound so a bad server can't
-   * freeze `agents sessions --active`.
-   */
   timeoutMs?: number;
 }
 
-/**
- * Run a tmux command and capture stdout/stderr. The socket arg is hoisted in
- * front of `args` so callers never have to remember the `-S` position.
- *
- * For interactive `attach`, use `attachTmux()` instead — this helper is for
- * scripted commands where you want output back as strings.
- */
 export async function runTmux(opts: RunTmuxOptions): Promise<{ stdout: string; stderr: string; code: number }> {
   const bin = assertTmuxAvailable();
   const fullArgs: string[] = [];
@@ -185,11 +152,6 @@ export async function runTmux(opts: RunTmuxOptions): Promise<{ stdout: string; s
   });
 }
 
-/**
- * Foreground attach. Replaces this process's stdio with tmux's so the user is
- * fully inside tmux. Returns the tmux exit code (which the caller should mirror
- * via process.exit so detach/Ctrl-D propagates cleanly).
- */
 export function attachTmux(opts: { socket: string; args: string[]; env?: NodeJS.ProcessEnv }): Promise<number> {
   const bin = assertTmuxAvailable();
   const fullArgs = ['-S', opts.socket, ...opts.args];

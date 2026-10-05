@@ -1,10 +1,3 @@
-/**
- * iTerm backend — drives iTerm2 via AppleScript (`osascript`).
- *
- * Tab: creates a tab in the current window (or a window when none is open).
- * Split: splits the current session — `split vertically` (side-by-side, a
- * vertical divider) for `right`, `split horizontally` (stacked) for `down`.
- */
 import * as fs from 'fs';
 import type { TerminalBackend, LaunchSpec, SplitDirection, EngineContext } from '../types.js';
 import { appleScriptStr } from '../quote.js';
@@ -20,7 +13,6 @@ function appExists(p: string): boolean {
   }
 }
 
-/** AppleScript that opens an iTerm tab (a window if none is open) running the command. */
 export function itermTabScript(cwd: string, command: string[]): string {
   const cmd = appleScriptStr(iLoginShell(loginExec(cwd, command)));
   return [
@@ -35,10 +27,8 @@ export function itermTabScript(cwd: string, command: string[]): string {
   ].join('\n');
 }
 
-/** AppleScript that splits the current iTerm session (a window if none is open). */
 export function itermSplitScript(cwd: string, command: string[], direction: SplitDirection): string {
   const cmd = appleScriptStr(iLoginShell(loginExec(cwd, command)));
-  // iTerm: "split vertically" = a vertical divider = panes side by side (right).
   const verb = direction === 'right' ? 'split vertically' : 'split horizontally';
   return [
     'tell application "iTerm2"',
