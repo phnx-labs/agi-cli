@@ -121,7 +121,7 @@ export function appendWatchdogEvents(
   events: WatchdogEvent[],
   opts: { logPath?: string; maxLines?: number } = {},
 ): void {
-  // Bounded context and file length prevent transcript leakage and unbounded cache growth.
+  // Bound retained transcript exposure and cache growth; tail content remains intentionally persisted.
   if (events.length === 0) return;
   const logPath = opts.logPath ?? WATCHDOG_LOG_PATH;
   const maxLines = opts.maxLines ?? WATCHDOG_LOG_MAX_LINES;

@@ -573,6 +573,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         skipJobNames: deliveryStore.completedJobs(id),
         onJobFired: (job, firedJob) => {
           emit('webhook.fired', { source, event: webhookEvent, deliveryId: id, jobName: job.name, runId: firedJob.runId });
+          // Routine-job completion survives a partial delivery so retries skip successful jobs.
           deliveryStore.markJob(id, job.name);
           fireOptions.onJobFired?.(job, firedJob);
         },
@@ -586,7 +587,6 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
           emit('webhook.matched', { source, event: webhookEvent, deliveryId: id, handlerName: handler.name });
           try {
             const result = await executeHandler(handler, webhook);
-            // Per-job completion survives a partial delivery so retries skip successful work only.
             deliveryStore.markJob(id, handler.name);
             firedHandlers.push(result);
           } catch (err) {
@@ -595,7 +595,7 @@ export function startWebhookServer(options: WebhookServerOptions): http.Server {
         }),
       );
 
-      // The delivery becomes complete only after every dispatch settles; failures use the post-ack path.
+      // Handler failures are reported after acknowledgement, then this delivery id becomes complete.
       deliveryStore.mark(id);
       for (const failure of handlerErrors) {
         emit('webhook.failed', { source, event: webhookEvent, deliveryId: id, handlerName: failure.handlerName, error: failure.error });
