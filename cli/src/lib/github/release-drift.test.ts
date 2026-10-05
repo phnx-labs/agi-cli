@@ -64,14 +64,21 @@ describe('release drift parts', () => {
     expect(releasedPackage({ ...manifest, private: true }, '1.22.121')).toBeNull();
   });
 
-  it('counts the merges after the tag, and says when the window cannot see them all', () => {
+  it('counts the merges into the default branch after the tag, and says when the window cannot see them all', () => {
     const tag = { latestTag: 'v1.22.121', latestTagAt: '2026-10-04T15:40:42Z', npm: null };
-    const merged = [{ mergedAt: '2026-10-04T22:00:00Z' }, { mergedAt: '2026-10-04T15:42:33Z' }, { mergedAt: '2026-10-04T15:08:06Z' }];
+    const merged = [
+      { mergedAt: '2026-10-04T22:00:00Z', baseRefName: 'main' },
+      { mergedAt: '2026-10-04T21:00:00Z', baseRefName: 'release/v1' },
+      { mergedAt: '2026-10-04T15:42:33Z', baseRefName: 'main' },
+      { mergedAt: '2026-10-04T15:08:06Z', baseRefName: 'main' },
+    ];
     const sinceMs = Date.parse('2026-09-28T00:00:00Z');
-    expect(withMergesSince(tag, merged, { sinceMs, truncated: false })).toMatchObject({ mergesSince: 2, mergesSinceComplete: true });
-    expect(withMergesSince(tag, merged, { sinceMs, truncated: true }).mergesSinceComplete).toBe(false);
-    expect(withMergesSince(tag, merged, { sinceMs: Date.parse('2026-10-05T00:00:00Z'), truncated: false }).mergesSinceComplete).toBe(false);
-    expect(withMergesSince(tag, null, { sinceMs, truncated: false })).toMatchObject({ mergesSince: 0, mergesSinceComplete: false });
+    const window = { sinceMs, truncated: false, base: 'main' };
+    expect(withMergesSince(tag, merged, window)).toMatchObject({ mergesSince: 2, mergesSinceComplete: true });
+    expect(withMergesSince(tag, merged, { ...window, truncated: true }).mergesSinceComplete).toBe(false);
+    expect(withMergesSince(tag, merged, { ...window, sinceMs: Date.parse('2026-10-05T00:00:00Z') }).mergesSinceComplete).toBe(false);
+    expect(withMergesSince(tag, merged, { ...window, base: null })).toMatchObject({ mergesSince: 3, mergesSinceComplete: false });
+    expect(withMergesSince(tag, null, window)).toMatchObject({ mergesSince: 0, mergesSinceComplete: false });
   });
 });
 
@@ -97,17 +104,22 @@ describe('readLatestTag', () => {
     expect(viewed).toHaveLength(2);
   });
 
-  it('caches every GitHub read for an hour through gh', async () => {
+  it('caches every GitHub read for an hour through gh, and reads every page of tags', async () => {
     const { gh, asked } = recordedGh(routes);
     await readLatestTag(REPO, gh, { view: async () => '1.22.120', cache: memoryCache(), nowMs });
     for (const args of asked) expect(args.slice(args.indexOf('--cache'), args.indexOf('--cache') + 2)).toEqual(['--cache', '1h']);
+    expect(asked[0]).toContain('--paginate');
   });
 
-  it('says why npm could not be read instead of reporting no version', async () => {
+  it('says why npm could not be read, and asks again next time instead of caching the miss', async () => {
     const { gh } = recordedGh(routes);
+    const cache = memoryCache();
     const timedOut = Object.assign(new Error('Command failed: npm view'), { killed: true, stderr: '' });
-    const read = await readLatestTag(REPO, gh, { view: async () => { throw timedOut; }, cache: memoryCache(), nowMs });
+    const read = await readLatestTag(REPO, gh, { view: async () => { throw timedOut; }, cache, nowMs });
     expect(read?.npm).toEqual({ name: '@phnx-labs/agents-cli', version: null, error: 'npm view timed out after 5 s' });
+    expect(cache.entries.size).toBe(0);
+    const again = await readLatestTag(REPO, gh, { view: async () => '1.22.120', cache, nowMs: nowMs + 1000 });
+    expect(again?.npm?.version).toBe('1.22.120');
   });
 
   it('is null for a repository with no version tag, and throws on a read that is not a missing file', async () => {

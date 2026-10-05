@@ -14,7 +14,8 @@
  */
 
 import { ghExec, type GhExec } from './pr-mergeable.js';
-import { FAILING_CONCLUSIONS, ghFailure } from './project-prs.js';
+import { FAILING_CONCLUSIONS, FAILING_STATES, ghFailure } from './project-prs.js';
+import { rollupForSha, type RollupItem } from './rest.js';
 
 /** The most excerpt lines one failing check carries. */
 export const EXCERPT_LIMIT = 12;
@@ -53,10 +54,18 @@ export interface RerunResult {
 }
 
 const TIMESTAMP = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z ?/;
-// CSI sequences (colour, cursor) as the runner writes them.
+// A job log is written by the code under test, a fork PR's included, and the
+// excerpt reaches a terminal and the menu. gh's own escape-sequence guard is off
+// for the log read, so every escape sequence goes here: CSI (colour, cursor),
+// OSC/DCS/APC/PM strings (title, clipboard writes, hyperlinks), other ESC pairs,
+// then any C0/C1 control character left (bare CR, BEL, the 8-bit CSI 0x9b).
 // eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+const ESCAPES = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[\]P^_][\s\S]*?(?:\x07|\x1b\\|$)|\x1b[@-Z\\-_]|\x9b[0-9;?]*[ -/]*[@-~]/g;
+// eslint-disable-next-line no-control-regex
+const CONTROLS = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/g;
 const ERRORISH = /error|fail|exit(?:ed|ing)? (?:with )?code|✗|×/i;
+/** Summary lines that name the error words while saying nothing failed: "0 failed", "errors: 0". */
+const ALL_CLEAR = /(?:^|\W)0 (?:failed|failures?|errors?)\b|\b(?:failed|failures?|errors?):? 0\b/i;
 /** Runner bookkeeping that carries "error"/"fail" words without being the failure. */
 const NOISE = /^(?:##\[(?:group|endgroup)\]|\[command\]|shell: |env:$)/;
 /** The runner's post-steps (checkout cleanup, credential removal) start here. */
@@ -64,7 +73,7 @@ const CLEANUP = /^Post job cleanup\.?$/;
 
 /** One raw log line as a person reads it: no timestamp, no colour, no runner annotation marker. */
 function cleanLine(raw: string): string {
-  return raw.replace(TIMESTAMP, '').replace(ANSI, '').replace(/^##\[(?:error|warning)\]/, '').trimEnd();
+  return raw.replace(TIMESTAMP, '').replace(ESCAPES, '').replace(CONTROLS, '').replace(/^##\[(?:error|warning)\]/, '').trimEnd();
 }
 
 /**
@@ -85,7 +94,7 @@ export function excerptFromLog(log: string): string[] {
   const usable = (i: number) => i >= 0 && i < lines.length && lines[i].trim() !== '' && !NOISE.test(lines[i]);
   const keep = new Set<number>();
   lines.forEach((line, i) => {
-    if (!usable(i) || !ERRORISH.test(line)) return;
+    if (!usable(i) || !ERRORISH.test(line) || ALL_CLEAR.test(line)) return;
     for (const j of [i - 1, i, i + 1]) if (usable(j)) keep.add(j);
   });
   const picked: string[] = [];
@@ -102,66 +111,50 @@ export function actionsIds(url: string | null): { runId: number | null; jobId: n
   return m ? { runId: Number(m[1]), jobId: Number(m[2]) } : { runId: null, jobId: null };
 }
 
-/** Parse newline-delimited JSON (gh `--jq` streams one object per line/page). */
-function ndjson(out: string): Array<Record<string, unknown>> {
-  return out.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
-}
-
-const text = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
-
-/** One job's log, over REST. gh refuses to print a payload with escape sequences unless told it may. */
+/** One job's log, over REST. gh refuses to print a payload with escape sequences unless told it may; {@link cleanLine} strips them. */
 async function readJobLog(repo: string, jobId: number, gh: GhExec): Promise<string> {
   return gh(['api', '--allow-escape-sequences', `repos/${repo}/actions/jobs/${jobId}/logs`]);
 }
 
+/** A failed log read in words a person can act on; gh's own message otherwise. */
+function logFailure(err: unknown): string {
+  const raw = `${String((err as { stderr?: unknown })?.stderr ?? '')} ${err instanceof Error ? err.message : String(err)}`;
+  if (/unknown flag: --allow-escape-sequences/.test(raw)) return 'This gh is too old to read job logs (it lacks --allow-escape-sequences); upgrade gh.';
+  if (/maxBuffer/i.test(raw)) return 'The job log is larger than 8 MB; open it on GitHub.';
+  if ((err as { killed?: boolean })?.killed) return 'The job log did not download within 30 s; open it on GitHub.';
+  return ghFailure(err);
+}
+
+/** A rollup item that makes the commit red, by the same rule as the ✗ glyph (`ciFromRollupItems`). */
+const isFailing = (item: RollupItem) => (item.state === undefined
+  ? FAILING_CONCLUSIONS.has(item.conclusion ?? '')
+  : FAILING_STATES.has(item.state));
+
 /**
- * Every failing check on `sha` with the error lines of its job log. Check runs
- * and legacy commit statuses are both read (a check run wins a name collision,
- * as in `rollupForSha`); only failing ones are kept. Logs are read concurrently.
- * A log that cannot be read (expired, still uploading, no access) empties that
- * check's excerpt and says why in `excerptError`; it never fails the report.
+ * Every failing check on `sha` with the error lines of its job log. The checks
+ * are the same REST rollup the ✗ glyph is computed from ({@link rollupForSha}:
+ * check runs and legacy statuses, a check run winning a name collision), so this
+ * names exactly the checks the glyph counted. Logs are read concurrently. A log
+ * that cannot be read (expired, still uploading, no access) empties that check's
+ * excerpt and says why in `excerptError`; it never fails the report.
  */
 export async function readCiFailure(repo: string, sha: string, gh: GhExec = ghExec): Promise<CiFailureReport> {
-  let runs: Array<Record<string, unknown>>;
-  let statuses: Array<Record<string, unknown>>;
+  let items: RollupItem[];
   try {
-    const [runsOut, statusOut] = await Promise.all([
-      gh(['api', `repos/${repo}/commits/${sha}/check-runs`, '--paginate', '--jq',
-        '.check_runs[] | {name, conclusion: (.conclusion // "" | ascii_upcase), url: .html_url}']),
-      gh(['api', `repos/${repo}/commits/${sha}/status`, '--jq',
-        '.statuses[] | {name: .context, state: (.state // "" | ascii_upcase), url: .target_url}']),
-    ]);
-    runs = ndjson(runsOut);
-    statuses = ndjson(statusOut);
+    items = await rollupForSha(repo, sha, gh);
   } catch (err) {
     return { repo, sha, checks: [], error: ghFailure(err) };
   }
-
-  const byName = new Map<string, Omit<FailingCheck, 'excerpt' | 'excerptError'>>();
-  for (const s of statuses) {
-    const state = String(s.state ?? '');
-    if (state !== 'FAILURE' && state !== 'ERROR') continue;
-    byName.set(String(s.name), { name: String(s.name), url: text(s.url), runId: null, jobId: null, conclusion: state });
-  }
-  for (const r of runs) {
-    const name = String(r.name);
-    const conclusion = String(r.conclusion ?? '');
-    if (!FAILING_CONCLUSIONS.has(conclusion)) {
-      byName.delete(name);
-      continue;
-    }
-    const url = text(r.url);
-    byName.set(name, { name, url, ...actionsIds(url), conclusion });
-  }
-
-  const checks = await Promise.all([...byName.values()].map(async (check): Promise<FailingCheck> => {
+  const checks = await Promise.all(items.filter(isFailing).map(async (item): Promise<FailingCheck> => {
+    const url = item.link || null;
+    const check = { name: item.name, url, ...actionsIds(url), conclusion: (item.conclusion ?? item.state ?? '') };
     if (check.jobId === null) {
       return { ...check, excerpt: [], excerptError: 'Not a GitHub Actions job: open the check for its log.' };
     }
     try {
       return { ...check, excerpt: excerptFromLog(await readJobLog(repo, check.jobId, gh)), excerptError: null };
     } catch (err) {
-      return { ...check, excerpt: [], excerptError: ghFailure(err) };
+      return { ...check, excerpt: [], excerptError: logFailure(err) };
     }
   }));
   return { repo, sha, checks, error: null };

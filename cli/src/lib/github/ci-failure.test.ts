@@ -5,8 +5,9 @@ import { actionsIds, excerptFromLog, EXCERPT_LIMIT, readCiFailure, rerunFailedJo
 
 const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdata', name), 'utf-8');
 
-// Recorded from phnx-labs/agi-cli main at 4b709a7 (2026-10-04): every check green
-// except `windows`, whose job log is actions-job-windows.txt.
+// Recorded from phnx-labs/agi-cli main at 4b709a7 (2026-10-04), after a re-run of
+// the failed jobs: every check green except `windows`, whose job log is
+// actions-job-windows.txt. The check runs and status are in rollupForSha's shape.
 const SHA = '4b709a7e5c7026f4dcc56336235180386a992b03';
 const REPO = 'phnx-labs/agi-cli';
 const WINDOWS_EXCERPT = [
@@ -46,6 +47,21 @@ describe('excerptFromLog', () => {
     expect(excerpt.join('\n')).not.toMatch(/includeif|ErrorActionPreference|\x1b|^\d{4}-\d\d-\d\dT/m);
   });
 
+  it('strips every escape sequence and control character a job could print', () => {
+    const hostile = [
+      '2026-10-04T23:18:06.0000000Z \x1b]52;c;ZWNobyBwd25lZA==\x07Error: build failed',
+      '2026-10-04T23:18:06.0000000Z \x1b]0;fake title\x1b\\\x9b2JError: \x1b[31mred\x1b[0m\rexit code 2\x07',
+      '2026-10-04T23:18:06.0000000Z \x1bPq#0;2;0;0;0\x1b\\FAIL tests/x.test.ts',
+    ].join('\n');
+    const excerpt = excerptFromLog(hostile);
+    expect(excerpt).toEqual(['Error: build failed', 'Error: redexit code 2', 'FAIL tests/x.test.ts']);
+    expect(excerpt.join('')).not.toMatch(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/);
+  });
+
+  it('does not take an all-clear summary for an error', () => {
+    expect(excerptFromLog('Tests  0 failed | 12 passed\nerrors: 0\nall good')).toEqual([]);
+  });
+
   it('caps a long run of errors at the first seven and the last four lines', () => {
     const log = Array.from({ length: 30 }, (_, i) => `2026-10-04T23:18:06.0000000Z FAIL test ${i}`).join('\n');
     const excerpt = excerptFromLog(log);
@@ -58,8 +74,8 @@ describe('excerptFromLog', () => {
 
 describe('actionsIds', () => {
   it('reads the run and job from an Actions job page and nothing from another check page', () => {
-    expect(actionsIds('https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111555723085'))
-      .toEqual({ runId: 37243157132, jobId: 111555723085 });
+    expect(actionsIds('https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111568802006'))
+      .toEqual({ runId: 37243157132, jobId: 111568802006 });
     expect(actionsIds('https://ci.example.com/build/42')).toEqual({ runId: null, jobId: null });
     expect(actionsIds(null)).toEqual({ runId: null, jobId: null });
   });
@@ -69,7 +85,7 @@ describe('readCiFailure', () => {
   const routes = {
     [`repos/${REPO}/commits/${SHA}/check-runs`]: testdata('check-runs-main-windows-red.ndjson'),
     [`repos/${REPO}/commits/${SHA}/status`]: testdata('status-main-windows-red.ndjson'),
-    [`repos/${REPO}/actions/jobs/111555723085/logs`]: testdata('actions-job-windows.txt'),
+    [`repos/${REPO}/actions/jobs/111568802006/logs`]: testdata('actions-job-windows.txt'),
   };
 
   it('names only the failing check, with its run, job and the error lines of its log', async () => {
@@ -80,26 +96,34 @@ describe('readCiFailure', () => {
       error: null,
       checks: [{
         name: 'windows',
-        url: 'https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111555723085',
+        url: 'https://github.com/phnx-labs/agi-cli/actions/runs/37243157132/job/111568802006',
         runId: 37243157132,
-        jobId: 111555723085,
+        jobId: 111568802006,
         conclusion: 'FAILURE',
         excerpt: WINDOWS_EXCERPT,
         excerptError: null,
       }],
     });
     // gh refuses to print a log carrying escape sequences unless allowed to.
-    expect(asked.find((a) => a.includes(`repos/${REPO}/actions/jobs/111555723085/logs`))).toContain('--allow-escape-sequences');
+    expect(asked.find((a) => a.includes(`repos/${REPO}/actions/jobs/111568802006/logs`))).toContain('--allow-escape-sequences');
   });
 
   it('reports an unreadable log on that check instead of failing the report', async () => {
     const { gh } = recordedGh({
       ...routes,
-      [`repos/${REPO}/actions/jobs/111555723085/logs`]: ghError('gh: Not Found (HTTP 404)\n'),
+      [`repos/${REPO}/actions/jobs/111568802006/logs`]: ghError('gh: Not Found (HTTP 404)\n'),
     });
     const report = await readCiFailure(REPO, SHA, gh);
     expect(report.error).toBeNull();
     expect(report.checks[0]).toMatchObject({ name: 'windows', excerpt: [], excerptError: 'Not Found (HTTP 404)' });
+  });
+
+  it('says in plain words when gh is too old to read a log', async () => {
+    const { gh } = recordedGh({
+      ...routes,
+      [`repos/${REPO}/actions/jobs/111568802006/logs`]: ghError('unknown flag: --allow-escape-sequences\n\nUsage:  gh api <endpoint> [flags]\n'),
+    });
+    expect((await readCiFailure(REPO, SHA, gh)).checks[0].excerptError).toMatch(/too old to read job logs/);
   });
 
   it('says the checks could not be read rather than reporting none failing', async () => {
