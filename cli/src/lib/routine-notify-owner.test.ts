@@ -15,9 +15,6 @@ import {
   __resetOwnerFailureDedup,
 } from './routine-notify-owner.js';
 
-// Real capturing providers registered in the real REGISTRY the delivery path
-// resolves through — no module mocking. `ok` provider accepts; `fail` refuses,
-// exercising the fallback walk.
 const sent: Array<{ provider: string; text: string; opts: SendOptions }> = [];
 function makeProvider(name: string, ok: boolean): ChannelProvider {
   return {
@@ -81,7 +78,6 @@ describe('routineFinishOwnerText — failures only', () => {
     expect(routineFinishOwnerText(meta({ status: 'completed', exitCode: 0 }), HOST)).toBeNull();
     expect(routineFinishOwnerText(meta({ status: 'running' }), HOST)).toBeNull();
     expect(routineFinishOwnerText(meta({ status: 'missed' }), HOST)).toBeNull();
-    // A green COMMAND routine is silent too (no failure).
     expect(
       routineFinishOwnerText(meta({ agent: undefined, command: 'git pull', status: 'completed', exitCode: 0 }), HOST),
     ).toBeNull();
@@ -138,7 +134,6 @@ describe('ownerFailureDeliveryPlan — primary + fallbacks, no Telegram', () => 
         `    - id: buzz\n      transport: x\n      to: 'buzz1'\n` +
         `    - id: owntest-ok\n      transport: rush\n      to: '+1555'\n`,
     );
-    // buzz is mapped to openclaw-telegram via transports — also excluded.
     const plan = ownerFailureDeliveryPlan({ notify: { transports: { buzz: 'openclaw-telegram' } } } as Meta);
     expect(plan).toEqual([{ channel: 'owntest-ok', to: '+1555' }]);
   });
@@ -154,7 +149,6 @@ describe('ownerFailureDeliveryPlan — primary + fallbacks, no Telegram', () => 
   });
 
   it('excludes an intrusive primary when policy points normal at a voice channel', () => {
-    // Primary was previously push()ed without the intrusive check.
     writeHumans(
       `  channels:\n` +
         `    - id: call\n      transport: twilio\n      to: '+1911'\n      intrusive: true\n` +
@@ -166,7 +160,6 @@ describe('ownerFailureDeliveryPlan — primary + fallbacks, no Telegram', () => 
   });
 
   it('excludes a neutral id whose humans.yaml transport field is telegram', () => {
-    // isTelegramChannel previously ignored HumanChannel.transport.
     writeHumans(
       `  channels:\n` +
         `    - id: buzz\n      transport: telegram\n      to: 'tg-chat'\n` +
@@ -224,7 +217,6 @@ describe('deliverOwnerFailure — real registry, fallback on primary failure', (
     const r = await deliverOwnerFailure('boom', {} as Meta);
     expect(r.delivered).toBe(true);
     expect(r.channel).toBe('owntest-ok2');
-    // Both were attempted: the primary refused, the fallback accepted.
     expect(sent.map((s) => s.provider)).toEqual(['owntest-fail', 'owntest-ok2']);
     expect(r.attempts).toEqual([
       { channel: 'owntest-fail', ok: false, error: 'owntest-fail refused' },
@@ -279,8 +271,6 @@ describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent',
   });
 
   it('returns the delivery result so the daemon can log a total failure', async () => {
-    // A failed run whose only channel refuses: delivered=false but attempts non-empty
-    // — the exact shape the daemon WARN guards on.
     fs.writeFileSync(
       humansFile,
       `version: 1\nowner:\n  channels:\n    - id: owntest-fail\n      transport: rush\n      to: '+1555'\n  policy:\n    normal: [owntest-fail]\n`,
@@ -291,9 +281,6 @@ describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent',
   });
 
   it('retries the same job+runId after a total delivery failure (claim released)', async () => {
-    // Review: claim-before-send without release suppressed retries forever when
-    // every channel refused. First attempt refuses; second (with a working
-    // channel) must still deliver for the same runId.
     fs.writeFileSync(
       humansFile,
       `version: 1\nowner:\n  channels:\n    - id: owntest-fail\n      transport: rush\n      to: '+1555'\n  policy:\n    normal: [owntest-fail]\n`,
@@ -315,7 +302,6 @@ describe('notifyOwnerRoutineFinish — dedup per job+runId, green stays silent',
     expect(sent).toHaveLength(2);
     expect(sent[1].provider).toBe('owntest-ok');
 
-    // Third call still dedups after a successful delivery.
     const third = await notifyOwnerRoutineFinish(
       meta({ runId: 'run-retry', status: 'failed', exitCode: 1, errorMessage: 'auth_failed: 401' }),
     );

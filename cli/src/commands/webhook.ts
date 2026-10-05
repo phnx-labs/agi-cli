@@ -1,10 +1,3 @@
-/**
- * `agents webhooks` — localhost receiver for signed public webhook ingress.
- *
- * The receiver intentionally binds localhost by default. Public exposure is a
- * separate `agents funnel up <host>` step so the HTTP process can be tested and
- * rotated without changing the Tailscale Funnel config.
- */
 import type { Command } from 'commander';
 import type { Server } from 'http';
 import type { Socket } from 'net';
@@ -26,12 +19,6 @@ function positiveInt(value: string | undefined, fallback: number): number {
 async function readWebhookSecrets(bundleName: string): Promise<WebhookSecrets> {
   const { env } = await readAndResolveBundleEnv(bundleName, {
     caller: 'webhooks serve',
-    // `webhooks serve` is a long-running background server started to receive
-    // signed webhooks, not a human at a Touch ID sheet — so the read is always
-    // `agentOnly` (SEC-13: never pop biometry on its own). A `never`/no-ACL or
-    // broker-held bundle resolves silently; a locked bundle THROWS the actionable
-    // "unlock <name>" message, which propagates and fails the start LOUD rather
-    // than popping an unanswerable prompt.
     agentOnly: true,
   });
   const secrets: WebhookSecrets = {};
@@ -46,7 +33,6 @@ async function readWebhookSecrets(bundleName: string): Promise<WebhookSecrets> {
   return secrets;
 }
 
-/** Stop accepting requests and destroy persistent connections so shutdown is bounded. */
 export async function closeWebhookServer(server: Server, sockets: Set<Socket>): Promise<void> {
   const closing = closeServerBounded(server);
   for (const socket of sockets) socket.destroy();
@@ -83,14 +69,9 @@ export function registerWebhooksCommand(program: Command): void {
           port,
           secrets,
           rateLimitPerMinute: rateLimit,
-          // Durable delivery dedup: replays survive a receiver restart (an
-          // in-memory store would forget every seen delivery on restart).
           deliveryStore: createFileDeliveryStore(
             path.join(getRuntimeStateDir(), 'webhook', 'deliveries.json'),
           ),
-          // Logged at MATCH time, before dispatch — a `run.command` handler can
-          // block on a shelled-out agent run for minutes, and that must never
-          // delay the log that says a delivery fired (RUSH-2722).
           onMatch: (webhook, matchedJobNames, matchedHandlerNames) => {
             const parts: string[] = [];
             if (matchedJobNames.length) parts.push(`routines ${matchedJobNames.join(', ')}`);
@@ -100,8 +81,6 @@ export function registerWebhooksCommand(program: Command): void {
               (parts.length ? `fired ${parts.join('; ')}` : 'no match'),
             );
           },
-          // The delivery is acked 202 before dispatch (RUSH-2548), so a dispatch
-          // failure has no HTTP status left to ride — print it instead.
           onDeliveryError: (webhook, err) => {
             console.error(chalk.red(
               `${new Date().toISOString()} ${webhook.source}:${webhook.event} dispatch failed after ack: ${err.message}`,

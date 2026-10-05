@@ -1,17 +1,3 @@
-/**
- * Tests for the Claude-invalid plugin-manifest auto-repair
- * (`repairableManifestFields` / `repairPluginManifestFile` in
- * plugin-marketplace.ts).
- *
- * The real bug these guard: a plugin.json with a bare-name `skills`/`commands`
- * field (e.g. `"skills": ["loop"]`) makes Claude Code silently reject the ENTIRE
- * plugin — no commands or skills load. The repair strips those fields (Claude
- * auto-discovers from the dirs). The load-bearing edges:
- *   - bare names are detected; "./"-relative entries are left alone
- *   - the `agents` field is NEVER touched (agents-cli overloads it as AgentId[])
- *   - the write-back preserves the rest of the manifest and is idempotent
- *   - dryRun reports without writing
- */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -58,8 +44,6 @@ describe('repairableManifestFields', () => {
   });
 
   it('never touches the agents field even when bare (agents-cli AgentId[])', () => {
-    // ["claude","codex"] is agents-cli's legitimate targeting list, NOT a Claude
-    // path field. Stripping it would destroy real metadata.
     expect(repairableManifestFields({ name: 'code', agents: ['claude', 'codex'] })).toEqual([]);
   });
 
@@ -88,7 +72,7 @@ describe('repairPluginManifestFile', () => {
     write({ name: 'code', skills: ['loop'] });
     const dropped = repairPluginManifestFile(manifestPath, { dryRun: true });
     expect(dropped).toEqual(['skills']);
-    expect(read().skills).toEqual(['loop']); // unchanged on disk
+    expect(read().skills).toEqual(['loop']);
   });
 
   it('does not rewrite a clean manifest', () => {

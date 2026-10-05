@@ -4,14 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// `agents import <agent> --version <v>` was unreachable from the day it was added.
-// The program declares `.version(VERSION)`, which claims `-V, --version` globally and
-// wins over a same-named subcommand option — so the command printed the CLI's own
-// version and exited without importing. The "could not determine version" error even
-// advised passing the flag that could not work.
-//
-// Renamed to `--as`. These tests assert the flag actually reaches the command, which
-// is the part that silently regressed before.
 describe.skipIf(process.platform === 'win32')('agents import --as', () => {
   let home: string;
 
@@ -58,25 +50,16 @@ describe.skipIf(process.platform === 'win32')('agents import --as', () => {
 
   it('reaches the command instead of printing the CLI version', () => {
     const r = run('import', 'codex', '--isolated', '--as', '9.9.9', '-y');
-    // The regression: this used to be the CLI's own version and nothing else.
     expect(r.out).not.toMatch(/^\d+\.\d+\.\d+\s*$/);
     expect(fs.existsSync(path.join(versionsRoot(), '9.9.9'))).toBe(true);
   }, 180_000);
 
   it('imports under the given label rather than the detected one', () => {
     expect(run('import', 'codex', '--isolated', '--as', '9.9.9', '-y').status).toBe(0);
-    // Local package.json says 0.144.6; --as wins.
     expect(fs.readdirSync(versionsRoot())).toEqual(['9.9.9']);
   }, 180_000);
 
   it('re-seeds an EXISTING isolated copy at a different version than the local one', () => {
-    // The case this unblocks: a sandbox on 0.146.0 while the local install is 0.144.6.
-    //
-    // Doubles as the regression test for a Bun quirk: `fs.cpSync` drops its default
-    // `force: true` when a `filter` is supplied, so the seed silently left existing
-    // files alone. It only shows up here because this test spawns the CLI under bun
-    // (and `dist/bin/agents` is bun-compiled) — vitest itself runs on node, where the
-    // default holds and a unit test would pass either way.
     const target = path.join(versionsRoot(), '0.146.0');
     fs.mkdirSync(path.join(target, 'node_modules', '.bin'), { recursive: true });
     fs.mkdirSync(path.join(target, 'home', '.codex'), { recursive: true });
@@ -88,12 +71,9 @@ describe.skipIf(process.platform === 'win32')('agents import --as', () => {
 
     expect(run('import', 'codex', '--isolated', '--as', '0.146.0', '-y').status).toBe(0);
 
-    // The existing sandbox picked up the local settings...
     expect(fs.readFileSync(path.join(target, 'home', '.codex', 'config.toml'), 'utf-8'))
       .toContain('my-local-setting');
-    // ...no second copy was created at the local version...
     expect(fs.readdirSync(versionsRoot()).sort()).toEqual(['0.146.0']);
-    // ...and the real config is still a real directory, untouched.
     expect(fs.lstatSync(realConfig()).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(path.join(realConfig(), 'config.toml'), 'utf-8')).toContain('my-local-setting');
   }, 180_000);

@@ -4,11 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// The guarantee: once an agent is installed only as isolated copies, nothing the
-// framework does can adopt it. Previously `--isolated` was defined by a list of
-// things it doesn't do, which had to be re-checked at every new call site — and
-// leaked three times that way. Protection is now derived from the `.isolated`
-// markers on disk and enforced inside the primitives themselves.
 describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
   let home: string;
   const V = '9.9.4';
@@ -46,7 +41,6 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
     }
   }
 
-  /** Nothing that can be hijacked has moved. */
   function assertNothingAdopted() {
     expect(fs.readlinkSync(launcher())).toBe('../lib/node_modules/@openai/codex/bin/codex.js');
     expect(fs.existsSync(realConfig())).toBe(false);
@@ -75,7 +69,6 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
     const r = run('add', 'codex@9.9.9');
     expect(r.out).toContain('installed only as isolated copies');
     expect(r.out).toContain('--isolated');
-    // Refused up front: no new version dir was created.
     expect(fs.existsSync(versionDir('codex', '9.9.9'))).toBe(false);
     assertNothingAdopted();
   }, 180_000);
@@ -106,7 +99,6 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
   it('protection is PER-AGENT — an isolated codex constrains nothing about claude', () => {
     plant('codex', V, 'codex');
     plant('claude', '1.2.3', 'claude', { isolated: false });
-    // claude has a normal install, so it is not protected: setting its default works.
     const r = run('use', 'claude@1.2.3');
     expect(r.status).toBe(0);
     expect(r.out).not.toContain('installed only as isolated copies');
@@ -115,26 +107,18 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
   it('an agent with any NORMAL version is not protected', () => {
     plant('codex', V, 'codex');
     plant('codex', '9.9.5', 'codex', { isolated: false });
-    // Mixed installs: codex already has an adopting install, so there is no
-    // boundary left to defend and `use` behaves normally.
     const r = run('use', 'codex@9.9.5');
     expect(r.out).not.toContain('installed only as isolated copies');
   }, 180_000);
 
   it("setup's own hand-rolled adoption is closed too — and scaffolding can't disarm the check", () => {
     plant('codex', V, 'codex');
-    // The real unmanaged config is still there: isolated installs never touch it,
-    // so this is the ordinary state, and it is what setup offers to adopt.
     fs.mkdirSync(realConfig(), { recursive: true });
     fs.writeFileSync(path.join(realConfig(), 'config.toml'), 'model = "mine"\n');
 
-    // setup adopts inline (rename + symlink) without calling switchConfigSymlink, and
-    // its FIRST action creates <version>/home — which, if bare dirs counted as
-    // non-isolated installs, would flip protection off before any gate is reached.
     const r = run('setup', '--force');
     expect(r.out).not.toContain('is now managed');
 
-    // The real config is still a real directory holding the user's content.
     expect(fs.lstatSync(realConfig()).isSymbolicLink()).toBe(false);
     expect(fs.readFileSync(path.join(realConfig(), 'config.toml'), 'utf-8')).toContain('mine');
     expect(fs.readlinkSync(launcher())).toBe('../lib/node_modules/@openai/codex/bin/codex.js');
@@ -145,9 +129,6 @@ describe.skipIf(process.platform === 'win32')('isolation boundary', () => {
     expect(run('import', 'codex').status).not.toBe(0);
 
     expect(run('remove', `codex@${V}`, '--isolated').status).toBe(0);
-    // No isolated copies left => not protected => the refusal no longer fires.
-    // (import still fails here for unrelated reasons — no package to adopt — but
-    // it must no longer be the BOUNDARY that stops it.)
     expect(run('import', 'codex').out).not.toContain('installed only as isolated copies');
   }, 180_000);
 });

@@ -16,13 +16,12 @@ function makeTempDir(): string {
 
 afterEach(() => {
   for (const dir of tempDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ok */ }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {  }
   }
   tempDirs.length = 0;
   _resetForTest();
 });
 
-/** Point events.ts at a temp global log and return {eventsPath, activityRoot}. */
 function setup(): { activityRoot: string } {
   const dir = makeTempDir();
   _resetForTest(path.join(dir, 'events.jsonl'));
@@ -34,7 +33,6 @@ function setup(): { activityRoot: string } {
 describe('readUnifiedEvents', () => {
   it('merges operational and agent-semantic events into one newest-first stream', () => {
     const { activityRoot } = setup();
-    // Activity event 5s in the past; the ops event is stamped ~now by emit().
     appendActivityEvent(
       { ts: new Date(Date.now() - 5000).toISOString(), event: 'pr.opened', sessionId: 's1', mailboxId: 's1', host: 'zion', runtime: 'headless', agent: 'claude', detail: 'gh pr create', url: 'https://x/pull/1' },
       activityRoot,
@@ -45,16 +43,13 @@ describe('readUnifiedEvents', () => {
     const kinds = events.map((e) => e.event);
     expect(kinds).toContain('secrets.get');
     expect(kinds).toContain('pr.opened');
-    // Newest-first: the just-emitted ops event leads the older activity event.
     expect(events[0].event).toBe('secrets.get');
-    // Timestamps are monotonically non-increasing.
     const ts = events.map((e) => Date.parse(e.ts));
     expect(ts).toEqual([...ts].sort((a, b) => b - a));
   });
 
   it('filters secrets events by bundle (the ops audit path)', () => {
     setup();
-    // secrets.get is an operational event; it carries `bundle` in its payload.
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
     const share = readUnifiedEvents({ bundle: 'share', includeActivity: false, limit: 50 });
@@ -74,10 +69,6 @@ describe('readUnifiedEvents', () => {
 
   it('finds a matching-bundle record older than the newest `limit` window (no data loss)', () => {
     setup();
-    // `share` is the OLDEST read; two NEWER `prod` reads follow. A post-filter
-    // applied AFTER query()'s limit cutoff would let the two `prod` records exhaust
-    // limit:2 and silently drop `share` (the bug). Filtering bundle INSIDE the scan
-    // must still surface `share`.
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'share' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
     emit('secrets.get', { module: 'secrets', command: 'secrets get', bundle: 'prod' });
@@ -122,9 +113,6 @@ describe('readUnifiedEvents', () => {
   });
 
   it('sessionId filters BOTH the operational and activity halves — the scoped read enrichCachedSessionMeta relies on', () => {
-    // browser.navigate/computer.action land in the operational log via emit();
-    // this filter is what lets db.ts read "did session X touch browser/computer"
-    // without re-scanning that session's whole transcript.
     const { activityRoot } = setup();
     emit('browser.navigate', { sessionId: 's-target', profile: 'default', url: 'https://x' });
     emit('browser.navigate', { sessionId: 's-other', profile: 'default', url: 'https://y' });
@@ -171,9 +159,6 @@ describe('readUnifiedEvents', () => {
   });
 
   it('applies event-type filter BEFORE limit so a rare match survives routine churn (RUSH-2093)', () => {
-    // Mirror the activity.ts contract: without pushing eventTypes into the
-    // reader, limit:5 takes the five newest file.edited rows and the later
-    // matches() filter drops them all — silently missing the older pr.opened.
     const { activityRoot } = setup();
     appendActivityEvent(
       {
@@ -202,12 +187,10 @@ describe('readUnifiedEvents', () => {
         activityRoot,
       );
     }
-    // Post-filter on a capped unfiltered read would miss the PR.
     expect(
       readUnifiedEvents({ activityRoot, limit: 5 })
         .filter((e) => e.event === 'pr.opened'),
     ).toHaveLength(0);
-    // Filter-before-limit surfaces it.
     const hits = readUnifiedEvents({
       activityRoot,
       eventTypes: ['pr.opened'],

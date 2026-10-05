@@ -47,7 +47,7 @@ describe('routineKind', () => {
 
 describe('formatDuration', () => {
   it('renders seconds / minutes / hours in human form', () => {
-    expect(formatDuration(4500)).toBe('5s'); // rounds
+    expect(formatDuration(4500)).toBe('5s');
     expect(formatDuration(45_000)).toBe('45s');
     expect(formatDuration(80_000)).toBe('1m 20s');
     expect(formatDuration(120_000)).toBe('2m');
@@ -98,11 +98,6 @@ describe('routineStartNotification — threshold', () => {
   });
 });
 
-// RUSH-2030: the daemon fires the START ping unconditionally, so a pre-spawn
-// failure (executeJobDetached throws before spawning) must emit a matching
-// failure banner from the daemon catch block — otherwise the user is left with
-// an orphaned "Routine started" and no finish, breaking "exactly one start +
-// one finish". This is the builder the catch path calls.
 describe('routineStartFailedNotification — closes the orphaned-start gap', () => {
   it('emits a failure banner carrying the error reason and the runs-folder action', () => {
     const n = routineStartFailedNotification(agentConfig(), 'prepareJobHome: ENOSPC');
@@ -166,8 +161,6 @@ describe('routineFinishNotification — threshold + content', () => {
     expect(n.action).toBe('routines:list');
   });
 
-  // Anti-spam threshold: a green command routine (housekeeping) is suppressed,
-  // but a FAILED command routine still notifies.
   it('suppresses a successful command routine but notifies on command failure', () => {
     const okCmd = meta({ agent: undefined, command: 'git pull', status: 'completed', exitCode: 0 });
     expect(routineFinishNotification(okCmd, {})).toBeNull();
@@ -186,10 +179,6 @@ describe('routineAgent — the notification avatar', () => {
   });
 
   it('shows the Claude avatar for a workflow routine (the harness workflows run on)', () => {
-    // A workflow routine has no `agent` field (routines.ts JobConfig.agent is
-    // omitted for workflows, and validation rejects setting both). It runs via
-    // `agents run <workflow>`, which delegates to claude — so both the start and
-    // finish banners carry the Claude mark (runner.ts effectiveAgent).
     const cfg = agentConfig({ agent: undefined, workflow: 'deploy' });
     expect(routineAgent(cfg)).toBe('claude');
     expect(routineStartNotification(cfg)!.agent).toBe('claude');
@@ -199,8 +188,6 @@ describe('routineAgent — the notification avatar', () => {
   });
 
   it('leaves a command routine without an agent', () => {
-    // Deterministic housekeeping runs no harness, so its failure banner shows
-    // the agents-cli icon alone rather than an avatar for an agent that never ran.
     const cmd = meta({ agent: undefined, command: 'git pull', status: 'failed', exitCode: 1 });
     expect(routineAgent(cmd)).toBeUndefined();
     expect(routineFinishNotification(cmd, {})!.agent).toBeUndefined();

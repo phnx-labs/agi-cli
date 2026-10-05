@@ -1,11 +1,3 @@
-/**
- * Rules management commands for controlling agent behavior via persistent instructions.
- *
- * Implements `agents rules` -- list, add, view, and remove markdown rule files
- * (AGENTS.md, CLAUDE.md, .cursorrules, etc.) that guide agent behavior across
- * sessions. Central storage lives in ~/.agents/rules/ and rules are synced
- * to individual version homes.
- */
 import type { Command } from 'commander';
 import { withAliases } from '../lib/verbs.js';
 import chalk from 'chalk';
@@ -60,7 +52,6 @@ import {
   resolveListFilterOrExit,
 } from './utils.js';
 
-/** Register the `agents rules` command tree (list, add, view, remove). */
 export function registerRulesCommands(program: Command): void {
   const rulesCmd = program
     .command('rules')
@@ -237,7 +228,6 @@ Project rules & @-imports:
           const hasUser = userInstr?.exists;
           const hasProject = projectInstr?.exists;
 
-          // Skip agents with nothing to show
           if (!hasUser && !hasProject) continue;
 
           console.log(`  ${chalk.bold(agentLabel(aid))}:`);
@@ -548,8 +538,6 @@ Examples:
 `)
     .action((agentArg: string | undefined) => {
       if (!agentArg) {
-        // Only list agents that actually have a rules file installed — avoids
-        // suggesting agents the user hasn't touched.
         const candidates = MANAGED_AGENT_IDS.filter((id) => instructionsExists(id));
         requireDestructiveArg({
           argName: 'agent',
@@ -640,7 +628,6 @@ Examples:
           process.exit(1);
         }
 
-        // Discover available presets across layers (highest-priority defines, lowers union in).
         const layers = discoverRulesLayers();
         const presetSet = new Set<string>();
         for (const layer of layers) {
@@ -649,7 +636,7 @@ Examples:
           try {
             const parsed = yaml.parse(fs.readFileSync(yamlPath, 'utf-8')) as { presets?: Record<string, unknown> } | null;
             for (const name of Object.keys(parsed?.presets || {})) presetSet.add(name);
-          } catch { /* malformed yaml — skip */ }
+          } catch {  }
         }
         const presets = Array.from(presetSet).sort();
         if (presets.length === 0) {

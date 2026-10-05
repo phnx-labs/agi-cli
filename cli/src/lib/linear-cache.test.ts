@@ -12,10 +12,6 @@ import {
   writeCached,
 } from './linear-cache.js';
 
-// getCacheDir() resolves HOME once at module load, so swapping process.env.HOME
-// here would read and WRITE the developer's real cache. Point the dedicated
-// AGENTS_LINEAR_CACHE_PATH seam at a temp file instead. Real fs, real JSON, no
-// mocking.
 let home: string;
 let cacheFile: string;
 const T0 = new Date(2026, 7, 3, 12, 0, 0).getTime();
@@ -44,8 +40,6 @@ describe('linear cache', () => {
   });
 
   it('KEEPS serving past the TTL, flagged stale, rather than vanishing', () => {
-    // The whole point: a card that loses its Linear line on one timeout is the
-    // defect. Stale-and-labelled beats absent.
     writeCached('p1', { progress: 0.88 }, T0);
     const hit = readCached<{ progress: number }>('p1', T0 + LINEAR_CACHE_TTL_MS + 1);
     expect(hit?.value).toEqual({ progress: 0.88 });
@@ -70,18 +64,15 @@ describe('linear cache', () => {
     noteRateLimited(undefined, T0);
     expect(isRateLimited(T0 + LINEAR_CACHE_TTL_MS - 1)).toBe(true);
     expect(isRateLimited(T0 + LINEAR_CACHE_TTL_MS + 1)).toBe(false);
-    // A reset already in the past is not usable either.
     noteRateLimited(T0 - 5, T0);
     expect(isRateLimited(T0 + LINEAR_CACHE_TTL_MS - 1)).toBe(true);
   });
 
   it('parses a usable 429 reset header, and rejects the rest', () => {
-    // Linear sends epoch milliseconds on x-ratelimit-requests-reset.
     expect(parseRateLimitReset(String(T0 + 30 * 60_000), T0)).toBe(T0 + 30 * 60_000);
     expect(parseRateLimitReset(null, T0)).toBeUndefined();
     expect(parseRateLimitReset('soon', T0)).toBeUndefined();
     expect(parseRateLimitReset('', T0)).toBeUndefined();
-    // Already elapsed is not a future window.
     expect(parseRateLimitReset(String(T0 - 1), T0)).toBeUndefined();
   });
 
@@ -91,7 +82,6 @@ describe('linear cache', () => {
     invalidateCached('p1');
     expect(readCached('p1', T0)).toBeUndefined();
     expect(readCached<string>('p2', T0)?.value).toBe('two');
-    // Invalidating something absent is a no-op, not an error.
     expect(() => invalidateCached('nope')).not.toThrow();
   });
 
@@ -100,7 +90,6 @@ describe('linear cache', () => {
     fs.writeFileSync(path.join(cacheFile, 'p1.json'), '{not json');
     expect(readCached('p1', T0)).toBeUndefined();
     expect(isRateLimited(T0)).toBe(false);
-    // And it recovers: the next write replaces the garbage.
     writeCached('p1', 'again', T0);
     expect(readCached<string>('p1', T0)?.value).toBe('again');
   });
@@ -118,8 +107,6 @@ describe('linear cache', () => {
   });
 
   it('survives concurrent writers of distinct keys', () => {
-    // A single shared JSON document lost 72 of 80 entries here under two
-    // concurrent writers; one file per key has nothing to clobber.
     for (let i = 0; i < 40; i++) writeCached(`a-${i}`, i, T0);
     for (let i = 0; i < 40; i++) writeCached(`b-${i}`, i, T0);
     const survived = fs.readdirSync(cacheFile).filter((f) => f.endsWith('.json')).length;

@@ -1,23 +1,14 @@
 #!/usr/bin/env bash
-# supervise.sh — health + self-heal for the shared CI runner box (ci-runner-fsn1)
-# and the crabbox idle-reaper. Designed to run from launchd/cron on mac-mini
-# (needs: ~/.ssh/ci-runner-ops key, gh auth, and hetzner access via either an
-# unlocked `agents secrets` hetzner.com bundle or ~/.config/infra-ci/hcloud-token).
-# The box is reached by its tailnet name, so the runner host must be on the tailnet.
-#
-#   supervise.sh [--once]     one pass (default), prints a summary line
-#
-# Heal ladder per dead runner unit: systemctl restart over SSH -> verify on the
-# GitHub API -> re-register (phnx units: fresh org token minted via gh, pushed
-# over SSH; muqsitnawaz units self-heal via their on-box PAT). The box itself
-# being unreachable is reported, not rebuilt (full re-provision is a script).
+# Health and self-heal for the retained shared CI runner and idle reaper.
+# Requires the CI SSH key, gh auth, and Hetzner access; unreachable hosts are
+# reported instead of rebuilt. Healing escalates restart -> verify -> re-register.
 set -uo pipefail
 
 BOX=ci-runner-fsn1
 BOX_KEY="${CI_BOX_KEY:-$HOME/.ssh/ci-runner-ops}"
 LOG_DIR="$HOME/.cache/infra-ci"
 LOG="$LOG_DIR/supervise.log"
-REAP_IDLE_SECS="${REAP_IDLE_SECS:-21600}"   # 6h
+REAP_IDLE_SECS="${REAP_IDLE_SECS:-21600}"
 mkdir -p "$LOG_DIR"
 
 log() { echo "[$(date -u +%FT%TZ)] $*" | tee -a "$LOG"; }
@@ -33,13 +24,11 @@ hcloud_token() {
   cat "$HOME/.config/infra-ci/hcloud-token" 2>/dev/null
 }
 
-# --- 1. box reachable ---------------------------------------------------------
 if ! box 'true'; then
   log "FATAL box $BOX unreachable over SSH — runners down; manual re-provision may be needed"
   exit 1
 fi
 
-# --- 2. runner units active + GitHub-side online ------------------------------
 restart_unit() { box "systemctl restart '$1'" && log "heal: restarted $1"; }
 
 for u in runner@1 runner@2 runner@3 runner@4 runner-phnx@1 runner-phnx@2; do
@@ -50,11 +39,8 @@ for u in runner@1 runner@2 runner@3 runner@4 runner-phnx@1 runner-phnx@2; do
   fi
 done
 
-# GitHub-side view: an org runner stuck offline with an active unit means
-# registration drift — re-register the phnx units (their token path is ours).
-# The org endpoints need org admin; if gh can't (403), GitHub-side healing is
-# skipped and unit-state checks carry the health signal.
 GH_ORG_OK=1
+# Org-admin API access is optional; unit state remains the health signal on 403.
 gh api orgs/phnx-labs/actions/runners --jq '.runners | length' >/dev/null 2>&1 || GH_ORG_OK=0
 [ "$GH_ORG_OK" = 0 ] && log "NOTE gh lacks org runner read (403) — GitHub-side checks/heals skipped; unit checks only"
 
@@ -76,7 +62,6 @@ for name in $phnx_offline; do
   fi
 done
 
-# --- 3. tailnet + win-mini reach from the box ---------------------------------
 ts_ip=$(box 'tailscale ip -4 2>/dev/null' || true)
 if [ -z "$ts_ip" ]; then
   log "WARN box is off the tailnet (win-e2e will fail: cannot reach win-mini)"
@@ -84,11 +69,9 @@ elif ! box 'ping -c1 -W3 win-mini >/dev/null 2>&1'; then
   log "WARN box tailnet up ($ts_ip) but win-mini unreachable (win-e2e will fail)"
 fi
 
-# --- 4. disk ------------------------------------------------------------------
 disk=$(box "df --output=pcent / | tail -1 | tr -dc 0-9" || echo 0)
 [ "${disk:-0}" -ge 85 ] && { log "WARN disk at ${disk}% — running janitor"; box /usr/local/bin/janitor.sh >/dev/null; }
 
-# --- 5. crabbox idle-reaper ---------------------------------------------------
 tok=$(hcloud_token || true)
 if [ -n "$tok" ]; then
   now=$(date +%s)

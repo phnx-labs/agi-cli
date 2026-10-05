@@ -3,12 +3,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Seeded registry presets (SEEDED_REGISTRIES) are resolved in memory by
-// getRegistries rather than written into agents.yaml — writing them from the
-// read path dirtied that git-tracked file and deadlocked `agents repo pull`
-// (RUSH-1925). registry.ts and state.ts both resolve HOME at import time, so
-// each test points HOME at a throwaway dir and re-imports fresh. Real files,
-// real yaml, no mocks.
 let TMP = '';
 
 async function freshRegistry() {
@@ -33,7 +27,7 @@ describe('seeded registry presets', () => {
   });
   afterEach(() => {
     delete process.env.AGENTS_SYNC_MACHINE_ID;
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {  }
   });
 
   it('offers hermes without writing it to agents.yaml', async () => {
@@ -53,7 +47,6 @@ describe('seeded registry presets', () => {
     expect(fs.readFileSync(metaPath(), 'utf-8')).toContain('skill.hermes');
     expect(getRegistries('skill').hermes).toBeUndefined();
 
-    // Sticky across a fresh process — the whole point of the tombstone.
     const { getRegistries: again } = await freshRegistry();
     expect(again('skill').hermes).toBeUndefined();
   });
@@ -66,9 +59,6 @@ describe('seeded registry presets', () => {
   });
 
   it('keeps a pre-RUSH-1925 seeded entry, tombstone and all', async () => {
-    // What the old read-path seeding left behind: the entry in the user's own
-    // registries block AND the key in seededPresets. The explicit entry wins, so
-    // upgrading must not make the registry vanish.
     writeMetaFile([
       'registries:',
       '  mcp: {}',
@@ -86,10 +76,6 @@ describe('seeded registry presets', () => {
   });
 
   it('keeps the preset url when a partial update disables it', async () => {
-    // A seeded preset has no stored entry to merge with, so setRegistry must fall
-    // back to SEEDED_REGISTRIES. Without that, `registry disable` persisted only
-    // {enabled:false}, dropping url — and since a stored entry outranks the
-    // in-memory seed, the preset stayed broken even after re-enabling.
     writeMetaFile('registries:\n  mcp: {}\n  skill: {}\n');
 
     const { getRegistries, setRegistry } = await freshRegistry();

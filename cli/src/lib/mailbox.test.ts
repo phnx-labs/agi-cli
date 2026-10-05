@@ -11,7 +11,6 @@ function tmpRoot(): string {
 
 const BOX = 'a1b2';
 
-/** Write a raw file straight into inbox/ (to simulate misplaced/corrupt msgs). */
 function writeRawInbox(boxDir: string, name: string, content: string): void {
   const inbox = path.join(boxDir, 'inbox');
   fs.mkdirSync(inbox, { recursive: true });
@@ -33,9 +32,7 @@ describe('mailbox', () => {
     expect(texts(got)).toEqual(['first', 'second', 'third']);
     expect(got.every((m) => m.to === BOX)).toBe(true);
 
-    // idempotent: a second drain finds nothing.
     expect(drain(box)).toEqual([]);
-    // pending inbox is empty; delivered messages are archived.
     expect(fs.readdirSync(path.join(box, 'inbox'))).toHaveLength(0);
     expect(fs.readdirSync(path.join(box, 'consumed'))).toHaveLength(3);
   });
@@ -44,8 +41,6 @@ describe('mailbox', () => {
     const box = mailboxDir(BOX, tmpRoot());
     const msgId = enqueue(box, { to: BOX, text: 'survive-a-crash' });
 
-    // Simulate a drain that CLAIMED the message (inbox -> processing) then died
-    // before archiving it.
     fs.mkdirSync(path.join(box, 'processing'), { recursive: true });
     fs.renameSync(
       path.join(box, 'inbox', `${msgId}.json`),
@@ -79,15 +74,12 @@ describe('mailbox', () => {
 
   it('refuses a message addressed to a different box (anti-misroute) and drops it', () => {
     const box = mailboxDir(BOX, tmpRoot());
-    // Simulate a file that landed in the wrong box, addressed to someone else.
     writeRawInbox(box, '1700000000000-000000-deadbeef.json',
       JSON.stringify({ msgId: 'x', to: 'someone-else', ts: '', text: 'not for you' }));
-    // And one legitimately addressed here.
     enqueue(box, { to: BOX, text: 'for me' });
 
     const got = drain(box);
-    expect(texts(got)).toEqual(['for me']); // the mismatched one is NOT delivered
-    // The dropped message must not loop — inbox is drained clean.
+    expect(texts(got)).toEqual(['for me']);
     expect(fs.readdirSync(path.join(box, 'inbox'))).toHaveLength(0);
   });
 
@@ -107,7 +99,6 @@ describe('mailbox', () => {
     enqueue(box, { to: BOX, text: 'b' });
 
     expect(texts(peek(box))).toEqual(['a', 'b']);
-    // peek did not consume:
     expect(texts(peek(box))).toEqual(['a', 'b']);
 
     expect(clear(box)).toBe(2);
@@ -120,10 +111,8 @@ describe('mailbox', () => {
     for (const bad of ['team1/subagentA', '..', '.', '', 'a\\b', 'foo/../bar']) {
       expect(() => mailboxDir(bad, root)).toThrow(/Invalid mailboxId/);
     }
-    // enqueue validates the `to` stamp at write time too.
     const box = mailboxDir(BOX, root);
     expect(() => enqueue(box, { to: 'team1/subagentA', text: 'x' })).toThrow(/Invalid mailboxId/);
-    // a clean id passes.
     expect(() => assertValidMailboxId('loop-1700000000000-a1b2c3')).not.toThrow();
   });
 
@@ -176,7 +165,6 @@ describe('mailbox', () => {
     const box = mailboxDir(BOX, tmpRoot());
     const now = new Date('2026-01-01T00:00:00.000Z');
     const msgId = enqueue(box, { to: BOX, text: 'fresh', ttlSeconds: 30 });
-    // backdate the record so it is already expired
     const file = path.join(box, 'inbox', `${msgId}.json`);
     const record = JSON.parse(fs.readFileSync(file, 'utf-8'));
     record.ts = new Date(now.getTime() - 60_000).toISOString();
@@ -202,7 +190,6 @@ describe('mailbox', () => {
     const previous = process.env.AGENTS_FEED_DIR;
     process.env.AGENTS_FEED_DIR = feedDir;
     try {
-      // The feed block must exist for the receipt to be recorded.
       const blockId = blockIdForSession(BOX);
       publishBlock({
         blockId,
@@ -267,11 +254,10 @@ describe('mailbox', () => {
 describe('listBoxes', () => {
   it('enumerates only valid box directories, sorted, ignoring files and junk', () => {
     const root = tmpRoot();
-    // Two real boxes (created by enqueue), one stray file, one traversal-unsafe name.
     enqueue(mailboxDir('b2', root), { to: 'b2', text: 'x' });
     enqueue(mailboxDir('a1', root), { to: 'a1', text: 'y' });
-    fs.writeFileSync(path.join(root, 'notabox.json'), '{}', 'utf-8'); // a file, not a dir
-    fs.mkdirSync(path.join(root, 'bad name'), { recursive: true }); // fails isValidMailboxId
+    fs.writeFileSync(path.join(root, 'notabox.json'), '{}', 'utf-8');
+    fs.mkdirSync(path.join(root, 'bad name'), { recursive: true });
 
     expect(listBoxes(root)).toEqual(['a1', 'b2']);
   });
@@ -286,14 +272,12 @@ describe('readBox', () => {
     const box = mailboxDir(BOX, tmpRoot());
     enqueue(box, { to: BOX, text: 'first', from: 'claude/alpha' });
     enqueue(box, { to: BOX, text: 'second' });
-    // Consume the two so they land in consumed/, then queue a fresh pending one.
     drain(box);
     enqueue(box, { to: BOX, text: 'third-still-pending' });
 
     const all = readBox(box);
     expect(all.map((m) => m.text)).toEqual(['first', 'second', 'third-still-pending']);
     expect(all.map((m) => m.state)).toEqual(['consumed', 'consumed', 'inbox']);
-    // Sender is preserved so the communication log can show from -> to.
     expect(all[0].from).toBe('claude/alpha');
   });
 
@@ -301,7 +285,6 @@ describe('readBox', () => {
     const box = mailboxDir(BOX, tmpRoot());
     enqueue(box, { to: BOX, text: 'pending' });
     expect(readBox(box).map((m) => m.state)).toEqual(['inbox']);
-    // readBox was non-destructive: the message is still deliverable.
     expect(drain(box).map((m) => m.text)).toEqual(['pending']);
   });
 });

@@ -14,13 +14,6 @@ function buildAddGenericPasswordArgs(account: string, item: string): string[] {
   return ['add-generic-password', '-U', '-a', account, '-s', item, '-w'];
 }
 
-/**
- * spawnSync options for the bare `-w` keychain write. `input` pipes the value
- * TWICE (bare `-w` prompts enter+confirm; one line fails the confirm and stores
- * an empty secret). `detached: true` runs `security` in a new session with no
- * controlling terminal, so readpassphrase(3) falls back to our piped stdin
- * instead of prompting the user's `/dev/tty` in an interactive shell.
- */
 function buildAddGenericPasswordSpawnOptions(
   value: string,
 ): SpawnSyncOptions & { input: string; detached: boolean } {

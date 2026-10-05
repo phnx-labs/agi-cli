@@ -4,8 +4,6 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import * as yaml from 'yaml';
 
-// We need to test the actual functions, but they depend on global state (HOME, etc.)
-// So we'll test the logic directly by creating mock version homes
 
 const TEST_DIR = join(tmpdir(), 'agents-cli-versions-sync-test');
 
@@ -19,15 +17,13 @@ describe('getActuallySyncedResources', () => {
   });
 
   it('detects commands in version home', () => {
-    // Create a mock version home with commands
     const versionHome = join(TEST_DIR, 'claude-home');
     const commandsDir = join(versionHome, '.claude', 'commands');
     mkdirSync(commandsDir, { recursive: true });
     writeFileSync(join(commandsDir, 'debug.md'), '# Debug command');
     writeFileSync(join(commandsDir, 'plan.md'), '# Plan command');
-    writeFileSync(join(commandsDir, 'other.txt'), 'Not a command'); // Should be ignored
+    writeFileSync(join(commandsDir, 'other.txt'), 'Not a command');
 
-    // Read what's there
     const files = require('fs').readdirSync(commandsDir)
       .filter((f: string) => f.endsWith('.md'))
       .map((f: string) => f.replace(/\.md$/, ''));
@@ -46,7 +42,6 @@ describe('getActuallySyncedResources', () => {
     writeFileSync(join(centralSkillsDir, 'mq', 'SKILL.md'), '# MQ skill');
     writeFileSync(join(versionSkillsDir, 'mq', 'SKILL.md'), '# MQ skill');
 
-    // Content match: skill should be considered synced
     const centralContent = require('fs').readFileSync(join(centralSkillsDir, 'mq', 'SKILL.md'), 'utf-8');
     const versionContent = require('fs').readFileSync(join(versionSkillsDir, 'mq', 'SKILL.md'), 'utf-8');
     expect(centralContent).toBe(versionContent);
@@ -60,7 +55,6 @@ describe('getActuallySyncedResources', () => {
     writeFileSync(join(centralSkillsDir, 'sessions', 'SKILL.md'), '# Sessions v2 (updated)');
     writeFileSync(join(versionSkillsDir, 'sessions', 'SKILL.md'), '# Sessions v1 (stale)');
 
-    // Content mismatch: skill should NOT be considered synced
     const centralContent = require('fs').readFileSync(join(centralSkillsDir, 'sessions', 'SKILL.md'), 'utf-8');
     const versionContent = require('fs').readFileSync(join(versionSkillsDir, 'sessions', 'SKILL.md'), 'utf-8');
     expect(centralContent).not.toBe(versionContent);
@@ -86,7 +80,6 @@ describe('getActuallySyncedResources', () => {
     const claudeDir = join(versionHome, '.claude');
     mkdirSync(claudeDir, { recursive: true });
 
-    // Write settings with permissions
     const settings = {
       permissions: {
         allow: ['Bash(git *)', 'Bash(npm *)', 'Read(**)'],
@@ -95,7 +88,6 @@ describe('getActuallySyncedResources', () => {
     };
     writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify(settings, null, 2));
 
-    // Read permissions
     const content = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf-8'));
     const allowRules = content.permissions?.allow || [];
 
@@ -110,7 +102,6 @@ describe('getActuallySyncedResources', () => {
     const claudeDir = join(versionHome, '.claude');
     mkdirSync(claudeDir, { recursive: true });
 
-    // Write settings with EMPTY permissions
     const settings = {
       permissions: {
         allow: [],
@@ -140,7 +131,7 @@ describe('getActuallySyncedResources', () => {
     mkdirSync(hooksDir, { recursive: true });
     writeFileSync(join(hooksDir, 'pre-commit.sh'), '#!/bin/bash\necho "hook"');
     writeFileSync(join(hooksDir, 'post-build.py'), '#!/usr/bin/env python\nprint("hook")');
-    writeFileSync(join(hooksDir, '.hidden'), 'hidden'); // Should be ignored
+    writeFileSync(join(hooksDir, '.hidden'), 'hidden');
 
     const files = require('fs').readdirSync(hooksDir)
       .filter((f: string) => !f.startsWith('.'));
@@ -308,7 +299,6 @@ describe('hasNewResources', () => {
 
 describe('permission group detection from allow rules', () => {
   it('detects which groups are applied based on matching rules', () => {
-    // Simulate checking if rules from a group are in the allow list
     const groupRules = {
       '01-core': ['Bash(cat /tmp:*)', 'Bash(ls /tmp:*)'],
       '02-node': ['Bash(npm:*)', 'Bash(node:*)', 'Bash(bun:*)'],
@@ -321,7 +311,6 @@ describe('permission group detection from allow rules', () => {
       'Bash(npm:*)',
       'Bash(node:*)',
       'Bash(bun:*)',
-      // Note: no python rules
     ];
 
     const appliedGroups: string[] = [];

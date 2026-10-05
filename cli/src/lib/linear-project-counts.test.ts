@@ -10,9 +10,6 @@ import {
   type LinearIssuesResponse,
 } from './linear-project-counts.js';
 
-// fetchLinearProjectCounts is cache-first, so every test needs its OWN cache or
-// one test's answer is served to the next — and to the developer's real cache
-// dir, since getCacheDir() resolves HOME at module load.
 let cacheHome: string;
 beforeEach(() => {
   cacheHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lpc-cache-'));
@@ -23,7 +20,6 @@ afterEach(() => {
   fs.rmSync(cacheHome, { recursive: true, force: true });
 });
 
-/** A recorded Linear `issues` response shape (state types only, trimmed). */
 function response(types: (string | null | undefined)[]): LinearIssuesResponse {
   return {
     issues: {
@@ -33,7 +29,6 @@ function response(types: (string | null | undefined)[]): LinearIssuesResponse {
   };
 }
 
-/** A paged response with an explicit cursor. */
 function page(types: string[], hasNextPage: boolean, endCursor: string | null): LinearIssuesResponse {
   return {
     issues: {
@@ -43,7 +38,6 @@ function page(types: string[], hasNextPage: boolean, endCursor: string | null): 
   };
 }
 
-/** Scripted page fetcher: serves `pages` in order, recording the cursors it was called with. */
 function scriptedPages(pages: LinearIssuesResponse[]) {
   const calls: Array<string | undefined> = [];
   const fetchPage = async (_p: string, after: string | undefined) => {
@@ -57,9 +51,9 @@ describe('countsFromIssuesResponse', () => {
   it('groups by state type: completed → done, started → inProgress, all → total', () => {
     const counts = countsFromIssuesResponse(
       response([
-        'completed', 'completed', 'completed', // 3 done
-        'started', 'started', // 2 in progress
-        'unstarted', 'backlog', 'triage', 'canceled', // neither
+        'completed', 'completed', 'completed',
+        'started', 'started',
+        'unstarted', 'backlog', 'triage', 'canceled',
       ]),
     );
     expect(counts).toEqual({ done: 3, total: 9, inProgress: 2 });
@@ -98,7 +92,7 @@ describe('fetchLinearProjectCounts — pagination accumulator', () => {
     const endless = page(['completed'], true, 'cur');
     const { calls, fetchPage } = scriptedPages(Array.from({ length: 20 }, () => endless));
     const counts = await fetchLinearProjectCounts('proj-1', fetchPage);
-    expect(calls).toHaveLength(10); // MAX_PAGES, no more
+    expect(calls).toHaveLength(10);
     expect(counts).toEqual({ done: 10, total: 10, inProgress: 0, truncated: true });
   });
 
@@ -108,7 +102,6 @@ describe('fetchLinearProjectCounts — pagination accumulator', () => {
   });
 });
 
-/** An issue node as the query selects it: state plus a milestone id, if any. */
 function issue(stateType: string, msId?: string) {
   return { state: { type: stateType }, ...(msId ? { projectMilestone: { id: msId } } : {}) };
 }
@@ -124,8 +117,6 @@ describe('nextMilestone', () => {
   });
 
   it('surfaces a declared milestone with NO issues filed under it', () => {
-    // The real case: the milestone exists on the project, nothing is assigned
-    // to it yet. Deriving the list from issues made these invisible.
     expect(nextMilestone([M1], [issue('started'), issue('completed')])).toEqual({
       name: 'Beta cut',
       targetDate: '2026-08-21',
@@ -185,8 +176,6 @@ describe('fetchLinearProjectCounts — request budget', () => {
   });
 
   it('spends ZERO requests on a second call inside the TTL', async () => {
-    // Requests are the scarce Linear budget (2500/hr) and this pages up to 10
-    // per project per call. A repeated `projects status` must not re-spend them.
     let calls = 0;
     const page = async () => { calls++; return onePage(); };
     const t0 = new Date(2026, 7, 3, 12, 0, 0).getTime();
@@ -208,8 +197,6 @@ describe('fetchLinearProjectCounts — request budget', () => {
   });
 
   it('serves the last good answer marked stale rather than dropping the line', async () => {
-    // The defect this replaces: one failed fetch blanked a Linear row that was
-    // populated a minute earlier.
     const t0 = new Date(2026, 7, 3, 12, 0, 0).getTime();
     await fetchLinearProjectCounts('p1', async () => onePage(), t0);
     const afterFailure = await fetchLinearProjectCounts('p1', async () => undefined, t0 + 11 * 60_000);
@@ -236,14 +223,11 @@ describe('orderedMilestones', () => {
   const C = { id: 'c', name: 'Done thing', targetDate: '2026-08-01' };
 
   it('returns every declared milestone, unfinished first by date', () => {
-    // C is complete, so it sorts last despite the earliest date — a reader is
-    // scanning for what is still ahead.
     const out = orderedMilestones([A, B, C], [issue('completed', 'c')]);
     expect(out.map((m) => m.name)).toEqual(['GA', 'Beta cut', 'Done thing']);
   });
 
   it('shows all three of a project whose milestones carry no issues at all', () => {
-    // The real shape of this repo's Linear project.
     const out = orderedMilestones([A, B], []);
     expect(out).toEqual([
       { name: 'GA', targetDate: '2026-09-15', done: 0, total: 0 },
@@ -263,7 +247,6 @@ describe('nextMilestone — Linear wins over our date guess', () => {
   const flagged = { id: 'f', name: 'Flagged', targetDate: '2026-12-01', status: 'next' };
 
   it("prefers Linear's own next marker over the earliest date", () => {
-    // Linear's answer is what the user sees in Linear's UI; ours is a guess.
     expect(nextMilestone([early, flagged], [])?.name).toBe('Flagged');
   });
 

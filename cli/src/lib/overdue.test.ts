@@ -20,22 +20,12 @@ describe('notifyOverdue — missing desktop notifier must not crash the daemon',
     process.env.PATH = origPath;
   });
 
-  // Regression: the desktop notifier (`osascript` on macOS, `notify-send` on
-  // Linux) is absent on headless boxes. spawn() reports that as an ASYNC 'error'
-  // event, not a synchronous throw — so the surrounding try/catch never saw it,
-  // Node re-threw it as an uncaught exception, and the daemon died on every
-  // overdue routine (systemd then restart-looped it, tearing down the browser
-  // IPC socket). Emptying PATH guarantees ENOENT on every platform, so this
-  // exercises the real spawn path. If the 'error' listener is removed, the async
-  // ENOENT crashes this test process instead of being swallowed.
   it('swallows the notifier ENOENT and lets the process survive', async () => {
     process.env.PATH = '';
 
     notifyOverdue([overdueJob()]);
-    // Let the async spawn 'error' event fire on the next libuv turn.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
-    // Reaching this line means the async ENOENT did not abort the process.
     expect(true).toBe(true);
   });
 
@@ -45,12 +35,6 @@ describe('notifyOverdue — missing desktop notifier must not crash the daemon',
   });
 });
 
-/**
- * detectOverdueJobs walked a fixed one-week window looking for the most recent
- * expected fire. Any cron whose gap exceeds that returned null and was skipped
- * entirely — never flagged overdue on any device, never caught up, no record.
- * `slack-link-rotate` (`0 9 1,13,25 * *`, 12-day gaps) was live in that class.
- */
 describe('detectOverdueJobs — schedules sparser than the old one-week lookback', () => {
   let home: string;
   let prevHome: string | undefined;
@@ -85,8 +69,6 @@ describe('detectOverdueJobs — schedules sparser than the old one-week lookback
 
   it('flags a semi-monthly routine whose missed slot is older than a week', async () => {
     const { detectOverdueJobs } = await import('./overdue.js');
-    // Fires the 1st, 13th and 25th. "Now" is the 22nd: the missed 13th is nine
-    // days back, outside the old window, and the next fire (25th) is ahead.
     write({ ...base, name: 'semi-monthly', schedule: '0 9 1,13,25 * *' });
     const overdue = detectOverdueJobs(new Date('2026-01-22T10:00:00.000Z'));
     expect(overdue.map((o) => o.name)).toContain('semi-monthly');
@@ -122,7 +104,6 @@ describe('detectOverdueJobs — schedules sparser than the old one-week lookback
 
   it('does not replay a one-shot-like schedule that never carried runOnce', async () => {
     const { detectOverdueJobs } = await import('./overdue.js');
-    // Fixed minute/hour/day/month: one-shot by shape, no runOnce flag.
     write({ ...base, name: 'one-shot-like', schedule: '0 9 5 1 *' });
     expect(detectOverdueJobs(new Date('2026-01-22T10:00:00.000Z')).map((o) => o.name))
       .not.toContain('one-shot-like');
