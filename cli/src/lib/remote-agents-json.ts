@@ -18,6 +18,7 @@ import {
   RemoteUtf8Accumulator,
 } from './ssh-exec.js';
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
+import { resolveDeviceProfile } from './devices/resolve-profile.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from './devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from './hosts/remote-cmd.js';
@@ -209,13 +210,16 @@ export async function gatherRemoteAgentsJson<T>(
       // fallback — see isDialableDevice (mirrors session/remote-list.ts).
       if (!isDialableDevice(device)) continue;
       if (normalizeHost(device.name) === self) continue;
-      if (!['windows', 'linux', 'macos'].includes(device.platform)) continue;
+      // The operator config (`platform`) decides the remote shell family, exactly
+      // as sshTargetFor dials it — never the registry's discovered platform.
+      const platform = resolveDeviceProfile(device).platform;
+      if (!['windows', 'linux', 'macos'].includes(platform)) continue;
       try {
         targets.push({
           target: sshTargetFor(device),
           machine: normalizeHost(device.name),
           name: device.name,
-          os: device.platform,
+          os: platform,
           extraSshArgs: deviceIdentityArgs(device),
         });
       } catch {
