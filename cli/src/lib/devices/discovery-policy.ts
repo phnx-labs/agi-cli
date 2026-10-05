@@ -1,4 +1,3 @@
-/** Synced device approval/ignore policy and local registry reconciliation. */
 import { readMeta, updateMeta } from '../state.js';
 import { unionDeviceDiscovery } from './device-docs.js';
 import {
@@ -21,19 +20,11 @@ interface DeviceDiscoveryReconcileResult {
   unresolved: string[];
 }
 
-/** Read one portable decision. Absence means pending. */
 export function getDeviceDiscoveryStatus(name: string): DeviceDiscoveryStatus | undefined {
   assertValidDeviceName(name);
   return loadDeviceDiscoveryPolicies().get(name);
 }
 
-/**
- * Persist ONE discovery decision in THIS box's device doc (PHNX-3315). Each box
- * records only its own choices in `devices/<machine>/agents.yaml` `fleet.discovery`,
- * so N boxes no longer rewrite one shared central map (the guaranteed pull
- * conflict). The effective policy is the union across every box
- * ({@link loadDeviceDiscoveryPolicies}).
- */
 export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoveryStatus | undefined): void {
   assertValidDeviceName(name);
   updateMeta((meta) => {
@@ -44,14 +35,8 @@ export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoverySt
   });
 }
 
-/**
- * The effective discovery policy: the UNION across every box's device doc, plus
- * any lingering central-legacy map (drained by the fold-then-delete migration).
- * Precedence for a name declared by more than one box is deterministic and
- * order-independent — `ignored` beats `approved` — so every box computes the
- * identical policy. Absence means pending.
- */
 export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus> {
+  // Corruption is fatal: silently dropping one document could re-enroll an intentionally ignored peer.
   const policies = new Map<string, DeviceDiscoveryStatus>();
   const apply = (rec: Record<string, unknown> | undefined) => {
     for (const [name, status] of Object.entries(rec ?? {})) {
@@ -59,29 +44,15 @@ export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus
       if (status !== 'approved' && status !== 'ignored') {
         throw new Error(`Device discovery policy for '${name}' must be approved or ignored.`);
       }
-      if (policies.get(name) === 'ignored') continue; // ignored is never downgraded
+      if (policies.get(name) === 'ignored') continue;
       policies.set(name, status);
     }
   };
-  apply(readMeta().fleet?.discovery); // central legacy, until the migration drains it
-  apply(unionDeviceDiscovery());       // per-box device docs (ignored still wins)
+  apply(readMeta().fleet?.discovery);
+  apply(unionDeviceDiscovery());
   return policies;
 }
 
-/**
- * Apply synced intent to this machine's local registry. Approval resolves live
- * Tailscale metadata; ignore never needs the network. Missing approved peers are
- * reported as unresolved rather than written with invented connection details.
- *
- * Only devices with an EXPLICIT entry in the synced policy are touched. A
- * device absent from the map is left alone, whether or not the map itself is
- * defined — the map is not treated as authoritative-by-omission, because not
- * every local registration path writes a policy entry (daemon/umbrella
- * auto-refresh, and any device registered before this feature shipped).
- * Wiping those on the next `agents repo pull user` would be
- * silent, fleet-wide data loss for a decision (e.g. "ignore this one iPad")
- * that never meant to touch them.
- */
 export async function reconcileDeviceDiscoveryPolicies(): Promise<DeviceDiscoveryReconcileResult> {
   const policies = loadDeviceDiscoveryPolicies();
   if (policies.size === 0) {
@@ -109,7 +80,6 @@ export async function reconcileDeviceDiscoveryPolicies(): Promise<DeviceDiscover
   return registerApprovedDevicesFromTailscale(json, approved, ignored, missing);
 }
 
-/** Complete reconciliation from real `tailscale status --json` output. */
 export async function registerApprovedDevicesFromTailscale(
   json: string,
   approved: string[],

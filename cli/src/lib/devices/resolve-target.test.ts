@@ -1,22 +1,8 @@
-/**
- * resolveDeviceTarget — the `agents ssh` adapter over the shared host resolver.
- *
- * Covers the `auto` affinity sentinel (RUSH-2185): `agents ssh auto` used to
- * reject with "Unknown device 'auto'" because only `agents run --device auto`
- * pre-processed the sentinel before reaching the resolver. matchHost now
- * resolves it directly (../hosts/registry.ts), so this file locks in that
- * resolveDeviceTarget — the ssh-specific adapter on top of matchHost — carries
- * the pick through to a full DeviceProfile the same way an explicit device
- * name does.
- */
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-// Same isolation pattern as ../hosts/registry.test.ts: HOME must be overridden
-// before state.ts loads so both the devices registry and hosts overlay resolve
-// paths from the sandbox, not the real machine's ~/.agents.
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resolve-target-test-'));
 process.env.HOME = TEST_HOME;
 process.env.AGENTS_DEVICES_DIR = path.join(TEST_HOME, '.agents', '.history', 'devices');

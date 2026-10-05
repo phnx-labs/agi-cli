@@ -38,24 +38,10 @@ export interface FleetHealthRow {
   clis: Record<string, FleetCliStatus>;
   sync: FleetSyncStatus[];
   orphans: FleetOrphanStatus[];
-  /** Cached auth-health rollup for this host (the Auth column). Undefined when
-   *  the host has never been probed (`agents fleet ping`) or the cache is cold. */
   auth?: HostAuthSummary;
-  /** Resolved online/offline verdict (from {@link deviceOnlineState}). Populated
-   *  by `runFleetStatus` for the summary view; undefined in the raw grid. */
   online?: OnlineState;
-  /** When this box was last seen reachable (ISO), for the "last seen …" note on
-   *  an offline row. Sourced from the registry's tailscale snapshot / reachability
-   *  verdict. Undefined when never recorded. */
   lastSeen?: string;
-  /** This host's self-reported harness inventory (resources / agent versions /
-   *  repo state) from its `doctor --json` `fleet` field, for cross-device
-   *  divergence detection (RUSH-2027). Undefined for an unreachable box or an
-   *  older CLI that doesn't emit it. */
   inventory?: FleetInventory;
-  /** This host's live agent workload (running-agent count + per-context / per-
-   *  agent breakdown), from the fleet-status mirror / read-union (RUSH-2061).
-   *  Undefined when no row has been published for the host yet. */
   agents?: FleetAgentCounts;
 }
 
@@ -140,11 +126,6 @@ export function buildFleetHealthReport(
     });
   }
 
-  // Cross-device harness divergence (RUSH-2027): compare every device's
-  // self-reported inventory against the local baseline and roll the findings up
-  // into one warning per affected device. Only runs when a baseline (`self`) is
-  // named and at least one device carries an inventory — an older-CLI fleet with
-  // no `fleet` field simply produces no divergence warning.
   if (opts.self && rows.some((r) => r.inventory)) {
     const divergence = compareFleetInventories(
       rows.map((r) => ({ name: r.name, inventory: r.inventory ?? null })),
@@ -220,16 +201,6 @@ function loadLabel(stats: DeviceStats | undefined): string {
   return `${load}/${mem}`;
 }
 
-/**
- * Compact per-host auth cell. Four buckets, deliberately distinct so the column
- * doesn't cry wolf on healthy accounts:
- *   `●{live}`     green  — live-verified
- *   `·{present}`  gray   — signed in but no live probe (codex/grok/…): benign
- *   `◐{degraded}` yellow — soft/self-healing (expired/limited/error)
- *   `○{revoked}`  red    — server rejected the token: re-login now
- * A host with no cached auth rows shows "—"; an unreachable/skipped row shows
- * "-" like the other probe columns.
- */
 function authLabel(row: FleetHealthRow): string {
   if (row.error || row.skipped) return chalk.gray('-');
   const s = row.auth;
@@ -239,12 +210,9 @@ function authLabel(row: FleetHealthRow): string {
   if (s.present > 0) parts.push(chalk.gray(`·${s.present}`));
   if (s.degraded > 0) parts.push(chalk.yellow(`◐${s.degraded}`));
   if (s.revoked > 0) parts.push(chalk.red(`○${s.revoked}`));
-  // All-zero can't happen (total > 0); but if only present/degraded exist we
-  // still lead with them — never show an empty cell for a probed host.
   return parts.length > 0 ? parts.join(' ') : chalk.gray('—');
 }
 
-/** Oldest epoch-ms timestamp across rows for a field, or null when none present. */
 function oldestAcross(rows: FleetHealthRow[], pick: (r: FleetHealthRow) => number | null | undefined): number | null {
   let oldest: number | null = null;
   for (const row of rows) {
@@ -273,14 +241,8 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
     14,
     Math.max(7, ...report.devices.map((r) => (r.version ?? '-').length)),
   );
-  // Auth cells are variable-length (up to four space-separated buckets, e.g.
-  // `●2 ·3 ◐1 ○1`); size the column to the widest so a mixed-auth row can't
-  // overflow the fixed slot and shove every later column out of alignment.
   const authW = Math.max(9, ...report.devices.map((r) => stringWidth(authLabel(r))));
   const width = terminalWidth();
-  // 4 = leading "  " + the per-row status glyph + its trailing space (rows prefix
-  // `  ${statusGlyph} `; the header reserves the same 4 cols so every column lines up).
-  // Columns: Device, OS(8), Health(9), Sync(9), CLI(9), Auth(authW), Version, Load/Mem(9), then Note.
   const fixed = 4 + nameW + 2 + 8 + 2 + 9 + 2 + 9 + 2 + 9 + 2 + authW + 2 + versionW + 2 + 9;
   const noteW = Math.max(12, width - fixed);
   const lines = [
@@ -309,12 +271,6 @@ export function renderFleetMatrix(report: FleetHealthReport): string[] {
   return lines;
 }
 
-/**
- * "as of …" line so cache-served output is honest about age and points at the
- * refresh flag. Stats age comes from `stats.fetchedAt`, auth age from the
- * cached rollup's `oldestCheckedAt`; either may be absent. Returns null when the
- * table carries no timestamped data at all (nothing to date).
- */
 export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()): string | null {
   const oldestStats = oldestAcross(rows, (r) => r.stats?.fetchedAt);
   const oldestAuth = oldestAcross(rows, (r) => r.auth?.oldestCheckedAt);
@@ -325,14 +281,7 @@ export function freshnessFooter(rows: FleetHealthRow[], now: number = Date.now()
   return `  updated ${parts.join(' · ')} — pass --refresh (--live) for a live probe`;
 }
 
-// ---------------------------------------------------------------------------
-// Summary view (default): rollup + NEEDS ATTENTION + OS groups + footer.
-// The full grid above is kept for `--verbose`. (RUSH-1966)
-// ---------------------------------------------------------------------------
 
-/** Collapse a long dev build (`0.0.0-dev.<sha>[-dirty]`) to `dev`/`dev-dirty`;
- *  released semver is shown verbatim. Keeps the version column narrow and stops
- *  a single dev box from widening every row. */
 export function shortVersion(version: string | null | undefined): string {
   if (!version) return '—';
   const m = version.match(/-dev\b/);
@@ -340,7 +289,6 @@ export function shortVersion(version: string | null | undefined): string {
   return version;
 }
 
-/** OS bucket label for grouping. Anything unrecognized falls under "Other". */
 export function platformGroupLabel(platform: string | undefined): 'macOS' | 'Linux' | 'Windows' | 'Other' {
   const p = (platform ?? '').toLowerCase();
   if (p === 'macos' || p === 'darwin') return 'macOS';
@@ -351,61 +299,38 @@ export function platformGroupLabel(platform: string | undefined): 'macOS' | 'Lin
 
 const GROUP_ORDER: Array<'macOS' | 'Linux' | 'Windows' | 'Other'> = ['macOS', 'Linux', 'Windows', 'Other'];
 
-/** Non-fresh sync rows for the ACTIVE (default) version only — the drift that a
- *  running install actually feels, not stale/cold counts across old orphans. */
 function activeDriftRows(row: FleetHealthRow): FleetSyncStatus[] {
   return row.sync.filter((s) => s.isDefault && s.status !== 'fresh');
 }
 
 function isOffline(row: FleetHealthRow): boolean {
-  // Prefer the resolved verdict; fall back to a probe error/skip when the caller
-  // didn't populate it (e.g. a raw report). Only a positive 'online' is "up".
   if (row.online) return row.online !== 'online';
   return Boolean(row.error || row.skipped);
 }
 
-/** A box with a real offline verdict — as opposed to `unknown` (registered but
- *  never addressed/probed). Only a genuine offline is a "check the box" item;
- *  an unknown box is unconfigured, not down. */
 function isGenuinelyOffline(row: FleetHealthRow): boolean {
   return row.online === 'offline' || (!row.online && Boolean(row.error || row.skipped));
 }
 
-/** A CLI count is only worth flagging when it's stark — the box is missing more
- *  than two-thirds of the known agent CLIs (e.g. 1/9), which signals a
- *  broken/half-set-up box. A normal partial install (a box that just doesn't run
- *  every agent) is not a problem, so this deliberately does NOT fire at 4/9 or
- *  6/9. The full count stays visible under `--verbose`. */
 function starkCliGap(row: FleetHealthRow): { installed: number; total: number } | null {
   const { installed, total } = installedCliCount(row);
   return total > 0 && installed * 3 < total ? { installed, total } : null;
 }
 
 interface FleetAttentionItem {
-  /** Leading mark: `○` offline, `⚠` config/CLI/version issue. */
   glyph: 'offline' | 'warn';
   subject: string;
   detail: string;
-  /** The exact command (or instruction) that fixes it. */
   fix: string;
 }
 
-/**
- * The actionable problems only — each with the command that fixes it. Order:
- * offline boxes, CLI gaps, active-version config drift, then version skew.
- * A healthy fleet returns `[]` (the caller prints an all-clear line).
- */
 export function buildFleetAttentionItems(report: FleetHealthReport, now: number = Date.now()): FleetAttentionItem[] {
   const items: FleetAttentionItem[] = [];
-  // 1) Genuinely-offline boxes (not `unknown`/unconfigured), each individually.
   for (const row of report.devices) {
     if (!isGenuinelyOffline(row)) continue;
     const seen = row.lastSeen ? ` · last seen ${formatCheckedAge(Date.parse(row.lastSeen), now)}` : '';
     items.push({ glyph: 'offline', subject: row.name, detail: `offline${seen}`, fix: 'check the box' });
   }
-  // 2) Boxes that need `agents fleet apply` — merge config drift and a stark CLI gap
-  // into ONE item per box (both are fixed by the same command, so don't
-  // double-list). An offline box's config/CLI is unknowable, so skip it.
   for (const row of report.devices) {
     if (isOffline(row)) continue;
     const reasons: string[] = [];
@@ -416,7 +341,6 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
       items.push({ glyph: 'warn', subject: row.name, detail: reasons.join(' · '), fix: `agents fleet apply --device ${row.name}` });
     }
   }
-  // 3) Version skew across the fleet — one line.
   const skew = report.warnings.find((w) => w.kind === 'version-skew');
   if (skew) {
     const counts = new Map<string, number>();
@@ -431,7 +355,6 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
       .join(' · ');
     items.push({ glyph: 'warn', subject: 'version skew', detail: summary, fix: 'agents upgrade --fleet' });
   }
-  // 4) Cross-device harness divergence — one item per diverged box (RUSH-2027).
   for (const w of report.warnings) {
     if (w.kind !== 'divergence') continue;
     items.push({
@@ -444,8 +367,6 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
   return items;
 }
 
-/** Right-aligned `<content>` on the same line as `left`, clamped so it never
- *  overlaps the left text on a narrow terminal. */
 function alignRight(left: string, right: string, width: number): string {
   const gap = width - stringWidth(left) - stringWidth(right);
   return gap > 1 ? `${left}${' '.repeat(gap)}${right}` : `${left}  ${right}`;
@@ -468,12 +389,6 @@ function versionCell(row: FleetHealthRow): string {
   return shortVersion(row.version);
 }
 
-/**
- * The default `agents fleet status` view (RUSH-1966): a one-line rollup, a
- * NEEDS ATTENTION list of only the actionable problems (each with its fix
- * command), quiet per-device rows grouped by OS, and an honest footer. The full
- * auth/CLI/sync grid moves behind `--verbose` ({@link renderFleetMatrix}).
- */
 export function renderFleetSummary(
   report: FleetHealthReport,
   opts: { self?: string; now?: number } = {},
@@ -508,8 +423,6 @@ export function renderFleetSummary(
     lines.push('');
   }
 
-  // Per-device rows, grouped by OS. Within a group, this machine floats to the
-  // top; the rest stay alphabetical.
   const nameW = Math.min(18, Math.max(6, ...rows.map((r) => r.name.length)));
   const headW = Math.max(...rows.map((r) => stringWidth(headroomWord(r))));
   const loadW = Math.max(...rows.map((r) => stringWidth(loadMemCell(r))));
@@ -552,8 +465,6 @@ export function renderFleetSummary(
     lines.push('');
   }
 
-  // Footer: orphan-version nudge (a `prune` concern, not drift), then an honest
-  // freshness line naming the cache age and what --live/--verbose add.
   const orphaned = rows.filter((r) => r.orphans.length > 0).length;
   if (orphaned > 0) {
     const subject = orphaned === 1 ? '1 device carries' : `${orphaned} devices carry`;

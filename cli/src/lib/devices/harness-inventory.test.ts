@@ -17,7 +17,6 @@ import {
   type QuotaSummary,
 } from './harness-inventory.js';
 
-/** Build a usage window; only `key` + `usedPercent` matter for these tests. */
 function win(key: UsageWindow['key'], usedPercent: number): UsageWindow {
   return { key, label: key, shortLabel: key, usedPercent, resetsAt: null, windowMinutes: null };
 }
@@ -38,7 +37,6 @@ function quota(status: QuotaSummary['status'], usedPercent: number | null, stale
   };
 }
 
-/** A HarnessRow with sane defaults, overridable per test. */
 function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
   const quotaValue: QuotaSummary = overrides.quota ?? quota('available', 10);
   return {
@@ -59,13 +57,10 @@ function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
 describe('summarizeQuota', () => {
 
   it('an out_of_credits marker blocks readiness even with no live windows (RUSH-3018)', () => {
-    // The normal state hours/days after a run: cached windows have expired, so
-    // only the persisted refusal marker remains. It must NOT read as available.
     const snap: UsageSnapshot = {
       source: 'live', sourceLabel: 'live', capturedAt: null, windows: [],
       unavailable: { reason: 'out_of_credits' },
     };
-    // accountStatus 'available' is the coarse hardcoded value for a signed-in Claude.
     const q = summarizeQuota(snap, null, 'available');
     expect(q.status).toBe('out_of_credits');
     expect(computeReady(true, q)).toEqual({ ready: false, reason: 'out of credits' });
@@ -81,7 +76,6 @@ describe('summarizeQuota', () => {
       source: 'live', sourceLabel: 'live', capturedAt: null, windows: [],
       unavailable: { reason: 'session_limit', resetsAt: new Date(Date.now() - 1000) },
     };
-    // expired marker → falls through to the coarse available status
     expect(summarizeQuota(past, null, 'available').status).toBe('available');
   });
   it('returns null status and no percent when there is no snapshot', () => {
@@ -100,7 +94,6 @@ describe('summarizeQuota', () => {
   });
 
   it('excludes the sonnet_week sub-limit from the account-wide utilization', () => {
-    // A maxed model sub-limit must not read as a throttled account.
     const q = summarizeQuota(snapshot([win('session', 20), win('sonnet_week', 100)]));
     expect(q.usedPercent).toBe(20);
     expect(q.status).toBe('available');
@@ -115,39 +108,26 @@ describe('summarizeQuota', () => {
   });
 
   it('never shows 100% for an account that is not actually capped', () => {
-    // 99.6 rounds to 100, but the account is still `available` (a true 100 window
-    // would flip status to rate_limited) — so the display caps at 99 to avoid a
-    // "100%" cell next to a "ready" verdict.
     const q = summarizeQuota(snapshot([win('session', 99.6)]));
     expect(q.status).toBe('available');
     expect(q.usedPercent).toBe(99);
   });
 
-  // #3705: status and usedPercent must read from the SAME live windows. A 100%
-  // window whose reset already passed has rolled over — its usedPercent is the
-  // PREVIOUS period, so it must not colour the displayed percentage while the
-  // status (from `deriveUsageStatusFromSnapshot`) reads `available`.
   it('a 100% window past its reset yields available status and a percent not from that window', () => {
     const rolledOver: UsageWindow = {
       key: 'week', label: 'week', shortLabel: 'week',
       usedPercent: 100, resetsAt: new Date(Date.now() - 60_000), windowMinutes: null,
     };
-    // With a live sibling window, the percent comes from the live one, never the
-    // rolled-over 100%.
     const withLive = summarizeQuota(snapshot([rolledOver, win('session', 20)]), null, 'available');
     expect(withLive.status).toBe('available');
     expect(withLive.usedPercent).toBe(20);
 
-    // With only the rolled-over window, there is no live utilization to show at all.
     const onlyRolled = summarizeQuota(snapshot([rolledOver]), null, 'available');
     expect(onlyRolled.status).toBe('available');
     expect(onlyRolled.usedPercent).toBe(0);
   });
 
   it('exposes verdict, capture time, earliest reset, and no unavailable reason', () => {
-    // The reset times must be LIVE (in the future) — a window past its reset is
-    // rolled over and dropped from both the status and the projected resetsAt
-    // (#3705), so a past reset would no longer surface as the account's reset.
     const capturedAt = new Date(Date.now() - 60_000);
     const later = new Date(Date.now() + 2 * 3600_000);
     const earlier = new Date(Date.now() + 3600_000);
@@ -179,11 +159,6 @@ describe('summarizeQuota', () => {
   });
 
   it('never surfaces the internal not-collected sentinel — the caller normalizes it (PHNX-3348)', () => {
-    // collectLocalHarnessInventory feeds `usageErrorForDisplay(usage?.error)` into
-    // summarizeQuota, so a never-cached account (error === 'stale', without
-    // --refresh) can never reach `agents devices harnesses/accounts --json`'s
-    // `quota.unavailableReason` as the raw sentinel — the same leak class PHNX-3348
-    // fixed for `agents view --json`.
     const q = summarizeQuota(null, usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER));
     expect(q.unavailableReason).not.toBe(USAGE_NOT_COLLECTED_MARKER);
     expect(q.unavailableReason).not.toBe('stale');
@@ -279,8 +254,6 @@ describe('groupByAccount', () => {
       row({ agent: 'claude', version: '1', account: 'signed-out', signedIn: true, ready: true }),
       row({ agent: 'codex', version: '2', account: null, signedIn: false, ready: false, reason: 'signed out' }),
     ]);
-    // The NUL-prefixed sentinel keeps the two apart: a real label 'signed-out'
-    // (signed in) never collides with the null signed-out bucket.
     expect(groups).toHaveLength(2);
     expect(groups.find((g) => g.account === 'signed-out')?.signedIn).toBe(true);
     expect(groups.find((g) => g.account === null)?.signedIn).toBe(false);
@@ -355,7 +328,6 @@ describe('renderAccountsMatrix', () => {
     expect(out).toContain('mac-mini');
     expect(out).toContain('me@ex.com');
     expect(out).toContain('work@ex.com');
-    // collapsed: one 'me@ex.com' row, not two
     expect(out.match(/me@ex\.com/g)?.length).toBe(1);
   });
 });

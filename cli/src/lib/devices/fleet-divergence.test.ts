@@ -8,8 +8,6 @@ import {
   type RepoState,
 } from './fleet-divergence.js';
 
-/** Build a FleetInventory with all resource kinds empty, then apply overrides —
- *  so a test names only the kinds it cares about. */
 function inventory(overrides: {
   resources?: Partial<Record<FleetResourceKind, string[]>>;
   agentVersions?: Record<string, string[]>;
@@ -35,8 +33,6 @@ const repo = (over: Partial<RepoState> = {}): RepoState => ({
 
 describe('compareFleetInventories', () => {
   it('flags a plugin present locally but missing on a remote device', () => {
-    // The RUSH-2027 motivating case: `swarm` on the local baseline (zion), absent
-    // on yosemite-s0 — a user typing /swarm:run there gets "Unknown command".
     const devices: DeviceInventory[] = [
       { name: 'zion', inventory: inventory({ resources: { plugins: ['swarm', 'rush'] } }) },
       { name: 'yosemite-s0', inventory: inventory({ resources: { plugins: ['rush'] } }) },
@@ -51,7 +47,6 @@ describe('compareFleetInventories', () => {
     expect(swarmMiss!.category).toBe('plugins');
     expect(swarmMiss!.message).toContain("yosemite-s0 is missing plugin 'swarm'");
     expect(swarmMiss!.message).toContain('present on zion');
-    // `rush` is on both — not a divergence.
     expect(report.divergences.some((d) => d.name === 'rush')).toBe(false);
     expect(report.comparedDevices).toEqual(['yosemite-s0']);
     expect(report.skippedDevices).toEqual([]);
@@ -89,7 +84,6 @@ describe('compareFleetInventories', () => {
 
   it('flags a diverged .agents repo HEAD, branch, and remote-only dirty tree', () => {
     const local = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: false }) } });
-    // Different HEAD.
     const remoteHead = inventory({ repos: { agents: repo({ head: 'bbbbbbbb' }) } });
     let report = compareFleetInventories(
       [{ name: 'zion', inventory: local }, { name: 'box', inventory: remoteHead }],
@@ -99,7 +93,6 @@ describe('compareFleetInventories', () => {
     expect(drift?.message).toContain('.agents repo diverged');
     expect(drift?.message).toContain('HEAD bbbbbbbb != local aaaaaaaa');
 
-    // Same HEAD, different branch.
     const remoteBranch = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'feature' }) } });
     report = compareFleetInventories(
       [{ name: 'zion', inventory: local }, { name: 'box', inventory: remoteBranch }],
@@ -108,7 +101,6 @@ describe('compareFleetInventories', () => {
     drift = report.divergences.find((d) => d.kind === 'repo-drift');
     expect(drift?.message).toContain('branch feature != local main');
 
-    // Same HEAD + branch, remote tree dirty while local is clean → names the remote.
     const remoteDirty = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: true }) } });
     report = compareFleetInventories(
       [{ name: 'zion', inventory: local }, { name: 'box', inventory: remoteDirty }],
@@ -117,9 +109,6 @@ describe('compareFleetInventories', () => {
     drift = report.divergences.find((d) => d.kind === 'repo-drift');
     expect(drift?.message).toContain('box .agents tree has uncommitted changes');
 
-    // Symmetric: the local baseline is dirty while the remote is clean. The row
-    // must be filed against the BASELINE — blaming the clean remote sends the
-    // user to the wrong machine, and `agents repo pull` there fixes nothing.
     const cleanRemote = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: false }) } });
     const dirtyLocal = inventory({ repos: { agents: repo({ head: 'aaaaaaaa', branch: 'main', dirty: true }) } });
     report = compareFleetInventories(
@@ -193,7 +182,7 @@ describe('compareFleetInventories', () => {
 
   it('skips repo drift when only one side is a readable git repo', () => {
     const local = inventory({ repos: { agents: repo() } });
-    const remote = inventory({ repos: { agents: null } }); // remote .agents not a repo
+    const remote = inventory({ repos: { agents: null } });
     const report = compareFleetInventories(
       [{ name: 'zion', inventory: local }, { name: 'box', inventory: remote }],
       'zion',
@@ -209,7 +198,6 @@ describe('compareFleetInventories', () => {
     ];
     const report = compareFleetInventories(devices, 'zion');
     const devicesInOrder = report.divergences.map((d) => d.device);
-    // a-box's findings all precede b-box's.
     const firstB = devicesInOrder.indexOf('b-box');
     const lastA = devicesInOrder.lastIndexOf('a-box');
     expect(lastA).toBeLessThan(firstB);
