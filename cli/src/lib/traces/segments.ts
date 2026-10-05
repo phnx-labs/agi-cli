@@ -1,20 +1,4 @@
-/**
- * Group-by dimensions + time-to-first-tool latency for the traces insight
- * engine (the console's Issue bar).
- *
- * Pure functions, no I/O. Classifiers are DATA-DRIVEN TABLES — a new task type
- * or timing bucket is a row, not a new if/else-by-name arm. The integrator
- * (`insights.ts` / `sync.ts`) tags each session; this file does not write the
- * shard.
- *
- * Input is the redacted `SessionDetail` from `agents traces sync` plus the
- * SyncRow fields the detail strips (prompt, gitBranch, files). Structural —
- * `SessionDetail` is a valid `SegmentSession`.
- */
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
 
 export const TASK_TYPES = ['bugfix', 'feature', 'refactor', 'test', 'chore', 'other'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
@@ -22,7 +6,6 @@ export type TaskType = (typeof TASK_TYPES)[number];
 const FAILURE_TIMINGS = ['early', 'mid', 'late'] as const;
 type FailureTiming = (typeof FAILURE_TIMINGS)[number];
 
-/** The #1 group-by axis: compare the pair, never the model alone. */
 interface SegmentAgent {
   model: string;
   harness: string;
@@ -30,7 +13,6 @@ interface SegmentAgent {
 
 export interface SegmentFile {
   path: string;
-  /** Write/create vs Edit/patch. */
   action: 'new' | 'edit';
 }
 
@@ -43,11 +25,6 @@ export interface SegmentStep {
   label?: string;
 }
 
-/**
- * Session shape the classifiers read. `SessionDetail` (sessions/<id>.json)
- * satisfies this; callers may also pass SyncRow fields (`prompt`, `gitBranch`,
- * `agent`, `model`, `files`) alongside steps.
- */
 export interface SegmentSession {
   id?: string;
   prompt?: string | null;
@@ -78,7 +55,6 @@ export interface Percentiles {
   max: number;
 }
 
-/** Time-to-first-tool latency — `steps[0].startMs` over tool-using sessions. */
 export interface LatencyInsight {
   firstToolMs: Percentiles;
 }
@@ -89,14 +65,7 @@ interface SegmentDimensions {
   failureTiming: FailureTiming | null;
 }
 
-// ---------------------------------------------------------------------------
-// Tables — the classifiers. Add a row; do not add an if/else-by-name arm.
-// ---------------------------------------------------------------------------
 
-/**
- * Tool name → file action. Lowercased. Write-family is a new file; Edit-family
- * is a patch. Anything else is ignored for diff-shape.
- */
 const FILE_ACTION_TOOLS: ReadonlyArray<{
   action: SegmentFile['action'];
   tools: readonly string[];
@@ -105,11 +74,9 @@ const FILE_ACTION_TOOLS: ReadonlyArray<{
   { action: 'edit', tools: ['edit', 'strreplace', 'apply_patch', 'applypatch', 'notebookedit'] },
 ];
 
-/** Path heuristics for a test-only diff. */
 const TEST_PATH_PATTERN =
   /(?:^|\/)(?:__tests__|testdata|test)\/|\.(?:test|spec)\.[cm]?[jt]sx?$|_test\.(?:go|py|rs)$/i;
 
-/** Path heuristics for a chore-only diff (lockfiles, CI, docs). */
 const CHORE_PATH_PATTERN =
   /(?:^|\/)(?:package(?:-lock)?\.json|bun\.lockb?|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|go\.sum|Dockerfile|Makefile|\.github\/|CHANGELOG[^/]*|README[^/]*|\.gitignore)$/i;
 
@@ -138,13 +105,6 @@ const DIFF_SHAPE_MATCHERS: ReadonlyArray<{
   },
 ];
 
-/**
- * Task-type rules, first match wins. Prompt/branch keywords outrank diff shape
- * except where `shape` is set (test-only files, chore-only files, all-new files).
- *
- * Order is the product priority: test-only work is not a "feature"; a `fix/`
- * branch is a bugfix even if files are new; chore lockfile edits are not features.
- */
 export const TASK_TYPE_RULES: ReadonlyArray<{
   type: Exclude<TaskType, 'other'>;
   patterns: readonly RegExp[];
@@ -216,10 +176,6 @@ export const TASK_TYPE_RULES: ReadonlyArray<{
   },
 ];
 
-/**
- * Normalized position of the first failing step inside the session span.
- * Early failures cascade — highest-signal bucket. Exclusive upper bound.
- */
 const FAILURE_TIMING_BUCKETS: ReadonlyArray<{
   timing: FailureTiming;
   maxExclusive: number;
@@ -241,11 +197,7 @@ const AGENT_FIELDS = {
   ],
 } as const;
 
-// ---------------------------------------------------------------------------
-// Public functions
-// ---------------------------------------------------------------------------
 
-/** Model × harness unit — the #1 group-by axis. */
 export function deriveAgent(session: SegmentSession): SegmentAgent {
   return {
     model: firstPresent(AGENT_FIELDS.model.map((read) => read(session))),
@@ -253,10 +205,6 @@ export function deriveAgent(session: SegmentSession): SegmentAgent {
   };
 }
 
-/**
- * Classify the session's work from the opening prompt + diff shape (files
- * touched, new vs edit, test-only). First matching table row wins.
- */
 export function classifyTaskType(session: SegmentSession): TaskType {
   const haystack = taskHaystack(session);
   const shape = inferDiffShape(session);
@@ -267,11 +215,6 @@ export function classifyTaskType(session: SegmentSession): TaskType {
   return 'other';
 }
 
-/**
- * Bucket the FIRST failing step by its normalized position in the session
- * span (`firstFailure.startMs / spanMs`). Sessions with no failing step
- * return null — they do not belong on the failure-timing axis.
- */
 export function failureTiming(session: SegmentSession): FailureTiming | null {
   const firstFailure = (session.steps ?? []).find((step) => step.outcome === 'error');
   if (!firstFailure) return null;
@@ -280,11 +223,6 @@ export function failureTiming(session: SegmentSession): FailureTiming | null {
   return FAILURE_TIMING_BUCKETS.find((bucket) => position < bucket.maxExclusive)?.timing ?? null;
 }
 
-/**
- * Time-to-first-tool latency from `steps[0].startMs` across sessions that
- * recorded at least one step. Nearest-rank percentiles (same formula as the
- * traces index stats) so p99 on `/tmp/traces-real` lands at ~128s.
- */
 export function computeLatency(sessions: readonly SegmentSession[]): LatencyInsight {
   const samples: number[] = [];
   for (const session of sessions) {
@@ -304,7 +242,6 @@ export function computeLatency(sessions: readonly SegmentSession[]): LatencyInsi
   };
 }
 
-/** All three group-by dimensions for one session. */
 export function deriveDimensions(session: SegmentSession): SegmentDimensions {
   return {
     agent: deriveAgent(session),
@@ -313,9 +250,6 @@ export function deriveDimensions(session: SegmentSession): SegmentDimensions {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Internals
-// ---------------------------------------------------------------------------
 
 function firstPresent(values: Array<string | null | undefined>): string {
   for (const value of values) {
@@ -365,7 +299,6 @@ function fileActionForTool(tool: string | undefined): SegmentFile['action'] | un
   return undefined;
 }
 
-/** Best-effort path from a redacted Write/Edit label (`path/to/file.ts`). */
 function filePathFromLabel(label: string | undefined): string | undefined {
   if (!label) return undefined;
   const match = label.match(/(?:^|[\s`'"])(\/?[\w.@-]+(?:\/[\w.@-]+)+\.[A-Za-z][\w.]*)/);
@@ -391,12 +324,6 @@ function sessionSpanMs(session: SegmentSession): number {
   return max;
 }
 
-/**
- * Nearest-rank percentile, ratio in (0, 1]. Same index rule as
- * `sync.ts`'s private `percentile` — linear interpolation (`lib/percentile.ts`)
- * would report ~71s for p99 on the 738-session corpus; the published figure is
- * 128s / 2m8s.
- */
 function percentileNearest(values: number[], ratio: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);

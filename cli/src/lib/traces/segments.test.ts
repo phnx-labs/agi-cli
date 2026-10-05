@@ -163,7 +163,6 @@ describe.skipIf(!hasTracesReal)('/tmp/traces-real corpus', () => {
 
   it('computeLatency firstToolMs.p99 is ~128s (2m 8s)', () => {
     const { firstToolMs } = computeLatency(loadTracesReal());
-    // Published figure from the 738-session dry-run: p90 13.8s · p99 2m8s · max 7m48s.
     expect(firstToolMs.p99).toBeGreaterThan(120_000);
     expect(firstToolMs.p99).toBeLessThan(140_000);
     expect(firstToolMs.p90).toBeGreaterThan(10_000);
@@ -189,9 +188,6 @@ describe.skipIf(!hasTracesReal)('/tmp/traces-real corpus', () => {
       if (timing === null) timingCounts.none++;
       else timingCounts[timing]++;
     }
-    // Redacted traces often omit the opening prompt, so `other` is the bulk —
-    // but the keyword/shape table still has to fire on the sessions that carry
-    // a Write/Edit path or a test/chore file.
     expect(taskCounts.get('other') ?? 0).toBeLessThan(sessions.length);
     expect(timingCounts.early + timingCounts.mid + timingCounts.late).toBeGreaterThan(0);
     expect(timingCounts.early).toBeGreaterThan(timingCounts.late);

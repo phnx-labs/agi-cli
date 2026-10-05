@@ -73,8 +73,6 @@ describe('rich traces index shard', () => {
       id,
       first.file_mtime_ms,
       first.file_size,
-      // Seed at the current extractor version so this cache row is read, not treated
-      // as stale — otherwise a version bump silently drops these facets from the shard.
       INSIGHTS_EXTRACTOR_VERSION,
       Date.now(),
       JSON.stringify({ frictionSignals: { 'failed tool loop: exec_command': 1 }, correctionSignals: {} }),
@@ -116,8 +114,6 @@ describe('rich traces index shard', () => {
       delete process.env.AGENTS_TRACE_FIXTURE_SECRET;
     }
 
-    // Seed the test server with 7 days of low-error history so the live GET path
-    // produces a non-empty driftSignals when today's 2/3-error session lands.
     const seededShard = JSON.stringify({
       schema: 1, device: 'test-device', syncedAt: 0, owner: 'owner-1',
       stats: { sessionsImported: 1, medianMs: 0, p90Ms: 0, needAttention: 0, toolErrorRate: 0.1 },
@@ -154,9 +150,6 @@ describe('rich traces index shard', () => {
     process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
     process.env.AGENTS_SYNC_MACHINE_ID = 'test-device';
     fs.rmSync(path.join(getRuntimeStateDir(), 'traces-sync.json'), { force: true });
-    // The BYO write token bypasses Phoenix auth (backend.userId === 'byo') and must
-    // never be sent to the Prix link endpoint. Pass real calls through to the local
-    // test server; only intercept to prove no request ever targets prix.dev.
     const realFetch = globalThis.fetch;
     const outboundUrls: string[] = [];
     globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
@@ -175,23 +168,13 @@ describe('rich traces index shard', () => {
     }
     expect(outboundUrls.some((u) => u.includes('api.prix.dev'))).toBe(false);
     expect(requests.filter((url) => url.includes(`/sessions/${id}.json`))).toHaveLength(1);
-    // Verify the GET was issued for the prior shard on each live-sync run.
     expect(reqLog.filter((r) => r.startsWith('GET') && r.includes('/index.json'))).toHaveLength(2);
-    // Verify driftSignals is non-empty: today's 2/3-error bucket (errorRate≈0.667)
-    // vs the seeded 7-day baseline (errorRate=0.1) → delta≈0.567 → degrading.
     const indexBody = JSON.parse(indexPutBodies[0]);
     expect(indexBody.driftSignals).toHaveLength(1);
     expect(indexBody.driftSignals[0].bucket).toBe('bugfix');
     expect(indexBody.driftSignals[0].severity).toBe('degrading');
   });
 
-  // PHNX-3401: on an active machine the Rush app holds sessions.db, so the topics/
-  // insights cache write-back inside buildIndexShard waits out busy_timeout and
-  // throws SQLITE_BUSY. That used to propagate out and (via syncTraces' swallow)
-  // leave the console index 59h stale with no insight fields. The write-back is a
-  // pure cache warm-up — the shard reads the in-memory maps — so a locked write
-  // must NOT abort the build. This asserts the index stays complete and the failure
-  // is surfaced (warned), not silent.
   it('still builds a complete shard when the cache write-back is locked (PHNX-3401)', () => {
     const stat = fs.statSync(transcript);
     const first = row(stat.mtimeMs, stat.size);
@@ -220,8 +203,6 @@ describe('rich traces index shard', () => {
       JSON.stringify({ frictionSignals: { 'failed tool loop: exec_command': 1 }, correctionSignals: {} }),
     );
 
-    // topics are uncached (beforeEach deleted them) → buildIndexShard will attempt
-    // the write-back; make it throw exactly as a locked DB does.
     const write = vi.spyOn(sessionDb, 'writeSessionTopics').mockImplementation(() => {
       throw new Error('database is locked');
     });
@@ -232,15 +213,12 @@ describe('rich traces index shard', () => {
         shard = buildIndexShard([first], 'test-device', 'owner-1');
       }).not.toThrow();
 
-      // The aggregated shard is still complete — the insight fields the console
-      // renders are present, not dropped by the locked write.
       expect(shard.wastedMsTotal).toBeTypeOf('number');
       expect(Array.isArray(shard.failurePatterns)).toBe(true);
       expect(shard.latency).toBeDefined();
       expect(shard.needsAttention.length).toBeGreaterThan(0);
       expect(shard.stats.sessionsImported).toBe(1);
 
-      // ...and the degraded cache write is surfaced, not silent.
       expect(write).toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('session-topics cache warm-up skipped'),
@@ -251,9 +229,6 @@ describe('rich traces index shard', () => {
     }
   });
 
-  // PHNX-3401: the OTHER half — when the index PUT itself fails (here: the worker
-  // 500s), syncTraces must surface it as SyncResult.indexError instead of the old
-  // bare `catch {}`, while the per-session upload still counts as success.
   it('surfaces SyncResult.indexError when the index upload fails, without failing the session upload', async () => {
     const stat = fs.statSync(transcript);
     const first = row(stat.mtimeMs, stat.size);
@@ -269,7 +244,6 @@ describe('rich traces index shard', () => {
       first.file_mtime_ms, first.file_size, first.machine,
     );
 
-    // Worker that accepts session shards but 500s the index PUT.
     const server = http.createServer((req, res) => {
       if (req.method === 'PUT' && req.url?.endsWith('/index.json')) {
         req.resume();
@@ -288,10 +262,8 @@ describe('rich traces index shard', () => {
     fs.rmSync(path.join(getRuntimeStateDir(), 'traces-sync.json'), { force: true });
     try {
       const result = await syncTraces();
-      // The session shard uploaded fine — the failure is isolated to the index.
       expect(result.uploaded).toBe(1);
       expect(result.errors).toBe(0);
-      // ...and the index failure is surfaced, not swallowed.
       expect(result.indexError).toBeDefined();
       expect(result.indexError).toContain('500');
     } finally {
@@ -321,10 +293,6 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
   } as any;
 
   it('buildSessionShard emits schema 2 by default — no env var, no operator knob', () => {
-    // The console reads both schemas (live), so schema 2 is backward-compatible
-    // by construction; the producer runs across the fleet and must not depend on
-    // AGENTS_TRACES_SCHEMA2 (or any env var) being set. An empty trajectory keeps
-    // the assertion about the shard's schema, not its step contents.
     const emptyTraj = { ...baseTraj, steps: [], gaps: [], errorCount: 0 };
     delete process.env['AGENTS_TRACES_SCHEMA2'];
     const shard = buildSessionShard(emptyTraj, [], undefined);
@@ -336,15 +304,14 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     expect(d.schema).toBe(1);
     expect(d.id).toBe('s1');
     expect(d.meta.spanMs).toBe(60_000);
-    // activeMs strips the 130s idle gap; here the whole span is idle → 0 (PHNX-3457).
     expect(d.meta.activeMs).toBe(0);
-    expect(d.meta.turns).toBe(7); // userTurns + assistantTurns
+    expect(d.meta.turns).toBe(7);
     expect(d.meta.tools).toBe(2);
     expect(d.meta.errorCount).toBe(1);
     expect(d.meta.tokens).toBe(1000);
     expect(d.meta.costUsd).toBe(1.5);
     expect(d.meta.outcome).toBe('errored');
-    expect(d.meta.repo).toBe('repo'); // cwd basename, not the full path (PII)
+    expect(d.meta.repo).toBe('repo');
     expect(d.meta.agent).toBe('claude');
     expect(d.steps).toHaveLength(2);
   });
@@ -376,11 +343,6 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
   });
 });
 
-// PHNX-3387: meta.outcome is the truthful "did the task FINISH", derived from the
-// causal-recovery predicate shared with the false-termination phenotype
-// (recoveredAfterErrors), NOT from `errorCount > 0`. A recover-then-succeed run is
-// `completed` while still surfacing the failure it recovered from; a run that
-// punted to a human or ended unresolved stays `errored` (no regression).
 describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
   const step = (ordinal: number, tool: string, outcome: 'ok' | 'error', label: string, program?: string) => ({
     ordinal, kind: 'tool' as const, lane: tool, tool, startMs: ordinal * 10, durationMs: 5, outcome, label,
@@ -397,20 +359,16 @@ describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
 
   it('recover-then-succeed → completed, and still surfaces the recovered-from failure', () => {
     const d = buildSessionDetail(traj([
-      step(1, 'Bash', 'error', 'bun test'), // the task fails
+      step(1, 'Bash', 'error', 'bun test'),
       step(2, 'Edit', 'ok', 'fix the bug'),
-      step(3, 'Bash', 'ok', 'bun test'), // …and passes on retry
+      step(3, 'Bash', 'ok', 'bun test'),
     ]));
     expect(d.meta.errorCount).toBe(1);
-    expect(d.meta.outcome).toBe('completed'); // BEFORE this fix: 'errored'
-    // The green run still honestly lists the failure it recovered from.
+    expect(d.meta.outcome).toBe('completed');
     expect(d.surfacedToolFailures).toEqual([{ tool: 'Bash', label: 'bun test', detail: undefined }]);
   });
 
   it('human-takeover (punt to AskUserQuestion after a failure) → errored, not completed', () => {
-    // The broken PR's "last tool call ok" heuristic mislabeled this `completed`
-    // because AskUserQuestion succeeded last. The causal predicate excludes
-    // human-facing tools, so the last SUBSTANTIVE step is the error → errored.
     const d = buildSessionDetail(traj([
       step(1, 'Bash', 'error', 'bun test'),
       step(2, 'AskUserQuestion', 'ok', 'which fix do you want?'),
@@ -419,54 +377,41 @@ describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
   });
 
   it('an incidental success does not rescue a run that ends unresolved → errored', () => {
-    // A stray successful `ls` before the task fails must not flip the run to
-    // completed: the recovery must come AFTER the last error, and here it does not.
     const d = buildSessionDetail(traj([
-      step(1, 'Bash', 'ok', 'ls'), // incidental, unrelated to the task
-      step(2, 'Bash', 'error', 'bun test'), // the task fails and the run ends
+      step(1, 'Bash', 'ok', 'ls'),
+      step(2, 'Bash', 'error', 'bun test'),
     ]));
-    expect(d.meta.outcome).toBe('errored'); // no regression vs errorCount-based derivation
+    expect(d.meta.outcome).toBe('errored');
   });
 
   it('an incidental later success of unrelated work does not rescue the failure → errored', () => {
-    // The regression the review reproduced: a failed `bun test` followed by an
-    // incidental `ls` that succeeds AFTER it. The `ls` occurs later, but it does
-    // not resolve the failed test — its work signature (`Bash:ls`) differs from the
-    // failure's (`Bash:bun`) — so the run must stay `errored`, not flip to
-    // `completed`. (The shell `program` is what distinguishes the two Bash calls.)
     const d = buildSessionDetail(traj([
-      step(1, 'Bash', 'error', 'bun test', 'bun'), // the task fails
-      step(2, 'Bash', 'ok', 'ls', 'ls'), // incidental, unrelated — runs AFTER the failure
+      step(1, 'Bash', 'error', 'bun test', 'bun'),
+      step(2, 'Bash', 'ok', 'ls', 'ls'),
     ]));
     expect(d.meta.errorCount).toBe(1);
     expect(d.meta.outcome).toBe('errored');
   });
 
   it('a genuine retry of the failed work after the error → completed', () => {
-    // Contrast to the incidental case: the SAME program that failed is re-run and
-    // succeeds after an intervening fix, so the failure is resolved → completed.
     const d = buildSessionDetail(traj([
-      step(1, 'Bash', 'error', 'bun test', 'bun'), // the task fails
+      step(1, 'Bash', 'error', 'bun test', 'bun'),
       step(2, 'Edit', 'ok', 'fix the bug'),
-      step(3, 'Bash', 'ok', 'bun test', 'bun'), // …and passes on retry (same program)
+      step(3, 'Bash', 'ok', 'bun test', 'bun'),
     ]));
     expect(d.meta.outcome).toBe('completed');
   });
 
   it('a failed non-shell tool resolved by the same tool → completed', () => {
-    // Non-shell recovery keys on tool identity: a failed `Edit` is resolved by a
-    // later successful `Edit`, but not by an unrelated `Read`.
     const d = buildSessionDetail(traj([
-      step(1, 'Edit', 'error', 'old string not found'), // the edit fails
-      step(2, 'Read', 'ok', 'read the file to find the real string'), // unrelated — not recovery on its own
-      step(3, 'Edit', 'ok', 'apply the corrected edit'), // …same tool succeeds → resolves it
+      step(1, 'Edit', 'error', 'old string not found'),
+      step(2, 'Read', 'ok', 'read the file to find the real string'),
+      step(3, 'Edit', 'ok', 'apply the corrected edit'),
     ]));
     expect(d.meta.outcome).toBe('completed');
   });
 
   it('a failed tool followed only by an unrelated different tool → errored', () => {
-    // The Read succeeds after the failed Edit but does not resolve it (different
-    // tool identity), and no later Edit succeeds → the failed work is unresolved.
     const d = buildSessionDetail(traj([
       step(1, 'Edit', 'error', 'old string not found'),
       step(2, 'Read', 'ok', 'read the file'),
@@ -481,13 +426,6 @@ describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
   });
 });
 
-// PHNX-3327: the phenotype grouping dimension must be populated from the
-// PERSISTED per-session cache over the WHOLE corpus, not from just this sync's
-// incremental batch. Two sessions with an identical (tool, cause, error) failure
-// signature must land in ONE failure cluster even when they were first synced in
-// different runs — the exact fragmentation the broken attempt (#3240) hit, where
-// an old session carried phenotype=null (never in this run's batch) while a new
-// one carried a real value, splitting one signature into two clusters.
 describe('phenotype grouping across the incremental boundary (PHNX-3327)', () => {
   const transcriptA = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
   const sessA = 'phenotype-boundary-a';
@@ -505,7 +443,6 @@ describe('phenotype grouping across the incremental boundary (PHNX-3327)', () =>
       '/redacted/agents-cli', 'main', 'Boundary test', 9000, 'gpt-test',
       transcriptA, mtimeMs, size, 'test-device',
     );
-    // Identical failing tool call for BOTH sessions → identical (tool, cause, key).
     db.prepare(`
       INSERT INTO tool_calls
         (call_key, session_id, ordinal, timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
@@ -530,45 +467,31 @@ describe('phenotype grouping across the incremental boundary (PHNX-3327)', () =>
     const rowA = insertSessionRow(sessA, stat.mtimeMs, stat.size);
     const rowB = insertSessionRow(sessB, stat.mtimeMs, stat.size);
 
-    // First sync sees only A — its phenotype is classified once and PERSISTED.
     const first = buildIndexShard([rowA], 'test-device', 'owner-1');
     expect(first.failurePatterns).toHaveLength(1);
     const cachedA = readSessionPhenotypes<string | null>([sessA]);
-    expect(cachedA.has(sessA)).toBe(true); // cached, not thrown away
+    expect(cachedA.has(sessA)).toBe(true);
 
-    // Second sync sees the full corpus. A's transcript is now UNREADABLE, so the
-    // only way A can carry a phenotype into the grouping is the persisted cache —
-    // exactly the "session synced in an earlier batch" case the broken attempt got
-    // wrong (it read phenotype only from THIS run's freshly-parsed sessions, so A
-    // would fall to null and split from B). If the cache is honored, A and B share
-    // both the signature and the phenotype and fold into ONE cluster.
     const rowAUnreadable: SyncRow = { ...rowA, file_path: '/nonexistent/gone.jsonl' };
     const second = buildIndexShard([rowAUnreadable, rowB], 'test-device', 'owner-1');
 
     const shared = second.failurePatterns.filter(
       (p) => p.signature.tool === 'exec_command' && p.signature.key === 'command failed',
     );
-    expect(shared).toHaveLength(1); // NOT 2 — the broken-attempt fragmentation
+    expect(shared).toHaveLength(1);
     expect(shared[0].sessions).toBe(2);
     expect(shared[0].occurrences).toBe(2);
-    // B's freshly-classified phenotype equals A's cached one (same transcript).
     expect(shared[0].phenotype).toBe(cachedA.get(sessA));
   });
 });
 
 describe('index.sessions roster (PHNX-3483)', () => {
-  // percentile(): replicated from sync.ts so the mode-split reproduction below is
-  // checked against the EXACT nearest-rank rule the stats use, not an approximation.
   const percentile = (values: number[], ratio: number): number => {
     if (values.length === 0) return 0;
     const sorted = [...values].sort((a, b) => a - b);
     return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
   };
 
-  // Each fixture row: a synthetic SyncRow plus the DB state buildIndexShard reads
-  // (a sessions row for the insights-cache JOIN, tool_calls for the call/error
-  // counts, and an EMPTY insights cache so needs-attention is driven only by tool
-  // errors — never by friction a parsed transcript might surface).
   type Fixture = {
     id: string;
     durationMs: number | null;
@@ -616,8 +539,6 @@ describe('index.sessions roster (PHNX-3483)', () => {
       ordinal++;
       insertCall.run(`${fx.id}-err-${i}`, fx.id, ordinal, ts, 'exec_command', 'error', 1, 'command failed');
     }
-    // Empty facets, stamped at the current mtime/size/version so the cache is a HIT
-    // and buildIndexShard never parses the (nonexistent) transcript for insights.
     db.prepare(`
       INSERT INTO session_insights
         (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
@@ -637,9 +558,6 @@ describe('index.sessions roster (PHNX-3483)', () => {
     };
   }
 
-  // headless = agent run (has tool calls OR >8 msgs); interactive = one-shot query.
-  // Spans are all < IDLE_GAP_THRESHOLD (120s) with calls at the session start, so
-  // sessionActiveMs returns the full span → each roster durationMs == duration_ms.
   const FIXTURES: Fixture[] = [
     { id: 'roster-h1', durationMs: 10_000, messageCount: 3, okCalls: 1, errorCalls: 0 },
     { id: 'roster-h2', durationMs: 30_000, messageCount: 3, okCalls: 0, errorCalls: 1 },
@@ -648,8 +566,6 @@ describe('index.sessions roster (PHNX-3483)', () => {
     { id: 'roster-i2', durationMs: 8_000, messageCount: 5, okCalls: 0, errorCalls: 0 },
   ];
 
-  // A null-duration agent row, seeded only by the unmeasured-row test below. Kept out
-  // of FIXTURES (whose durations back the median-reproduction test) but cleaned here.
   const NULL_FIX: Fixture = { id: 'roster-null', durationMs: null, messageCount: 3, okCalls: 1, errorCalls: 0 };
 
   beforeEach(() => {
@@ -672,12 +588,10 @@ describe('index.sessions roster (PHNX-3483)', () => {
     const rows = FIXTURES.map(seed);
     const shard = buildIndexShard(rows, 'test-device', 'owner-1');
 
-    // (a) present, and length === agent-row count (all fixtures are agent kind).
     expect(shard.sessions).toBeDefined();
     expect(shard.sessions).toHaveLength(rows.length);
     expect(shard.sessions).toHaveLength(shard.stats.sessionsImported);
 
-    // (b) every row carries the required fields at the right types.
     for (const s of shard.sessions!) {
       expect(typeof s.id).toBe('string');
       expect(typeof s.title).toBe('string');
@@ -693,7 +607,6 @@ describe('index.sessions roster (PHNX-3483)', () => {
       expect(typeof s.needsAttention).toBe('boolean');
     }
 
-    // Field values map straight off the row: harness/model/repo/tool/error counts.
     const h2 = shard.sessions!.find((s) => s.id === 'roster-h2')!;
     expect(h2.harness).toBe('codex');
     expect(h2.model).toBe('gpt-test');
@@ -710,8 +623,6 @@ describe('index.sessions roster (PHNX-3483)', () => {
     const headless = shard.sessions!.filter((s) => s.mode === 'headless').map((s) => s.durationMs);
     const interactive = shard.sessions!.filter((s) => s.mode === 'interactive').map((s) => s.durationMs);
 
-    // The roster's own segmentation must partition the corpus the same way the
-    // segmented stats do — a headless bucket of the 3 agent runs, interactive of 2.
     expect(headless).toHaveLength(3);
     expect(interactive).toHaveLength(2);
 
@@ -727,43 +638,28 @@ describe('index.sessions roster (PHNX-3483)', () => {
     for (const s of shard.sessions!) {
       expect(s.needsAttention).toBe(flagged.has(s.id));
     }
-    // The error-call session is flagged; a clean run is not — so the boolean carries
-    // real signal, not a constant.
     expect(shard.sessions!.find((s) => s.id === 'roster-h2')!.needsAttention).toBe(true);
     expect(shard.sessions!.find((s) => s.id === 'roster-h1')!.needsAttention).toBe(false);
   });
 
   it('carries an unmeasured (null-duration) session at durationMs 0, excluded from the segmented medians', () => {
-    // The segmented stats skip null-duration rows; the roster still lists every agent
-    // session, emitting durationMs 0 for an unmeasured one. This documents the exact
-    // boundary of the reproduction claim: a consumer must exclude these the same way
-    // stats does, or a mode-split median over the raw roster diverges by them.
     const rows = [...FIXTURES, NULL_FIX].map(seed);
     const shard = buildIndexShard(rows, 'test-device', 'owner-1');
 
-    // Present and counted — length still equals the agent-row total.
     expect(shard.sessions).toHaveLength(rows.length);
     expect(shard.sessions).toHaveLength(shard.stats.sessionsImported);
     const nullRow = shard.sessions!.find((s) => s.id === 'roster-null')!;
     expect(nullRow.durationMs).toBe(0);
-    expect(nullRow.mode).toBe('headless'); // has a tool call → agent run
+    expect(nullRow.mode).toBe('headless');
 
-    // stats.agentMedianMs is over MEASURED rows only, so the null row does not move it.
     expect(shard.stats.agentMedianMs).toBe(percentile([10_000, 30_000, 20_000], 0.5));
-    // A naive median over the RAW roster headless bucket (which includes the 0) differs
-    // — the divergence the reproduction claim excludes.
     const rawHeadless = shard.sessions!.filter((s) => s.mode === 'headless').map((s) => s.durationMs);
     expect(rawHeadless).toContain(0);
     expect(percentile(rawHeadless, 0.5)).not.toBe(shard.stats.agentMedianMs);
-    // Excluding the unmeasured 0 restores exact reproduction.
     expect(percentile(rawHeadless.filter((d) => d > 0), 0.5)).toBe(shard.stats.agentMedianMs);
   });
 
   it('promotes a real silent-stall friction facet into a behavioral failurePattern (RUSH-2988)', () => {
-    // End-to-end through buildIndexShard: seed a session whose cached insights carry
-    // a `silent stall:` friction signal (no failed tool call), and assert it surfaces
-    // as a ranked behavioral pattern — exercising the computeBehavioralPatterns wiring
-    // at the real call site, not just the pure function.
     const row = seed({ id: 'roster-h1', durationMs: 10_000, messageCount: 3, okCalls: 1, errorCalls: 0 });
     getDB().prepare('UPDATE session_insights SET facets = ? WHERE session_id = ?')
       .run(JSON.stringify({ frictionSignals: { 'silent stall: 15-60m': 1 }, correctionSignals: {} }), 'roster-h1');
@@ -774,9 +670,8 @@ describe('index.sessions roster (PHNX-3483)', () => {
     expect(behavioral!.signature).toEqual({ tool: 'silent-stall', cause: 'behavioral', key: '15-60m' });
     expect(behavioral!.sessions).toBe(1);
     expect(behavioral!.occurrences).toBe(1);
-    expect(behavioral!.wastedMs).toBe(30 * 60_000); // open bucket capped at MAX_GAP_ATTRIBUTION_MS
+    expect(behavioral!.wastedMs).toBe(30 * 60_000);
     expect(shard.wastedMsTotal).toBeGreaterThanOrEqual(behavioral!.wastedMs);
-    // It is not a tool-error cause, so the byCause split still reports it as 0.
     expect(shard.failures.byCause.behavioral).toBe(0);
   });
 });
@@ -819,7 +714,6 @@ describe('traces sync --dry-run local export', () => {
     const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'traces-dry-'));
     const ledgerPath = path.join(getRuntimeStateDir(), 'traces-sync.json');
     fs.rmSync(ledgerPath, { force: true });
-    // No AGENTS_TRACES_BASE_URL / token set: a dry-run must NOT resolve a backend.
     delete process.env.AGENTS_TRACES_BASE_URL;
     delete process.env.AGENTS_TRACES_WRITE_TOKEN;
     process.env.AGENTS_SYNC_MACHINE_ID = 'dry-device';
@@ -827,21 +721,17 @@ describe('traces sync --dry-run local export', () => {
       const result = await syncTraces({ dryRun: true, outDir });
       expect(result.uploaded).toBeGreaterThan(0);
 
-      // index.json — rich shard, owner "local" (no Phoenix userId available).
       const index = JSON.parse(fs.readFileSync(path.join(outDir, 'index.json'), 'utf8'));
       expect(index.schema).toBe(1);
       expect(index.owner).toBe('local');
       expect(index.stats.sessionsImported).toBeGreaterThan(0);
 
-      // sessions/<id>.json — the console's SessionDetail shape. The per-session
-      // detail now emits schema 2 by default (the console reads both).
       const detail = JSON.parse(fs.readFileSync(path.join(outDir, 'sessions', `${dryId}.json`), 'utf8'));
       expect(detail.schema).toBe(2);
       expect(detail.meta).toHaveProperty('spanMs');
       expect(detail).toHaveProperty('whereItWentWrong');
       expect(detail.meta.repo).toBe('agents-cli');
 
-      // The ledger is untouched — a dry-run is a read-only export.
       expect(fs.existsSync(ledgerPath)).toBe(false);
     } finally {
       delete process.env.AGENTS_SYNC_MACHINE_ID;
@@ -885,8 +775,6 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
   });
 
   it('retries an upload-failed session stranded below the watermark, then a stable sync uploads zero', async () => {
-    // A (older) and B (newer). B's later success advances the watermark past A —
-    // the exact case the plain watermark loses. A must still come back via the ledger.
     insertSession('retry-a', 1000, realTranscript);
     insertSession('retry-b', 2000, realTranscript);
 
@@ -908,27 +796,24 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
     process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
     process.env.AGENTS_SYNC_MACHINE_ID = 'retry-device';
     try {
-      // First sync: B uploads, A's PUT 500s → recorded as an upload-failed retry.
       const first = await syncTraces({ skipIndex: true });
       expect(first.uploaded).toBe(1);
       expect(first.uploadFailed).toBe(1);
       expect(first.errors).toBe(1);
       const afterFirst = readSyncLedger();
-      expect(afterFirst.lastSyncMtime).toBe(2000); // watermark advanced PAST A (1000)
+      expect(afterFirst.lastSyncMtime).toBe(2000);
       const stranded = (afterFirst.failures ?? []).find((f) => f.id === 'retry-a');
       expect(stranded?.kind).toBe('upload-failed');
-      expect(stranded?.detail).toContain('500'); // actionable evidence, not an opaque count
+      expect(stranded?.detail).toContain('500');
 
-      // A is now below the watermark. Only the union-with-retry-ids re-selects it.
       failA = false;
       puts.length = 0;
       const second = await syncTraces({ skipIndex: true });
-      expect(puts.some((u) => u.includes('/sessions/retry-a.json'))).toBe(true); // re-attempted
-      expect(second.uploaded).toBe(1); // A recovered
+      expect(puts.some((u) => u.includes('/sessions/retry-a.json'))).toBe(true);
+      expect(second.uploaded).toBe(1);
       expect(second.uploadFailed).toBe(0);
-      expect((readSyncLedger().failures ?? [])).toHaveLength(0); // cleared on success
+      expect((readSyncLedger().failures ?? [])).toHaveLength(0);
 
-      // Third sync of unchanged data uploads nothing (idempotent).
       puts.length = 0;
       const third = await syncTraces({ skipIndex: true });
       expect(third.uploaded).toBe(0);
@@ -940,8 +825,6 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
   });
 
   it('classifies a missing transcript as unavailable and does not re-query it once past the watermark', async () => {
-    // C points at a file that does not exist; D is a real, uploadable session with a
-    // higher mtime so the watermark advances past C.
     insertSession('retry-c-gone', 1000, '/nonexistent/path/gone.jsonl');
     insertSession('retry-d-ok', 2000, realTranscript);
 
@@ -962,18 +845,15 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
       expect(first.transcriptUnavailable).toBe(1);
       expect(first.uploadFailed).toBe(0);
       expect(first.parseFailed).toBe(0);
-      expect(first.uploaded).toBe(1); // D
+      expect(first.uploaded).toBe(1);
       const recorded = (readSyncLedger().failures ?? []).find((f) => f.id === 'retry-c-gone');
       expect(recorded?.kind).toBe('transcript-unavailable');
 
-      // Second sync: C is below the advanced watermark and unavailable, so it is
-      // neither re-selected by the watermark nor by the retry union — no wasted work.
       puts.length = 0;
       const second = await syncTraces({ skipIndex: true });
       expect(second.uploaded).toBe(0);
-      expect(second.transcriptUnavailable).toBe(0); // not re-queried, not re-counted
+      expect(second.transcriptUnavailable).toBe(0);
       expect(puts).toHaveLength(0);
-      // The evidence is retained in the ledger for the operator even though it is not retried.
       expect((readSyncLedger().failures ?? []).some((f) => f.id === 'retry-c-gone')).toBe(true);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
@@ -981,10 +861,6 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
   });
 });
 
-// PHNX-3457: the duration median/p90 run over ACTIVE time (span − idle gaps > 120s),
-// not raw span, so a session resumed after hours or left idle mid-turn doesn't
-// inflate them (real corpus max span: 345h). Raw span stays per-session on
-// SessionDetail.meta.spanMs; the index stats keep the same medianMs/p90Ms keys.
 describe('active-time duration stats (PHNX-3457)', () => {
   const IDS = ['dur-idle', 'dur-busy', 'dur-abandoned', 'dur-nocalls'];
 
@@ -1019,8 +895,6 @@ describe('active-time duration stats (PHNX-3457)', () => {
   });
 
   it('strips an idle gap between two tool calls from the duration median', () => {
-    // c1 at 00:00 (span start, no front idle); a 400s idle gap; c2 blocks 06:40→10:00
-    // so its end == span end and there is no trailing idle. active = 600000 − 400000.
     insertCall('dur-idle', 1, '2026-08-25T00:00:00.000Z', null);
     insertCall('dur-idle', 2, '2026-08-25T00:06:40.000Z', '2026-08-25T00:10:00.000Z');
     const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
@@ -1030,27 +904,22 @@ describe('active-time duration stats (PHNX-3457)', () => {
 
   it('leaves a busy session (no gap > 120s, last call ends at span end) with active == span', () => {
     insertCall('dur-busy', 1, '2026-08-25T00:00:00.000Z', null);
-    insertCall('dur-busy', 2, '2026-08-25T00:00:30.000Z', '2026-08-25T00:03:20.000Z'); // ends at span end
+    insertCall('dur-busy', 2, '2026-08-25T00:00:30.000Z', '2026-08-25T00:03:20.000Z');
     const shard = buildIndexShard([durRow('dur-busy', 200_000)], 'test-device', 'owner-1');
     expect(shard.stats.medianMs).toBe(200_000);
   });
 
   it('measures an idle gap from a call END, not its start, when end_timestamp is known', () => {
-    // c1 blocks 00:00→05:00 (work, not idle); idle to c2 at 08:00 is 3m from the END,
-    // not 8m from the start; c2 blocks 08:00→10:00 (= span end, no trailing idle).
     insertCall('dur-idle', 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:05:00.000Z');
     insertCall('dur-idle', 2, '2026-08-25T00:08:00.000Z', '2026-08-25T00:10:00.000Z');
     const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
-    // idle = 08:00 − 05:00 = 180000; active = 600000 − 180000 = 420000.
     expect(shard.stats.medianMs).toBe(420_000);
   });
 
   it('strips TRAILING idle: a lone call then a 10h abandonment (the case a between-calls-only measure missed)', () => {
-    // One 30s-in tool call, then the session sat open for 10h before its last event.
     insertCall('dur-abandoned', 1, '2026-08-25T00:00:30.000Z', '2026-08-25T00:00:30.000Z');
     const tenHours = 10 * 60 * 60_000;
     const shard = buildIndexShard([durRow('dur-abandoned', tenHours)], 'test-device', 'owner-1');
-    // Everything after the lone call's end is idle → active is just the 30s before it.
     expect(shard.stats.medianMs).toBe(30_000);
   });
 
@@ -1060,11 +929,6 @@ describe('active-time duration stats (PHNX-3457)', () => {
   });
 });
 
-// PHNX-3472: the blended median conflates one-shot interactive queries (63% of the
-// corpus, ~15s) with substantial agent runs (~15min), so the console needs the two
-// segmented. A session is an AGENT run when it made any tool call OR has more than
-// 8 messages; otherwise INTERACTIVE. measuredFraction reports how much of the corpus
-// carried a non-null duration.
 describe('segmented agent vs interactive duration stats (PHNX-3472)', () => {
   const IDS = ['seg-agent-1', 'seg-agent-2', 'seg-agent-msgs', 'seg-int-1', 'seg-int-2', 'seg-nodur'];
 
@@ -1082,7 +946,6 @@ describe('segmented agent vs interactive duration stats (PHNX-3472)', () => {
     };
   }
 
-  // A single tool call spanning the whole session, so active time == duration (no idle gap).
   function insertSpanningCall(sid: string, endTs: string) {
     getDB().prepare(`
       INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
@@ -1100,36 +963,25 @@ describe('segmented agent vs interactive duration stats (PHNX-3472)', () => {
   });
 
   it('segments agent runs (tool calls or >8 msgs) from one-shot interactive queries, and reports coverage', () => {
-    // Two agent runs classified by a tool call (15min each, busy → active == span).
     insertSpanningCall('seg-agent-1', '2026-08-25T00:15:00.000Z');
     insertSpanningCall('seg-agent-2', '2026-08-25T00:15:00.000Z');
-    // One agent run classified by >8 messages, NO tool calls (10min, no calls → active == span).
-    // Two INTERACTIVE queries: no tool calls, 3–8 msgs (above the ≤2-msg utility floor
-    // — PHNX-3474 — so they stay in the corpus rather than being excluded), ~15s each.
     const shard = buildIndexShard([
       segRow('seg-agent-1', 900_000, { message_count: 2 }),
       segRow('seg-agent-2', 900_000, { message_count: 3 }),
       segRow('seg-agent-msgs', 600_000, { message_count: 12, last_activity: '2026-08-25T00:10:00.000Z' }),
       segRow('seg-int-1', 15_000, { message_count: 4, last_activity: '2026-08-25T00:00:15.000Z' }),
       segRow('seg-int-2', 15_000, { message_count: 5, last_activity: '2026-08-25T00:00:15.000Z' }),
-      // No duration → excluded from medians but counts against coverage. message_count 12
-      // keeps it an AGENT row (not utility), so it stays in the denominator (PHNX-3474).
       segRow('seg-nodur', null, { message_count: 12 }),
     ], 'test-device', 'owner-1');
 
-    // Agent median (900k, 900k, 600k) dwarfs interactive median (15k, 15k).
     expect(shard.stats.agentMedianMs).toBe(900_000);
     expect(shard.stats.interactiveMedianMs).toBe(15_000);
     expect(shard.stats.agentMedianMs).toBeGreaterThan(shard.stats.interactiveMedianMs * 10);
     expect(shard.stats.agentP90Ms).toBe(900_000);
-    // 5 of 6 rows carried a non-null duration.
     expect(shard.stats.measuredFraction).toBeCloseTo(5 / 6, 10);
   });
 });
 
-// PHNX-3408: each topic tile carries up to 30 example session refs so the console
-// can drill from the treemap into a category's session list. Without them every
-// tile renders display-only (the consumer gates the click on topic.sessions).
 describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
   function topicRow(rowId: string, label: string, recency: string): SyncRow {
     return {
@@ -1139,8 +991,6 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
       project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'fix/bug', topic: 'fix the bug',
       label, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
       cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
-      // A non-null tool_call_count keeps the row out of the utility class (PHNX-3474),
-      // so it stays in the agent corpus and reaches a topic bucket.
       duration_ms: 1000, model: 'rush-test', tool_call_count: 2,
       file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
       machine: 'test-device',
@@ -1161,12 +1011,11 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
       topicRow('topic-b', 'Newer fix', '2026-08-25T00:09:00.000Z'),
     ], 'test-device', 'owner-1');
 
-    // Both rows classify into one bucket (same cwd/branch/topic).
     const withRefs = shard.topics.find((t) => t.sessions.length > 0);
     expect(withRefs).toBeDefined();
     expect(withRefs!.count).toBe(2);
     expect(withRefs!.sessions).toEqual([
-      { id: 'topic-b', title: 'Newer fix', kind: 'agent', harness: 'rush' }, // most-recent first
+      { id: 'topic-b', title: 'Newer fix', kind: 'agent', harness: 'rush' },
       { id: 'topic-a', title: 'Older fix', kind: 'agent', harness: 'rush' },
     ]);
   });
@@ -1182,18 +1031,12 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
 
     const shard = buildIndexShard(rows, 'test-device', 'owner-1');
     const bucket = shard.topics.find((t) => t.sessions.length > 0)!;
-    expect(bucket.count).toBe(45);          // true total unchanged
-    expect(bucket.sessions).toHaveLength(30); // capped
-    expect(bucket.sessions[0].id).toBe('topic-44'); // most recent kept
+    expect(bucket.count).toBe(45);
+    expect(bucket.sessions).toHaveLength(30);
+    expect(bucket.sessions[0].id).toBe('topic-44');
   });
 });
 
-// PHNX-3474: internal utility plumbing — single-shot calls (no tool AND ≤2 msgs) and
-// known internal-prompt signatures (title-gen, watchdog, commit-message, factory
-// worker) — poisons every console stat. They are tagged `utility` and excluded from
-// the corpus: sessionsImported becomes the real agent count, the medians/topic buckets
-// exclude them, and a top-level utilityCount reports how many were dropped. Real agent
-// rows carry kind='agent' + harness so the console can filter by both.
 describe('utility-call classification excludes internal plumbing (PHNX-3474)', () => {
   const IDS = ['u-title', 'u-watch', 'u-commit', 'u-shape', 'a-real'];
 
@@ -1222,25 +1065,17 @@ describe('utility-call classification excludes internal plumbing (PHNX-3474)', (
   });
 
   it('classifies the single-shot and signature rows utility, and the tool-using row agent', () => {
-    // no tool call, message_count/tool_call_count is the shape's fallback — assert the
-    // pure classifier directly (the authoritative loaded-call count is passed as 0).
     expect(classifySessionKind({ topic: 'Generate a 3-4 word title for this chat', label: null, message_count: 2, tool_call_count: null }, 0)).toBe('utility');
     expect(classifySessionKind({ topic: null, label: 'You are a watchdog monitoring agent sessions', message_count: 1, tool_call_count: null }, 0)).toBe('utility');
     expect(classifySessionKind({ topic: 'Write a conventional-commit message', label: null, message_count: 1, tool_call_count: null }, 0)).toBe('utility');
-    // the single-shot shape rule: no tool call AND ≤2 messages, no signature.
     expect(classifySessionKind({ topic: 'quick question', label: null, message_count: 2, tool_call_count: null }, 0)).toBe('utility');
-    // a signature match wins even when the row otherwise looks like an agent run.
     expect(classifySessionKind({ topic: 'FACTORY WORKER: build the widget', label: null, message_count: 40, tool_call_count: 12 }, 12)).toBe('utility');
-    // a real multi-turn tool-using session is agent.
     expect(classifySessionKind({ topic: 'fix the bug', label: null, message_count: 20, tool_call_count: 3 }, 3)).toBe('agent');
-    // 3–8 messages with no tool call clears the utility floor → agent (interactive).
     expect(classifySessionKind({ topic: 'discuss the design', label: null, message_count: 4, tool_call_count: null }, 0)).toBe('agent');
   });
 
   it('excludes utility rows from sessionsImported, the medians, and the topic buckets; reports utilityCount', () => {
     const db = getDB();
-    // One real agent session: a single tool call spanning its whole 10-min duration so
-    // active time == span, plus a topic that lands it in a bucket.
     db.prepare(`
       INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
       VALUES (?, ?, 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:10:00.000Z', 'Bash', '{}', 'ok', 0, null, 0)
@@ -1250,20 +1085,16 @@ describe('utility-call classification excludes internal plumbing (PHNX-3474)', (
       kindRow('u-title', 'claude', { topic: 'Generate a 3-4 word title for this conversation', message_count: 2 }),
       kindRow('u-watch', 'claude', { label: 'You are a watchdog monitoring stalled agents', message_count: 1 }),
       kindRow('u-commit', 'claude', { topic: 'Draft a conventional-commit subject line', message_count: 1 }),
-      kindRow('u-shape', 'claude', { topic: 'single-shot machine call', message_count: 2 }), // no tool, ≤2 msgs
+      kindRow('u-shape', 'claude', { topic: 'single-shot machine call', message_count: 2 }),
       kindRow('a-real', 'codex', { topic: 'fix the bug', git_branch: 'fix/bug', message_count: 20, tool_call_count: 3, duration_ms: 600_000 }),
     ], 'test-device', 'owner-1');
 
-    // Only the one real agent session is imported; the four utility rows are dropped.
     expect(shard.stats.sessionsImported).toBe(1);
     expect(shard.utilityCount).toBe(4);
-    // The median is the agent session's active time (600s), not diluted by the ~5s
-    // utility rows that would otherwise pull it toward zero.
     expect(shard.stats.medianMs).toBe(600_000);
     expect(shard.stats.agentMedianMs).toBe(600_000);
-    expect(shard.stats.measuredFraction).toBe(1); // the one agent row carried a duration
+    expect(shard.stats.measuredFraction).toBe(1);
 
-    // The topic bucket carries only the agent session, tagged kind+harness.
     const bucket = shard.topics.find((t) => t.sessions.length > 0)!;
     expect(bucket.sessions).toEqual([{ id: 'a-real', title: 'fix the bug', kind: 'agent', harness: 'codex' }]);
     expect(shard.topics.flatMap((t) => t.sessions.map((s) => s.id))).not.toContain('u-title');

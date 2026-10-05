@@ -5,9 +5,6 @@ import * as path from 'node:path';
 import { writeSession, clearSession, sessionFilePath } from '../identity/client.js';
 import { resolveTracesBackend, DEFAULT_TRACES_DOMAIN } from './backend.js';
 
-// resolveTracesBackend now routes managed-vs-BYO through the shared selection
-// policy (lib/storage/selection). These pin the three outcomes on the real
-// session file + env, no mocking of the decision.
 
 const BASE_ENV = process.env.AGENTS_TRACES_BASE_URL;
 const TOKEN_ENV = process.env.AGENTS_TRACES_WRITE_TOKEN;

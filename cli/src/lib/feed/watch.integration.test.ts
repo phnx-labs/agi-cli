@@ -31,7 +31,6 @@ it.skipIf(process.platform !== 'linux')('composes a real hook owner, SQLite hist
     stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, AGENT_LAUNCH_ID: launchId },
   });
   const controller = new AbortController();
-  // All waits have a hard failure boundary; teardown always stops the watcher.
   const deadline = setTimeout(() => controller.abort(new Error('composed stream timed out')), 8_000);
   const projection = new FeedSessionProjection();
   const events: FeedWatchEnvelope[] = [];

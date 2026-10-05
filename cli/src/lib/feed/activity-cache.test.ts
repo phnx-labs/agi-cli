@@ -43,7 +43,7 @@ describe('activity tail cache with real files', () => {
     expect(read()).toEqual(['a']);
     fs.appendFileSync(file, line('b').slice(0, -2));
     expect(read()).toEqual(['a']);
-    fs.appendFileSync(file, line('b').slice(-2)); // valid final JSON without newline
+    fs.appendFileSync(file, line('b').slice(-2));
     expect(read()).toEqual(['a', 'b']);
     fs.writeFileSync(file, line('c'));
     expect(read()).toEqual(['c']);
@@ -95,8 +95,6 @@ describe('activity tail cache with real files', () => {
 
   it('rehydrates tails after memory pressure and entry eviction without hiding older events', () => {
     const dir = root();
-    // More than the retained parsed-tail budget, with each file below its tail
-    // byte budget. Summary-only entries must support a later, earlier cursor.
     const text = Array.from({ length: 1000 }, (_, i) => line(String(i))).join('\n');
     for (let i = 0; i < 40; i++) fs.writeFileSync(path.join(dir, `s${i}.jsonl`), text);
     expect(readRecentActivity({ root: dir, sinceMs: Date.parse('2026-09-07') })).toEqual([]);
@@ -116,9 +114,6 @@ describe('activity tail cache with real files', () => {
   });
 
   it('evicts summaries within the byte budget when no parsed payloads remain, and does not evict history to admit a payload', () => {
-    // Each real tail budget is an independent cache key. An empty real file
-    // exercises summary admission without oversized paths or a test-only
-    // memory limit, including on macOS's 1024-byte PATH_MAX filesystem.
     const dir = root();
     fs.writeFileSync(path.join(dir, 's.jsonl'), '');
     const count = 100_000;
@@ -132,8 +127,6 @@ describe('activity tail cache with real files', () => {
     expect(full.bytes).toBeGreaterThan(full.maxBytes - 16 * 1024);
     expect(full.parsedTails).toBe(0);
     expect(full.entries).toBeLessThan(count);
-    // The newest summary stays warm, while the evicted oldest budget reads
-    // the real file again and is admitted without exceeding the byte budget.
     expect(readRecentActivity({ ...options, maxBytesPerSession: count })).toEqual([]);
     expect(getActivityCacheStats().tailReads).toBe(full.tailReads);
     expect(readRecentActivity({ ...options, maxBytesPerSession: 1 })).toEqual([]);
@@ -146,8 +139,6 @@ describe('activity tail cache with real files', () => {
     expect(readRecentActivity(cursor)).toEqual([]);
     const summary = getActivityCacheStats();
     expect(summary.bytes).toBeLessThanOrEqual(full.maxBytes);
-    // The retained summary fits, but its payload cannot. Return real events
-    // without exceeding the budget or evicting summaries to retain payloads.
     const last = readSessionActivity('payload', other);
     expect(last).toHaveLength(100);
     expect(last[0].detail).toBe('last');
