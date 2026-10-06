@@ -87,6 +87,7 @@
     "@fontsource/inter": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
     "@inquirer/prompts": "8.5.2",
+    "@phnx-labs/secrets-cli": "0.3.0",
     "@phnx-labs/sessions-cli": "0.6.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "@types/proper-lockfile": "4.1.4",

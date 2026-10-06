@@ -14,7 +14,7 @@ describe('standalone tool floors', () => {
   it('pins the published releases R1 of PHNX-4227 depends on', () => {
     expect(pinnedSpec('sessions')).toBe('@phnx-labs/sessions-cli@0.5.0');
     expect(pinnedSpec('browser')).toBe('@phnx-labs/browser-cli@0.1.15');
-    expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.1.8');
+    expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.3.0');
     expect(pinnedSpec('computer')).toBe('@phnx-labs/computer-cli@0.1.5');
   });
 
@@ -28,15 +28,19 @@ describe('standalone tool floors', () => {
 describePosix('ensureToolPins — real executables on PATH', () => {
   let bin: string;
   let originalPath: string | undefined;
+  let originalSecretsBin: string | undefined;
 
   beforeEach(() => {
     bin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tool-pins-'));
     originalPath = process.env.PATH;
+    originalSecretsBin = process.env.SECRETS_BIN;
+    delete process.env.SECRETS_BIN;
     process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
+    if (originalSecretsBin !== undefined) process.env.SECRETS_BIN = originalSecretsBin;
     fs.rmSync(bin, { recursive: true, force: true });
   });
 

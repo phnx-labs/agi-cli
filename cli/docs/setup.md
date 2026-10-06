@@ -48,7 +48,9 @@ Each agents-cli release names the standalone tool releases it is tested against 
 `secrets`, `computer` and `term`, each a published `@phnx-labs/<tool>-cli` version.
 `agents setup tools` reads `<tool> --version` for each and runs
 `npm install -g @phnx-labs/<tool>-cli@<pin>` for any tool that is missing or older.
-A tool at or above its pin is never reinstalled or downgraded.
+A tool at or above its pin is never reinstalled or downgraded. For `secrets`, an
+explicit `SECRETS_BIN` is the executable graded, and one below the pin fails
+instead of installing over PATH. `agents setup secrets` runs the same check first.
 
 ```sh
 agents setup tools --dry-run           # what is below its pin, install nothing
