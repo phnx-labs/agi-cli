@@ -127,13 +127,6 @@ function configureStatsCommand(stats: Command, spelling: string): void {
   });
 }
 
-/**
- * Both parents also declare --agent: `sessions` as one string, `insights` as a
- * repeatable list defaulting to []. Commander hands a flag written after the
- * subcommand to whichever ancestor knows it, so the value can sit on any level.
- * An empty list is unset; more than one distinct agent is rejected because the
- * index query filters on exactly one.
- */
 export function resolveStatsAgent(values: unknown[]): string | undefined {
   const agents = [...new Set(values.flatMap(v => (Array.isArray(v) ? v : v === undefined ? [] : [v])).map(String))];
   if (agents.length > 1) {
