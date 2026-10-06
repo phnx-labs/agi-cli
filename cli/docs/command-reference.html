@@ -1700,9 +1700,9 @@ partial (JSON reports errors per repository; text mode exits non-zero).</p></art
 agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha &lt;headsha&gt;
 agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha &lt;headsha&gt; --method squash --json the merge is a single rest call pinned to --sha: if anything was pushed after
 you read the pr, github refuses and nothing merges. without --admin, a pr whose
-live mergeable_state is not clean/unstable/has_hooks (blocked by a pending or red
-required check or a review, behind, conflicted, or not computed yet) is refused
-before the call. --admin skips that refusal and lets a
+live mergeable_state is blocked (a pending or red required check, or a review),
+behind, conflicted or a draft is refused before the call; one github has not
+computed goes on to the call and github decides. --admin skips that refusal and lets a
 repository admin merge past branch protection where github allows it; it exists
 for a person&#39;s explicit confirm (agi menu&#39;s &quot;confirm admin merge&quot;) and agents
 must never pass it. to land a pr once its checks pass, use prs automerge. a
@@ -1710,9 +1710,9 @@ refusal exits 1 with github&#39;s reason (merged: false in --json)."><div class=
 agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha &lt;headSha&gt;
 agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha &lt;headSha&gt; --method squash --json</code></pre><h4>Notes</h4><p class="notes">The merge is a single REST call pinned to --sha: if anything was pushed after
 you read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose
-live mergeable_state is not clean/unstable/has_hooks (blocked by a pending or red
-required check or a review, behind, conflicted, or not computed yet) is refused
-before the call. --admin skips that refusal and lets a
+live mergeable_state is blocked (a pending or red required check, or a review),
+behind, conflicted or a draft is refused before the call; one GitHub has not
+computed goes on to the call and GitHub decides. --admin skips that refusal and lets a
 repository admin merge past branch protection where GitHub allows it; it exists
 for a person&#39;s explicit confirm (AGI Menu&#39;s &quot;Confirm admin merge&quot;) and agents
 must never pass it. To land a PR once its checks pass, use prs automerge. A
