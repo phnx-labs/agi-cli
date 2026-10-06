@@ -18,6 +18,13 @@ export function profileOfCacheKey(key: string): string {
   return at === -1 ? key : key.slice(0, at);
 }
 
+export function profileScopeSql(column: string, profile: string): { sql: string; params: string[] } {
+  return {
+    sql: `(${column} = ? OR (substr(${column}, 1, length(?) + 1) = ? || '@' AND instr(substr(${column}, length(?) + 2), '@') = 0))`,
+    params: [profile, profile, profile, profile],
+  };
+}
+
 export function listProfileCacheDirs(profileName: string): string[] {
   const root = getBrowserRuntimeDir();
   if (!fs.existsSync(root)) return [];

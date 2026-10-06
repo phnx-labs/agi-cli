@@ -26,6 +26,7 @@ import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
 import { firstUserMessageFromEvents, lastUserMessageFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } from '@phnx-labs/sessions-cli/reader';
+import { profileScopeSql } from '../browser/paths.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -4300,13 +4301,15 @@ function toStoredBrowserSession(row: BrowserSessionRow): StoredBrowserSession {
 
 export function listBrowserSessionRecords(
   profile?: string,
-  opts: { limit?: number } = {},
+  opts: { limit?: number; deviceKeys?: boolean } = {},
 ): StoredBrowserSession[] {
   const db = getDB();
-  const rows = (profile
-    ? db.prepare(`SELECT * FROM browser_sessions WHERE profile = ? ORDER BY started_at DESC`).all(profile)
-    : db.prepare(`SELECT * FROM browser_sessions ORDER BY started_at DESC LIMIT ?`)
-      .all(opts.limit ?? TOOL_SESSION_LIST_LIMIT)) as BrowserSessionRow[];
+  const where = !profile ? undefined
+    : opts.deviceKeys ? profileScopeSql('profile', profile) : { sql: 'profile = ?', params: [profile] };
+  const limit = profile ? opts.limit : opts.limit ?? TOOL_SESSION_LIST_LIMIT;
+  const rows = db.prepare(
+    `SELECT * FROM browser_sessions${where ? ` WHERE ${where.sql}` : ''} ORDER BY started_at DESC${limit === undefined ? '' : ' LIMIT ?'}`,
+  ).all(...(where?.params ?? []), ...(limit === undefined ? [] : [limit])) as BrowserSessionRow[];
   return rows.map(toStoredBrowserSession);
 }
 
