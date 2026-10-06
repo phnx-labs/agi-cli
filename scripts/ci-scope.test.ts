@@ -203,7 +203,7 @@ describe('selectImpact policy', () => {
   ])('%s selects the generated-reference freshness check', (file) => {
     const plan = selectImpact({ files: [file], repoRoot: REPO, related: false });
     expect(plan.checks).toContain('command-index');
-    expect(plan.budget_sec).toBe(IMPACT_BUDGET_SEC);
+    expect(plan.budget_sec).toBeUndefined();
   });
 
   test('a command definition selects command-index and docs, not daemon', () => {
@@ -630,7 +630,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
       expect(plan.unmapped).toEqual([]);
       expect(plan.tests.map((t) => t.file)).toEqual(['cli/src/lib/version.test.ts']);
       expect(plan.checks).toEqual(['command-index', 'docs', 'typecheck']);
-      expect(plan.budget_sec).toBe(IMPACT_BUDGET_SEC);
+      expect(plan.budget_sec).toBeUndefined();
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
     }
