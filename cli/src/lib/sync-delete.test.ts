@@ -82,6 +82,8 @@ describe('agents sync --delete', () => {
 
     fs.copyFileSync(path.join(FIXTURES, 'handmade', 'mine.md'), commandFile('mine'));
     fs.rmSync(path.join(agentsDir(), 'commands', 'gonecmd.md'));
+    fs.rmSync(path.join(agentsDir(), 'commands', 'dupcmd.md'));
+    fs.rmSync(path.join(agentsDir(), 'skills', 'goneskill'), { recursive: true });
     fs.rmSync(path.join(agentsDir(), 'plugins', 'gone'), { recursive: true });
     fs.rmSync(path.join(agentsDir(), '.system', 'plugins', 'sysgone'), { recursive: true });
     fs.cpSync(path.join(FIXTURES, 'later', 'skills'), path.join(agentsDir(), 'skills'), { recursive: true });
@@ -117,5 +119,16 @@ describe('agents sync --delete', () => {
     expect(fs.existsSync(pluginDir('agents-system', 'sysgone'))).toBe(true);
     expect(fs.existsSync(commandFile('mine'))).toBe(true);
     expect(fs.existsSync(commandFile('keepcmd'))).toBe(true);
+    expect(del.out).toContain('skill goneskill');
+    expect(fs.existsSync(path.join(versionHome, '.claude', 'skills', 'goneskill'))).toBe(false);
+    expect(del.out).toContain('still provided by another repo (command dupcmd)');
+    expect(fs.existsSync(commandFile('dupcmd'))).toBe(true);
+
+    const sys = run(['sync', 'claude@1.0.0', 'system', '--delete', '--yes']);
+    expect(sys.status, sys.out).toBe(0);
+    expect(sys.out).toContain('Removed from Claude@1.0.0 (deleted from system): plugin sysgone');
+    expect(fs.existsSync(pluginDir('agents-system', 'sysgone'))).toBe(false);
+    expect(enabledPlugins()).toEqual([]);
+    expect(fs.existsSync(commandFile('mine'))).toBe(true);
   });
 });

@@ -65,7 +65,7 @@ export function pruneRepoRemovals(args: {
   };
 
   if (supports(agent, 'plugins', version).ok) {
-    report.removed.plugins = cleanOrphanedPluginSkills(agent, versionHome, discoverPlugins({ cwd }), version, { marketplace, dryRun });
+    report.removed.plugins = cleanOrphanedPluginSkills(agent, versionHome, discoverPlugins({ cwd }), version, { marketplace, cwd, dryRun });
     for (const name of listVersionMarketplaceNames(agent, versionHome)) {
       if (name === marketplace) continue;
       const dir = path.join(marketplaceRoot(name, agent, versionHome), 'plugins');
