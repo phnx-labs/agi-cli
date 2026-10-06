@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 
-import { deduplicateVersionHookCommands, registerHooksToSettings, selectHookManifest, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks/install.js';
+import { registerHooksToSettings, selectHookManifest, unmanagedHookNames, computeCodexHookTrustHash, toPortableCommand, pruneVersionHomeHookEntriesFromSettings } from '../hooks/install.js';
 import { getHookShimPath } from '../hooks/cache.js';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
@@ -254,7 +254,7 @@ describe('registerHooksToSettings - Codex', () => {
     expect(group.hooks[0]).toEqual(userHook);
   });
 
-  it('drops stale sibling-version hook entries from hooks.json', () => {
+  it('keeps one registration per hook in hooks.json: no sibling-version or direct copies', () => {
     const versionHome = path.join(
       tmpDir,
       '.agents',
@@ -319,10 +319,14 @@ describe('registerHooksToSettings - Codex', () => {
 
     const hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
     const commands = hooksJson.hooks.PreToolUse[0].hooks.map((h: { command: string }) => h.command);
+    // The manifest runs git-guard through its shim; a direct copy beside it would run it twice.
     expect(commands).not.toContain(oldVersionHook.command);
-    expect(commands).toContain(currentVersionHook.command);
+    expect(commands).not.toContain(currentVersionHook.command);
     expect(commands).toContain(customHook.command);
-    expect(commands.map((c: string) => resolvedCommand(c))).toContain(resolvedCommand(getHookShimPath('git-guard')));
+    expect(commands.map((c: string) => resolvedCommand(c))).toEqual([
+      customHook.command,
+      resolvedCommand(getHookShimPath('git-guard')),
+    ]);
   });
 
   it('ignores the deprecated agents: field — capability table decides registration', () => {
@@ -1978,21 +1982,6 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
     return out;
   }
 
-  it('deduplicates by hook resource name and prefers the active version path', () => {
-    const activeHome = '/home/u/.agents/.history/versions/claude/2.1.207/home';
-    const commands = [
-      '/home/u/.agents/.history/versions/claude/2.1.181/home/.claude/hooks/00-agent-verify-work-complete.sh',
-      '/home/u/.agents/.history/versions/claude/2.1.207/home/.claude/hooks/00-agent-verify-work-complete.sh',
-      '/home/u/.agents/.history/versions/claude/2.1.186/home/.claude/hooks/00-agent-verify-work-complete.sh',
-      '/home/u/custom/stop-hook.sh',
-    ];
-
-    expect(deduplicateVersionHookCommands(commands, activeHome)).toEqual([
-      '/home/u/custom/stop-hook.sh',
-      '/home/u/.agents/.history/versions/claude/2.1.207/home/.claude/hooks/00-agent-verify-work-complete.sh',
-    ]);
-  });
-
   describe('sync (registerHooksToSettings)', () => {
     beforeEach(() => {
       tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hooks-prune-test-'));
@@ -2003,7 +1992,7 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it('drops sibling-version entries, keeps the current version + .system + custom hooks', () => {
+    it('drops every other home\'s copy of a hook, keeps .system + custom hooks', () => {
       const versionHome = path.join(
         tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
       );
@@ -2031,40 +2020,89 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       const commands = collectCommands(settings);
 
-      expect(commands).not.toContain(guardCmd('2.1.186'));
-      expect(commands).not.toContain(guardCmd('2.1.191'));
-      const versionHomeCmds = commands.filter((c) => c.includes('.history/versions/claude/'));
-      expect(versionHomeCmds).toEqual([guardCmd('2.1.201')]);
+      expect(commands.filter((c) => c.includes('.history/versions/claude/'))).toEqual([]);
+      expect(commands.filter((c) => c.endsWith('git-guard.sh'))).toHaveLength(1);
       expect(commands).toContain(SYSTEM_HOOK);
       expect(commands).toContain(CUSTOM_HOOK);
     });
 
-    it('collapses an exact-duplicate entry of the CURRENT version to a single hook', () => {
+    it('collapses an exact-duplicate registration to a single hook', () => {
       const versionHome = path.join(
         tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
       );
       const settingsPath = path.join(versionHome, '.claude', 'settings.json');
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-
-      fs.writeFileSync(settingsPath, JSON.stringify({
-        hooks: preToolUseGroup([
-          guardCmd('2.1.201'),
-          guardCmd('2.1.201'),
-          CUSTOM_HOOK,
-        ]),
-      }, null, 2));
-
       makeScript('git-guard.sh');
       const manifest: Record<string, ManifestHook> = {
         'git-guard': { script: 'git-guard.sh', events: ['PreToolUse'], matcher: 'Bash' },
       };
+      registerHooksToSettings('claude', versionHome, manifest, agentsDir);
+      const written = collectCommands(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
+      expect(written).toHaveLength(1);
 
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: preToolUseGroup([written[0], written[0], CUSTOM_HOOK]),
+      }, null, 2));
       const result = registerHooksToSettings('claude', versionHome, manifest, agentsDir);
       expect(result.errors).toHaveLength(0);
 
       const commands = collectCommands(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
-      expect(commands.filter((c) => c === guardCmd('2.1.201'))).toEqual([guardCmd('2.1.201')]);
+      expect(commands.filter((c) => c === written[0])).toEqual([written[0]]);
       expect(commands).toContain(CUSTOM_HOOK);
+    });
+
+    it('an account slot drops the version-home hook copies it carried forward', () => {
+      // Observed 2026-10-06: every claude account slot ran each Stop hook twice, once from
+      // its own hooks dir and once from a version home's (including a removed version).
+      const slotHome = path.join(tmpDir, '.agents', '.history', 'accounts', 'claude', 'acct-1');
+      const settingsPath = path.join(slotHome, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      const carried = '~/.agents/.history/versions/claude/2.1.219/home/.claude/hooks/stop-check.sh';
+      const deleted = '~/.agents/.history/versions/claude/2.1.261/home/.claude/hooks/rabbit-hole-enforce.sh';
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: { Stop: [{ hooks: [carried, deleted, CUSTOM_HOOK].map((command) => ({ type: 'command', command })) }] },
+      }, null, 2));
+
+      makeScript('stop-check.sh');
+      const manifest: Record<string, ManifestHook> = {
+        'stop-check': { script: 'stop-check.sh', events: ['Stop'] },
+      };
+      const result = registerHooksToSettings('claude', slotHome, manifest, agentsDir);
+      expect(result.errors).toHaveLength(0);
+
+      const commands = collectCommands(JSON.parse(fs.readFileSync(settingsPath, 'utf-8')));
+      expect(commands).not.toContain(carried);
+      expect(commands).not.toContain(deleted);
+      expect(commands.filter((c) => c.endsWith('stop-check.sh'))).toHaveLength(1);
+      expect(commands).toContain(CUSTOM_HOOK);
+    });
+
+    it('one script serving several events keeps exactly one command per event', () => {
+      // feed-publish: the AskUserQuestion leg runs through a shim (it has a matcher), the Stop leg
+      // runs the script directly. A direct registration left on PreToolUse ran it twice there.
+      const versionHome = path.join(
+        tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
+      );
+      const settingsPath = path.join(versionHome, '.claude', 'settings.json');
+      fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+      const direct = makeScript('feed-publish.py');
+      const manifest: Record<string, ManifestHook> = {
+        'feed-publish': { script: 'feed-publish.py', events: ['PreToolUse'], matcher: 'AskUserQuestion' },
+        'feed-clear-lifecycle': { script: 'feed-publish.py', events: ['Stop'] },
+      };
+      fs.writeFileSync(settingsPath, JSON.stringify({
+        hooks: { PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: direct }] }] },
+      }, null, 2));
+
+      const result = registerHooksToSettings('claude', versionHome, manifest, agentsDir);
+      expect(result.errors).toHaveLength(0);
+
+      const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      const pre = settings.hooks.PreToolUse[0].hooks.map((h: { command: string }) => h.command);
+      const stop = settings.hooks.Stop[0].hooks.map((h: { command: string }) => h.command);
+      expect(pre).toHaveLength(1);
+      expect(pre[0]).not.toBe(direct);
+      expect(stop).toEqual([direct]);
     });
   });
 
