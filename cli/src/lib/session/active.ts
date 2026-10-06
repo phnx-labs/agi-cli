@@ -482,7 +482,7 @@ export function isPidAlive(pid: number, startedAtMs?: number): boolean {
 }
 
 interface LiveTerminalEntry {
-  sessionId?: string;
+  sessionId?: string | '';
   terminalId?: string;
   tabIndex?: number;
   pid: number;
@@ -517,11 +517,11 @@ function readLiveTerminals(): LiveTerminalEntry[] {
     const windowHeartbeatMs = Number.isFinite(at) ? at : undefined;
     const windowGone = windowHeartbeatMs !== undefined && now - windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
-      const key = e?.sessionId ?? (e?.terminalId ? `terminal\0${windowId}\0${e.terminalId}` : undefined);
+      const key = e?.sessionId || (e?.terminalId ? `terminal\0${e.terminalId}` : undefined);
       if (!key) continue;
       const alive = isPidAlive(e.pid, e.startedAtMs);
       if (!alive && !windowGone) continue;
-      const entry: LiveTerminalEntry = { ...e, windowId, windowHeartbeatMs, pidDead: !alive };
+      const entry: LiveTerminalEntry = { ...e, sessionId: e.sessionId || undefined, windowId, windowHeartbeatMs, pidDead: !alive };
       const prev = merged.get(key);
       if (prev && !prev.pidDead && !alive) continue;
       merged.set(key, entry);
@@ -869,7 +869,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   const labelMap = buildClaudeLabelMap();
   const runNameMap = buildRunNameMap();
 
-  return entries.map((t): ActiveSession => {
+  return entries.flatMap((t): ActiveSession[] => {
     const directEntry = readPidSessionEntry(t.pid, procByPid.get(t.pid)?.startTime);
     const candidate = directEntry?.sessionId ? directEntry
       : (!t.pidDead ? terminalDescendantEntry(t.pid, procByPid, children) : undefined) ?? directEntry;
@@ -877,13 +877,14 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const resolvedId = pidEntry?.sessionId ?? t.sessionId;
     const cwd = pidEntry?.cwd ?? t.cwd ?? undefined;
     const sessionKind = pidEntry?.agent ?? t.kind;
-    const sessionFile = findSessionFileForKind(sessionKind, cwd, resolvedId);
+    if (!resolvedId && !isSessionTrackedAgent(sessionKind)) return [];
+    const sessionFile = resolvedId ? findSessionFileForKind(sessionKind, cwd, resolvedId) : undefined;
     const label = t.label ?? (resolvedId ? labelMap.get(resolvedId) : undefined) ?? undefined;
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = isPidAlive(t.pid, t.startedAtMs);
     const { state, tokPerSec } = computeLiveSignals(sessionKind, sessionFile, cwd, pidAlive);
-    return applyState({
+    return [applyState({
       context: 'terminal',
       kind: sessionKind,
       harness: pidEntry?.harness,
@@ -906,7 +907,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       windowId: t.windowId,
       windowHeartbeatMs: t.windowHeartbeatMs,
       owner: resolveOwner(pidEntry?.actor, resolvedId),
-    }, state, sessionFile, pidAlive);
+    }, state, sessionFile, pidAlive)];
   });
 }
 

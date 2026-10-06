@@ -315,8 +315,11 @@ tab (`agents run --device`) also lists that tab: the launcher forwards
 the row's `originTerminal`, and the projection adds
 `{device, terminalId, launchId}` for the origin desktop when it differs from the
 owner. This works for every harness, including those with no pre-minted session
-id (Codex, Grok). A `live-terminals.json` entry may omit `sessionId`; a tab with a
-`terminalId` and pid still yields a terminal row. Disconnect retains the last owner state;
+id (Codex, Grok). A `live-terminals.json` entry may omit `sessionId` (or carry
+`""`); it is keyed by `terminalId` alone, so a reloaded window does not duplicate
+it. A sessionless agent tab yields a terminal row with no session id. It is never
+joined to a transcript by cwd. A non-agent tab (`kind: "shell"`) yields no row
+unless a recorded agent with a session id runs under it. Disconnect retains the last owner state;
 reconnect resets it. Once an owner has answered, stale launcher/history copies
 cannot resurrect a session that the owner removed. `--local` remains the raw
 observation stream used by the fleet coordinator.

@@ -120,6 +120,40 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
     expect((await scan())[0]).toMatchObject({ sessionId: sessionB, originTerminal: { device: 'zion', terminalId: 'cx-only' } });
   });
 
+  function publish(mutate: (entry: Record<string, unknown>) => void): void {
+    const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    mutate(published.window.entries[0]);
+    fs.writeFileSync(registry, JSON.stringify(published));
+  }
+
+  it('lists no row for a shell tab with no agent beneath it, and the agent row when one runs under it (PHNX-4263)', async () => {
+    const [pid] = await startTab(1, 'siblings', 'shell');
+    publish(entry => { delete entry.sessionId; entry.terminalId = 'sh-1-1'; });
+    expect(await scan()).toEqual([]);
+    record(pid, sessionB, { terminalId: 'sh-1-1' });
+    expect(await scan()).toEqual([expect.objectContaining({ kind: 'claude', sessionId: sessionB, terminalId: 'sh-1-1' })]);
+  });
+
+  it('treats an empty published sessionId as missing, and never guesses one from the cwd (PHNX-4263)', async () => {
+    await startTab(0, 'siblings', 'codex');
+    publish(entry => { entry.sessionId = ''; entry.terminalId = 'cx-old-ext'; });
+    expect(await scan()).toEqual([expect.objectContaining({ kind: 'codex', terminalId: 'cx-old-ext', pid: shell!.pid, sessionId: undefined })]);
+    publish(entry => { entry.kind = 'claude'; });
+    const [row] = await scan();
+    expect(fs.readdirSync(transcriptDir).length).toBeGreaterThan(0);
+    expect(row).toMatchObject({ kind: 'claude', terminalId: 'cx-old-ext', sessionId: undefined, sessionFile: undefined });
+  });
+
+  it('collapses one sessionless tab published by an old and a reloaded window (PHNX-4263)', async () => {
+    await startTab(0, 'siblings', 'codex');
+    const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    delete published.window.entries[0].sessionId;
+    published.window.entries[0].terminalId = 'cx-reload';
+    published.reloaded = structuredClone(published.window);
+    fs.writeFileSync(registry, JSON.stringify(published));
+    expect(await scan()).toEqual([expect.objectContaining({ terminalId: 'cx-reload' })]);
+  });
+
   it('selects the latest recorded start and breaks ties by pid, independent of traversal order', async () => {
     const pids = (await startTab(2)).sort((a, b) => a - b);
     const now = Date.now();
