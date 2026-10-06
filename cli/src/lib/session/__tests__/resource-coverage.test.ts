@@ -74,7 +74,7 @@ describe('resourceUsageCoverage — scan coverage is distinct from with-usage co
   it('a stale-extractor-version ledger row does NOT count as scanned (re-derived next backfill)', () => {
     getDB().prepare(`UPDATE resource_scan_ledger SET extractor_version = 0 WHERE session_id = 'inv1'`).run();
     expect(resourceUsageCoverage().scanned).toBe(4);
-    getDB().prepare(`UPDATE resource_scan_ledger SET extractor_version = 1 WHERE session_id = 'inv1'`).run();
+    getDB().prepare(`UPDATE resource_scan_ledger SET extractor_version = 2 WHERE session_id = 'inv1'`).run();
     expect(resourceUsageCoverage().scanned).toBe(5);
   });
 
@@ -82,7 +82,7 @@ describe('resourceUsageCoverage — scan coverage is distinct from with-usage co
     getDB().prepare(`
       INSERT INTO resource_scan_ledger
         (session_id, file_path, file_mtime_ms, file_size, extractor_version, indexed_at, resource_count)
-      VALUES ('ghost', ?, 0, 0, 1, 0, 0)
+      VALUES ('ghost', ?, 0, 0, 2, 0, 0)
     `).run(path.join(SEED_FILES_DIR, 'ghost.jsonl'));
     const cov = resourceUsageCoverage();
     expect(cov.scanned).toBe(5);
