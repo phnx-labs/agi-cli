@@ -12,6 +12,5 @@
   - Both stores are read-only, and the feed no longer prunes `sessions.db` on
     every refresh.
   - An unreadable history record keeps the existing rows instead of removing them.
-  - Action commands are unchanged (`command: "agents"`).
   Source: `cli/src/lib/browser/sessions-list.ts`, `cli/src/lib/feed/tool-activity.ts`,
   `cli/src/lib/feed/tools.ts`, `cli/src/lib/sqlite.ts`.

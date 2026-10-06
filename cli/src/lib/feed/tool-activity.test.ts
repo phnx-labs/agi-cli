@@ -264,7 +264,7 @@ describe('live browser tasks read from real tasks.json files', () => {
     expect([row.kind, row.task, row.live]).toEqual(['browser', 'fresh', true]);
     expect(row.captures).toEqual([]);
     expect(row.kind === 'browser' && row.tabs?.map((tab) => tab.id)).toEqual(['a']);
-    expect(row.kind === 'browser' && row.showCommand?.args).toEqual(['browser', 'tab', 'focus', 'a', '--task', 'fresh']);
+    expect(row.kind === 'browser' && row.showCommand?.args).toEqual(['tab', 'focus', 'a', '--task', 'fresh']);
   });
 
   it('does not duplicate a task that has BOTH a live record and captures', () => {
@@ -452,8 +452,8 @@ describe('native browser history on the feed (real history.db in WAL mode)', () 
     expect(live).toHaveLength(1);
     expect(live[0]).toMatchObject({
       live: true, owner: { sessionId: 'sess-fin' }, machine: 'origin-box',
-      closeCommand: { command: 'agents', args: ['browser', 'done', '--task', 'fin'], runOn: 'peer-a' },
-      showCommand: { command: 'agents', args: ['browser', 'tab', 'focus', 't1', '--task', 'fin'], runOn: 'peer-a' },
+      closeCommand: { command: 'browser', args: ['done', '--task', 'fin'], runOn: 'peer-a' },
+      showCommand: { command: 'browser', args: ['tab', 'focus', 't1', '--task', 'fin'], runOn: 'peer-a' },
     });
 
     fs.writeFileSync(path.join(runtime, 'tasks.json'), '{}');

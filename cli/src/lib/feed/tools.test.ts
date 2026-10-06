@@ -49,7 +49,7 @@ describe('canonical tool rows', () => {
     expect(row.live).toBe(true);
     expect(row.device).toBe('zion');
     expect(row.scope).toBe('yosemite-m1');
-    expect(row.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'post'], runOn: 'yosemite-m1' });
+    expect(row.closeCommand).toEqual({ command: 'browser', args: ['done', '--task', 'post'], runOn: 'yosemite-m1' });
     expect(row.owner).toEqual({ sessionId: 'sess-1', device: 'zion', label: 'ship the feed', agent: 'claude' });
     expect(row.captures.map((capture) => capture.name)).toEqual(['b.png', 'a.png']);
     expect(row.captures.map((capture) => capture.host)).toEqual(['yosemite-m1', 'yosemite-m1']);
@@ -142,7 +142,7 @@ describe('live task identity, tabs and commands', () => {
     expect(row.captureCounts).toEqual({});
     expect(row.startedAtMs).toBe(5_000);
     expect(row.updatedAtMs).toBe(5_000);
-    expect(row.closeCommand?.args).toEqual(['browser', 'done', '--task', 'fresh']);
+    expect(row.closeCommand?.args).toEqual(['done', '--task', 'fresh']);
   });
 
   it('collapses the capture-derived and live records for one task onto ONE row key', () => {
@@ -158,7 +158,7 @@ describe('live task identity, tabs and commands', () => {
     };
     const row = projectBrowserToolRow('m1', boundBrowserRow('post', live), { device: 'm1' }, live);
     expect(row.tabs?.map((tab) => tab.id)).toEqual(['a', 'b', 'c']);
-    expect(row.showCommand).toEqual({ command: 'agents', args: ['browser', 'tab', 'focus', 'c', '--task', 'post'], runOn: 'm1' });
+    expect(row.showCommand).toEqual({ command: 'browser', args: ['tab', 'focus', 'c', '--task', 'post'], runOn: 'm1' });
   });
 
   it('never offers to show a borrowed tab the task did not open', () => {
