@@ -16129,6 +16129,42 @@
           "negate": false
         },
         {
+          "flags": "--pane <id>",
+          "description": "session channel: tmux pane id to type into directly (e.g. %3), instead of --to",
+          "long": "--pane",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--socket <path>",
+          "description": "session channel: tmux socket the --pane lives on",
+          "long": "--socket",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--no-enter",
+          "description": "session channel: type the text without pressing Enter",
+          "long": "--no-enter",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": true
+        },
+        {
+          "flags": "--combined",
+          "description": "session channel: send text + Enter as one write",
+          "long": "--combined",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--json",
           "description": "output JSON",
           "long": "--json",
@@ -16157,8 +16193,8 @@
           "negate": false
         }
       ],
-      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.",
+      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Type into a known tmux pane, without pressing Enter\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"draft\" --no-enter\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
+      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
       "subcommands": []
     },
     {

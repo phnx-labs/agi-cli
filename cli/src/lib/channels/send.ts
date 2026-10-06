@@ -1,8 +1,9 @@
 import type { Meta } from '../types.js';
 import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
-import { resolveTransport } from './resolve.js';
-import type { SendResult } from './registry.js';
+import { lookupTransport, resolveTransport } from './resolve.js';
+import type { SendResult, TerminalSendOptions } from './registry.js';
+import { SESSION_CHANNEL } from './providers/session.js';
 import { sendToOwner } from '../notify.js';
 import type { SinkMessageFormat } from '../sink-format.js';
 
@@ -15,6 +16,7 @@ interface SendEnvelope {
   from?: string;
   ownerScoped?: boolean;
   dryRun?: boolean;
+  terminal?: TerminalSendOptions;
 }
 
 export interface ResolveSendInput {
@@ -28,6 +30,7 @@ export interface ResolveSendInput {
   from?: string;
   dryRun?: boolean;
   ownerMode?: boolean;
+  terminal?: TerminalSendOptions;
 }
 
 type ResolveSendResult =
@@ -40,8 +43,8 @@ export function isOwnerAlias(to: string | undefined): boolean {
   return (to ?? '').trim().toLowerCase() === OWNER_ALIAS;
 }
 
-export function composeSendText(text: string, urls?: string[]): string {
-  const body = text.trim();
+export function composeSendText(text: string, urls?: string[], verbatim = false): string {
+  const body = verbatim ? text : text.trim();
   const extra = (urls ?? [])
     .map((u) => u.trim())
     .filter(Boolean)
@@ -58,30 +61,58 @@ export function readOwnerDest(meta: Meta): { channel: string; to: string } | nul
   return channel && to ? { channel, to } : null;
 }
 
-export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): ResolveSendResult {
-  const positional = (input.positionalText ?? '').trim();
-  const flagged = (input.text ?? '').trim();
-  if (positional && flagged && positional !== flagged) {
+// The session channel types into a terminal, so its text is delivered byte for
+// byte: surrounding whitespace is input, and an explicitly empty message still
+// presses Enter. Every other channel trims.
+function resolveText(
+  input: ResolveSendInput,
+  verbatim: boolean,
+): { ok: true; text: string } | { ok: false; error: string } {
+  const norm = (t: string | undefined) => (t === undefined || verbatim ? t : t.trim());
+  const positional = norm(input.positionalText);
+  const flagged = norm(input.text);
+  const conflict = verbatim
+    ? positional !== undefined && flagged !== undefined && positional !== flagged
+    : Boolean(positional && flagged && positional !== flagged);
+  if (conflict) {
     return {
       ok: false,
       error: 'Pass the message once: use --text, or a positional argument, not both with different values.',
     };
   }
-  const rawText = flagged || positional;
   const urls = (input.urls ?? []).map((u) => u.trim()).filter(Boolean);
-  const text = composeSendText(rawText, urls);
-  if (!text) {
+  const supplied = verbatim ? (flagged ?? positional) : (flagged || positional);
+  const text = composeSendText(supplied ?? '', urls, verbatim);
+  if (!text && (supplied === undefined || !verbatim)) {
     return {
       ok: false,
       error: 'Message is empty. Pass --text "…", a positional message, and/or --url.',
     };
   }
+  return { ok: true, text };
+}
 
+function terminalOptionsError(terminal: TerminalSendOptions | undefined, to: string): string | null {
+  if (!terminal) return null;
+  if (terminal.socket && !terminal.pane) {
+    return '--socket addresses an explicit --pane; a session found by --to already carries its own socket.';
+  }
+  if (terminal.combined && terminal.enter === false) {
+    return '--combined fuses the text with Enter; it cannot be used with --no-enter.';
+  }
+  if (terminal.pane && to && to !== terminal.pane) {
+    return `--pane ${terminal.pane} and --to ${to} name different targets; pass one of them.`;
+  }
+  return null;
+}
+
+export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): ResolveSendResult {
   let channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
   const usedOwnerAlias = isOwnerAlias(to);
+  const ownerAddressed = input.ownerMode || usedOwnerAlias;
 
-  if (input.ownerMode || usedOwnerAlias) {
+  if (ownerAddressed) {
     const owner = getOwnerNotifyFromHumans() ?? meta.notify?.owner;
     const ownerChannel = owner?.channel ?? '';
     const ownerTo = owner?.to ?? '';
@@ -89,12 +120,30 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
     if (!to || usedOwnerAlias) to = ownerTo;
   }
 
+  const isSession = !ownerAddressed && Boolean(channel)
+    && lookupTransport(channel, meta).providerName === SESSION_CHANNEL;
+  if (input.terminal && !isSession) {
+    return {
+      ok: false,
+      error: '--pane, --socket, --no-enter and --combined only apply to --channel session.',
+    };
+  }
+  const terminalError = isSession ? terminalOptionsError(input.terminal, to) : null;
+  if (terminalError) return { ok: false, error: terminalError };
+  if (isSession && input.terminal?.pane) to = input.terminal.pane;
+
+  const resolvedText = resolveText(input, isSession);
+  if (!resolvedText.ok) return resolvedText;
+  const { text } = resolvedText;
+
   if (!channel || !to) {
     const hint =
-      input.ownerMode || usedOwnerAlias
+      ownerAddressed
         ? 'Set owner.channels and owner.policy.normal in humans.yaml, or pass --channel and --to explicitly.'
-        : 'Need --channel and --to (or --to owner with notify.owner configured). ' +
-          'Example: agents send --channel desktop --to local --text "hi"';
+        : isSession
+          ? 'Need --to <session> (find ids with: agents ps) or --pane <tmux pane id>.'
+          : 'Need --channel and --to (or --to owner with notify.owner configured). ' +
+            'Example: agents send --channel desktop --to local --text "hi"';
     return { ok: false, error: hint };
   }
 
@@ -115,6 +164,7 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
       from: input.from?.trim() || undefined,
       ownerScoped: usedOwnerAlias || (input.ownerMode === true && !input.to?.trim()),
       dryRun: input.dryRun,
+      terminal: isSession ? input.terminal : undefined,
     },
   };
 }
@@ -129,6 +179,7 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
     from: envelope.from,
     ownerScoped: envelope.ownerScoped,
     dryRun: envelope.dryRun,
+    terminal: envelope.terminal,
   });
 }
 

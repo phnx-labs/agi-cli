@@ -16,8 +16,19 @@ export async function resolveLiveInjectTarget(
   selector: string,
 ): Promise<{ target: InjectTarget | null; reason?: string; hint?: string }> {
   const sessions = await getActiveSessions();
-  const match = sessions.find((s) => matchInjectSelector(s, selector));
-  if (!match) return { target: null, reason: `No active session matches "${selector}".` };
+  const matches = sessions.filter((s) => matchInjectSelector(s, selector));
+  if (matches.length === 0) return { target: null, reason: `No active session matches "${selector}".` };
+  const exact = matches.filter((s) =>
+    [s.sessionId, s.tmuxName, s.paneId, s.tmuxName && shortIdFromName(s.tmuxName)].includes(selector));
+  const candidates = exact.length > 0 ? exact : matches;
+  if (candidates.length > 1) {
+    const names = candidates.map((s) => s.tmuxName ?? s.sessionId ?? s.paneId).join(', ');
+    return {
+      target: null,
+      reason: `"${selector}" matches ${candidates.length} live sessions (${names}); pass a longer id.`,
+    };
+  }
+  const [match] = candidates;
   const resolution = resolveInjectTargetForSession(match);
   if (!resolution.addressable) {
     return {
