@@ -13,6 +13,10 @@
   invisible once the worker's new root exists, since adoption runs only once); an
   explicit `remoteSecretsHome` still wins. The standalone `agents setup tools`
   installs is raised from 0.1.8 to 0.3.0, because a 0.1.x
-  engine defaulted to `~/.secrets` without adopting. Source:
+  engine defaulted to `~/.secrets` without adopting. `agents setup secrets` now
+  enforces that floor through the same `ensureToolPins` path instead of accepting
+  any `secrets` on PATH, and an explicit `SECRETS_BIN` below it fails with the
+  version it read rather than installing over PATH. Source:
   `cli/src/lib/secrets-client.ts`, `cli/src/lib/exec.ts`, `cli/src/lib/secrets-cli.ts`,
+  `cli/src/lib/standalone-tools.ts`, `cli/src/commands/setup-secrets.ts`,
   `cli/package.json`, `cli/tests/secrets-standalone.ts`.

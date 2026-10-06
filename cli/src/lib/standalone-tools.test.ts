@@ -28,15 +28,19 @@ describe('standalone tool floors', () => {
 describePosix('ensureToolPins — real executables on PATH', () => {
   let bin: string;
   let originalPath: string | undefined;
+  let originalSecretsBin: string | undefined;
 
   beforeEach(() => {
     bin = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-tool-pins-'));
     originalPath = process.env.PATH;
+    originalSecretsBin = process.env.SECRETS_BIN;
+    delete process.env.SECRETS_BIN;
     process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
   });
 
   afterEach(() => {
     process.env.PATH = originalPath;
+    if (originalSecretsBin !== undefined) process.env.SECRETS_BIN = originalSecretsBin;
     fs.rmSync(bin, { recursive: true, force: true });
   });
 
