@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 476 commands._
+_65 command groups · 483 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -169,6 +169,13 @@ agents daemon funnel                      Manage Tailscale Funnel exposure for a
 agents daemon funnel down <host>          Disable Tailscale Funnel exposure for a public HTTPS port.
 agents daemon funnel status <host>        Show Tailscale Funnel status on a fleet host.
 agents daemon funnel up <host>            Expose a localhost webhook receiver through Tailscale Funnel.
+agents daemon index                       Maintain the session index the daemon keeps: transcript roots, FTS compaction, historical backfills. Runs in the foreground; never starts or restarts the daemon.
+agents daemon index backfill              Populate derived session data explicitly.
+agents daemon index backfill resources    Derive historical skill/slash-command usage once into the local SQLite index.
+agents daemon index backfill titles       Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.
+agents daemon index backfill tools        Parse historical tool calls once into the local SQLite index.
+agents daemon index optimize              Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
+agents daemon index roots                 Print the on-disk directories scanned for session transcripts, per agent, as JSON (for external watchers)
 agents daemon logs                        Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
 agents daemon reload                      Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
 agents daemon restart                     Stop then start the daemon.
