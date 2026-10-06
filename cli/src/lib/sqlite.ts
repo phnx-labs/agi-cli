@@ -30,11 +30,14 @@ const sqliteMod = isBun
   ? (require as (id: string) => unknown)(BUN_SQLITE)
   : loadNodeSqlite();
 
-const NativeDatabase: new (filename: string, options?: { strict: boolean }) => NativeDb =
+const NativeDatabase: new (filename: string, options?: { strict?: boolean; readonly?: boolean; readOnly?: boolean }) => NativeDb =
   (sqliteMod as { Database?: unknown; DatabaseSync?: unknown }).Database as never
   ?? (sqliteMod as { DatabaseSync?: unknown }).DatabaseSync as never;
 
-const NATIVE_ARGS: [] | [{ strict: boolean }] = isBun ? [{ strict: true }] : [];
+function nativeOptions(readOnly: boolean): { strict?: boolean; readonly?: boolean; readOnly?: boolean } {
+  if (isBun) return readOnly ? { strict: true, readonly: true } : { strict: true };
+  return readOnly ? { readOnly: true } : {};
+}
 
 interface NativeStmt {
   run(...args: unknown[]): RunResult;
@@ -85,8 +88,8 @@ class StatementImpl<_T = unknown> {
 class Database {
   private readonly inner: NativeDb;
 
-  constructor(filename: string) {
-    this.inner = new NativeDatabase(filename, ...NATIVE_ARGS);
+  constructor(filename: string, options: { readOnly?: boolean } = {}) {
+    this.inner = new NativeDatabase(filename, nativeOptions(options.readOnly === true));
   }
 
   prepare<T = unknown>(sql: string): StatementImpl<T> {

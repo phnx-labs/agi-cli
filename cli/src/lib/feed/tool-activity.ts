@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { getBrowserRuntimeDir } from '../state.js';
+import { getBrowserRuntimeDir, getHistoryDir } from '../state.js';
 import { getEventsDir } from './events.js';
-import { buildBrowserSessionRows, type BrowserSessionRow } from '../browser/sessions-list.js';
+import { readBrowserSessionRows, type BrowserSessionRow } from '../browser/sessions-list.js';
 import { buildComputerSessionRows, standaloneComputerActionsDir, type ComputerRunRow } from '../computer/sessions-list.js';
 import type { LiveBrowserTask, ToolTab } from './tools.js';
 import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, sortToolRows, type ToolRow } from './tools.js';
@@ -40,7 +40,7 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
   for (const task of read(sources.liveTasks ?? (() => readLiveBrowserTasks()), [])) liveTasks.set(task.task, task);
 
   const rows: ToolRow[] = [];
-  const browserRows = read(sources.browserRows ?? (() => buildBrowserSessionRows()), [] as BrowserSessionRow[]);
+  const browserRows = read(sources.browserRows ?? (() => readBrowserSessionRows()), [] as BrowserSessionRow[]);
   const captured = new Set<string>();
   for (const row of browserRows) {
     if (row.task) captured.add(row.task);
@@ -96,7 +96,7 @@ interface ToolWatchOptions {
 }
 
 export function toolWatchRoots(): string[] {
-  return [getBrowserRuntimeDir(), getEventsDir(), standaloneComputerActionsDir()];
+  return [getBrowserRuntimeDir(), path.join(getHistoryDir(), 'browser'), getEventsDir(), standaloneComputerActionsDir()];
 }
 
 function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
@@ -167,8 +167,11 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
   const armRoot = (root: string): void => {
     if (stopped || watchers.get(root)) return;
     try {
-      fs.mkdirSync(root, { recursive: true });
-      const watcher = fs.watch(root, { recursive: true }, () => { dirty = true; });
+      fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+      // A reader of a WAL database updates its -shm index; only -wal and the db itself carry writes.
+      const watcher = fs.watch(root, { recursive: true }, (_event, file) => {
+        if (!String(file ?? '').endsWith('-shm')) dirty = true;
+      });
       watcher.on('error', () => {
         watcher.close();
         if (watchers.get(root) === watcher) watchers.set(root, undefined);
