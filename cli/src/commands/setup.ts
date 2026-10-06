@@ -30,7 +30,7 @@ import { registerBetaCommands } from './beta.js';
 import { addUrlSchemeSubcommands } from './open.js';
 import { runPreferencesStep } from './setup-preferences.js';
 import { browserInstalled } from '../lib/browser-client.js';
-import { probeComputerTrust } from './computer.js';
+import { probeComputerTrust } from '../lib/computer-client.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { getConfigValue } from '../lib/device-config.js';
 import { setupSecretsPrefsPath } from './setup-secrets.js';

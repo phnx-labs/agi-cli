@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -10,7 +10,15 @@ import {
   invocation,
   parseEventLines,
   resolveComputerBin,
+  parseTrustFromStatusJson,
+  resolveDeviceHost,
+  withHostFlag,
 } from './computer-client.js';
+
+const mockGetConfigValue = vi.fn();
+const mockResolveRemoteDevice = vi.fn();
+vi.mock('./device-config.js', () => ({ getConfigValue: (...args: unknown[]) => mockGetConfigValue(...args) }));
+vi.mock('./ssh-tunnel.js', () => ({ resolveRemoteDevice: (...args: unknown[]) => mockResolveRemoteDevice(...args) }));
 
 describe('resolveComputerBin', () => {
   const prev = process.env.COMPUTER_BIN;
@@ -125,5 +133,101 @@ describe('parseEventLines — NDJSON framing', () => {
     expect(events[0].invocationId).toBe('run-1');
     expect(events[0].host).toBe('win-mini');
     expect(events[0].actor).toBe('muqsit');
+  });
+});
+
+describe('parseTrustFromStatusJson', () => {
+  it('reads trusted:true out of a clean JSON status', () => {
+    expect(parseTrustFromStatusJson('{"trusted":true,"pid":4211}')).toBe(true);
+  });
+
+  it('reads trusted:false', () => {
+    expect(parseTrustFromStatusJson('{"trusted":false}')).toBe(false);
+  });
+
+  it('tolerates a banner line printed before the JSON', () => {
+    expect(parseTrustFromStatusJson('checking helper...\n{"trusted":true}\n')).toBe(true);
+  });
+
+  it('returns false — never throws — on empty or unparseable output', () => {
+    expect(parseTrustFromStatusJson('')).toBe(false);
+    expect(parseTrustFromStatusJson('daemon not running')).toBe(false);
+    expect(parseTrustFromStatusJson('{oops')).toBe(false);
+  });
+
+  it('treats a missing or non-boolean `trusted` as untrusted', () => {
+    expect(parseTrustFromStatusJson('{"pid":1}')).toBe(false);
+    expect(parseTrustFromStatusJson('{"trusted":"yes"}')).toBe(false);
+  });
+});
+
+describe('withHostFlag', () => {
+  it('re-inserts --host right after the verb so the engine sees the remote selector', () => {
+    expect(withHostFlag(['setup'], 'ssh://Administrator@win-mini')).toEqual(['setup', '--host', 'ssh://Administrator@win-mini']);
+  });
+
+  it('keeps the verb\'s own operands, after the flag', () => {
+    expect(withHostFlag(['screenshot', '-o', '/tmp/win.png'], 'vnc://10.0.0.5:5901'))
+      .toEqual(['screenshot', '--host', 'vnc://10.0.0.5:5901', '-o', '/tmp/win.png']);
+  });
+
+  it('leaves a local invocation untouched', () => {
+    expect(withHostFlag(['apps', '--json'])).toEqual(['apps', '--json']);
+  });
+
+  it('never overwrites an explicit --host the caller already typed', () => {
+    expect(withHostFlag(['screenshot', '--host', 'vnc://explicit:5901'], 'ssh://fallback@win-mini'))
+      .toEqual(['screenshot', '--host', 'vnc://explicit:5901']);
+  });
+});
+
+describe('resolveDeviceHost', () => {
+  beforeEach(() => {
+    mockGetConfigValue.mockReset();
+    mockResolveRemoteDevice.mockReset();
+  });
+
+  it('forwards a vnc:// computer.host with no fleet ssh identity resolution', async () => {
+    mockGetConfigValue.mockReturnValue({ value: 'vnc://10.0.0.5:5901' });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('vnc://10.0.0.5:5901');
+    expect(result.target.sshArgs).toEqual([]);
+    expect(mockResolveRemoteDevice).not.toHaveBeenCalled();
+  });
+
+  it('resolves fleet ssh identity for an ssh:// computer.host, with no Windows expectation', async () => {
+    mockGetConfigValue.mockReturnValue({ value: 'ssh://muqsit@linux-desk' });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',
+      device: { platform: 'linux' }, identityArgs: ['-i', '/key'],
+    });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('ssh://muqsit@linux-desk');
+    expect(result.target.sshArgs).toEqual(['-i', '/key']);
+    expect(mockResolveRemoteDevice).toHaveBeenCalledWith('linux-desk', {});
+  });
+
+  it('uses the configured ssh:// host/user, not the registry\'s own resolution, when they disagree', async () => {
+    mockGetConfigValue.mockReturnValue({ value: 'ssh://otheruser@otherhost:2222' });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'muqsit@linux-desk', user: 'muqsit', host: 'linux-desk',
+      device: { platform: 'linux' }, identityArgs: ['-i', '/key'],
+    });
+    const result = await resolveDeviceHost('linux-desk');
+    expect(result.host).toBe('ssh://otheruser@otherhost:2222');
+    expect(result.target.host).toBe('otheruser@otherhost');
+    expect(result.target.hostname).toBe('otherhost');
+    expect(result.target.sshArgs).toEqual(['-i', '/key']);
+  });
+
+  it('falls back to the Windows-only fleet ssh tunnel with no computer.host configured', async () => {
+    mockGetConfigValue.mockReturnValue({ value: undefined });
+    mockResolveRemoteDevice.mockResolvedValue({
+      target: 'Administrator@win-mini', user: 'Administrator', host: 'win-mini',
+      device: { platform: 'windows' }, identityArgs: [],
+    });
+    const result = await resolveDeviceHost('win-mini');
+    expect(result.host).toBe('ssh://Administrator@win-mini');
+    expect(mockResolveRemoteDevice).toHaveBeenCalledWith('win-mini', expect.objectContaining({ expectPlatform: 'windows' }));
   });
 });

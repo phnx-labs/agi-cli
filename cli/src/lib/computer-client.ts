@@ -7,6 +7,11 @@ import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
+import { buildComputerContext, type ComputerTargetContext } from './computer/context.js';
+import { recordComputerAction } from './computer/record.js';
+import { resolveRemoteDevice } from './ssh-tunnel.js';
+import { getConfigValue } from './device-config.js';
+import { parseAddress, sshTarget } from './address.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/computer-cli';
 
@@ -174,6 +179,112 @@ function osSignalNumber(signal: NodeJS.Signals): number | undefined {
     SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGPIPE: 13, SIGTERM: 15,
   };
   return table[signal];
+}
+
+export function withHostFlag(argv: string[], host?: string): string[] {
+  if (!host) return argv;
+  if (argv.some((arg) => arg === '--host' || arg.startsWith('--host='))) return argv;
+  const [verb, ...rest] = argv;
+  return [verb, '--host', host, ...rest];
+}
+
+export async function resolveDeviceHost(device: string): Promise<{ host: string; target: ComputerTargetContext }> {
+  const configured = getConfigValue('computer.host', { device }).value as string | undefined;
+  if (configured) {
+    const addr = parseAddress(configured);
+    if (addr.scheme === 'vnc' || addr.scheme === 'tcp') {
+      return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
+    }
+    const resolved = await resolveRemoteDevice(device, {});
+    const target = sshTarget(addr);
+    return {
+      host: configured,
+      target: { alias: device, host: target, user: addr.user ?? resolved.user, hostname: addr.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
+    };
+  }
+  const resolved = await resolveRemoteDevice(device, {
+    expectPlatform: 'windows',
+    forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
+  });
+  return {
+    host: `ssh://${resolved.target}`,
+    target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
+  };
+}
+
+export interface ForwardToComputerOptions {
+  argv: string[];
+  device?: string;
+  record?: boolean;
+  capture?: boolean;
+}
+
+export async function forwardToComputer(opts: ForwardToComputerOptions): Promise<RunComputerResult> {
+  let bin: string;
+  try {
+    bin = resolveComputerBin();
+  } catch (err) {
+    if (isComputerClientError(err)) {
+      console.error(err.message);
+      return { exitCode: 1, stdout: '' };
+    }
+    throw err;
+  }
+
+  const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
+  let host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
+  let target: ComputerTargetContext | undefined;
+  if (!host && opts.device) {
+    const resolved = await resolveDeviceHost(opts.device);
+    host = resolved.host;
+    target = resolved.target;
+  }
+  const context = await buildComputerContext({ device: opts.device, host, target, computerBin: bin });
+
+  return runComputer({
+    argv: withHostFlag(opts.argv, host),
+    context,
+    capture: opts.capture,
+    onEvent: opts.record === false
+      ? undefined
+      : (event) => recordComputerAction(event, { device: opts.device }),
+  });
+}
+
+export async function installComputerHelperMacLocal(): Promise<void> {
+  const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
+  if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
+}
+
+export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
+  const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
+  if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
+  return { trusted: await probeComputerTrust() };
+}
+
+export function parseTrustFromStatusJson(stdout: string): boolean {
+  const start = stdout.indexOf('{');
+  if (start < 0) return false;
+  try {
+    const parsed = JSON.parse(stdout.slice(start)) as { trusted?: unknown };
+    return parsed.trusted === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function probeComputerTrust(): Promise<boolean> {
+  try {
+    const { exitCode, stdout } = await forwardToComputer({
+      argv: ['status', '--json'],
+      record: false,
+      capture: true,
+    });
+    if (exitCode !== 0) return false;
+    return parseTrustFromStatusJson(stdout);
+  } catch {
+    return false;
+  }
 }
 
 export function _resetComputerClientForTest(): void {
