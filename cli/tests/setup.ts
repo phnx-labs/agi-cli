@@ -21,6 +21,7 @@ installOpenerSandbox({ tmp });
 process.env.AGENTS_SECRETS_AGENT_DIR = path.join(tmp, 'secrets-agent');
 process.env.AGENTS_SECRETS_NO_AGENT = '1';
 
+delete process.env.SECRETS_HOME;
 process.env.SECRETS_NO_AGENT = '1';
 process.env.SECRETS_PASSPHRASE = 'agents-vitest-file-store';
 
