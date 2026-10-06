@@ -26,6 +26,7 @@ const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
 
 interface UserYaml {
+  org?: string;
   session?: {
     email?: string;
     access_token?: string;
@@ -70,6 +71,17 @@ export function readToken(yamlPath: string = USER_YAML): string {
     throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
+}
+
+export async function rushOrgHandle(token: string, yamlPath: string = USER_YAML): Promise<string> {
+  const saved = (yaml.parse(fs.readFileSync(yamlPath, 'utf-8')) as UserYaml)?.org?.trim();
+  if (saved) return saved;
+  const res = await api('GET', '/me', token);
+  if (!res.ok) throw new Error(`Could not read your Rush organizations (${res.status}). Run \`rush login\` again.`);
+  const orgs = ((await res.json()) as { orgs?: Array<{ slug?: string; kind?: string }> }).orgs ?? [];
+  const handle = (orgs.find((o) => o.kind === 'personal' && o.slug) ?? orgs.find((o) => o.slug))?.slug;
+  if (!handle) throw new Error('No Rush organization found for your account. Run `rush login` again.');
+  return handle;
 }
 
 function readEmail(): string | undefined {

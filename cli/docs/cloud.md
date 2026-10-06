@@ -174,7 +174,11 @@ agents cloud providers
 ### `cloud transcripts` options
 
 Lists captured Rush Cloud runs through your `rush login` session, or renders the
-one whose id, short id, or id prefix matches `[selector]`. A missing or ambiguous
+one whose id, short id, or id prefix matches `[selector]`. Runs come from every
+project in your Rush organization: the `org` saved in `~/.rush/user.yaml`, else
+your personal organization from `GET /me`, the same order `rush` uses. Each run is
+parsed by its captured harness (`claude`, `codex` or `opencode`); a run with
+none is not listed. A missing or ambiguous
 selector, or a failed login, exits 1; it never falls back to local sessions.
 Every render fetches the transcript again into the agents cache. It reads
 transcripts only: the job commands above (`list`, `status`, `logs`) do not, and
