@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 475 commands._
+_65 command groups · 476 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -311,6 +311,7 @@ agents insights perf friction  Sessions stuck repeatedly hitting the same guard 
 agents insights perf hooks     Per-hook timing + cache stats
 agents insights perf run       agent.run / perf.timing label rollups
 agents insights query          Raw usage-event query (usage.db)
+agents insights resources      Which skills/commands you actually invoke, and which installed ones are dead weight.
 ```
 
 ## inspect: Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.

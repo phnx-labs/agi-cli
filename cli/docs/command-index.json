@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 475,
+  "commands": 476,
   "root": {
     "name": "agents",
     "path": "",
@@ -7029,7 +7029,7 @@
         }
       ],
       "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "cost",
@@ -7532,6 +7532,120 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "resources",
+          "path": "insights resources",
+          "aliases": [],
+          "description": "Which skills/commands you actually invoke, and which installed ones are dead weight.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--kind <kind>",
+              "description": "Limit to one kind: skill or command",
+              "long": "--kind",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--plugin <name>",
+              "description": "Only this plugin's resources (r.plugin), not every resource a plugin-touching session used",
+              "long": "--plugin",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-a, --agent <agent>",
+              "description": "Only sessions from this agent (e.g. claude)",
+              "short": "-a",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-p, --project <name>",
+              "description": "Only sessions in this project",
+              "short": "-p",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--machine <name>",
+              "description": "Only sessions recorded on this machine (host)",
+              "long": "--machine",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only sessions newer than this (e.g. 7d, 30d, or ISO date)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--top <n>",
+              "description": "How many ranked rows to show (default 20)",
+              "long": "--top",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--bottom",
+              "description": "Rank the least-invoked resources first instead of the most-invoked",
+              "long": "--bottom",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--zero",
+              "description": "Show only installed-but-never-invoked resources (the dead weight)",
+              "long": "--zero",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output the stats as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents insights resources\n\n# Just the dead weight — installed but never explicitly invoked\nagents insights resources --zero\n\n# Skills only, last 30 days, machine-readable\nagents insights resources --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents insights resources --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         }
       ]
@@ -17437,7 +17551,7 @@
             }
           ],
           "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "mix",
@@ -18326,7 +18440,7 @@
             }
           ],
           "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents sessions stats\n\n# Just the dead weight — installed but never explicitly invoked\nagents sessions stats --zero\n\n# Skills only, last 30 days, machine-readable\nagents sessions stats --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents sessions stats --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
-          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         },
         {

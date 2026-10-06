@@ -14,14 +14,16 @@ interface StatsJson { ranked: StatsRow[]; zeroInvoked: StatsRow[] }
 
 let home: string;
 
-function stats(): StatsJson {
-  const res = spawnSync(process.execPath, [tsxBin, cliEntry, 'sessions', 'stats', '--json', '--top', '0'], {
+function stats(args: string[] = ['sessions', 'stats', '--json', '--top', '0']): StatsJson {
+  const res = spawnSync(process.execPath, [tsxBin, cliEntry, ...args], {
     cwd: home,
     env: { ...process.env, HOME: home, NODE_NO_WARNINGS: '1', AGENTS_SESSIONS_DB: '' },
     encoding: 'utf-8',
   });
   expect(res.status, res.stderr).toBe(0);
-  return JSON.parse(res.stdout) as StatsJson;
+  const parsed = JSON.parse(res.stdout) as StatsJson & { generatedAt?: string };
+  delete parsed.generatedAt;
+  return parsed;
 }
 
 beforeAll(() => {
@@ -44,5 +46,19 @@ describe('agents sessions stats — ranked and zero-invoked agree on plugin reso
       { kind: 'skill', name: 'docs', plugin: null, sessions: 1, invocations: 1 },
     ]);
     expect(out.zeroInvoked.map(r => `${r.kind}:${r.name}`)).toEqual(['command:create:image']);
+  });
+});
+
+describe('agents insights resources — same report as sessions stats', () => {
+  it.each([
+    [['--top', '0']],
+    [['--agent', 'claude', '--top', '0']],
+    [['--plugin', 'create', '--bottom']],
+  ])('matches sessions stats for %j', (args) => {
+    expect(stats(['insights', 'resources', ...args, '--json'])).toEqual(stats(['sessions', 'stats', ...args, '--json']));
+  });
+
+  it('matches with --agent written before the subcommand, where insights collects it as a list', () => {
+    expect(stats(['insights', '--agent', 'claude', 'resources', '--json'])).toEqual(stats(['sessions', 'stats', '--agent', 'claude', '--json']));
   });
 });
