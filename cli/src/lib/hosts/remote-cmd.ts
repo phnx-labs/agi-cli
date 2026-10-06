@@ -91,6 +91,10 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   listTasks: 'local-only',
   results: 'local-only',
   concurrency: 'local-only',
+  all: 'local-only',
+  teams: 'local-only',
+  since: 'local-only',
+  limit: 'local-only',
 };
 
 export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
