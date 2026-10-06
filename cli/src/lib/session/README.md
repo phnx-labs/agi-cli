@@ -119,7 +119,7 @@ never disagree:
 | `Skills:` / `Skills (N)` | `extractSkills` — `Skill` tool calls (`args.skill`) | plugin skills ride the same tool |
 | `Hooks:` / `Hooks (N)` | `extractHooks` — `hook` events from Claude's `hook_success`/`hook_error` attachments (`parse.ts`) | Claude-only: other harnesses don't record firings; the section doesn't render for them |
 | `Links:` / `Links (N)` | `extractLinks` — URLs in messages, classified Linear/Jira/GitHub/GitLab | deduped by label, OSC-8 clickable, capped |
-| `Artifacts:` / `Artifacts (N)` | `extractArtifacts` — created docs (`.agents/artifacts|plans|reports/`, other `*.md`/`*.html`) | clickable |
+| `Artifacts:` / `Artifacts (N)` | `extractArtifacts` — created files under `.agents/artifacts|plans|reports/` and viewable creations (docs, images, video, PDF, SVG, CSV) outside the scratchpad; rows also get folders the agent names in replies (`extractProducedArtifacts`, sessions-cli 0.6.0) | clickable |
 | `Repos:` (preview only) | `extractRepos` — bounded `.git` walk-up over touched paths | relative paths resolve against the session cwd ONLY; skipped when cwd is unknown |
 | `Errors:` (preview) | `error` events | one-line tally, mirrors the summary's Errors section |
 
