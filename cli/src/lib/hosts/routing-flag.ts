@@ -87,10 +87,14 @@ export function scanArgv(args: string[], extra: StripSpec[] = []): ScannedArgv {
   const routing: RoutingOccurrence[] = [];
   let commandIndex: number | undefined;
   let operands = 0;
+  let optionsEnded = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '--') break;
-    if (arg.length < 2 || !arg.startsWith('-')) {
+    if (arg === '--' && !optionsEnded) {
+      optionsEnded = true;
+      continue;
+    }
+    if (optionsEnded || arg.length < 2 || !arg.startsWith('-')) {
       commandIndex ??= i;
       const current = chain[chain.length - 1];
       const sub = operands === 0 && current?.commands.find((c) => c.name() === arg || c.aliases().includes(arg));

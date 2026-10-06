@@ -110,7 +110,9 @@ describe('option-aware routing scan over the registered command tree', () => {
     expect(commandTokenIndex(['--device=peer', ...SEND])).toBe(1);
     expect(commandTokenIndex(['-Dpeer', ...SEND])).toBe(1);
     expect(commandTokenIndex(['--verbose', '--remote-cwd', '/srv', '-D', 'peer', ...SEND])).toBe(5);
-    expect(commandTokenIndex(['--', 'send'])).toBeUndefined();
+    expect(commandTokenIndex(['--', 'send'])).toBe(1);
+    expect(commandTokenIndex(['--', '--device=x', 'send'])).toBe(1);
+    expect(hasHostRoutingFlag(['--', 'send', '--device', 'peer'])).toBe(false);
     expect(stripRoutingFlags(['--device', 'peer', ...SEND, '--text', 'x'], ROUTING_OPTION_SPECS)).toEqual([...SEND, '--text', 'x']);
   });
 
