@@ -46,7 +46,6 @@ describe('command source evaluate', () => {
   });
 
   it.runIf(process.platform !== 'win32')('kills every process of a timed-out pipeline', async () => {
-    // `execFile` signalled only the shell, so the pipeline's `sleep` outlived the poll.
     const sleep = `sleep 30.${process.pid}`;
     const obs = await evaluate({ type: 'command', command: `${sleep} | cat` }, 500);
     await new Promise((r) => setTimeout(r, 300));

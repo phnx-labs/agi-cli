@@ -296,9 +296,6 @@ describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)
 });
 
 describe('MonitorEngine.tick — slow monitors cannot hold a tick past its deadline', () => {
-  // 26 polls run one after another, several taking ~30s, kept the daemon's
-  // monitors tick past its 2-minute deadline on every boot, so the supervisor
-  // exited the daemon every two minutes (PHNX-4225 follow-up).
   function writeSlow(count: number): string[] {
     const created = Array.from({ length: count }, () => uniq('slow'));
     for (const name of created) {
@@ -315,7 +312,7 @@ describe('MonitorEngine.tick — slow monitors cannot hold a tick past its deadl
       engine.start({ externalScheduler: true });
       const start = Date.now();
       await engine.tick();
-      expect(Date.now() - start).toBeLessThan(4_000); // serial would be 8s
+      expect(Date.now() - start).toBeLessThan(4_000);
       expect(checked(created)).toBe(8);
     } finally {
       for (const name of created) deleteMonitor(name);
@@ -329,7 +326,7 @@ describe('MonitorEngine.tick — slow monitors cannot hold a tick past its deadl
       engine.start({ externalScheduler: true });
       const start = Date.now();
       await engine.tick(500);
-      expect(Date.now() - start).toBeLessThan(2_500); // one round of four, no second launch
+      expect(Date.now() - start).toBeLessThan(2_500);
       expect(checked(created)).toBe(4);
       await engine.tick(500);
       expect(checked(created)).toBe(8);

@@ -7,7 +7,6 @@ import { POLL_TIMEOUT_MS } from '../monitors/sources/command.js';
 export class MonitorEngineService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'monitors';
   readonly intervalMs = MONITOR_ENGINE_TICK_MS;
-  /** Polls launch in the first third, finish by the end of the second, and the third covers their fires. */
   readonly deadlineMs = 3 * POLL_TIMEOUT_MS;
 
   private engine: MonitorEngine | null = null;

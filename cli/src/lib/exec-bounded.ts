@@ -8,7 +8,6 @@ interface ExecFileBoundedOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   input?: string;
-  /** Per-stream cap on captured output, like `execFile`'s; past it the group is killed and the output truncated. */
   maxBuffer?: number;
 }
 
