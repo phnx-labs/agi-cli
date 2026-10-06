@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process';
 import { hostProcessView, writerProcessView } from './process-view.js';
 import { getTerminalsDir } from '../state.js';
 import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
+import type { LaunchOrigin } from '../launch-identity.js';
 
 export interface PidSessionEntry {
   pid: number;
@@ -15,6 +16,7 @@ export interface PidSessionEntry {
   initiatedBy?: 'human' | 'agent';
   launchId?: string;
   terminalId?: string;
+  originTerminal?: LaunchOrigin;
   tmuxPane?: string;
   startedAtMs: number;
   processIdentity?: { bootId?: string; pidNamespace?: string; initStartTicks?: string; startTicks?: string; startTime?: string };
@@ -148,11 +150,15 @@ function persistOwnership(entry: PidSessionEntry): void {
 }
 
 function restoreOwnership(entry: PidSessionEntry): PidSessionEntry {
-  if (entry.processIdentity) return entry;
+  if (entry.processIdentity && (entry.originTerminal || !entry.launchId)) return entry;
   try {
     const owner = JSON.parse(fs.readFileSync(ownershipPath(entry.pid), 'utf8')) as PidSessionEntry;
     if (owner.pid === entry.pid && owner.launchId === entry.launchId && owner.startedAtMs === entry.startedAtMs) {
-      return { ...entry, processIdentity: owner.processIdentity };
+      return {
+        ...entry,
+        processIdentity: entry.processIdentity ?? owner.processIdentity,
+        ...(entry.originTerminal ?? owner.originTerminal ? { originTerminal: entry.originTerminal ?? owner.originTerminal } : {}),
+      };
     }
   } catch {  }
   return entry;

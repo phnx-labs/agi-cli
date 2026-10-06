@@ -399,7 +399,9 @@ with the row's attachments in hand — rather than the already-collapsed `topic`
 Fleet stream ownership is projected by `src/lib/session/projection.ts` for both
 `watchFleetSessions` and `watchFleetFeed`. A session is keyed by execution device,
 harness and exact session id. Worker observations own lifecycle and content;
-`observerTerminals` carry observer-local terminal/viewing/reply metadata. Peer loss
+`observerTerminals` carry observer-local terminal/viewing/reply metadata, plus the
+dispatching desktop's tab for a `--device` run (`originTerminal`, from the forwarded
+`AGENTS_ORIGIN_DEVICE` + `AGENTS_ORIGIN_TERMINAL_ID`, PHNX-4263). Peer loss
 retains state until the next owner reset; an answered owner's absent row cannot
 be resurrected by a stale launcher or mirrored history.
 

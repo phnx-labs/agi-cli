@@ -22,6 +22,7 @@ import {
 } from './dispatch.js';
 import { buildRemoteAgentsInvocation, posixEnvExports } from './remote-cmd.js';
 import { resetActorCache, setActorResolvers } from '../actor.js';
+import { machineId } from '../machine-id.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
@@ -625,6 +626,20 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     expect(env.AGENT_TERMINAL_ID).toBe('cl-1785738033788-17');
     const cmd = buildRemoteAgentsInvocation(['run', 'claude', '--interactive'], undefined, undefined, env);
     expect(cmd).toContain('export AGENT_TERMINAL_ID=cl-1785738033788-17');
+  });
+
+  it('names the dispatching desktop beside the origin tab so the remote row binds back to it (PHNX-4263)', () => {
+    setActor({ AGENTS_ACTOR: 'muqsit@example.com', AGENTS_ACTOR_KIND: 'human' });
+    process.env.AGENT_TERMINAL_ID = 'cx-1791286411284-2';
+    delete process.env.AGENTS_ORIGIN_DEVICE;
+    const env = withActorEnv();
+    expect(env).toMatchObject({ AGENTS_ORIGIN_TERMINAL_ID: 'cx-1791286411284-2', AGENTS_ORIGIN_DEVICE: machineId() });
+    const cmd = buildRemoteAgentsInvocation(['run', 'codex', '--interactive'], undefined, undefined, env);
+    expect(cmd).toContain(`export AGENTS_ORIGIN_DEVICE=${machineId()}`);
+    process.env.AGENTS_ORIGIN_DEVICE = 'zion';
+    expect(withActorEnv().AGENTS_ORIGIN_DEVICE).toBe('zion');
+    delete process.env.AGENT_TERMINAL_ID;
+    expect('AGENTS_ORIGIN_DEVICE' in withActorEnv()).toBe(false);
   });
 
   it('omits AGENT_TERMINAL_ID entirely when the launch came from no tracked terminal', () => {

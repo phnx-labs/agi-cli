@@ -107,6 +107,19 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
     expect((await scan())[0]).toMatchObject({ sessionId: sessionA, terminalId: 'published-T' });
   });
 
+  it('lists a tab published with only a terminal id and carries its pid record origin (PHNX-4263)', async () => {
+    const [pid] = await startTab(1, 'siblings', 'codex');
+    const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
+    delete published.window.entries[0].sessionId;
+    published.window.entries[0].terminalId = 'cx-only';
+    fs.writeFileSync(registry, JSON.stringify(published));
+    const [row] = await scan();
+    expect(row).toMatchObject({ pid: shell!.pid, kind: 'codex', terminalId: 'cx-only', windowId: 'window', tabIndex: 3 });
+    expect(row.originTerminal).toBeUndefined();
+    record(pid, sessionB, { agent: 'codex', terminalId: 'cx-only', originTerminal: { device: 'zion', terminalId: 'cx-only' } });
+    expect((await scan())[0]).toMatchObject({ sessionId: sessionB, originTerminal: { device: 'zion', terminalId: 'cx-only' } });
+  });
+
   it('selects the latest recorded start and breaks ties by pid, independent of traversal order', async () => {
     const pids = (await startTab(2)).sort((a, b) => a - b);
     const now = Date.now();

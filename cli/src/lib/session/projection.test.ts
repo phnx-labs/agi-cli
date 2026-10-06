@@ -53,6 +53,22 @@ describe('execution-owned session projection', () => {
     expect(c.apply({ ...reset('worker', []), type: 'remove', rowKey: live.rowKey })[0]).toMatchObject({ previous: true, preview: 'old' });
   });
 
+  it('binds a remote run to the desktop tab that dispatched it, once, from the owner row alone (PHNX-4263)', () => {
+    const c = client();
+    const origin = { device: 'zion', terminalId: 'cx-tab' };
+    const [only] = c.apply(reset('worker', [row('worker', { launchId: 'launch', terminalId: 'cx-tab', originTerminal: origin })]));
+    const onZion = (r: SessionWatchRow) => r.observerTerminals!.filter(item => item.device === 'zion');
+    expect(onZion(only)).toEqual([{ device: 'zion', terminalId: 'cx-tab', launchId: 'launch', viewingIn: null }]);
+    const [merged] = c.apply(reset('zion', [row('zion', { launchId: 'launch', terminalId: 'cx-tab', viewingIn: 'VSCodium' })]));
+    expect(onZion(merged)).toEqual([expect.objectContaining({ terminalId: 'cx-tab', viewingIn: 'VSCodium' })]);
+  });
+
+  it('leaves a row without a foreign origin unchanged', () => {
+    expect(client().apply(reset('worker', [row('worker')]))[0].observerTerminals).toEqual([]);
+    const local = row('worker', { terminalId: 'tab', originTerminal: { device: 'worker', terminalId: 'tab' } });
+    expect(client().apply(reset('worker', [local]))[0].observerTerminals).toEqual([expect.objectContaining({ device: 'worker', terminalId: 'tab' })]);
+  });
+
   it('retires an id-less placeholder only through unambiguous exact launch identity', () => {
     const c = client();
     c.apply(reset('desktop', [row('desktop', { sessionId: undefined, launchId: 'launch', terminalId: 'tab' })]));

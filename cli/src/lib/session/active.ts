@@ -338,6 +338,7 @@ export interface ActiveSession {
   tmuxTarget?: string;
   viewingIn?: { app: string; tab?: number };
   terminalId?: string;
+  originTerminal?: import('../launch-identity.js').LaunchOrigin;
   tabIndex?: number;
   launchId?: string;
   paneId?: string;
@@ -481,7 +482,7 @@ export function isPidAlive(pid: number, startedAtMs?: number): boolean {
 }
 
 interface LiveTerminalEntry {
-  sessionId: string;
+  sessionId?: string;
   terminalId?: string;
   tabIndex?: number;
   pid: number;
@@ -516,13 +517,14 @@ function readLiveTerminals(): LiveTerminalEntry[] {
     const windowHeartbeatMs = Number.isFinite(at) ? at : undefined;
     const windowGone = windowHeartbeatMs !== undefined && now - windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
     for (const e of (slice?.entries ?? []) as LiveTerminalEntry[]) {
-      if (!e?.sessionId) continue;
+      const key = e?.sessionId ?? (e?.terminalId ? `terminal\0${windowId}\0${e.terminalId}` : undefined);
+      if (!key) continue;
       const alive = isPidAlive(e.pid, e.startedAtMs);
       if (!alive && !windowGone) continue;
       const entry: LiveTerminalEntry = { ...e, windowId, windowHeartbeatMs, pidDead: !alive };
-      const prev = merged.get(e.sessionId);
+      const prev = merged.get(key);
       if (prev && !prev.pidDead && !alive) continue;
-      merged.set(e.sessionId, entry);
+      merged.set(key, entry);
     }
   }
   return Array.from(merged.values());
@@ -891,6 +893,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       sessionId: resolvedId ?? sessionIdFromFile(sessionFile),
       launchId: pidEntry?.launchId,
       terminalId: pidEntry?.terminalId ?? t.terminalId,
+      originTerminal: pidEntry?.originTerminal,
       tabIndex: t.tabIndex,
       cwd,
       label,
@@ -1281,6 +1284,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       owner: resolveOwner(entry?.actor, resolvedId),
       launchId: entry?.launchId ?? hookRec?.launch_id,
       terminalId: entry?.terminalId ?? hookRec?.terminal_id,
+      originTerminal: entry?.originTerminal,
     }, state, sessionFile, true));
   }
   prunePidSessionRegistry(isPidAlive);
@@ -1421,6 +1425,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
       launchId: liveEntry?.launchId,
       terminalId: liveEntry?.terminalId,
+      originTerminal: liveEntry?.originTerminal,
       paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
       tmuxName: sessName,
     }, state, sessionFile, pidAlive));

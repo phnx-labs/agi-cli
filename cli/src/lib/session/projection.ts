@@ -60,8 +60,15 @@ export class SessionProjection {
       if (!chosen) continue;
       selected.set(`${candidate.scope}\0${chosen.rowKey}`, rowKey);
       const observerTerminals = observations.filter(item => !item.row.previous && (item.row.terminalId || item.row.viewingIn || item.row.provenance?.reply))
-        .map(({ scope: device, row }) => ({ device, terminalId: row.terminalId, launchId: row.launchId, viewingIn: row.viewingIn, provenance: row.provenance }))
-        .sort((a, b) => a.device.localeCompare(b.device) || (a.terminalId ?? '').localeCompare(b.terminalId ?? ''));
+        .map(({ scope: device, row }): NonNullable<SessionWatchRow['observerTerminals']>[number] => ({ device, terminalId: row.terminalId, launchId: row.launchId, viewingIn: row.viewingIn, provenance: row.provenance }));
+      const origin = chosen.originTerminal;
+      if (!chosen.previous && origin && normalizeHost(origin.device) !== owner) {
+        const device = normalizeHost(origin.device);
+        if (!observerTerminals.some(item => item.device === device && item.terminalId === origin.terminalId)) {
+          observerTerminals.push({ device, terminalId: origin.terminalId, launchId: chosen.launchId, viewingIn: null });
+        }
+      }
+      observerTerminals.sort((a, b) => a.device.localeCompare(b.device) || (a.terminalId ?? '').localeCompare(b.terminalId ?? ''));
       next.set(rowKey, {
         ...chosen, rowKey, sourceDevice: owner, machine: owner,
         observerTerminals,
