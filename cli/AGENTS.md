@@ -1854,7 +1854,8 @@ CLI-owned half: the writer/indexer (`db.ts`, `tool-index.ts` — which only WRIT
 tool-call index; searching it is the standalone `sessions --include tools`, PHNX-4227 —
 `tool-store.ts`, `timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`,
 `discover.ts`, `pid-registry.ts`, `recovery.ts`, `mirror.ts`, `presence.ts`, `watch.ts`,
-`remote*`, `projection.ts`, `session-cache.ts`), and `migrate-targets.ts`. `sync/`
+`remote*`, `projection.ts`, `session-cache.ts`), CLI/fleet selector resolution
+(`selection.ts`), and `migrate-targets.ts`. `sync/`
 (the off-box backup client and the managed Worker template) is still a copy of
 sessions-cli's `./backup` module and goes once that export is published.
 Read queries (`agents sessions <query> [--json]`) exec the `sessions` bin from the
@@ -1903,7 +1904,7 @@ live `sessions preview <id> --local --json` fetch over SSH.
 
 Indexing is lazy — only `discoverSessions` writes the index — so a session THIS
 box just started is "running" in `--active` before it is indexed. The id resolver
-(`computeLocalMetadataMatches` in `sessions.ts`) therefore unions the indexed
+(`computeLocalMetadataMatches` in `lib/session/selection.ts`) therefore unions the indexed
 rows with the LIVE registry on a cold id miss, so `preview`/`resume`/`focus`
 resolve a running session with no transcript row yet (the fan-out peer answers
 from the same union, so it works cross-device too — SES-9b). The daemon keeps the

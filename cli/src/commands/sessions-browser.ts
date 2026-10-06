@@ -6,7 +6,7 @@ import { dynamicPicker } from '../lib/picker.js';
 import { isSessionTrackedAgent, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 import { discoverSessions } from '../lib/session/discover.js';
-import { gatherRemoteList } from '../lib/session/remote-list.js';
+import { gatherRemoteList, remoteHostsToDial, shouldIncludeLocal } from '../lib/session/remote-list.js';
 import { resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
@@ -14,8 +14,9 @@ import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '@phnx-l
 import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview, setRemotePreviewRepaint } from './sessions-picker.js';
-import { formatPickerLabel, pickerColumnsFor, type SshOriginTag, ticketLabel, mergeLocalFirst, liveHostLabel, LIVE_ROW_PREFIX, handlePickedSession, matchesTeam, formatLiveStatusHeadline, isRunningLiveSession, parseAgentFilter, type PickerColumns } from './sessions.js';
-import { gatherActiveSessions, cleanPreview, shouldIncludeLocal, remoteHostsToDial, matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
+import { formatPickerLabel, pickerColumnsFor, type SshOriginTag, liveHostLabel, LIVE_ROW_PREFIX, handlePickedSession, matchesTeam, formatLiveStatusHeadline, isRunningLiveSession, type PickerColumns } from './sessions.js';
+import { mergeLocalFirst, parseAgentFilter, sessionMatchesQuery } from '../lib/session/selection.js';
+import { gatherActiveSessions, cleanPreview, matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
 
 export interface BrowserFilter {
   running: boolean;
@@ -85,25 +86,6 @@ export function cycleWindow(current: string | undefined): string | undefined {
 
 function distinct(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => !!v))].sort();
-}
-
-export function sessionMatchesQuery(s: SessionMeta, query: string): boolean {
-  const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-  if (terms.length === 0) return true;
-  const hay = [
-    s.shortId,
-    s.agent,
-    s.project,
-    s.cwd,
-    s.topic,
-    (s as { label?: string }).label,
-    ticketLabel(s),
-    s.machine,
-  ]
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
-  return terms.every((t) => hay.includes(t));
 }
 
 export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {

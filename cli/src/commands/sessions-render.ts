@@ -10,7 +10,7 @@ import { extractSessionTopic, isSyntheticUserMessage } from '@phnx-labs/sessions
 import { renderConversationMarkdown } from '@phnx-labs/sessions-cli/reader';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { buildPreview } from './sessions-picker.js';
-import { parseAgentFilter } from './sessions.js';
+import { parseAgentFilter } from '../lib/session/selection.js';
 import { selectSessions } from './sessions-export.js';
 
 export const MARKDOWN_RENDER_AGENTS = [

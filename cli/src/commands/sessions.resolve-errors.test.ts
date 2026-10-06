@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fleetCandidatesByQuery } from './sessions.js';
+import { fleetCandidatesByQuery } from '../lib/session/selection.js';
 import { parseRemoteList } from '../lib/session/remote-list.js';
 import { writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 

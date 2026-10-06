@@ -8,12 +8,12 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 process.env.AGENTS_SYNC_MACHINE_ID = 'this-box';
 
-const dbModule = await import('../lib/session/db.js');
+const dbModule = await import('./db.js');
 const { upsertSession, closeDB } = dbModule;
-const { computeLocalMetadataMatches, liveMetadataMatches } = await import('./sessions.js');
-type ActiveSession = import('../lib/session/active.js').ActiveSession;
+const { computeLocalMetadataMatches, liveMetadataMatches } = await import('./selection.js');
+type ActiveSession = import('./active.js').ActiveSession;
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
-type LoadActive = typeof import('../lib/session/session-cache.js').loadLocalActiveSessions;
+type LoadActive = typeof import('./session-cache.js').loadLocalActiveSessions;
 
 afterAll(() => {
   closeDB();

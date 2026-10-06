@@ -12,7 +12,7 @@ import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { resolveArtifactsBin, invocation, ArtifactsClientError } from '../lib/artifacts-client.js';
 import { renderSessionMarkdownDocument, type ReasoningMode } from './sessions-render.js';
 import { selectSessions } from './sessions-export.js';
-import { parseAgentFilter } from './sessions.js';
+import { parseAgentFilter } from '../lib/session/selection.js';
 
 interface ShareGlobals {
   all?: boolean;

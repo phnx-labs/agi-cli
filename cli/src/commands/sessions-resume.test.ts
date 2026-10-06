@@ -17,7 +17,7 @@ import {
   resumeUsesLifecycleDispatch,
   sessionsResumeAction,
 } from './sessions-resume.js';
-import { sessionMatchesQuery } from './sessions-browser.js';
+import { sessionMatchesQuery } from '../lib/session/selection.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { shellQuote } from '../lib/terminal/index.js';
 import { execOnly } from '../lib/terminal/shell.js';

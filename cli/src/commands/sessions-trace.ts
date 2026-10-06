@@ -24,7 +24,7 @@ import type {
 } from '@phnx-labs/sessions-cli/reader';
 import type { TrajectoryStep } from '@phnx-labs/sessions-cli/reader';
 import type { LineageEdge, LineageNode, SessionLineage } from '@phnx-labs/sessions-cli/reader';
-import { parseAgentFilter } from './sessions.js';
+import { parseAgentFilter } from '../lib/session/selection.js';
 import { selectSessions } from './sessions-export.js';
 
 export const SESSIONS_TRACE_SCHEMA_VERSION = 1;

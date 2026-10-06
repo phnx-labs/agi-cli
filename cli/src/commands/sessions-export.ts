@@ -24,7 +24,7 @@ import type { Command } from 'commander';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, resolveSessionById, looksLikeSessionId } from '../lib/session/discover.js';
 import { findSessionsById } from '../lib/session/db.js';
-import { filterSessionsByQuery, parseAgentFilter } from './sessions.js';
+import { filterSessionsByQuery, parseAgentFilter } from '../lib/session/selection.js';
 import { listLocalTranscripts, objectKey, SYNC_AGENTS, type LocalTranscript } from '../lib/session/sync/agents.js';
 import { machineId } from '../lib/machine-id.js';
 import { getHistoryDir } from '../lib/state.js';

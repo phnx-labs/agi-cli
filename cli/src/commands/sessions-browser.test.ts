@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { sessionMatchesQuery } from '../lib/session/selection.js';
 import {
   browserFilterToArgv,
   cycle,
   cycleWindow,
-  sessionMatchesQuery,
   normalizeDeviceSeed,
   activeBrowserSeed,
   bareBrowserSeed,

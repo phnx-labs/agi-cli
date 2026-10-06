@@ -247,7 +247,7 @@ describe('parseRemoteListPayload', () => {
   });
 
   it('accepts the production resolver projection with launch mode and custom harness', async () => {
-    const { serializeResolvedSessionsJson } = await import('../../../commands/sessions.js');
+    const { serializeResolvedSessionsJson } = await import('../selection.js');
     const row = {
       id: 'abcd7777', shortId: 'abcd7777', agent: 'claude', harness: 'custom-claude',
       timestamp: '2026-09-13T00:00:00Z', mode: 'plan', origin: 'cli',

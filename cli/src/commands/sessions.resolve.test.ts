@@ -7,7 +7,7 @@ import {
   metadataResolveOutcome,
   isUniqueEnoughSelector,
   metadataResolveForwardedArgs,
-} from './sessions.js';
+} from '../lib/session/selection.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { repoRoot, writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 
@@ -19,7 +19,7 @@ describe('resolveSessionQuery indexed metadata coverage', () => {
         "import fs from 'node:fs';",
         "import path from 'node:path';",
         "const { upsertSession, closeDB } = await import('./src/lib/session/db.ts');",
-        "const { resolveSessionQuery } = await import('./src/commands/sessions.ts');",
+        "const { resolveSessionQuery } = await import('./src/lib/session/selection.ts');",
         "const home = process.env.HOME;",
         "const add = (id, topic, content = '') => { const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, ''); upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath, topic }, content); };",
         "const indexed = 'a7c1d88d-b543-48c1-993d-dd5cd8e210c9'; add(indexed, 'old but present');",
@@ -60,7 +60,7 @@ describe('RUSH-2203 local full-UUID hit skips SSH', () => {
         "import fs from 'node:fs';",
         "import path from 'node:path';",
         "const { upsertSession, closeDB } = await import('./src/lib/session/db.ts');",
-        "const { resolveSessionMetadataValue } = await import('./src/commands/sessions.ts');",
+        "const { resolveSessionMetadataValue } = await import('./src/lib/session/selection.ts');",
         "const home = process.env.HOME;",
         "const id = '019fd0c8-b3e9-77a2-a1a4-444698c4d897';",
         "const filePath = path.join(home, id + '.jsonl'); fs.writeFileSync(filePath, '');",
