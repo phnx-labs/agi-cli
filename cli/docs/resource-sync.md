@@ -309,6 +309,48 @@ registration (a Windows-portable-path surface), tracked in **RUSH-2456**; hook
 files stay reconciled by the in-write orphan sweep (`versions.ts`, gated on
 `hooksToSync > 0`). See [`src/lib/staleness/prune.ts`](../src/lib/staleness/prune.ts).
 
+### `agents sync <repo> --delete` — propagate a repo's deletions on request
+
+An ordinary sync removes a deleted resource only on some paths: the in-write
+plugin sweep runs only when the version has plugins left to install, the manifest
+prune above only on a repo-scoped sync, and nothing runs when the resource
+selection is skipped (a non-interactive `agents sync` with no `--yes` prints
+`Skipped resource selection` and writes nothing). So a plugin or command deleted
+from its source can stay installed indefinitely. `--delete` is the explicit way to
+remove those, and it is **scoped to one repo** (PHNX-4247). A sync without it
+behaves exactly as before.
+
+```bash
+agents sync claude user --delete --dry-run   # preview
+agents sync claude user --delete --yes       # remove, then sync the user repo
+agents sync system --delete                  # git-sync system, then sweep every installed version
+agents sync --repo user --delete             # sweep every installed version, then the umbrella sync
+```
+
+- **A repo is mandatory.** Bare `agents sync --delete` exits 1 and names the
+  repos. It never falls back to "every repo".
+- **Provenance decides, never a guess.** A plugin qualifies only when it sits in
+  that repo's marketplace (`agents-cli` for user, `agents-system` for system,
+  `agents-project`, `agents-<alias>`), that repo is checked out here, and it no
+  longer ships the plugin (`cleanOrphanedPluginSkills` with an `OrphanPluginScope`).
+  A command or skill qualifies only when the sync manifest records its source
+  under `<repo>/commands/` or `<repo>/skills/`, that source is gone, and no other
+  repo provides the name. The manifest keeps the source of a resource after it
+  leaves its repo, in `retired`, so a full sync in between does not erase the
+  proof.
+- **Everything else is kept and counted:** resources from another repo or
+  marketplace, and anything with no recorded source (a file you wrote into the
+  home yourself). The output prints `kept: N not from <repo>`.
+- **Trash, not delete.** Plugins go to `~/.agents/.history/trash/plugins/` and are
+  unregistered from `settings.json` (and Droid/Copilot's installed lists);
+  commands and skills go through `removeCommandFromVersion` /
+  `removeSkillFromVersion`, the same trash path `agents prune cleanup` uses.
+- **Non-interactive.** The pass runs before the sync and does not depend on the
+  new-resources prompt, so it works with and without `--yes`. `--json` emits a
+  `{ mode: 'delete', repo, dryRun, versions }` line ahead of the sync's own line.
+
+Implementation: [`src/lib/sync-delete.ts`](../src/lib/sync-delete.ts).
+
 ## MCP Servers: Per-Agent JSON Write
 
 MCP is the one resource that isn't symlinked. Each agent stores MCP server

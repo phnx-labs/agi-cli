@@ -38,4 +38,10 @@ export interface SyncManifest {
   workflows?: Record<string, DirEntry>;
   plugins?:   Record<string, PluginEntry>;
   writtenTargets?: string[];
+  retired?:   RetiredEntries;
+}
+
+export interface RetiredEntries {
+  commands: Record<string, FileEntry>;
+  skills:   Record<string, DirEntry>;
 }

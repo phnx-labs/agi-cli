@@ -43,6 +43,8 @@ import { addHostOption } from '../lib/hosts/option.js';
 import { syncRepoGit, adoptUserRepoIfNeeded, recordUserRepoRemote, resolveUserRepoRemoteUrl } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 import { registerStatusCommand } from './status.js';
+import { setHelpSections } from '../lib/help.js';
+import { pruneRepoRemovals, type RepoRemovalReport } from '../lib/sync-delete.js';
 
 interface SyncOpts {
   agent?: string;
@@ -63,6 +65,7 @@ interface SyncOpts {
   cloud?: boolean;
   local?: boolean;
   pruneClis?: boolean;
+  delete?: boolean;
   plugin?: string[] | true;
   plugins?: string[] | true;
   command?: string[] | true;
@@ -206,11 +209,33 @@ export function registerSyncCommand(program: Command): void {
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
     .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
     .option('--prune-clis', 'Umbrella: also purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper) when a fixed peer exists. DESTRUCTIVE and off by default — the purge never runs on a routine sync.', false)
+    .option('--delete', 'Also remove what a repo deleted: trash plugins, commands and skills that came from that repo and no longer exist in it. Needs a repo (agents sync <repo> --delete); resources from other repos or installed by hand are kept', false)
     .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
       await runSync(agentSpec, repo, opts);
     });
 
   addSelectorOptions(cmd);
+  setHelpSections(cmd, {
+    examples: `
+      # Make this machine current (fetch repos, reconcile every installed agent)
+      agents sync
+
+      # Sync one agent, without prompts
+      agents sync claude --yes
+
+      # Only the system repo's resources, into every installed Claude
+      agents sync claude@all system
+
+      # Preview, then remove what the user repo deleted (plugins, commands, skills)
+      agents sync claude user --delete --dry-run
+      agents sync claude user --delete --yes
+    `,
+    notes: `
+      - --delete only removes a resource whose recorded source is in the named repo and is gone from it. Anything from another repo, or with no recorded source (installed by hand), is kept and counted as "kept".
+      - Removed items go to ~/.agents/.history/trash/, so they can be restored.
+      - Without --delete, sync behaves as before: run --delete to clear what a repo removed after a skipped or partial sync.
+    `,
+  });
   registerStatusCommand(cmd);
 }
 
@@ -533,6 +558,56 @@ async function runUmbrella(
   }
 }
 
+function allInstalledTargets(): Array<{ agent: AgentId; version: string }> {
+  return MANAGED_AGENT_IDS.flatMap((agent) => listInstalledVersions(agent).map((version) => ({ agent, version })));
+}
+
+function runDeletePass(
+  repo: string,
+  targets: Array<{ agent: AgentId; version: string }>,
+  cwd: string,
+  dryRun: boolean,
+  json: boolean,
+  outLog: (msg: string) => void,
+  errLog: (msg: string) => void,
+): boolean {
+  const reports: RepoRemovalReport[] = [];
+  try {
+    for (const { agent, version } of targets) reports.push(pruneRepoRemovals({ agent, version, repo, cwd, dryRun }));
+  } catch (err) {
+    if (json) emitJson({ ok: false, mode: 'delete', repo, dryRun, error: (err as Error).message });
+    errLog(chalk.red(`sync --delete: ${(err as Error).message}`));
+    process.exitCode = 1;
+    return false;
+  }
+  if (json) {
+    emitJson({ ok: true, mode: 'delete', repo, dryRun, versions: reports });
+    return true;
+  }
+  const verb = dryRun ? 'Would remove' : 'Removed';
+  let any = false;
+  for (const r of reports) {
+    const items = [
+      ...r.removed.plugins.map((n) => `plugin ${n}`),
+      ...r.removed.commands.map((n) => `command ${n}`),
+      ...r.removed.skills.map((n) => `skill ${n}`),
+    ];
+    if (items.length > 0) {
+      any = true;
+      outLog(chalk.yellow(`${verb} from ${agentLabel(r.agent)}@${r.version} (deleted from ${repo}): ${items.join(', ')}`));
+    }
+    const kept: string[] = [];
+    if (r.kept.notFromRepo.length > 0) kept.push(`${r.kept.notFromRepo.length} not from ${repo}`);
+    if (r.kept.stillProvided.length > 0) kept.push(`${r.kept.stillProvided.length} still provided by another repo (${r.kept.stillProvided.join(', ')})`);
+    if (items.length > 0 || r.kept.stillProvided.length > 0) {
+      outLog(chalk.gray(`  kept: ${kept.join(', ') || 'nothing else'}`));
+    }
+  }
+  if (!any) outLog(chalk.gray(`Nothing deleted from ${repo} is still installed (${targets.length} version(s) checked).`));
+  else if (!dryRun) outLog(chalk.gray('  Trashed under ~/.agents/.history/trash/ (recoverable).'));
+  return true;
+}
+
 async function runSync(agentSpec: string | undefined, repoArg: string | undefined, opts: SyncOpts): Promise<void> {
 
 
@@ -544,6 +619,21 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (json) emitJson({ ok: false, ...payload });
   };
 
+  const repoOnlySpec = agentSpec && !opts.agent && !repoArg && listRepoNames().includes(agentSpec) ? agentSpec : undefined;
+  const deleteRepo = opts.delete ? (opts.repo || repoArg || repoOnlySpec) : undefined;
+  if (opts.delete && !deleteRepo) {
+    const error = '--delete needs a repo: it only removes what that repo deleted.';
+    const hint = 'Name one: agents sync <repo> --delete, agents sync <agent> <repo> --delete, or --repo <repo> --delete (repos: ' + listRepoNames().join(', ') + ')';
+    failJson({ mode: 'delete', error, hint });
+    if (!json) {
+      console.error(chalk.red(error));
+      console.error(chalk.gray(hint));
+    }
+    process.exitCode = 1;
+    return;
+  }
+  const deleteCwd = opts.cwd || process.cwd();
+
   let agentId: AgentId | undefined;
   let version: string | undefined;
 
@@ -553,7 +643,10 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (!quiet && !json) {
       console.error(chalk.yellow(`Warning: 'agents sync ${agentSpec}' is deprecated. Use: agents repo sync ${agentSpec}`));
     }
-    await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
+    if (!opts.dryRun) await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
+    if (deleteRepo && process.exitCode !== 1) {
+      runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, !!opts.dryRun, json, outLog, errLog);
+    }
     return;
   }
 
@@ -613,6 +706,10 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   if (!agentId) {
+    if (deleteRepo) {
+      if (!runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, !!opts.dryRun, json, outLog, errLog)) return;
+      if (opts.dryRun) return;
+    }
     await runUmbrella(opts, quiet, outLog, errLog, json);
     return;
   }
@@ -671,6 +768,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     }
     const scopeLabel = repoScope ? chalk.gray(` (repo: ${repoScope})`) : '';
     if (!json) outLog(chalk.cyan(`Syncing ${installed.length} ${agentLabel(agentId)} version(s)${scopeLabel}.`));
+    if (deleteRepo && !runDeletePass(deleteRepo, installed.map((v) => ({ agent: agentId, version: v })), cwd, !!opts.dryRun, json, outLog, errLog)) return;
     if (opts.dryRun) {
       if (!quiet && !json) {
         console.log(chalk.cyan(`Dry run — would sync ${agentLabel(agentId)} (${installed.length} version(s))${scopeLabel}:`));
@@ -784,6 +882,8 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     process.exitCode = 1;
     return;
   }
+
+  if (deleteRepo && !runDeletePass(deleteRepo, [{ agent: agentId, version }], cwd, !!opts.dryRun, json, outLog, errLog)) return;
 
   if (opts.launch) {
 
