@@ -111,7 +111,6 @@ describe('agents daemon index (real CLI parse, disposable HOME)', () => {
     const again = json<ToolsEnvelope>(['daemon', 'index', 'backfill', 'tools', '--local', '--unmanaged', '--agent', 'codex', '--json']);
     expect(again.machines[0]).toMatchObject({ indexedFiles: 0, indexedCalls: 0, coverage: { indexedFiles: 1, complete: true } });
 
-    // The exact argv shape a fleet peer receives from `peerArgs`, every filter set.
     const peer = json<ToolsEnvelope>([
       'daemon', 'index', 'backfill', 'tools', '--json', '--local', '--agent', 'codex', '--project', path.basename(home),
       '--since', '2026-10-01', '--until', '2099-01-01', '--unmanaged', '--teams',
