@@ -10,7 +10,7 @@ loud with install guidance rather than falling back to anything in-repo:
 
 ```
 agents clis install secrets
-# or: npm i -g @phnx-labs/secrets-cli@0.1.8
+# or: npm i -g @phnx-labs/secrets-cli@0.3.0
 # or: agents setup secrets
 ```
 
@@ -118,6 +118,7 @@ defense in depth, not permission to publish raw transcripts.
 
 See [`secrets-client.md` §Environment contract](secrets-client.md#environment-contract)
 for the full `SECRETS_BIN` / `SECRETS_HOME` / `SECRETS_PASSPHRASE` table. The
-one thing worth calling out here: `SECRETS_HOME` defaults to `~/.agents`
-(`getUserAgentsDir()`), so the standalone adopts a user's pre-extraction store
-in place — no copy, no re-encryption (MIG-1).
+one thing worth calling out here: agents-cli leaves an unset `SECRETS_HOME`
+unset, so the standalone uses its own default root (`~/.agents/.secrets`), which
+adopts a user's earlier `~/.agents` and `~/.secrets` stores the first time it
+finds no store of its own (MIG-1).

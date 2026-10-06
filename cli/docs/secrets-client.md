@@ -1,7 +1,15 @@
 # The standalone secrets client (`secrets-client.ts`)
 
 `cli/src/lib/secrets-client.ts` is the **one** process client through which
-agents-cli talks to the standalone `secrets` CLI (PHNX-3989). It is the
+agents-cli talks to the standalone `secrets` CLI (PHNX-3989). Since secrets-cli
+0.3.0 its transport is the published `@phnx-labs/secrets-cli/client` entry
+(exact-pinned in `cli/package.json`), which this module re-exports
+(`secretsRequest*`, `readAndResolveBundleEnv*`, `SecretsClientError`,
+`resolveSecretsBin`, `buildServeEnv`, the test hooks); what stays here is
+agents-cli's typed domain wrappers and identifier helpers (PHNX-4227). The
+dependency is used only for that client entry: the engine that answers is
+still the user's installed `secrets` on PATH (or `SECRETS_BIN`), never the copy
+under `node_modules`. It is the
 agents-owned half of the secrets extraction: the engine — bundle storage,
 providers, the broker, transports — lives entirely in
 [`phnx-labs/secrets-cli`](https://github.com/phnx-labs/secrets-cli), and
@@ -35,8 +43,8 @@ parent                              child: `secrets __serve`
 - **Wire contract** (mirrored from `secrets-cli/src/protocol.ts`):
   `{ v: 1, id, op, args, context? }` in, `{ v: 1, id, ok, result | error }` out.
   `Map` arguments and results are carried through `encodeWire`/`decodeWire`
-  (`{ $map: [[k, v], …] }`). This is the one thing the client re-declares rather
-  than imports — a shared schema both sides must agree on byte-for-byte.
+  (`{ $map: [[k, v], …] }`). The published client imports these from the same
+  package as the server, so the two cannot drift.
 - **Version negotiation rides the response**, not a separate round trip: every
   reply carries `v`, and `parseResponse` rejects one that is not
   `PROTOCOL_VERSION` (1) with `PROTOCOL_UNSUPPORTED`. There is deliberately no
@@ -78,8 +86,8 @@ answer.
 
 | Variable | Who sets it | Meaning |
 |---|---|---|
-| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (`findInPath`): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets` and sits first on PATH, so taking it would make `agents secrets` re-enter itself without bound (the self-heal shim pass also removes that legacy shim outright). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
-| `SECRETS_HOME` | **this client** | The standalone's state root. Defaults to the user agents dir (`~/.agents`, `getUserAgentsDir()`) so the user's existing stores are adopted **in place** — no copy, no re-encryption (MIG-1). An explicit value in the environment wins (test isolation, power users), matching the standalone's own precedence. |
+| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (the published client's lookup keeps this rule): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets` and sits first on PATH, so taking it would make `agents secrets` re-enter itself without bound (the self-heal shim pass also removes that legacy shim outright). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
+| `SECRETS_HOME` | operator/tests (optional) | The standalone's state root. An explicit value passes through; an unset one stays unset, so the standalone uses its own default (`~/.agents/.secrets` since 0.2.0, which adopts the earlier `~/.agents` and `~/.secrets` stores on first use). agents-cli no longer forces `~/.agents` here or in `buildExecEnv` (`lib/exec.ts`), so a bare `secrets` inside an agent reads the same store. The standalone floor is 0.3.0 (`secrets-cli.ts`): a 0.1.x engine defaulted to `~/.secrets` without adopting. |
 | `SECRETS_PASSPHRASE` | **this client** (bridged) | The file-store encryption key the standalone reads. The extraction renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so `buildServeEnv` forwards a caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name agents-cli's own engine reads) onto `SECRETS_PASSPHRASE` for the child — otherwise the standalone can't decrypt the very file store agents-cli wrote and would silently provision a fresh machine-local key (MIG-1: never silently choose another key after a decryption miss). An explicit `SECRETS_PASSPHRASE` already in the env wins; the bridge only fills the rename gap. |
 
 The child inherits the rest of the parent env, so `SECRETS_SCOPE`/`SECRETS_CONTEXT`
@@ -200,14 +208,14 @@ Every test that touches an account bundle, a profile token, or the reserved
 `auth` bundle drives the **real** standalone `secrets __serve` — there is no
 in-memory keychain backend any more. `tests/secrets-standalone.ts` resolves the
 executable once per machine: `AGENTS_TEST_SECRETS_BIN` / `SECRETS_BIN` if set
-(a secrets-cli checkout's `dist/index.js`), else it installs the pinned published
-`@phnx-labs/secrets-cli` into a per-version prefix under the OS temp dir with
-`npm i -g --prefix` (serialized by a directory lock, reused across runs).
+(a secrets-cli checkout's `dist/index.js`), else the `dist/index.js` of the
+exact-pinned `@phnx-labs/secrets-cli` dependency, beside the client entry it
+imports. `secrets-client.test.ts` asserts that pin equals `SECRETS_CLI_VERSION`.
 `tests/global-setup.ts` calls it in the main process so every fork inherits
 `SECRETS_BIN`; `tests/setup.ts` pins the per-fork posture (`SECRETS_NO_AGENT=1`, a
 deterministic `SECRETS_PASSPHRASE` so a headless box routes keychain items to the
-encrypted file store). The state root defaults to the sandboxed `HOME`'s `.agents`,
-so nothing reaches the real store; a suite that seeds state calls
+encrypted file store). The state root defaults to the standalone's default under the
+sandboxed `HOME`, so nothing reaches the real store; a suite that seeds state calls
 `useFreshSecretsHome()` for an empty `SECRETS_HOME` per test.
 
 Blocks that write bundles with no explicit backend or profile tokens are gated on

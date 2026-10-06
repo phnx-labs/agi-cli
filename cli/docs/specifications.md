@@ -1973,10 +1973,11 @@ process client (`cli/src/lib/secrets-client.ts`, documented in
   PHNX-4082). Checking the version per response is also strictly stronger than
   the handshake it replaces: a standalone that answered the handshake as v1 and
   a later op as v2 previously surfaced as a malformed envelope.
-- **MIG-1 (MUST).** `SECRETS_HOME` MUST default to the user agents dir
-  (`getUserAgentsDir()`, `~/.agents`) so the standalone adopts a user's
-  pre-extraction store **in place** — no copy, no re-encryption. An explicit
-  `SECRETS_HOME` in the caller's environment wins (`buildServeEnv`).
+- **MIG-1 (MUST).** agents-cli MUST NOT choose a state root: an unset
+  `SECRETS_HOME` stays unset (`buildServeEnv`, `buildExecEnv`), so the
+  standalone's own default (`~/.agents/.secrets`, secrets-cli ≥ 0.2.0) applies,
+  and that engine adopts the earlier `~/.agents` / `~/.secrets` stores on first
+  use. An explicit `SECRETS_HOME` in the caller's environment wins.
 - **OWN-1 (MUST).** The agents-cli daemon MUST NOT host or take over the
   secrets broker. The standalone owns its own broker lifecycle exclusively;
   `agents daemon status`/`services` only probe its reachability

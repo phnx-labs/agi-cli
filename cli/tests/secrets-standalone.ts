@@ -1,88 +1,23 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach } from 'vitest';
 import { _resetSecretsClientForTest, keychainUsesFileFallback } from '../src/lib/secrets-client.js';
 import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token.js';
-import { SECRETS_CLI_VERSION } from '../src/lib/secrets-cli.js';
 
-const STANDALONE_SECRETS_VERSION = SECRETS_CLI_VERSION;
-const LOCK_STALE_MS = 10 * 60 * 1000;
-const LOCK_WAIT_MS = 5 * 60 * 1000;
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function installPrefix(): string {
-  return path.join(os.tmpdir(), `agents-secrets-cli-${STANDALONE_SECRETS_VERSION}`);
-}
-
-function installedEntry(prefix: string): string {
-  if (process.platform === 'win32') {
-    return path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'secrets-cli', 'dist', 'index.js');
-  }
-  return path.join(prefix, 'bin', 'secrets');
-}
-
-function withInstallLock<T>(lock: string, fn: () => T): T {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock);
-      break;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      let age = 0;
-      try {
-        age = Date.now() - fs.statSync(lock).mtimeMs;
-      } catch {
-        continue;
-      }
-      if (age > LOCK_STALE_MS) {
-        fs.rmSync(lock, { recursive: true, force: true });
-        continue;
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`Timed out waiting for the standalone secrets install lock at ${lock}`);
-      }
-      sleepSync(250);
-    }
-  }
-  try {
-    return fn();
-  } finally {
-    fs.rmSync(lock, { recursive: true, force: true });
-  }
-}
-
+/**
+ * The real standalone the suite drives: an explicit AGENTS_TEST_SECRETS_BIN /
+ * SECRETS_BIN (a secrets-cli checkout's dist/index.js), else the `secrets`
+ * entrypoint of the pinned @phnx-labs/secrets-cli dependency, beside the client
+ * entry agents-cli imports.
+ */
 export function ensureStandaloneSecretsBin(): string {
   const explicit = process.env.AGENTS_TEST_SECRETS_BIN?.trim() || process.env.SECRETS_BIN?.trim();
   if (explicit) return explicit;
-  const prefix = installPrefix();
-  const entry = installedEntry(prefix);
-  const marker = path.join(prefix, `.installed-${STANDALONE_SECRETS_VERSION}`);
-  if (fs.existsSync(marker) && fs.existsSync(entry)) return entry;
-  return withInstallLock(`${prefix}.lock`, () => {
-    if (fs.existsSync(marker) && fs.existsSync(entry)) return entry;
-    fs.rmSync(prefix, { recursive: true, force: true });
-    fs.mkdirSync(prefix, { recursive: true });
-    const result = spawnSync(
-      process.platform === 'win32' ? 'npm.cmd' : 'npm',
-      ['install', '-g', '--prefix', prefix, '--no-audit', '--no-fund', `@phnx-labs/secrets-cli@${STANDALONE_SECRETS_VERSION}`],
-      { encoding: 'utf8', shell: process.platform === 'win32', timeout: 4 * 60 * 1000 },
-    );
-    if (result.status !== 0 || !fs.existsSync(entry)) {
-      throw new Error(
-        `Installing @phnx-labs/secrets-cli@${STANDALONE_SECRETS_VERSION} into ${prefix} failed ` +
-          `(exit ${result.status ?? 'signal'}). The suite needs the real standalone; set ` +
-          `AGENTS_TEST_SECRETS_BIN to a built secrets-cli entrypoint to skip the install.\n${result.stderr ?? ''}`,
-      );
-    }
-    fs.writeFileSync(marker, new Date().toISOString());
-    return entry;
-  });
+  const entry = fileURLToPath(new URL('../node_modules/@phnx-labs/secrets-cli/dist/index.js', import.meta.url));
+  if (!fs.existsSync(entry)) throw new Error(`The @phnx-labs/secrets-cli dependency has no ${entry}; run bun install.`);
+  return entry;
 }
 
 export function useFreshSecretsHome(): () => string {
