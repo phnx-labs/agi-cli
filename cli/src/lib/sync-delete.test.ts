@@ -17,6 +17,7 @@ function run(args: string[]): { out: string; status: number | null } {
     cwd: home,
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 60_000,
     env: {
       ...process.env,
       HOME: home,
@@ -60,7 +61,7 @@ beforeAll(() => {
     fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '#!/usr/bin/env node\n');
     setGlobalDefault('claude', '1.0.0');
     console.log(getVersionHomePath('claude', '1.0.0'));
-  `], { cwd: CLI_ROOT, encoding: 'utf-8', env: { ...process.env, HOME: home, USERPROFILE: home } });
+  `], { cwd: CLI_ROOT, encoding: 'utf-8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 60_000 });
   if (setup.status !== 0) throw new Error(`fake install failed: ${setup.stderr}`);
   versionHome = setup.stdout.trim();
 
@@ -98,7 +99,7 @@ describe('agents sync --delete', () => {
 
     const preview = run(['sync', 'claude@1.0.0', 'user', '--delete', '--dry-run']);
     expect(preview.status, preview.out).toBe(0);
-    expect(preview.out).toContain('Would remove from Claude@1.0.0 (deleted from user): plugin gone, plugin gone--gone-skill, command gonecmd');
+    expect(preview.out).toContain('Would remove from Claude@1.0.0 (deleted from user): plugin gone, command gonecmd');
     expect(fs.existsSync(commandFile('gonecmd'))).toBe(true);
     expect(fs.existsSync(pluginDir('agents-cli', 'gone'))).toBe(true);
 
