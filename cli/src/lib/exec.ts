@@ -16,7 +16,7 @@ import { sanitizeProcessEnv } from './secrets-client.js';
 import { resolveActor, actorEnv } from './actor.js';
 import { launchIdentityEnv, launchOrigin, LAUNCH_IDENTITY_KEYS } from './launch-identity.js';
 import { expandLocalHome } from './project-root.js';
-import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
+import { getShimsDir, getHistoryDir, getRuntimeStateDir } from './state.js';
 import { readCodexConfiguredModel } from './installations/shims.js';
 import { withInstallationLease } from './installations/launch-gate.js';
 import { getCliLaunch, getAgentsBinPath } from './cli-entry.js';
@@ -356,8 +356,6 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
   }
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
-  // Bind the standalone secrets client to the same store agents-cli resolved.
-  result.SECRETS_HOME = result.SECRETS_HOME ?? getUserAgentsDir();
   if (inheritsHarnessMode(options)) {
     delete result.AGENTS_RUN_MODE;
   } else {
