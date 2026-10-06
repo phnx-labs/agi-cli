@@ -952,9 +952,9 @@ async function runProjectCard(
     notes: `
       The merge is a single REST call pinned to --sha: if anything was pushed after
       you read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose
-      live mergeable_state is not clean/unstable/has_hooks (blocked by a pending or red
-      required check or a review, behind, conflicted, or not computed yet) is refused
-      before the call. --admin skips that refusal and lets a
+      live mergeable_state is blocked (a pending or red required check, or a review),
+      behind, conflicted or a draft is refused before the call; one GitHub has not
+      computed goes on to the call and GitHub decides. --admin skips that refusal and lets a
       repository admin merge past branch protection where GitHub allows it; it exists
       for a person's explicit confirm (AGI Menu's "Confirm admin merge") and agents
       must never pass it. To land a PR once its checks pass, use prs automerge. A
