@@ -20783,6 +20783,16 @@
           "defaultValue": false
         },
         {
+          "flags": "--delete",
+          "description": "Also remove what a repo deleted: trash plugins, commands and skills that came from that repo and no longer exist in it. Needs a repo (agents sync <repo> --delete); resources from other repos or installed by hand are kept",
+          "long": "--delete",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false,
+          "defaultValue": false
+        },
+        {
           "flags": "--plugin [names]",
           "description": "Sync only plugins (bare = all; comma-separated names to filter)",
           "long": "--plugin",
@@ -20892,6 +20902,8 @@
           "negate": false
         }
       ],
+      "examples": "# Make this machine current (fetch repos, reconcile every installed agent)\nagents sync\n\n# Sync one agent, without prompts\nagents sync claude --yes\n\n# Only the system repo's resources, into every installed Claude\nagents sync claude@all system\n\n# Preview, then remove what the user repo deleted (plugins, commands, skills)\nagents sync claude user --delete --dry-run\nagents sync claude user --delete --yes",
+      "notes": "- --delete covers plugins, commands and skills (hooks, MCP, subagents, rules and workflows are left alone). It only removes one whose recorded source is in the named repo and is gone from it. Anything from another repo, or with no recorded source (installed by hand), is kept and counted as \"kept\".\n- Removed items go to ~/.agents/.history/trash/, so they can be restored.\n- Without --delete, sync behaves as before: run --delete to clear what a repo removed after a skipped or partial sync.",
       "subcommands": [
         {
           "name": "status",

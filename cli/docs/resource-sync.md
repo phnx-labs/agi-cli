@@ -324,7 +324,7 @@ behaves exactly as before.
 agents sync claude user --delete --dry-run   # preview
 agents sync claude user --delete --yes       # remove, then sync the user repo
 agents sync system --delete                  # git-sync system, then sweep every installed version
-agents sync --repo user --delete             # sweep every installed version, then the umbrella sync
+agents sync --repo user --delete             # umbrella sync (fetch + reconcile), then sweep every installed version
 ```
 
 - **A repo is mandatory.** Bare `agents sync --delete` exits 1 and names the
@@ -345,7 +345,17 @@ agents sync --repo user --delete             # sweep every installed version, th
   unregistered from `settings.json` (and Droid/Copilot's installed lists);
   commands and skills go through `removeCommandFromVersion` /
   `removeSkillFromVersion`, the same trash path `agents prune cleanup` uses.
-- **Non-interactive.** The pass runs before the sync and does not depend on the
+- **What it covers.** Plugins, commands and skills only, and only on harnesses
+  whose capability table supports that kind for the version (`supports()`), with a
+  staleness detector for commands and skills. Hooks, MCP servers, subagents, rules
+  and workflows are never swept by `--delete`; remove those with
+  `agents prune cleanup`. A plugin that cannot be trashed fails the command with
+  its name instead of being skipped.
+- **Order.** When the sync fetches first (`agents sync <repo> --delete`, the
+  umbrella `--repo <repo> --delete`), the sweep runs after the fetch, so a
+  deletion that arrives in the same pull is removed in one run. `--dry-run`
+  previews without fetching.
+- **Non-interactive.** The pass does not depend on the
   new-resources prompt, so it works with and without `--yes`. `--json` emits a
   `{ mode: 'delete', repo, dryRun, versions }` line ahead of the sync's own line.
 

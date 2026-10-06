@@ -1323,6 +1323,7 @@ function isOrphanMarketplacePlugin(
 
 export interface OrphanPluginScope {
   marketplace: string;
+  cwd: string;
   dryRun?: boolean;
 }
 
@@ -1334,7 +1335,7 @@ export function cleanOrphanedPluginSkills(
   scope?: OrphanPluginScope,
 ): string[] {
   const active = indexActivePlugins(activePlugins);
-  const cwd = process.cwd();
+  const cwd = scope?.cwd ?? process.cwd();
   const removed: string[] = [];
   const removedPlugins = new Set<string>();
 
@@ -1368,7 +1369,9 @@ export function cleanOrphanedPluginSkills(
         removed.push(entry.name);
         removedPlugins.add(entry.name);
         trashedHere = true;
-      } catch {  }
+      } catch (err) {
+        if (scope) throw new Error(`could not trash plugin '${entry.name}' from ${agent}@${version ?? 'unknown'}: ${(err as Error).message}`);
+      }
     }
     if (trashedHere) {
       syncMarketplaceManifest(spec, agent, versionHome);
@@ -1399,7 +1402,9 @@ export function cleanOrphanedPluginSkills(
         fs.mkdirSync(trashDir, { recursive: true, mode: 0o700 });
         fs.renameSync(path.join(skillsDir, entry.name), trashDest);
         removed.push(entry.name);
-      } catch {  }
+      } catch (err) {
+        if (scope) throw new Error(`could not trash plugin skill '${entry.name}' from ${agent}@${version ?? 'unknown'}: ${(err as Error).message}`);
+      }
     }
   }
 

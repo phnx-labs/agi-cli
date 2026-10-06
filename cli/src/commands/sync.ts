@@ -231,7 +231,7 @@ export function registerSyncCommand(program: Command): void {
       agents sync claude user --delete --yes
     `,
     notes: `
-      - --delete only removes a resource whose recorded source is in the named repo and is gone from it. Anything from another repo, or with no recorded source (installed by hand), is kept and counted as "kept".
+      - --delete covers plugins, commands and skills (hooks, MCP, subagents, rules and workflows are left alone). It only removes one whose recorded source is in the named repo and is gone from it. Anything from another repo, or with no recorded source (installed by hand), is kept and counted as "kept".
       - Removed items go to ~/.agents/.history/trash/, so they can be restored.
       - Without --delete, sync behaves as before: run --delete to clear what a repo removed after a skipped or partial sync.
     `,
@@ -643,7 +643,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     if (!quiet && !json) {
       console.error(chalk.yellow(`Warning: 'agents sync ${agentSpec}' is deprecated. Use: agents repo sync ${agentSpec}`));
     }
-    if (!opts.dryRun) await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
+    if (!(deleteRepo && opts.dryRun)) await runRepoGitSync(agentSpec, quiet, outLog, errLog, json);
     if (deleteRepo && process.exitCode !== 1) {
       runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, !!opts.dryRun, json, outLog, errLog);
     }
@@ -706,11 +706,14 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   if (!agentId) {
-    if (deleteRepo) {
-      if (!runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, !!opts.dryRun, json, outLog, errLog)) return;
-      if (opts.dryRun) return;
+    if (deleteRepo && opts.dryRun) {
+      runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, true, json, outLog, errLog);
+      return;
     }
     await runUmbrella(opts, quiet, outLog, errLog, json);
+    if (deleteRepo && process.exitCode !== 1) {
+      runDeletePass(deleteRepo, allInstalledTargets(), deleteCwd, false, json, outLog, errLog);
+    }
     return;
   }
 

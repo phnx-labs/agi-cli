@@ -3,7 +3,8 @@
   visibly when a non-interactive sync skipped the resource selection. `--delete`
   trashes the ones whose recorded source is in the named repo and is gone from it,
   unregisters removed plugins from `settings.json`, and keeps everything from other
-  repos or installed by hand (`kept: N not from <repo>`). It needs a repo, works
+  repos or installed by hand (`kept: N not from <repo>`). It covers plugins, commands and
+  skills (not hooks, MCP, subagents, rules or workflows), needs a repo, works
   without a TTY, and previews with `--dry-run`. A sync without `--delete` is
   unchanged. Source: `cli/src/lib/sync-delete.ts`, `cli/src/commands/sync.ts`.
 - **`agents sync` no longer hangs without a terminal.** When new resources were
