@@ -883,7 +883,11 @@ SSH access (§7); rendering sessions that no harness produced.
   `attention.remove`, `activity.append`, `scope`, and `heartbeat`. Fleet peers
   MUST be subscribed through `agents feed watch --json --local`, and an
   unavailable peer MUST retain its last rows until a reconnecting reset
-  (`lib/feed/watch.ts`; `lib/feed/watch.test.ts`).
+  (`lib/feed/watch.ts`; `lib/feed/watch.test.ts`). A consumer that closes the
+  pipe (EPIPE) MUST end the stream with exit 0 and nothing on stderr; any
+  other stdout write failure and an unexpected hub close MUST exit nonzero
+  (`commands/feed-watch.ts`; `commands/feed-watch.integration.test.ts`,
+  `lib/feed/hub-server.test.ts`).
 - **SES-40b (MUST).** `agents feed answer <attention-key>` MUST atomically claim
   the first answer before routing it through the recorded reply rail. A losing
   caller MUST return `already_answered` and MUST NOT inject or enqueue a second

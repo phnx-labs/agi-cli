@@ -35,11 +35,22 @@ export function registerFeedWatchCommand(parent: Command): void {
     if (!opts.json) invoked.error("error: required option '--json' not specified");
     const controller = new AbortController();
     const stop = () => controller.abort();
+    let writeFailure: Error | undefined;
+    const stopOnClosedConsumer = (error: NodeJS.ErrnoException) => {
+      if (controller.signal.aborted) return;
+      if (error.code !== 'EPIPE') writeFailure = error;
+      controller.abort();
+    };
     const emit = (event: FeedWatchEnvelope) => process.stdout.write(`${JSON.stringify(event)}\n`);
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
+    process.stdout.on('error', stopOnClosedConsumer);
     try {
       await attachToHub(controller.signal, emit, opts.local ? 'local' : 'fleet');
     }
-    finally { process.off('SIGINT', stop); process.off('SIGTERM', stop); }
+    finally {
+      process.off('SIGINT', stop); process.off('SIGTERM', stop);
+      process.stdout.off('error', stopOnClosedConsumer);
+    }
+    if (writeFailure) throw writeFailure;
   });
 }
