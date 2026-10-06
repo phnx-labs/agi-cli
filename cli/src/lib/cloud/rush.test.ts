@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { buildDispatchBody, isRushSessionValid, readToken, RushCloudProvider } from './rush.js';
+import { buildDispatchBody, isRushSessionValid, personalOrgHandle, readToken, rushOrgHandle, RushCloudProvider } from './rush.js';
 import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
@@ -341,4 +341,18 @@ describe('readToken', () => {
     expect(() => readToken(p)).toThrow(new Date(expiredAt).toISOString());
   });
 
+});
+
+describe('Rush org resolution', () => {
+  it('uses the org saved in user.yaml without asking the service', async () => {
+    const yamlPath = path.join(tmpDir, 'user.yaml');
+    fs.writeFileSync(yamlPath, yaml.stringify({ org: ' acme ', session: { access_token: 't' } }));
+    await expect(rushOrgHandle('t', yamlPath)).resolves.toBe('acme');
+  });
+
+  it('picks the personal org from the /me list, else the first with a slug', () => {
+    expect(personalOrgHandle([{ slug: 'team', kind: 'team' }, { slug: 'mine', kind: 'personal' }])).toBe('mine');
+    expect(personalOrgHandle([{ kind: 'personal' }, { slug: 'team', kind: 'team' }])).toBe('team');
+    expect(personalOrgHandle([])).toBeUndefined();
+  });
 });

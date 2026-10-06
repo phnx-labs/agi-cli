@@ -78,20 +78,6 @@ describe('cloud session cache path safety', () => {
     expect(sessions[0].filePath).toContain('session.opencode.jsonl');
   });
 
-  it('falls back to the personal org from /me when user.yaml saves none', async () => {
-    const { discoverCloudSessions } = await import('./cloud.js');
-    fs.writeFileSync(path.join(tmpRoot, '.rush', 'user.yaml'), 'session:\n  access_token: test-token\n');
-    globalThis.fetch = vi.fn(async (url: string) => url.endsWith('/me')
-      ? Response.json({ orgs: [{ slug: 'team', kind: 'team' }, { slug: 'me-personal', kind: 'personal' }] })
-      : Response.json({ sessions: [], next_cursor: null })) as any;
-
-    await discoverCloudSessions();
-    expect(vi.mocked(globalThis.fetch).mock.calls.map((c) => c[0])).toEqual([
-      'https://api.prix.dev/me',
-      'https://api.prix.dev/o/me-personal/sessions?limit=50',
-    ]);
-  });
-
   it('rejects invalid execution ids returned by cloud listing', async () => {
     const { discoverCloudSessions } = await import('./cloud.js');
     globalThis.fetch = vi.fn(async () => Response.json({

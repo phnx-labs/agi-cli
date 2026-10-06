@@ -73,15 +73,23 @@ export function readToken(yamlPath: string = USER_YAML): string {
   return token;
 }
 
+export interface RushOrg {
+  slug?: string;
+  kind?: string;
+}
+
 export async function rushOrgHandle(token: string, yamlPath: string = USER_YAML): Promise<string> {
   const saved = (yaml.parse(fs.readFileSync(yamlPath, 'utf-8')) as UserYaml)?.org?.trim();
   if (saved) return saved;
   const res = await api('GET', '/me', token);
   if (!res.ok) throw new Error(`Could not read your Rush organizations (${res.status}). Run \`rush login\` again.`);
-  const orgs = ((await res.json()) as { orgs?: Array<{ slug?: string; kind?: string }> }).orgs ?? [];
-  const handle = (orgs.find((o) => o.kind === 'personal' && o.slug) ?? orgs.find((o) => o.slug))?.slug;
+  const handle = personalOrgHandle(((await res.json()) as { orgs?: RushOrg[] }).orgs ?? []);
   if (!handle) throw new Error('No Rush organization found for your account. Run `rush login` again.');
   return handle;
+}
+
+export function personalOrgHandle(orgs: RushOrg[]): string | undefined {
+  return (orgs.find((o) => o.kind === 'personal' && o.slug) ?? orgs.find((o) => o.slug))?.slug;
 }
 
 function readEmail(): string | undefined {
