@@ -6,5 +6,7 @@
   instead of failing with `unknown command '<peer>'`. Command discovery, the
   routing-selector read and the flag strip before the SSH hop share one scan
   driven by each command's registered Commander options. Repeated selectors keep
-  the first value, as before. Source: `cli/src/lib/hosts/routing-flag.ts`,
-  `cli/src/lib/hosts/remote-cmd.ts`, `cli/src/bootstrap.ts`.
+  the first value, as before. Separately, the tmux backend now ends `send-keys`
+  options with `--`, so text that starts with `-` reaches the pane instead of
+  failing with `tmux exited with code 1`; this also applies to `sessions inject`. Source: `cli/src/lib/hosts/routing-flag.ts`,
+  `cli/src/lib/hosts/remote-cmd.ts`, `cli/src/bootstrap.ts`, `cli/src/lib/terminal/inject.ts`.

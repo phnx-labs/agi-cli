@@ -59,7 +59,7 @@ export function tmuxSendKeysArgv(
   if (opts.socket) argv.push('-S', opts.socket);
   argv.push('send-keys', '-t', pane);
   if (opts.literal) argv.push('-l');
-  argv.push(keys);
+  argv.push('--', keys);
   return argv;
 }
 

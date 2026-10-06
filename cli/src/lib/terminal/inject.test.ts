@@ -27,13 +27,13 @@ async function firstPaneId(name: string, socket: string): Promise<string> {
 describe('tmuxSendKeysArgv', () => {
   it('starts with tmux so the engine transport runs it locally or over SSH', () => {
     expect(tmuxSendKeysArgv('%2', 'continue', { literal: true })).toEqual([
-      'tmux', 'send-keys', '-t', '%2', '-l', 'continue',
+      'tmux', 'send-keys', '-t', '%2', '-l', '--', 'continue',
     ]);
   });
 
   it('positions -S <socket> before the subcommand', () => {
     expect(tmuxSendKeysArgv('%2', 'Enter', { socket: '/tmp/s.sock' })).toEqual([
-      'tmux', '-S', '/tmp/s.sock', 'send-keys', '-t', '%2', 'Enter',
+      'tmux', '-S', '/tmp/s.sock', 'send-keys', '-t', '%2', '--', 'Enter',
     ]);
   });
 });
@@ -42,20 +42,20 @@ describe('tmuxInjectSpecs', () => {
   it('Ink-safe default: two specs — literal text, then a separate Enter keypress', () => {
     const specs = tmuxInjectSpecs({ backend: 'tmux', pane: '%1' }, 'go', { enter: true, combined: false });
     expect(specs).toHaveLength(2);
-    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', 'go']);
-    expect(specs[1].argv).toEqual(['tmux', 'send-keys', '-t', '%1', 'Enter']);
+    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', '--', 'go']);
+    expect(specs[1].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '--', 'Enter']);
   });
 
   it('combined: one spec fusing a CR into the literal write', () => {
     const specs = tmuxInjectSpecs({ backend: 'tmux', pane: '%1' }, 'go', { enter: true, combined: true });
     expect(specs).toHaveLength(1);
-    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', 'go\r']);
+    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', '--', 'go\r']);
   });
 
   it('enter=false: just the literal text, no Enter', () => {
     const specs = tmuxInjectSpecs({ backend: 'tmux', pane: '%1' }, 'go', { enter: false, combined: false });
     expect(specs).toHaveLength(1);
-    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', 'go']);
+    expect(specs[0].argv).toEqual(['tmux', 'send-keys', '-t', '%1', '-l', '--', 'go']);
   });
 });
 
