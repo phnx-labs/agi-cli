@@ -101,8 +101,6 @@ export function toPortableCommand(
   return normalized;
 }
 
-// Hook copies agents-cli writes into a version home or an account slot are its own, even in
-// another home's settings: a slot carried a version home's file forward, then kept those paths.
 const AGENTS_HOME_HOOK_RE = /\/\.agents\/\.history\/(?:versions\/[^/]+\/[^/]+\/home|accounts\/[^/]+\/[^/]+)\//;
 
 function isManagedHookCommand(command: string, prefixes: string[]): boolean {
@@ -133,8 +131,6 @@ function versionHomeIdentity(commandOrPath: string): { agent: string; version: s
   return m ? { agent: m[1], version: m[2] } : null;
 }
 
-// One script can serve several events, each through its own command (a matcher hook runs via a
-// shim, a bare one runs direct), so a registration is owned by event + matcher + command.
 function hookEntryKey(event: string, matcher: string | undefined, command: string): string {
   return `${event}\0${matcher ?? ''}\0${command}`;
 }

@@ -319,7 +319,6 @@ describe('registerHooksToSettings - Codex', () => {
 
     const hooksJson = JSON.parse(fs.readFileSync(hooksPath, 'utf-8'));
     const commands = hooksJson.hooks.PreToolUse[0].hooks.map((h: { command: string }) => h.command);
-    // The manifest runs git-guard through its shim; a direct copy beside it would run it twice.
     expect(commands).not.toContain(oldVersionHook.command);
     expect(commands).not.toContain(currentVersionHook.command);
     expect(commands).toContain(customHook.command);
@@ -2052,8 +2051,6 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
     });
 
     it('an account slot drops the version-home hook copies it carried forward', () => {
-      // Observed 2026-10-06: every claude account slot ran each Stop hook twice, once from
-      // its own hooks dir and once from a version home's (including a removed version).
       const slotHome = path.join(tmpDir, '.agents', '.history', 'accounts', 'claude', 'acct-1');
       const settingsPath = path.join(slotHome, '.claude', 'settings.json');
       fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
@@ -2078,8 +2075,6 @@ describe('per-version hook entry pruning (settings accumulation regression)', ()
     });
 
     it('one script serving several events keeps exactly one command per event', () => {
-      // feed-publish: the AskUserQuestion leg runs through a shim (it has a matcher), the Stop leg
-      // runs the script directly. A direct registration left on PreToolUse ran it twice there.
       const versionHome = path.join(
         tmpDir, '.agents', '.history', 'versions', 'claude', '2.1.201', 'home'
       );
