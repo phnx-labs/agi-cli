@@ -259,6 +259,18 @@ carries). A row's session identity is resolved ONCE, durable history → live re
 owner on one assembly path and not another; nothing is invented when no source
 recorded one.
 
+Finished browser tasks come from the engine's native task history,
+`.history/browser/history.db` (`readNativeBrowserHistory` in
+[`browser/sessions-list.ts`](src/lib/browser/sessions-list.ts)), merged per
+profile and task with the legacy `browser_sessions` rows, with native fields winning.
+It is opened **read-only** so a read never checkpoints the engine's WAL, and the
+feed calls `readBrowserSessionRows`, which never prunes `sessions.db`. The watcher
+covers `.history/browser` and ignores `-shm` events: every reader of a WAL
+database updates its `-shm` index, so counting those would make each read
+re-trigger the next, while writes always touch `-wal` or the database itself. An
+unreadable record throws rather than being skipped, so the snapshot is
+incomplete and the rows already on the stream are kept.
+
 Two rules are not negotiable in a consumer or a future change:
 
 - **A computer run is history, not a session.** `ComputerToolRow` pins
