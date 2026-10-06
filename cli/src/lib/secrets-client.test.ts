@@ -1,10 +1,3 @@
-/**
- * agents-cli's secrets wrappers over the published `@phnx-labs/secrets-cli/client`.
- * The transport itself (fd 3 / fd 4 lifecycle, bounds, executable lookup) is
- * proven in secrets-cli; these tests prove the consumer contract against the
- * real `secrets` executable that ships in that dependency, in an isolated HOME,
- * with bundle names unique to the run (a macOS keychain is global, not per-HOME).
- */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
