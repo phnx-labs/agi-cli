@@ -51,7 +51,7 @@ import {
   switchHomeFileSymlinks,
 } from './installations/shims.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks/install.js';
-import { isPromptCancelled } from './format.js';
+import { isInteractiveTerminal, isPromptCancelled } from './format.js';
 
 interface RefreshOptions {
   agentFilter?: AgentId;
@@ -219,6 +219,8 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
         selection = requestedSelection;
       } else if (skipPrompts) {
         forceFullSync = true;
+      } else if (!isInteractiveTerminal() && (!hasAnySynced || (newResources && hasNewResources(newResources, agentId, defaultVer!)))) {
+        log(chalk.gray(`Skipped resource selection for ${agentLabel(agentId)}@${defaultVer!} (no terminal; rerun with --yes to sync new resources)`));
       } else if (!hasAnySynced) {
         log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer!} has no synced resources.`));
         const userSelection = await promptResourceSelection(agentId);
