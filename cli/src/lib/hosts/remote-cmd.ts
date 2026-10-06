@@ -4,38 +4,18 @@ import { pwshLiteral, pwshNativeExecStatements } from '../pwsh.js';
 import { quoteWin32ExecArg } from '../platform/exec.js';
 import { homeRemainder } from '../project-root.js';
 import * as zlib from 'node:zlib';
+import { scanArgv, type StripSpec } from './routing-flag.js';
 
-export interface StripSpec {
-  long: string;
-  short?: string;
-  takesValue: boolean;
-}
+export { HOST_ROUTING_SPECS, type StripSpec } from './routing-flag.js';
 
 export function stripRoutingFlags(args: string[], specs: StripSpec[]): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    const spec = specs.find((s) => {
-      if (a === `--${s.long}` || a.startsWith(`--${s.long}=`)) return true;
-      if (s.short && (a === `-${s.short}` || a.startsWith(`-${s.short}=`) || new RegExp(`^-${s.short}.+`).test(a)))
-        return true;
-      return false;
-    });
-    if (!spec) {
-      out.push(a);
-      continue;
-    }
-    const isExact = a === `--${spec.long}` || (spec.short && a === `-${spec.short}`);
-    if (spec.takesValue && isExact && i + 1 < args.length) i++;
+  const dropped = new Set<number>();
+  for (const r of scanArgv(args, specs).routing) {
+    if (!specs.some((s) => s.long === r.spec.long)) continue;
+    for (let i = r.start; i <= r.end; i++) dropped.add(i);
   }
-  return out;
+  return args.filter((_, i) => !dropped.has(i));
 }
-
-export const HOST_ROUTING_SPECS: StripSpec[] = [
-  { long: 'device', short: 'D', takesValue: true },
-  { long: 'host', short: 'H', takesValue: true },
-  { long: 'remote-cwd', takesValue: true },
-];
 
 type RunOptionForwarding =
   | 'forward'
