@@ -203,6 +203,50 @@ describe('resolveSendEnvelope', () => {
     expect(r.envelope.dryRun).toBe(true);
   });
 
+  it('keeps the session channel text verbatim, including whitespace-only and explicitly empty text', () => {
+    for (const text of ['  spaced\n', '   ', '']) {
+      const r = resolveSendEnvelope({ text, channel: 'session', to: 'abc' }, metaEmpty);
+      expect(r.ok, JSON.stringify(text)).toBe(true);
+      if (r.ok) expect(r.envelope.text).toBe(text);
+    }
+    const positional = resolveSendEnvelope({ positionalText: ' p ', channel: 'session', to: 'abc' }, metaEmpty);
+    expect(positional.ok && positional.envelope.text).toBe(' p ');
+    const withUrl = resolveSendEnvelope({ text: ' see ', urls: ['https://x.test'], channel: 'session', to: 'abc' }, metaEmpty);
+    expect(withUrl.ok && withUrl.envelope.text).toBe(' see \nhttps://x.test');
+
+    const trimmed = resolveSendEnvelope({ text: ' hi ', channel: 'desktop', to: 'local' }, metaEmpty);
+    expect(trimmed.ok && trimmed.envelope.text).toBe('hi');
+    const blank = resolveSendEnvelope({ text: '   ', channel: 'desktop', to: 'local' }, metaEmpty);
+    expect(!blank.ok && blank.error).toMatch(/empty/i);
+  });
+
+  it('treats a session alias from notify.transports as the session channel', () => {
+    const meta = { notify: { transports: { nudge: 'session' } } } as Meta;
+    const r = resolveSendEnvelope({ text: ' x ', channel: 'nudge', to: 'abc', terminal: { enter: false } }, meta);
+    expect(r.ok && r.envelope).toMatchObject({ text: ' x ', terminal: { enter: false } });
+  });
+
+  it('rejects a session send with no message and differing verbatim --text and positional', () => {
+    const absent = resolveSendEnvelope({ channel: 'session', to: 'abc' }, metaEmpty);
+    expect(!absent.ok && absent.error).toMatch(/empty/i);
+    const differ = resolveSendEnvelope({ text: 'a ', positionalText: 'a', channel: 'session', to: 'abc' }, metaEmpty);
+    expect(!differ.ok && differ.error).toMatch(/once/i);
+  });
+
+  it('lets --pane stand in for --to and refuses a conflicting --to', () => {
+    const pane = resolveSendEnvelope({ text: 'x', channel: 'session', terminal: { pane: '%3', socket: '/s' } }, metaEmpty);
+    expect(pane.ok && pane.envelope).toMatchObject({ to: '%3', terminal: { pane: '%3', socket: '/s' } });
+    const conflict = resolveSendEnvelope({ text: 'x', channel: 'session', to: 'abc', terminal: { pane: '%3' } }, metaEmpty);
+    expect(!conflict.ok && conflict.error).toMatch(/different targets/);
+  });
+
+  it('refuses terminal options outside the session channel, including owner fan-out, before delivery', async () => {
+    const desktop = await sendMessage({ text: 'x', channel: 'desktop', to: 'local', dryRun: true, terminal: { enter: false } }, metaEmpty);
+    expect(desktop).toEqual({ error: expect.stringContaining('only apply to --channel session') });
+    const owner = await sendMessage({ text: 'x', to: 'owner', dryRun: true, terminal: { combined: true } }, metaWithOwner);
+    expect(owner).toEqual({ error: expect.stringContaining('only apply to --channel session') });
+  });
+
   it('allows url-only body', () => {
     const r = resolveSendEnvelope(
       { channel: 'desktop', to: 'local', urls: ['https://x.test'] },

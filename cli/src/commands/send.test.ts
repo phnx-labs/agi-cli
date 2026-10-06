@@ -68,4 +68,30 @@ describe('agents send --to owner routes through the feed composer (PHNX-3698)', 
     expect(payload.text).not.toContain(`https://prix.dev/console/sessions/${SESSION}`);
     expect(payload.text).not.toContain('http');
   });
+
+  async function dryRunJson(args: string[]): Promise<Record<string, unknown>> {
+    const program = new Command();
+    registerSendCommand(program);
+    await program.parseAsync(['node', 'agents', 'send', ...args, '--dry-run', '--json']);
+    const line = stdout.find((l) => l.trim().startsWith('{'));
+    expect(line, 'expected a JSON payload on stdout').toBeTruthy();
+    return JSON.parse(line!);
+  }
+
+  it('an explicit channel trims the body and folds --url, unchanged by the session options', async () => {
+    const payload = await dryRunJson(['--channel', 'mailbox', '--to', 'peer-1', '--text', '  hi  ', '--url', 'https://x.test']);
+    expect(payload).toMatchObject({ ok: true, channel: 'mailbox', id: 'peer-1', text: 'hi\nhttps://x.test', dryRun: true });
+    expect(payload).not.toHaveProperty('writes');
+  });
+
+  it('--pane, --no-enter and --combined reach the terminal engine with the text kept verbatim', async () => {
+    expect(await dryRunJson(['--channel', 'session', '--pane', '%9', '--text', ' x ', '--no-enter']))
+      .toMatchObject({ ok: true, channel: 'session', id: '%9', text: ' x ', backend: 'tmux', writes: 1, dryRun: true });
+    stdout.length = 0;
+    expect(await dryRunJson(['--channel', 'session', '--pane', '%9', '--text', 'y']))
+      .toMatchObject({ id: '%9', text: 'y', writes: 2 });
+    stdout.length = 0;
+    expect(await dryRunJson(['--channel', 'session', '--pane', '%9', '--text', 'y', '--combined']))
+      .toMatchObject({ id: '%9', writes: 1 });
+  });
 });
