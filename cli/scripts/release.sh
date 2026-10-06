@@ -474,6 +474,10 @@ echo
 bold "Building $SWARMIFY_PKG@$TARGET shim..."
 SHIM_SRC="$ROOT/scripts/companion-shim"
 SHIM_TMP="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-shim.XXXXXX")"
+stage_release_metadata() {
+  git add -A package.json CHANGELOG.md .changelog docs/command-index.md docs/command-index.json docs/command-reference.html
+}
+
 restore_release_tree() {
   local paths=(package.json CHANGELOG.md .changelog docs/command-index.md docs/command-index.json docs/command-reference.html)
   if git diff --quiet HEAD -- "${paths[@]}" && git diff --cached --quiet HEAD -- "${paths[@]}"; then
@@ -780,10 +784,10 @@ if ! $MAIN_AT_TARGET; then
   PR_BODY="$(printf '## %s\n\n%s' "$TARGET" "$NOTES")"
   green "Folded .changelog/next/* -> .changelog/$TARGET.md; regenerated CHANGELOG.md"
 
-  bun scripts/gen-command-index.ts
-  green "Regenerated docs/command-index.{md,json}"
+  scripts/generate-reference.sh
+  green "Regenerated docs/command-index.{md,json} and docs/command-reference.html"
 
-  git add -A package.json CHANGELOG.md .changelog docs/command-index.md docs/command-index.json
+  stage_release_metadata
   BRANCH_TREE="$(git write-tree)"
   RELEASE_COMMIT="$(git commit-tree "$BRANCH_TREE" -p "$BASE_SHA" -m "chore(release): $TARGET")"
 

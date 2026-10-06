@@ -44,5 +44,30 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
   across 10,173 session transcripts, 90-day churn, and a keep / merge / extract / cut verdict
   per group. Re-run the measurements before acting on a number older than a release.
 
-`command-index.md`, `command-index.json`, and `command-reference.html` are generated
-from the Commander tree. Never edit them by hand.
+## Generated command reference
+
+From the repository root, after `bun install --cwd cli`:
+
+```bash
+cli/scripts/generate-reference.sh
+cli/scripts/generate-reference.sh --check
+cli/scripts/generate-reference.sh --out-dir .agents/scratch/reference
+```
+
+The script reads the real Commander tree and writes `command-index.md`,
+`command-index.json`, and the searchable `command-reference.html` under `cli/docs/`.
+Open the HTML in a browser to browse the command tree. No build or running CLI
+service is needed. `--out-dir` writes a separate preview, relative to your current
+directory. `--check` compares all three files without writing and fails if any
+are missing or stale. Never edit generated files by hand.
+
+The existing required CI check runs this comparison when commands, help metadata,
+the generator, generated files, or package metadata/dependencies change. That
+includes version bumps on `release/*` PRs. `scripts/release.sh` regenerates and
+stages all three formats before creating the release commit; CI verifies those
+same bytes. Unrelated PRs keep their existing selected checks.
+
+Other CLI products can use the shared `@phnx-labs/cli-docs` renderer with their own
+Commander tree: keep a small `scripts/gen-command-index.ts` adapter, expose a
+`scripts/generate-reference.sh` entry point, generate before the release commit,
+and run `--check` in CI. Each product owns its generated reference and release.

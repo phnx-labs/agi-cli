@@ -1943,6 +1943,14 @@ repo-root `native/` tree to reach: it left with the computer engine, PHNX-4075.)
 
 ## Build, test, dev
 
+**Command reference:** `scripts/generate-reference.sh` writes the HTML tree plus
+JSON and Markdown indexes from the real Commander definitions via the shared
+`@phnx-labs/cli-docs` renderer. `--check` compares without writing; `--out-dir`
+creates a separate preview. The impact gate checks all three formats on command,
+help, generator, generated-output, and package/lock changes, including release
+version bumps. `release.sh` regenerates and stages all three before constructing
+the release commit. See [the reference workflow](docs/README.md#generated-command-reference).
+
 ```bash
 bun install && bun run build && bun test
 ```

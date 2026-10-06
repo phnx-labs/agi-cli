@@ -64,12 +64,18 @@ groups:
     when:
       - cli/src/commands/**
       - cli/src/cli/**
+      - cli/src/lib/help.ts
+      - cli/package.json
+      - cli/bun.lock
+      - cli/scripts/generate-reference.sh
+      - cli/scripts/generate-reference.test.ts
       - cli/scripts/gen-command-index.ts
       - cli/scripts/gen-command-index.test.ts
       - cli/scripts/verify-command-index.sh
       - cli/scripts/verify-docs.sh
       - cli/docs/command-index.md
       - cli/docs/command-index.json
+      - cli/docs/command-reference.html
     checks: [command-index, docs, typecheck]
     budget_sec: 120
 

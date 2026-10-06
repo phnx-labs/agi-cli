@@ -277,7 +277,7 @@ release_diff_is_metadata_only() {
     rel="${rel#apps/cli/}"
     rel="${rel#cli/}"
     case "$rel" in
-      package.json|CHANGELOG.md|docs/command-index.md|docs/command-index.json) ;;
+      package.json|CHANGELOG.md|docs/command-index.md|docs/command-index.json|docs/command-reference.html) ;;
       .changelog/*) ;;
       *) die "derive refused: release tree changes '$line' beyond version/changelog/command-index -- run the full suite for this tree" ;;
     esac

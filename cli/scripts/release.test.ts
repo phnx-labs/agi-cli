@@ -19,6 +19,45 @@ function runRelease(...args: string[]): { status: number | null; out: string } {
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
 
+describeRelease('release.sh generated reference', () => {
+  it('stages every generated format in the release tree and leaves unrelated edits out', () => {
+    const stage = RELEASE_SH.match(/stage_release_metadata\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(stage).toBeDefined();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-reference-'));
+    const cli = path.join(root, 'cli');
+    const files = ['package.json', 'CHANGELOG.md', '.changelog/1.0.1.md',
+      'docs/command-index.md', 'docs/command-index.json', 'docs/command-reference.html'];
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    try {
+      git('init', '-q');
+      git('config', 'user.name', 'test');
+      git('config', 'user.email', 'test@example.com');
+      for (const file of [...files, 'src/unrelated.ts']) {
+        fs.mkdirSync(path.dirname(path.join(cli, file)), { recursive: true });
+        fs.writeFileSync(path.join(cli, file), 'before\n');
+      }
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      for (const file of [...files, 'src/unrelated.ts']) {
+        fs.writeFileSync(path.join(cli, file), 'after\n');
+      }
+      const staged = spawnSync('bash', ['-c', `set -euo pipefail\n${stage}\nstage_release_metadata`], {
+        cwd: cli, encoding: 'utf8',
+      });
+      expect(staged.status, staged.stderr).toBe(0);
+      const tree = git('write-tree');
+      for (const file of files) expect(git('show', `${tree}:cli/${file}`)).toBe('after');
+      expect(git('show', `${tree}:cli/src/unrelated.ts`)).toBe('before');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
   it('requires the exact release-commit tree and never waits on a full-suite matrix', () => {
     const waitFunction = RELEASE_SH.match(
