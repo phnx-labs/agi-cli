@@ -461,10 +461,8 @@ describe('mergeProjectPr', () => {
     expect(asked).toEqual(['repos/acme/mono/pulls/7']);
   });
 
-  it('fails closed on a state GitHub has not computed yet, or a branch behind its base', async () => {
+  it('refuses a branch behind its base or with conflicts before any write', async () => {
     for (const [state, message] of [
-      ['', 'GitHub is still computing mergeability; try again in a moment'],
-      ['unknown', 'GitHub is still computing mergeability; try again in a moment'],
       ['behind', 'The branch is behind its base; update it, or pass --admin to merge as an admin'],
       ['dirty', 'Has merge conflicts'],
     ] as const) {
@@ -472,6 +470,15 @@ describe('mergeProjectPr', () => {
       const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
       expect(result).toMatchObject({ merged: false, message });
       expect(asked).toEqual(['repos/acme/mono/pulls/7']);
+    }
+  });
+
+  it('tries the pinned merge when GitHub never computed mergeability, and reports its refusal', async () => {
+    for (const state of ['', 'unknown']) {
+      const { gh, asked } = recordedGh({ 'repos/acme/mono/pulls/7': `${state}\n`, 'PUT repos/acme/mono/pulls/7/merge': 'm3\n' });
+      const result = await mergeProjectPr('acme/mono', 7, 'abc1234', 'rebase', {}, gh);
+      expect(result).toMatchObject({ merged: true, sha: 'm3', message: 'Merged' });
+      expect(asked).toEqual(['repos/acme/mono/pulls/7', 'PUT repos/acme/mono/pulls/7/merge']);
     }
   });
 
