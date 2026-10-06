@@ -1080,7 +1080,10 @@ SSH access (§7); rendering sessions that no harness produced.
   session id, harness and execution device identify a canonical row; cwd and
   prefixes MUST NOT join observations. Worker lifecycle/content MUST win over
   launcher or history richness/recency. Observer-local terminal/viewing/reply
-  facts MUST remain separate in `observerTerminals`. Owner disconnect MUST retain its
+  facts MUST remain separate in `observerTerminals`. A row whose `originTerminal`
+  names a device other than its owner MUST list `{device, terminalId, launchId}` for
+  that origin in `observerTerminals`, once, deduplicated against that device's own
+  observation (PHNX-4263, `lib/session/projection.ts`). Owner disconnect MUST retain its
   last facts; reset/upsert/remove MUST converge without stale launcher resurrection
   after an owner has answered. Genuine owner history MUST remain visible when
   the owner no longer reports live state. Raw `--local` observations remain the

@@ -13,7 +13,7 @@ import { isTierToken, resolveTier } from './model-tiers.js';
 import { emit, emitStart, createTimer, redactPrompt, redactArgs, type EventPayload } from './feed/events.js';
 import { sanitizeProcessEnv } from './secrets-client.js';
 import { resolveActor, actorEnv } from './actor.js';
-import { launchIdentityEnv, LAUNCH_IDENTITY_KEYS } from './launch-identity.js';
+import { launchIdentityEnv, launchOrigin, LAUNCH_IDENTITY_KEYS } from './launch-identity.js';
 import { expandLocalHome } from './project-root.js';
 import { getShimsDir, getHistoryDir, getUserAgentsDir, getRuntimeStateDir } from './state.js';
 import { readCodexConfiguredModel } from './installations/shims.js';
@@ -884,6 +884,7 @@ async function execShimPassthroughLeased(
         initiatedBy: resolveActor().kind,
         launchId,
         terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
+        originTerminal: launchOrigin(),
         startedAtMs: Date.now(),
       });
       if (passthroughSessionId) {
@@ -1140,6 +1141,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
       initiatedBy: resolveActor().kind,
       launchId: options.env?.AGENT_LAUNCH_ID,
       terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
+      originTerminal: launchOrigin(),
       tmuxPane: pane,
       startedAtMs: Date.now(),
     });
@@ -1457,6 +1459,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
       initiatedBy: resolveActor().kind,
       launchId,
       terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
+      originTerminal: launchOrigin(),
       tmuxPane: process.env.TMUX_PANE,
       startedAtMs: Date.now(),
     });

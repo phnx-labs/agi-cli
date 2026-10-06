@@ -311,7 +311,14 @@ session id, harness and execution device. `sourceDevice` and `machine` identify
 the execution owner. The worker's state and preview win over the origin launcher,
 even when that launcher is newer or has more fields. Observer-local terminal ids,
 viewing information and reply provenance live in `observerTerminals`; they do not
-replace the worker's execution metadata. Disconnect retains the last owner state;
+replace the worker's execution metadata. A run dispatched from another desktop's
+tab (`agents run --device`) also lists that tab: the launcher forwards
+`AGENTS_ORIGIN_DEVICE` with `AGENTS_ORIGIN_TERMINAL_ID`, the worker stores both as
+the row's `originTerminal`, and the projection adds
+`{device, terminalId, launchId}` for the origin desktop when it differs from the
+owner. This works for every harness, including those with no pre-minted session
+id (Codex, Grok). A `live-terminals.json` entry may omit `sessionId`; a tab with a
+`terminalId` and pid still yields a terminal row. Disconnect retains the last owner state;
 reconnect resets it. Once an owner has answered, stale launcher/history copies
 cannot resurrect a session that the owner removed. `--local` remains the raw
 observation stream used by the fleet coordinator.

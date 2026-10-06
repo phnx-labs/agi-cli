@@ -23,6 +23,7 @@ describe('stampProvenance', () => {
       AGENTS_PARENT_SESSION_ID: 'parent-session',
       AGENTS_PARENT_LAUNCH_ID: 'parent-launch',
       AGENTS_ORIGIN_TERMINAL_ID: 'origin-tab',
+      AGENTS_ORIGIN_DEVICE: 'zion',
     });
 
     expect(provenance).toMatchObject({
@@ -34,6 +35,7 @@ describe('stampProvenance', () => {
       parentSessionId: 'parent-session',
       parentLaunchId: 'parent-launch',
       originTerminalId: 'origin-tab',
+      originDevice: 'zion',
     });
   });
 });
