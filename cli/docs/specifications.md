@@ -1513,6 +1513,15 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   resource rollup ordered by invocation volume (`--bottom` reverses, `--top <n>`
   caps); `zeroInvoked` is the installed-but-never-invoked set. The rollup MUST
   count each resource identity (kind + name) once — merging source layers — and
+  that identity MUST be the one the installed inventory (`zeroInvoked`) uses: a
+  plugin resource recorded by its bare name (`Skill({skill: "image"})`) is stored
+  as `<plugin>:<name>` (`create:image`), and a slash invocation that resolves to
+  no installed command but to an installed skill (`/docs`) is a skill
+  invocation, so a resource is never ranked under one name while listed as
+  never-invoked under another (PHNX-4247; `lib/session/db.ts`
+  `canonicalResource`). Stored bare plugin rows are renamed in place by schema
+  migration v52; the slash-skill kind is re-derived from transcripts by
+  `sessions backfill resources` (`RESOURCE_INDEX_VERSION` 2). The rollup
   MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
   an auto-triggered skill reads as 0 (skill invocations come from Claude + Kimi,
   slash-commands from Claude only); the envelope's `signal` field states this and

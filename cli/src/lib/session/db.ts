@@ -30,11 +30,11 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-export const SCHEMA_VERSION = 51;
+export const SCHEMA_VERSION = 52;
 
 export const CONTENT_INDEX_VERSION = 6;
 
-const RESOURCE_INDEX_VERSION = 1;
+const RESOURCE_INDEX_VERSION = 2;
 
 function canonicalLedgerKey(filePath: string): string {
   if (!filePath) return filePath;
@@ -1190,6 +1190,17 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DROP TABLE session_text_v50`);
   }
 
+  if (fromVersion < 52) {
+    db.exec(`
+      INSERT INTO session_resource_usage (session_id, kind, name, plugin, source, repo_root, snapshot_sha, count)
+      SELECT session_id, kind, plugin || ':' || name, plugin, source, repo_root, snapshot_sha, count
+      FROM session_resource_usage
+      WHERE plugin IS NOT NULL AND plugin <> '' AND instr(name, ':') = 0
+      ON CONFLICT(session_id, kind, name) DO UPDATE SET count = session_resource_usage.count + excluded.count
+    `);
+    db.exec(`DELETE FROM session_resource_usage WHERE plugin IS NOT NULL AND plugin <> '' AND instr(name, ':') = 0`);
+  }
+
 }
 
 function backfillClaudeAccounts(
@@ -1814,26 +1825,52 @@ const insertResourceUsageStmt = (db: Database.Database) => db.prepare(`
   VALUES (@session_id, @kind, @name, @plugin, @source, @repo_root, @snapshot_sha, @count)
 `);
 
-function resolveResourceProvenance(
+interface CanonicalResource {
+  kind: 'skill' | 'command';
+  name: string;
+  plugin?: string;
+  source?: string;
+  repoRoot?: string;
+  snapshotSha?: string;
+}
+
+function resolveInstalled(
   kind: 'skills' | 'commands',
   name: string,
   cwd: string | undefined,
   plugins: DiscoveredPlugin[],
-): { plugin?: string; source?: string; repoRoot?: string; snapshotSha?: string } {
+): Omit<CanonicalResource, 'kind'> | null {
   const listOf = (p: DiscoveredPlugin) => (kind === 'skills' ? p.skills : p.commands);
+  const fromPlugin = (p: DiscoveredPlugin, shortName: string) => ({
+    name: `${p.name}:${shortName}`,
+    plugin: p.name, source: p.marketplace, repoRoot: p.repoRoot, snapshotSha: p.snapshotSha,
+  });
   const colonIdx = name.indexOf(':');
   if (colonIdx > 0) {
     const pluginName = name.slice(0, colonIdx);
     const shortName = name.slice(colonIdx + 1);
     const plugin = plugins.find((p) => p.name === pluginName && listOf(p).includes(shortName));
-    if (!plugin) return {};
-    return { plugin: plugin.name, source: plugin.marketplace, repoRoot: plugin.repoRoot, snapshotSha: plugin.snapshotSha };
+    return plugin ? fromPlugin(plugin, shortName) : null;
   }
   const resolved = resolveResource(kind, name, cwd);
-  if (resolved) return { source: resolved.source, repoRoot: resolved.repoRoot, snapshotSha: resolved.snapshotSha };
+  if (resolved) return { name: resolved.name, source: resolved.source, repoRoot: resolved.repoRoot, snapshotSha: resolved.snapshotSha };
   const plugin = plugins.find((p) => listOf(p).includes(name));
-  if (!plugin) return {};
-  return { plugin: plugin.name, source: plugin.marketplace, repoRoot: plugin.repoRoot, snapshotSha: plugin.snapshotSha };
+  return plugin ? fromPlugin(plugin, name) : null;
+}
+
+function canonicalResource(
+  kind: 'skill' | 'command',
+  name: string,
+  cwd: string | undefined,
+  plugins: DiscoveredPlugin[],
+): CanonicalResource {
+  const own = resolveInstalled(kind === 'skill' ? 'skills' : 'commands', name, cwd, plugins);
+  if (own) return { kind, ...own };
+  if (kind === 'command') {
+    const skill = resolveInstalled('skills', name, cwd, plugins);
+    if (skill) return { kind: 'skill', ...skill };
+  }
+  return { kind, name };
 }
 
 function writeResourceUsageFromTallies(
@@ -1848,25 +1885,24 @@ function writeResourceUsageFromTallies(
   del.run(sessionId);
   if (skills.length === 0 && commands.length === 0) return;
   const plugins = discoverPlugins({ cwd });
-  for (const { name, count } of skills) {
-    const prov = resolveResourceProvenance('skills', name, cwd, plugins);
-    const bind: ResourceUsageBind = {
-      session_id: sessionId, kind: 'skill', name, count,
-      plugin: prov.plugin ?? null, source: prov.source ?? null,
-      repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
-    };
-    ins.run(bind);
-  }
-  for (const { name, count } of commands) {
-    const bare = name.replace(/^\//, '');
-    const prov = resolveResourceProvenance('commands', bare, cwd, plugins);
-    const bind: ResourceUsageBind = {
-      session_id: sessionId, kind: 'command', name: bare, count,
-      plugin: prov.plugin ?? null, source: prov.source ?? null,
-      repo_root: prov.repoRoot ?? null, snapshot_sha: prov.snapshotSha ?? null,
-    };
-    ins.run(bind);
-  }
+  const rows = new Map<string, ResourceUsageBind>();
+  const tally = (kind: 'skill' | 'command', name: string, count: number) => {
+    const c = canonicalResource(kind, name, cwd, plugins);
+    const key = `${c.kind}\0${c.name}`;
+    const existing = rows.get(key);
+    if (existing) {
+      existing.count += count;
+      return;
+    }
+    rows.set(key, {
+      session_id: sessionId, kind: c.kind, name: c.name, count,
+      plugin: c.plugin ?? null, source: c.source ?? null,
+      repo_root: c.repoRoot ?? null, snapshot_sha: c.snapshotSha ?? null,
+    });
+  };
+  for (const { name, count } of skills) tally('skill', name, count);
+  for (const { name, count } of commands) tally('command', name.replace(/^\//, ''), count);
+  for (const bind of rows.values()) ins.run(bind);
 }
 
 function writeResourceUsage(sessionId: string, events: SessionEvent[], cwd: string | undefined): void {
