@@ -1,11 +1,3 @@
-/**
- * A bundle push lands in the root the receiving agents-cli reads. A dedicated,
- * unprivileged `sshd` on 127.0.0.1 (its own host key, authorized key and client
- * config) plays the worker; its ForceCommand runs the real `secrets` from the
- * @phnx-labs/secrets-cli dependency under the worker's own HOME. The push goes
- * through agents-cli's `pushBundleToHost` after a real `secrets hosts pin`.
- * Skips with the reason when sshd cannot start here.
- */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
@@ -52,7 +44,6 @@ function writeExec(file: string, body: string): void {
   fs.writeFileSync(file, body, { mode: 0o755 });
 }
 
-/** Run the client as one side: its own HOME, an unset or explicit root, ssh through the fixture. */
 function asSide(home: string, root?: string): void {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
@@ -135,7 +126,6 @@ beforeAll(async () => {
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  // The pusher pins the worker's host key the way an operator does, before any transfer.
   asSide(pusherHome);
   const pin = spawnSync(process.execPath, [BIN, 'hosts', 'pin', TARGET, '--port', String(port)], { encoding: 'utf-8', env: process.env });
   if (pin.status !== 0) throw new Error(`secrets hosts pin: ${pin.stderr}`);
@@ -173,8 +163,6 @@ async function pushFileBundle(name: string, value: string, remoteSecretsHome?: s
 }
 
 describe('a bundle push lands where the receiving agents-cli reads (real sshd)', () => {
-  // The worker has already used its default root (as every upgraded worker has), so
-  // the engine's one-time adoption of ~/.agents cannot pick a misrouted push up.
   it('without remoteSecretsHome, the worker default root receives it', async (ctx) => {
     if (skipReason) ctx.skip(skipReason);
     asSide(workerHome);

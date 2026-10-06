@@ -21,8 +21,6 @@ import type {
   RcSecretFinding,
 } from './secrets-types.js';
 
-// The fd 3 / fd 4 process transport is the published secrets client; this module
-// keeps agents-cli's domain wrappers and identifier helpers on top of it.
 export {
   PROTOCOL_VERSION,
   SYNC_SERVE_TIMEOUT_MS,
@@ -230,8 +228,7 @@ export function remoteResolveEnv(
   return secretsRequest('remote.remoteResolveEnv', [target, bundle, opts ?? {}]);
 }
 
-// An unset opts.remoteSecretsHome stays unset, so the receiving `secrets` uses its
-// own default root, the same one agents-cli reads there; an explicit one wins.
+// An unset remoteSecretsHome stays unset so the receiver uses its own default root.
 export function pushBundleToHost(
   bundle: string,
   host: string,

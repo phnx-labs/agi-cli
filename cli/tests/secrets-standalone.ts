@@ -6,12 +6,6 @@ import { afterEach, beforeEach } from 'vitest';
 import { _resetSecretsClientForTest, keychainUsesFileFallback } from '../src/lib/secrets-client.js';
 import { invalidateClaudeSetupTokenCache } from '../src/lib/claude-account-token.js';
 
-/**
- * The real standalone the suite drives: an explicit AGENTS_TEST_SECRETS_BIN /
- * SECRETS_BIN (a secrets-cli checkout's dist/index.js), else the `secrets`
- * entrypoint of the pinned @phnx-labs/secrets-cli dependency, beside the client
- * entry agents-cli imports.
- */
 export function ensureStandaloneSecretsBin(): string {
   const explicit = process.env.AGENTS_TEST_SECRETS_BIN?.trim() || process.env.SECRETS_BIN?.trim();
   if (explicit) return explicit;
