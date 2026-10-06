@@ -34,6 +34,10 @@ export class NativeHistoryWriter {
     );
   }
 
+  putMany(records: Parameters<NativeHistoryWriter['put']>[0][]): void {
+    this.db.transaction(() => { for (const record of records) this.put(record); })();
+  }
+
   rawRecord(profile: string, task: string, record: string, lastActivity: number): void {
     this.db.prepare('INSERT OR REPLACE INTO tasks(profile,task,last_activity,record,native) VALUES(?,?,?,?,1)')
       .run(profile, task, lastActivity, record);

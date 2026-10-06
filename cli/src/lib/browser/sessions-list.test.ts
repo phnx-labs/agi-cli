@@ -15,6 +15,7 @@ import {
   readBrowserTaskHistory,
   readNativeBrowserHistory,
   nativeBrowserHistoryPath,
+  BROWSER_HISTORY_LIMIT,
   type ProfileArtifacts,
   type BrowserArtifact,
   type TaskIdentity,
@@ -329,7 +330,7 @@ describe('native browser history (.history/browser/history.db)', () => {
     recordBrowserSession({ profile, task: 'both', sessionId: 'legacy-sess', actor: 'legacy-actor', startedAt: 2_000, capturesRemote: 'peer-a' });
     writer.put({ profile, task: 'both', sessionId: 'native-sess', machine: 'native-box', startedAt: 3_000, lastActivity: 9_000 });
 
-    const history = readBrowserTaskHistory(profile);
+    const history = readBrowserTaskHistory({ profile });
     expect(history.map((h) => h.task).sort()).toEqual(['both', 'legacy-only']);
     expect(history.find((h) => h.task === 'legacy-only')).toMatchObject({ sessionId: 'legacy-sess', actor: 'legacy-actor' });
     expect(history.find((h) => h.task === 'both')).toMatchObject({
@@ -373,7 +374,7 @@ describe('native browser history (.history/browser/history.db)', () => {
     writer.rawRecord(profile, 'corrupt', '{"profile":', 10);
     expect(() => readBrowserSessionRows(profile)).toThrow(/unreadable browser history record/);
     writer.rawRecord(profile, 'corrupt', JSON.stringify({ profile, task: 'corrupt', startedAt: 'yesterday' }), 10);
-    expect(() => readNativeBrowserHistory()).toThrow(/needs profile, task and finite timestamps/);
+    expect(() => readNativeBrowserHistory({ profile })).toThrow(/needs profile, task and finite timestamps/);
     writer.rawRecord(profile, 'corrupt', JSON.stringify({ profile, task: 'corrupt', startedAt: 1, lastActivity: 10 }), 10);
   });
 
@@ -382,7 +383,39 @@ describe('native browser history (.history/browser/history.db)', () => {
     cleanup.push(dir);
     const garbage = path.join(dir, 'history.db');
     fs.writeFileSync(garbage, 'this is not sqlite '.repeat(64));
-    expect(() => readNativeBrowserHistory(garbage)).toThrow();
-    expect(readNativeBrowserHistory(path.join(dir, 'absent.db'))).toEqual([]);
+    expect(() => readNativeBrowserHistory({}, garbage)).toThrow();
+    expect(readNativeBrowserHistory({}, path.join(dir, 'absent.db'))).toEqual([]);
+  });
+
+  it('keeps an old captured task\'s identity when another profile has more than the display cap of newer history', () => {
+    const key = `${profile}@dev-a`;
+    const runtime = getProfileRuntimeDir(key);
+    cleanup.push(runtime);
+    for (const task of ['preserved', 'legacy-kept']) {
+      fs.mkdirSync(path.join(runtime, 'sessions', task), { recursive: true });
+      fs.writeFileSync(path.join(runtime, 'sessions', task, 'shot.png'), 'png');
+    }
+    writer.put({ profile: key, task: 'preserved', sessionId: 'native-sess', actor: 'native-owner', startedAt: 10, lastActivity: 20 });
+    recordBrowserSession({ profile: key, task: 'preserved', sessionId: 'legacy-sess', actor: 'legacy-owner', startedAt: 9_000_000 });
+    recordBrowserSession({ profile: key, task: 'legacy-kept', sessionId: 'legacy-only-sess', actor: 'legacy-owner', startedAt: 30 });
+
+    const other = `other-${profile}`;
+    const newer = Array.from({ length: BROWSER_HISTORY_LIMIT + 5 }, (_, i) => ({
+      profile: other, task: `newer-${i}`, startedAt: 1_000_000 + i, lastActivity: 1_000_000 + i,
+    }));
+    writer.putMany(newer);
+    for (const record of newer) recordBrowserSession({ profile: other, task: record.task, startedAt: 10_000_000 + record.startedAt });
+
+    for (const rows of [readBrowserSessionRows(profile), readBrowserSessionRows()]) {
+      expect(rows.find((r) => r.profile === key && r.task === 'preserved')).toMatchObject({
+        sessionId: 'native-sess', owner: 'native-owner', linkStatus: 'unresolved', artifacts: [expect.objectContaining({ name: 'shot.png' })],
+      });
+      expect(rows.find((r) => r.profile === key && r.task === 'legacy-kept')).toMatchObject({
+        sessionId: 'legacy-only-sess', owner: 'legacy-owner', linkStatus: 'unresolved',
+      });
+    }
+    const scoped = readBrowserSessionRows(profile);
+    expect(scoped.every((r) => r.profile === key)).toBe(true);
+    expect(scoped.map((r) => r.task).sort()).toEqual(['legacy-kept', 'preserved']);
   });
 });

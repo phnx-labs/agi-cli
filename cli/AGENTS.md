@@ -263,6 +263,10 @@ Finished browser tasks come from the engine's native task history,
 `.history/browser/history.db` (`readNativeBrowserHistory` in
 [`browser/sessions-list.ts`](src/lib/browser/sessions-list.ts)), merged per
 profile and task with the legacy `browser_sessions` rows, with native fields winning.
+Which history-only tasks get a row is capped (`BROWSER_HISTORY_LIMIT`, newest
+first) after the profile scope is applied in SQL; a row's identity is always read
+per exact profile key with no cap, so another profile's newer history can never
+strip an older captured task of its session link.
 It is opened **read-only** so a read never checkpoints the engine's WAL, and the
 feed calls `readBrowserSessionRows`, which never prunes `sessions.db`. The watcher
 covers `.history/browser` and ignores `-shm` events: every reader of a WAL

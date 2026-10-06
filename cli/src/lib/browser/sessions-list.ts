@@ -4,7 +4,7 @@ import { formatBytes } from '../format.js';
 export { formatBytes };
 import * as path from 'path';
 
-import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs, profileOfCacheKey } from './paths.js';
+import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs, profileScopeSql } from './paths.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
@@ -202,32 +202,40 @@ function parseSummary(file: string, raw: string): BrowserTaskSummary {
   return summary;
 }
 
-export function readNativeBrowserHistory(file = nativeBrowserHistoryPath(), limit = BROWSER_HISTORY_LIMIT): BrowserTaskSummary[] {
+export interface BrowserHistoryQuery {
+  key?: string;
+  profile?: string;
+  limit?: number;
+}
+
+export function readNativeBrowserHistory(query: BrowserHistoryQuery = {}, file = nativeBrowserHistoryPath()): BrowserTaskSummary[] {
   if (!fs.existsSync(file)) return [];
+  const where = query.key ? { sql: 'profile = ?', params: [query.key] }
+    : query.profile ? profileScopeSql('profile', query.profile) : undefined;
   const db = new Database(file, { readOnly: true });
   try {
-    const rows = db.prepare('SELECT record FROM tasks ORDER BY last_activity DESC LIMIT ?').all(limit) as { record: string }[];
+    const rows = db.prepare(
+      `SELECT record FROM tasks${where ? ` WHERE ${where.sql}` : ''} ORDER BY last_activity DESC${query.limit === undefined ? '' : ' LIMIT ?'}`,
+    ).all(...(where?.params ?? []), ...(query.limit === undefined ? [] : [query.limit])) as { record: string }[];
     return rows.map((row) => parseSummary(file, row.record));
   } finally {
     db.close();
   }
 }
 
-function belongsToProfile(key: string, profile: string | undefined): boolean {
-  return !profile || key === profile || profileOfCacheKey(key) === profile;
-}
-
-export function readBrowserTaskHistory(profile?: string): BrowserTaskSummary[] {
+export function readBrowserTaskHistory(query: BrowserHistoryQuery = {}): BrowserTaskSummary[] {
   const merged = new Map<string, BrowserTaskSummary>();
-  const key = (s: { profile: string; task: string }) => `${s.profile}\0${s.task}`;
-  for (const legacy of listBrowserSessionRecords(undefined, { limit: BROWSER_HISTORY_LIMIT })) {
-    if (!belongsToProfile(legacy.profile, profile) || legacy.startedAt === undefined) continue;
-    merged.set(key(legacy), { ...legacy, startedAt: legacy.startedAt, lastActivity: legacy.lastActivity ?? legacy.startedAt });
+  const id = (s: { profile: string; task: string }) => `${s.profile}\0${s.task}`;
+  const legacyRows = query.key
+    ? listBrowserSessionRecords(query.key, { limit: query.limit })
+    : listBrowserSessionRecords(query.profile, { deviceKeys: true, limit: query.limit });
+  for (const legacy of legacyRows) {
+    if (legacy.startedAt === undefined) continue;
+    merged.set(id(legacy), { ...legacy, startedAt: legacy.startedAt, lastActivity: legacy.lastActivity ?? legacy.startedAt });
   }
-  for (const native of readNativeBrowserHistory()) {
-    if (!belongsToProfile(native.profile, profile)) continue;
-    const legacy = merged.get(key(native));
-    merged.set(key(native), legacy ? { ...legacy, ...native } : native);
+  for (const native of readNativeBrowserHistory(query)) {
+    const legacy = merged.get(id(native));
+    merged.set(id(native), legacy ? { ...legacy, ...native } : native);
   }
   return [...merged.values()];
 }
@@ -259,10 +267,9 @@ export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
   return out;
 }
 
-export function loadDurableTaskIdentities(profile: string, history = readBrowserTaskHistory(profile)): Map<string, TaskIdentity> {
+export function loadDurableTaskIdentities(profile: string): Map<string, TaskIdentity> {
   const merged = new Map<string, TaskIdentity>();
-  for (const record of history) {
-    if (record.profile !== profile) continue;
+  for (const record of readBrowserTaskHistory({ key: profile })) {
     const { actor, profile: _profile, task: _task, ...rest } = record;
     merged.set(record.task, { ...rest, owner: actor });
   }
@@ -332,6 +339,7 @@ export function groupIntoRows(
   taskIdentities: Map<string, Map<string, TaskIdentity>>,
   resolveLaunch?: (launchId: string) => SessionMeta | null,
   resolveSession?: (sessionId: string) => SessionMeta | null,
+  listed?: Map<string, Set<string>>,
 ): BrowserSessionRow[] {
   const rows: BrowserSessionRow[] = [];
   for (const g of groups) {
@@ -347,7 +355,7 @@ export function groupIntoRows(
       list.push(a);
       byTask.set(a.task, list);
     }
-    for (const task of identities.keys()) {
+    for (const task of listed?.get(g.profile) ?? []) {
       if (!byTask.has(task)) byTask.set(task, []);
     }
     for (const [task, artifacts] of byTask) {
@@ -395,27 +403,36 @@ export function groupIntoRows(
 
 export function readBrowserSessionRows(profile?: string): BrowserSessionRow[] {
   const groups = listBrowserSessions(profile);
-  const history = readBrowserTaskHistory(profile);
   const byProfile = new Map(groups.map((g) => [g.profile, g]));
-  for (const record of history) {
-    let group = byProfile.get(record.profile);
-    if (!group) {
-      group = { profile: record.profile, artifacts: listProfileArtifacts(record.profile) };
+  const listed = new Map<string, Set<string>>();
+  for (const record of readBrowserTaskHistory({ profile, limit: BROWSER_HISTORY_LIMIT })) {
+    if (!byProfile.has(record.profile)) {
+      const group = { profile: record.profile, artifacts: listProfileArtifacts(record.profile) };
       byProfile.set(record.profile, group);
       groups.push(group);
     }
-    if (record.captureDir && !record.capturesRemote) {
-      const known = new Set(group.artifacts.map((a) => a.path));
-      group.artifacts.push(...listTaskArtifacts(record.captureDir, record.task).filter((a) => !known.has(a.path)));
+    const tasks = listed.get(record.profile) ?? new Set<string>();
+    tasks.add(record.task);
+    listed.set(record.profile, tasks);
+  }
+  const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile)]));
+  for (const group of groups) {
+    const identities = taskIdentities.get(group.profile)!;
+    const known = new Set(group.artifacts.map((a) => a.path));
+    const tasks = new Set([...(listed.get(group.profile) ?? []), ...group.artifacts.flatMap((a) => a.task ? [a.task] : [])]);
+    for (const task of tasks) {
+      const identity = identities.get(task);
+      if (!identity?.captureDir || identity.capturesRemote) continue;
+      group.artifacts.push(...listTaskArtifacts(identity.captureDir, task).filter((a) => !known.has(a.path)));
     }
   }
-  const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile, history)]));
   const index = buildLaunchSessionIndex();
   return groupIntoRows(
     groups,
     taskIdentities,
     (launchId) => resolveLaunchSession(index, launchId),
     (sessionId) => getSessionById(sessionId),
+    listed,
   );
 }
 
