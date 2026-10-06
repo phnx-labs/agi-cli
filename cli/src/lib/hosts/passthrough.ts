@@ -422,6 +422,8 @@ export async function maybeRunOnHost(
 
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
+  if (command === 'daemon' && firstSubcommand(allArgs, 'daemon') === 'index') return false;
+
   if (command === 'teams') {
 
     const teamsIdx = allArgs.indexOf('teams');

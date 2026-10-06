@@ -9,7 +9,11 @@ interface OptimizeOpts {
 }
 
 export function registerSessionsOptimizeCommand(sessionsCmd: Command): void {
-  const cmd = sessionsCmd
+  registerOptimizeCommand(sessionsCmd, 'agents sessions optimize');
+}
+
+export function registerOptimizeCommand(parent: Command, invocation: string): void {
+  const cmd = parent
     .command('optimize')
     .description('Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing')
     .option('--json', 'Emit machine-readable JSON')
@@ -35,14 +39,14 @@ export function registerSessionsOptimizeCommand(sessionsCmd: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Compact the session/tool search index once it has grown fragmented
-      agents sessions optimize
+      ${invocation}
 
       # Machine-readable segment counts
-      agents sessions optimize --json
+      ${invocation} --json
 
       # Wire it to a weekly routine so the index never re-bloats
       agents routines add sessions-optimize --schedule "0 4 * * 0" --agent claude \\
-        --prompt "Run: agents sessions optimize"
+        --prompt "Run: ${invocation}"
     `,
     notes: `
       - FTS5 appends a segment on every insert and tombstones every delete; the scanner delete+inserts a session's docs on each rescan and never self-merges, so \`tool_call_text_data\` / \`session_text_data\` bloat with unmerged segments — GBs of index for tens of MB of content, and queries slow down.
