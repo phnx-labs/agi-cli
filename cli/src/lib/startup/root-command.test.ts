@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Command } from 'commander';
 import { normalizeResumeDeviceArgs } from './root-command.js';
 import { buildFullCommandTree } from '../../cli/command-registry.js';
+import { peerArgs } from '../../commands/sessions-backfill.js';
 
 function find(program: Command, ...path: string[]): Command {
   let cmd = program;
@@ -27,6 +28,21 @@ describe('RUSH-2687 — no global positional-options regression on the real comm
     expect(captured?.since).toBe('7d');
     expect(captured?.json).toBe(true);
     expect(captured?.local).toBe(true);
+  });
+});
+
+describe('PHNX-4227 — the backfill peer argv parses on the real command tree', () => {
+  it('every filter peerArgs forwards is an option of daemon index backfill tools', async () => {
+    const program = await buildFullCommandTree();
+    program.exitOverride();
+    const tools = find(program, 'daemon', 'index', 'backfill', 'tools');
+    let captured: Record<string, unknown> | undefined;
+    tools.action((_opts: unknown, command: Command) => { captured = command.optsWithGlobals(); });
+    const args = peerArgs({ agent: 'codex', project: 'cli', since: '7d', until: '1d', unmanaged: true, teams: true });
+    await program.parseAsync(['node', 'agents', ...args], { from: 'node' });
+    expect(captured).toMatchObject({
+      json: true, local: true, agent: 'codex', project: 'cli', since: '7d', until: '1d', unmanaged: true, teams: true,
+    });
   });
 });
 

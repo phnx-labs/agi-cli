@@ -122,7 +122,7 @@ function parseRemoteBackfill(
   }
 }
 
-function peerArgs(options: ToolBackfillOptions): string[] {
+export function peerArgs(options: ToolBackfillOptions): string[] {
   const args = ['daemon', 'index', 'backfill', 'tools', '--json', '--local'];
   if (options.agent) args.push('--agent', options.agent);
   if (options.project) args.push('--project', options.project);
