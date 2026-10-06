@@ -8,7 +8,6 @@ import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
 import { getVersionHomePath } from './installations/versions.js';
-import { getUserAgentsDir } from './state.js';
 import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from './secrets-client.js';
 import type { SecretsBundle } from './secrets-types.js';
 import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
@@ -259,11 +258,11 @@ describe('buildExecEnv — outbound feed runtime identity', () => {
 });
 
 describe('buildExecEnv — the agent shares the secrets store agents-cli reads for it', () => {
-  it('points a bare `secrets` inside the agent at the user agents dir, like buildServeEnv', () => {
+  it('leaves SECRETS_HOME unset so a bare `secrets` inside the agent uses the engine default, like buildServeEnv', () => {
     const prev = process.env.SECRETS_HOME;
     delete process.env.SECRETS_HOME;
     try {
-      expect(buildExecEnv(execOpts({ agent: 'claude' })).SECRETS_HOME).toBe(getUserAgentsDir());
+      expect('SECRETS_HOME' in buildExecEnv(execOpts({ agent: 'claude' }))).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.SECRETS_HOME; else process.env.SECRETS_HOME = prev;
     }
