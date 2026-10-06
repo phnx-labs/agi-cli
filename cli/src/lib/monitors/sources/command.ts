@@ -4,11 +4,8 @@ import type { MonitorSource } from '../config.js';
 import type { Observation } from './types.js';
 import { classifyPollFailure } from './failure.js';
 
-/** Hard cap on one command poll, the longest any poll source runs (http and device probes are shorter). */
 export const POLL_TIMEOUT_MS = 60_000;
 
-// execFileBounded kills the whole process group: execFile's timeout signalled only
-// the shell, so a timed-out `agents devices ps | grep` left its children running.
 export async function evaluate(source: MonitorSource, timeoutMs = POLL_TIMEOUT_MS): Promise<Observation | null> {
   const command = source.command;
   if (!command) return null;

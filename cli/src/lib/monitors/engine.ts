@@ -24,7 +24,6 @@ import { readRunMeta } from '../scheduling/routines.js';
 
 export const MONITOR_ENGINE_TICK_MS = 5_000;
 const DEFAULT_INTERVAL_MS = 60_000;
-// Slow polls overlap instead of queueing behind each other.
 const MAX_CONCURRENT_POLLS = 4;
 const DROUGHT_THRESHOLD = 5;
 export const POLL_SOURCE_TYPES = new Set(['command', 'poll', 'poll-http', 'file', 'device']);
