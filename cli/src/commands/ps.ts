@@ -168,8 +168,7 @@ export function registerSessionPreviewCommand(parent: Command, group: 'ps' | 'se
       - Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
       - Short IDs wait for every selected device so ambiguity is never hidden.
       - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.
-      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.
-      - Put -D after the verb: '${group} -D box preview <id>' reads 'preview' as a device.
+      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.${group === 'ps' ? "\n      - Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device." : ''}
     `,
   });
 

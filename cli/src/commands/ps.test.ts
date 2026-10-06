@@ -48,6 +48,43 @@ describeLive('agents ps — real CLI against a live process', () => {
     return { tempHome, cwd, liveId, crashedId, sleeper };
   }
 
+  it('ps preview renders the same card as sessions preview and sessions --preview', () => {
+    const { tempHome, cwd, liveId, sleeper } = fixture();
+    try {
+      const legacy = runAgents(['sessions', 'preview', liveId, '--local', '--json'], cwd, tempHome);
+      expect(legacy.status, legacy.stderr).toBe(0);
+      const card = JSON.parse(legacy.stdout);
+      expect(card).toMatchObject({ schemaVersion: 1, session: { id: liveId }, active: { pid: sleeper.pid } });
+      expect(card).not.toHaveProperty('cache');
+      for (const args of [
+        ['ps', 'preview', liveId, '--local', '--json'],
+        ['ps', '--json', '--local', 'preview', liveId],
+        ['ps', 'preview', liveId.slice(0, 8), '--local', '--json'],
+      ]) {
+        const ps = runAgents(args, cwd, tempHome);
+        expect(ps.status, `${args.join(' ')}: ${ps.stderr}`).toBe(0);
+        expect(JSON.parse(ps.stdout)).toEqual(card);
+      }
+
+      const textCard = (args: string[]) => runAgents(args, cwd, tempHome).stdout.replace(/\d+[smhd] ago/g, 'N ago');
+      const text = runAgents(['ps', 'preview', liveId, '--local'], cwd, tempHome);
+      expect(text.status, text.stderr).toBe(0);
+      expect(text.stdout).toContain('Refactor the roster');
+      expect(textCard(['ps', 'preview', liveId, '--local'])).toBe(textCard(['sessions', 'preview', liveId, '--local']));
+      expect(textCard(['ps', 'preview', liveId, '--local'])).toBe(textCard(['sessions', liveId, '--preview', '--local']));
+
+      const missing = 'feed9999-9999-4999-8999-999999999999';
+      const gone = runAgents(['ps', 'preview', missing, '--local', '--json'], cwd, tempHome);
+      const legacyGone = runAgents(['sessions', 'preview', missing, '--local', '--json'], cwd, tempHome);
+      expect(gone.status).toBe(1);
+      expect([gone.stdout, gone.stderr]).toEqual([legacyGone.stdout, legacyGone.stderr]);
+      expect(runAgents(['ps', 'preview', '--help'], cwd, tempHome).stdout).toContain('agents ps preview 407b8dd5');
+    } finally {
+      sleeper.kill('SIGTERM');
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    }
+  }, 180_000);
+
   it('lists the same live roster as sessions --active, and filters by --status', () => {
     const { tempHome, cwd, liveId, crashedId, sleeper } = fixture(11 * 60_000);
     try {
@@ -257,41 +294,6 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
       const help = runAgents(['ps', '--help'], cwd, tempHome);
       expect(help.stdout).toContain('--bookmarks');
       expect(help.stdout).toContain('--routine [name]');
-    } finally {
-      sleeper.kill('SIGTERM');
-      fs.rmSync(tempHome, { recursive: true, force: true });
-    }
-  }, 180_000);
-
-  it('ps preview renders the same card as sessions preview and sessions --preview', () => {
-    const { tempHome, cwd, liveId, sleeper } = fixture();
-    try {
-      const legacy = runAgents(['sessions', 'preview', liveId, '--local', '--json'], cwd, tempHome);
-      expect(legacy.status, legacy.stderr).toBe(0);
-      const card = JSON.parse(legacy.stdout);
-      expect(card).toMatchObject({ schemaVersion: 1, session: { id: liveId }, active: { pid: sleeper.pid } });
-      expect(card).not.toHaveProperty('cache');
-      for (const args of [
-        ['ps', 'preview', liveId, '--local', '--json'],
-        ['ps', '--json', '--local', 'preview', liveId],
-        ['ps', 'preview', liveId.slice(0, 8), '--local', '--json'],
-      ]) {
-        const ps = runAgents(args, cwd, tempHome);
-        expect(ps.status, `${args.join(' ')}: ${ps.stderr}`).toBe(0);
-        expect(JSON.parse(ps.stdout)).toEqual(card);
-      }
-
-      const text = runAgents(['ps', 'preview', liveId, '--local'], cwd, tempHome);
-      expect(text.status, text.stderr).toBe(0);
-      expect(text.stdout).toBe(runAgents(['sessions', 'preview', liveId, '--local'], cwd, tempHome).stdout);
-      expect(text.stdout).toBe(runAgents(['sessions', liveId, '--preview', '--local'], cwd, tempHome).stdout);
-
-      const missing = 'feed9999-9999-4999-8999-999999999999';
-      const gone = runAgents(['ps', 'preview', missing, '--local', '--json'], cwd, tempHome);
-      const legacyGone = runAgents(['sessions', 'preview', missing, '--local', '--json'], cwd, tempHome);
-      expect(gone.status).toBe(1);
-      expect([gone.stdout, gone.stderr]).toEqual([legacyGone.stdout, legacyGone.stderr]);
-      expect(runAgents(['ps', 'preview', '--help'], cwd, tempHome).stdout).toContain('agents ps preview 407b8dd5');
     } finally {
       sleeper.kill('SIGTERM');
       fs.rmSync(tempHome, { recursive: true, force: true });
