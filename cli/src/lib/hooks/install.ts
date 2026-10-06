@@ -101,11 +101,14 @@ export function toPortableCommand(
   return normalized;
 }
 
+const AGENTS_HOME_HOOK_RE = /\/\.agents\/\.history\/(?:versions\/[^/]+\/[^/]+\/home|accounts\/[^/]+\/[^/]+)\//;
+
 function isManagedHookCommand(command: string, prefixes: string[]): boolean {
   let expanded = command;
   if (command.startsWith('~/')) {
     expanded = path.join(os.homedir(), command.slice(2));
   }
+  if (AGENTS_HOME_HOOK_RE.test(expanded.split(path.sep).join('/'))) return true;
   const dir = path.dirname(expanded);
   let resolvedDir = dir;
   try { resolvedDir = fs.realpathSync(dir); } catch {  }
@@ -128,60 +131,30 @@ function versionHomeIdentity(commandOrPath: string): { agent: string; version: s
   return m ? { agent: m[1], version: m[2] } : null;
 }
 
-function isStaleSiblingVersionCommand(
-  command: string,
-  current: { agent: string; version: string } | null
-): boolean {
-  if (!current) return false;
-  const id = versionHomeIdentity(command);
-  return id !== null && id.agent === current.agent && id.version !== current.version;
+function hookEntryKey(event: string, matcher: string | undefined, command: string): string {
+  return `${event}\0${matcher ?? ''}\0${command}`;
 }
 
-function hookResourceName(command: string): string {
-  const withoutArgs = command.trim().split(/\s+/)[0];
-  return path.basename(withoutArgs).replace(/\.[^.]+$/, '');
-}
-
-export function deduplicateVersionHookCommands(
-  commands: string[],
-  activeVersionHome: string,
-): string[] {
-
-  const active = versionHomeIdentity(activeVersionHome);
-  if (!active) return [...commands];
-
-  const selected = new Map<string, { command: string; active: boolean }>();
-  const passthrough: string[] = [];
-  for (const command of commands) {
-    const identity = versionHomeIdentity(command);
-    if (!identity || identity.agent !== active.agent) {
-      passthrough.push(command);
-      continue;
+function pruneManagedHookEntries(
+  hooks: Record<string, Array<{ matcher?: string; hooks?: Array<{ command: string }> }>>,
+  expected: Set<string>,
+  managedPrefixes: string[],
+): void {
+  for (const [event, groups] of Object.entries(hooks)) {
+    if (!Array.isArray(groups)) continue;
+    for (const group of groups) {
+      if (!group.hooks) continue;
+      const seen = new Set<string>();
+      group.hooks = group.hooks.filter((h) => {
+        if (!isManagedHookCommand(h.command, managedPrefixes)) return true;
+        const key = hookEntryKey(event, group.matcher, h.command);
+        if (!expected.has(key) || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
     }
-    const key = `${identity.agent}\0${hookResourceName(command)}`;
-    const candidateIsActive = identity.version === active.version;
-    const prior = selected.get(key);
-    if (!prior || (!prior.active && candidateIsActive)) {
-      selected.set(key, { command, active: candidateIsActive });
-    }
+    hooks[event] = groups.filter((g) => g.hooks && g.hooks.length > 0);
   }
-  return [...passthrough, ...Array.from(selected.values(), ({ command }) => command)];
-}
-
-function collapseVersionHookEntries<T extends { command: string }>(
-  entries: T[],
-  activeVersionHome: string,
-): T[] {
-  const budget = new Map<string, number>();
-  for (const command of deduplicateVersionHookCommands(entries.map((e) => e.command), activeVersionHome)) {
-    budget.set(command, (budget.get(command) ?? 0) + 1);
-  }
-  return entries.filter((e) => {
-    const remaining = budget.get(e.command) ?? 0;
-    if (remaining <= 0) return false;
-    budget.set(e.command, remaining - 1);
-    return true;
-  });
 }
 
 import {
@@ -1803,37 +1776,14 @@ function registerHooksForClaude(
   }
   const hooks = config.hooks as Record<string, unknown[]>;
 
-  const currentManifestPaths = new Set<string>();
+  const expected = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
-    if (resolved) currentManifestPaths.add(resolved);
+    if (!resolved) continue;
+    for (const event of hookDef.events) expected.add(hookEntryKey(event, hookDef.matcher, resolved));
   }
-
-  const currentVh = versionHomeIdentity(versionHome);
-
-  for (const eventEntries of Object.values(hooks)) {
-    if (!Array.isArray(eventEntries)) continue;
-    for (const group of eventEntries as Array<{
-      matcher?: string;
-      hooks?: Array<{ type: string; command: string; timeout?: number }>;
-    }>) {
-      if (!group.hooks) continue;
-      const managed = group.hooks.filter(
-        (h) =>
-          (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
-          !isStaleSiblingVersionCommand(h.command, currentVh)
-      );
-      group.hooks = collapseVersionHookEntries(managed, versionHome);
-    }
-  }
-
-  for (const [event, eventEntries] of Object.entries(hooks)) {
-    if (!Array.isArray(eventEntries)) continue;
-    hooks[event] = (eventEntries as Array<{ hooks?: unknown[] }>).filter(
-      (g) => g.hooks && g.hooks.length > 0
-    );
-  }
+  pruneManagedHookEntries(hooks as Parameters<typeof pruneManagedHookEntries>[0], expected, managedPrefixes);
 
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
@@ -2030,29 +1980,17 @@ function registerHooksForCodex(
     }
   }
 
-  const currentManifestPaths = new Set<string>();
+  const expected = new Set<string>();
   for (const [hookName, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
     const resolved = resolveHookCommand(hookName, hookDef, resolveScript);
-    if (resolved) currentManifestPaths.add(resolved);
-  }
-
-  const currentVh = versionHomeIdentity(versionHome);
-
-  for (const eventGroups of Object.values(hooksFile.hooks)) {
-    for (const group of eventGroups) {
-      if (!group.hooks) continue;
-      const managed = group.hooks.filter(
-        (h) =>
-          (!isManagedHookCommand(h.command, managedPrefixes) || currentManifestPaths.has(h.command)) &&
-          !isStaleSiblingVersionCommand(h.command, currentVh)
-      );
-      group.hooks = collapseVersionHookEntries(managed, versionHome);
+    if (!resolved) continue;
+    for (const event of hookDef.events) {
+      const matcher = CODEX_MATCHER_EVENTS.has(event) ? hookDef.matcher : undefined;
+      expected.add(hookEntryKey(event, matcher, resolved));
     }
   }
-  for (const [event, eventGroups] of Object.entries(hooksFile.hooks)) {
-    hooksFile.hooks[event] = eventGroups.filter((g) => g.hooks && g.hooks.length > 0);
-  }
+  pruneManagedHookEntries(hooksFile.hooks, expected, managedPrefixes);
 
   for (const [name, hookDef] of Object.entries(manifest)) {
     if (!hookDef.events || hookDef.events.length === 0) continue;
