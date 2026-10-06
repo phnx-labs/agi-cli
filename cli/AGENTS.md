@@ -294,7 +294,9 @@ Two rules are not negotiable in a consumer or a future change:
   file. `closeCommand`/`showCommand` carry `runOn` for the same reason — a later
   browser verb resolves the device from the local binding and REJECTS `--device`,
   so acting on a peer's task means running the plain argv on the host that holds
-  the binding.
+  the binding. Both commands target the standalone `browser` CLI
+  (`command: "browser"`, argv without a `browser` group word); AGI Menu 1.14.6,
+  the menubar floor, is the first build that runs either `agents` or `browser`.
 
 ### Session request + timeline on every row (PHNX-3939)
 

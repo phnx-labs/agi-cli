@@ -551,7 +551,7 @@ it('tool rows: a computer run is history, never a live session with a stop contr
 
   const bound = projectBrowserToolRow('dev-a', browserTaskRow('task-live'), { name: 'task-live', url: 'https://example.test', device: 'dev-a' });
   expect(bound.live).toBe(true);
-  expect(bound.closeCommand).toEqual({ command: 'agents', args: ['browser', 'done', '--task', 'task-live'], runOn: 'dev-a' });
+  expect(bound.closeCommand).toEqual({ command: 'browser', args: ['done', '--task', 'task-live'], runOn: 'dev-a' });
   const unbound = projectBrowserToolRow('dev-a', browserTaskRow('task-gone'), undefined);
   expect(unbound.live).toBe(false);
   expect('closeCommand' in unbound).toBe(false);

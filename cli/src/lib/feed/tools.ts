@@ -15,7 +15,7 @@
  *
  * WHAT IS DELIBERATELY DIFFERENT BETWEEN THE TWO KINDS. A browser task is a
  * LIVE resource: it is bound in the task index while it exists, it can be
- * driven, and it can be closed (`agents browser done --task <name>`). A
+ * driven, and it can be closed (`browser done --task <name>`). A
  * computer run is a LEDGER ENTRY: the actions already happened, the CLI process
  * that performed them has exited, and there is nothing to stop. So
  * {@link ComputerToolRow} pins `live: false` and carries no close/stop command
@@ -59,7 +59,7 @@ export interface ToolTab {
 }
 
 export interface ToolCommand {
-  command: 'agents';
+  command: 'browser';
   args: string[];
   runOn: string;
 }
@@ -212,8 +212,8 @@ export function projectBrowserToolRow(
     ...(row.capturesRemote ? { capturesRemote: row.capturesRemote } : {}),
     ...(url ? { url } : {}),
     ...(tabs ? { tabs } : {}),
-    ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'tab', 'focus', showTab, '--task', row.task!], runOn: host } } : {}),
-    ...(isLive ? { closeCommand: { command: 'agents' as const, args: ['browser', 'done', '--task', row.task!], runOn: host } } : {}),
+    ...(isLive && showTab ? { showCommand: { command: 'browser' as const, args: ['tab', 'focus', showTab, '--task', row.task!], runOn: host } } : {}),
+    ...(isLive ? { closeCommand: { command: 'browser' as const, args: ['done', '--task', row.task!], runOn: host } } : {}),
   };
 }
 
