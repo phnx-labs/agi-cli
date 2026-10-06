@@ -17,7 +17,7 @@ import {
   remotePoolArgs,
   type BrowserFilter,
 } from './sessions-browser.js';
-import { liveHostLabel } from './sessions.js';
+import { liveHostLabel } from '../lib/session/presentation.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { ActiveSession } from '../lib/session/active.js';
 

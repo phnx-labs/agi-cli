@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { buildResumeCommand, resumeSpawnInvocation, fleetNotFoundMessage, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
+import { fleetNotFoundMessage, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
 import { resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, resolveSessionAgentName, parseInstalledAgentVersionQuery } from '../lib/session/selection.js';
-import { buildSessionDescription } from './ps-roster.js';
+import { buildSessionDescription } from '../lib/session/presentation.js';
+import { buildResumeCommand, resumeSpawnInvocation } from '../lib/session/resume-command.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';

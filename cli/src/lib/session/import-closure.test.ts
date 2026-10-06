@@ -5,7 +5,7 @@ import * as path from 'path';
 const srcRoot = path.resolve(import.meta.dirname, '..', '..');
 const commandsDir = path.join(srcRoot, 'commands') + path.sep;
 const sessionsCommand = path.join(srcRoot, 'commands', 'sessions.ts');
-const extracted = ['presentation', 'selection'].map((name) => path.join(srcRoot, 'lib', 'session', `${name}.ts`));
+const extracted = ['presentation', 'selection', 'resume-command'].map((name) => path.join(srcRoot, 'lib', 'session', `${name}.ts`));
 
 function runtimeImports(file: string): { dep: string; dynamic: boolean }[] {
   const text = fs.readFileSync(file, 'utf-8').replace(/^import type [^;]+;/gm, '');
@@ -78,17 +78,22 @@ describe.each(extracted)('runtime import closure of %s', (root) => {
   });
 });
 
-describe('commands/sessions.ts no longer serves extracted selectors', async () => {
-  const selectionExports = Object.keys(await import('./selection.js'));
+describe('commands/sessions.ts no longer serves extracted selectors, rows, picker or resume helpers', async () => {
+  const movedExports = [
+    ...Object.keys(await import('./selection.js')),
+    ...Object.keys(await import('./resume-command.js')),
+    ...Object.keys(await import('./presentation.js')),
+    ...Object.keys(await import('../../commands/sessions-picker.js')),
+  ];
 
-  it('does not re-export the selection library', () => {
-    expect(fs.readFileSync(sessionsCommand, 'utf-8')).not.toMatch(/export\s+(\*|\{[^}]*\})\s+from\s+'\.\.\/lib\/session\/selection\.js'/);
+  it('does not re-export the selection, resume-command or picker modules', () => {
+    expect(fs.readFileSync(sessionsCommand, 'utf-8')).not.toMatch(/export\s+(\*|\{[^}]*\})\s+from\s+'(\.\.\/lib\/session\/(selection|resume-command)|\.\/sessions-picker)\.js'/);
   });
 
-  it('no source or test imports a selection export from commands/sessions', () => {
+  it('no source or test imports a moved export from commands/sessions', () => {
     const offenders = sourceFiles(srcRoot).flatMap((file) =>
       namesImportedFrom(file, sessionsCommand)
-        .filter((name) => selectionExports.includes(name))
+        .filter((name) => movedExports.includes(name))
         .map((name) => `${path.relative(srcRoot, file)}: ${name}`));
     expect(offenders).toEqual([]);
   });

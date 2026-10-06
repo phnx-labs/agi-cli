@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { pickerColumnsFor } from '../sessions.js';
+import { pickerColumnsFor } from '../../lib/session/presentation.js';
 import { mergeLocalFirst } from '../../lib/session/selection.js';
 import { groupSessionsByMachine, dedupeByMachineSession } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';

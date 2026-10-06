@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight, humanDuration, formatBytes } from '../lib/format.js';
@@ -10,11 +10,10 @@ import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
 import { interruptibleSpinner } from '../lib/spinner.js';
-import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionEvent, SessionMeta, ViewMode } from '@phnx-labs/sessions-cli/reader';
 import { SESSION_AGENTS, sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '@phnx-labs/sessions-cli/reader';
-import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
+import { looksLikePath, toComparablePath } from '../lib/platform/index.js';
 import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
@@ -43,50 +42,49 @@ import {
   type TeamSessionGroup,
 } from '@phnx-labs/sessions-cli/reader';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
-import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
-import { linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
-import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
-import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
-import { AGENTS, colorAgent } from '../lib/agents.js';
-import { getShimsDir } from '../lib/state.js';
+import { formatRelativeTime, formatCompactAge, sessionAgeParts } from '../lib/session/relative-time.js';
+import { shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
+import { colorAgent } from '../lib/agents.js';
 import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/scheduling/routines.js';
 import { formatUsd } from '../lib/pricing/cost.js';
 import { itemPicker } from '../lib/picker.js';
-import { getAgentsInvocation } from '../lib/daemon/daemon.js';
-import { sessionAgentSupportsResume, sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import {
-  sessionPicker,
   buildPreview,
   loadSessionPreviewDigest,
   transcriptOnPeerOf,
-  formatTodoCompact,
   githubRepoUrlFromCwd,
-  type PickedSession,
+  handlePickedSession,
+  pickSessionInteractive,
   type SessionPreviewDigest,
 } from './sessions-picker.js';
 import { setHelpSections } from '../lib/help.js';
 import {
-  cleanPreview,
   gatherActiveSessions,
   indexActiveBySessionId,
-  isAwaitingUser,
-  liveGlyphAndPreview,
-  liveStatusWord,
   requestedLiveStatuses,
   resolveRoutineName,
   runLiveRoster,
-  statusColor,
 } from './ps-roster.js';
 import {
   buildFilterOptions,
+  cleanPreview,
+  formatLiveStatusHeadline,
+  formatTeamHiddenFooter,
+  formatTodoCompact,
   hasAnyFilter,
+  liveGlyphAndPreview,
+  liveStatusCell,
   metaSignals,
+  printSessionTable,
   renderSession,
   resolveViewMode,
   signalBadges,
+  timeCell,
+  treeSessionRow,
   type TranscriptRenderOptions,
 } from '../lib/session/presentation.js';
+import { buildResumeCommand } from '../lib/session/resume-command.js';
 export {
   buildFilterOptions,
   renderSession,
@@ -101,6 +99,7 @@ import {
   filterSessionsByQuery,
   fleetCandidatesByQuery,
   isDefinitiveMatch,
+  matchesTeam,
   mergeLocalFirst,
   metadataResolveOutcome,
   parseAgentFilter,
@@ -110,7 +109,6 @@ import {
   scopedContentIndex,
   selectorAllowsEarlyExit,
   serializeResolvedSessionsJson,
-  ticketLabel,
   type FleetResolveDeps,
   type FleetSessionCandidate,
   type LiveMetadataDeps,
@@ -362,46 +360,10 @@ function contextColor(context: ActiveSession['context']): (s: string) => string 
   }
 }
 
-function shortCwd(cwd?: string): string {
-  if (!cwd) return '-';
-  const home = homeDir();
-  return toComparablePath(cwd).startsWith(toComparablePath(home))
-    ? '~' + cwd.slice(home.length)
-    : cwd;
-}
-
 function formatStartedAt(startedAtMs?: number): string {
   if (!startedAtMs) return '-';
   return formatRelativeTime(new Date(startedAtMs).toISOString());
 }
-
-const LIVE_STATUS_W = 8;
-
-function liveStatusCell(live: ActiveSession | undefined): { cell: string; width: number } {
-  const word = liveStatusWord(live);
-  if (!word || !live) return { cell: '', width: 0 };
-  return { cell: statusColor(live.status)(padToWidth(word, LIVE_STATUS_W)), width: LIVE_STATUS_W };
-}
-
-
-function ticketUrl(s: Pick<SessionMeta, 'ticketId' | 'prNumber' | 'prUrl'>): string | undefined {
-  if (s.ticketId) return linearIssueUrl(s.ticketId);
-  return s.prNumber ? s.prUrl : undefined;
-}
-
-export function linkTicketCell(s: Pick<SessionMeta, 'ticketId' | 'prNumber' | 'prUrl'>, label: string): string {
-  const url = ticketUrl(s);
-  return url && label.trim() !== '-' ? linkUrl(url, label) : label;
-}
-
-export function linkCwdCell(s: Pick<SessionMeta, 'cwd' | '_remote'>, label: string): string {
-  return s.cwd && !s._remote ? linkPath(s.cwd, label) : label;
-}
-
-function modelLabel(model?: string): string {
-  return model ? shortenModel(model) : '-';
-}
-
 
 interface SessionPickerJsonRow extends SessionMeta {
   state: ActiveSession['status'] | 'inactive';
@@ -1047,24 +1009,6 @@ export async function renderSessionPreview(
   console.log(buildPreview(session));
 }
 
-export function formatLiveStatusHeadline(live: ActiveSession | undefined, bookmarked = false): string {
-  const star = bookmarked ? chalk.yellow('★ ') : '';
-  if (!live) return bookmarked ? chalk.yellow('★ bookmarked') : '';
-  const { glyph } = liveGlyphAndPreview(live);
-  const word = liveStatusWord(live) || live.status;
-  const needsYou = isAwaitingUser(live);
-  const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
-  let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
-  if (live.status === 'crashed') {
-    suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
-  } else if (live.status === 'orphaned') {
-    suffix = needsYou
-      ? chalk.yellow(`  ← waiting on you${reason}, and no client is attached to answer it`)
-      : chalk.yellow('  ← still running, but no client is attached — nothing is showing it');
-  }
-  return `${star}${glyph} ${statusColor(live.status)(word)}${suffix}`;
-}
-
 async function sessionsAction(
   query: string | undefined,
   options: SessionsOptions,
@@ -1484,148 +1428,6 @@ async function sessionsAction(
   }
 }
 
-function teamTag(session: SessionMeta): string {
-  const origin = session.teamOrigin;
-  if (!origin) return '';
-  const handle = safeTeamText(origin.handle);
-  const team = safeTeamText(origin.team);
-  if (team) return `[${team}${handle ? `/${handle}` : ''}] `;
-  return handle ? `[${handle}] ` : '[team] ';
-}
-
-export function matchesTeam(session: SessionMeta, team: string): boolean {
-  const want = safeTeamText(team)?.trim().toLowerCase();
-  if (!want) return true;
-  return (
-    safeTeamText(session.spawnedTeam)?.toLowerCase() === want ||
-    safeTeamText(session.teamOrigin?.team)?.toLowerCase() === want
-  );
-}
-
-const TEAM_BADGE_MAX = 10;
-
-export function teamBadge(session: SessionMeta): { plain: string; width: number } {
-  const team = safeTeamText(session.spawnedTeam);
-  if (!team) return { plain: '', width: 0 };
-  const plain = `team:${truncate(team, TEAM_BADGE_MAX)} `;
-  return { plain, width: stringWidth(plain) };
-}
-
-function originTag(session: SessionMeta): string {
-  if (session.origin !== 'routine') return '';
-  return `[routine${session.routineName ? ` · ${session.routineName}` : ''}] `;
-}
-
-const MIN_TOPIC_W = 16;
-
-function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; text: string; extraW: number } {
-  const lastOnly = { plain: age.last, text: chalk.gray(age.last), extraW: 0 };
-  if (!age.created) return lastOnly;
-  const prefix = `${age.created} → `;
-  const extraW = stringWidth(prefix);
-  if (topicSlack - extraW < MIN_TOPIC_W) return lastOnly;
-  return { plain: prefix + age.last, text: chalk.dim(prefix) + chalk.gray(age.last), extraW };
-}
-
-export function flatSessionRow(
-  session: SessionMeta,
-  live?: ActiveSession,
-  showTicket = false,
-  cols: PickerColumns = {},
-  bookmarked = false,
-): string {
-  const shown = sessionDisplayAgent(session);
-  const agentColor = colorAgent(shown);
-  const age = sessionAgeParts(session.timestamp, session.lastActivity);
-  const project = session.project || '-';
-  const tag = originTag(session) || teamTag(session);
-  const label = (session as any).label;
-  const { glyph, preview } = liveGlyphAndPreview(live);
-  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
-  const topicBase = tag ? `${tag}${session.topic ?? ''}` : session.topic;
-  const doing = [restingTodo, preview || topicBase].filter(Boolean).join(' · ') || undefined;
-  const wt = session.worktreeSlug ? chalk.magenta(`wt:${session.worktreeSlug}`) : '';
-  const team = teamBadge(session);
-  const teamSeg = team.plain ? chalk.green(team.plain) : '';
-
-  const machineColW = cols.machineWidth ?? PICKER_MACHINE_W;
-  const machineCell = cols.showMachine
-    ? chalk.gray(padToWidth(truncateToWidth((cols.machineLabel?.(session.machine ?? '') ?? session.machine ?? '') || '-', machineColW - 1), machineColW))
-    : '';
-
-  const TICKET_W = 10;
-  const ticketCell = showTicket
-    ? chalk.blue(linkTicketCell(session, padToWidth(truncateToWidth(ticketLabel(session) || '-', TICKET_W), TICKET_W + 1)))
-    : '';
-  const { cell: statusCell, width: statusW } = liveStatusCell(live);
-  const glyphW = glyph ? 2 : 0;
-  const machineW = cols.showMachine ? machineColW : 0;
-  const ticketW = showTicket ? TICKET_W + 1 : 0;
-  const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const width = terminalWidth();
-  const requestedModelW = cols.showModel ? (cols.modelWidth ?? PICKER_MODEL_MAX) : 0;
-  const bookmarkW = cols.showBookmark ? 2 : 0;
-  const bookmarkCell = cols.showBookmark ? (bookmarked ? chalk.yellow('★ ') : '  ') : '';
-  const fixedW = bookmarkW + (10 + 9 + 8 + 16) + glyphW + statusW + machineW + ticketW + wtW + team.width + stringWidth(age.last) + 1;
-  const modelSlack = width - fixedW - MIN_TOPIC_W;
-  const modelW = requestedModelW <= modelSlack
-    ? requestedModelW
-    : modelSlack >= PICKER_MODEL_MIN ? modelSlack : 0;
-  const when = timeCell(age, width - fixedW - modelW);
-  const topicW = Math.max(MIN_TOPIC_W, width - fixedW - modelW - when.extraW);
-
-  return (
-    bookmarkCell +
-    chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
-    agentColor(padToWidth(truncateToWidth(shown, 8), 9)) +
-    chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
-    (modelW ? chalk.yellow(padToWidth(truncateToWidth(modelLabel(session.model), modelW - 1), modelW)) : '') +
-    machineCell +
-    chalk.cyan(linkCwdCell(session, padToWidth(truncateToWidth(project, 14), 16))) +
-    (glyph ? glyph + ' ' : '') +
-    statusCell +
-    teamSeg +
-    renderTopicCell(label, doing, '', topicW, topicW) +
-    ticketCell +
-    (wt ? wt + ' ' : '') +
-    when.text
-  );
-}
-
-function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
-  const shown = sessionDisplayAgent(session);
-  const agentColor = colorAgent(shown);
-  const age = sessionAgeParts(session.timestamp, session.lastActivity);
-  const tag = originTag(session) || teamTag(session);
-  const label = (session as any).label;
-  const { glyph, preview } = liveGlyphAndPreview(live);
-  const restingTodo = !live ? formatTodoCompact(session.todos) : '';
-  const topicBase = preview || (tag ? `${tag}${session.topic ?? ''}` : session.topic);
-  const topic = [restingTodo, topicBase].filter(Boolean).join(' · ') || '-';
-  const badges = signalBadges(metaSignals(session));
-  const badgeW = badges ? stringWidth(badges) + 1 : 0;
-  const team = teamBadge(session);
-  const teamSeg = team.plain ? chalk.green(team.plain) : '';
-  const head = label ? `${label} · ${topic}` : topic;
-  const { cell: statusCell, width: statusW } = liveStatusCell(live);
-  const glyphW = glyph ? 2 : 0;
-  const baseTopicW = terminalWidth() - (2 + 9 + 8) - glyphW - statusW - badgeW - team.width - stringWidth(age.last) - 1;
-  const when = timeCell(age, baseTopicW);
-  const topicW = Math.max(12, baseTopicW - when.extraW);
-
-  return (
-    '  ' +
-    chalk.dim(padToWidth(session.shortId, 9)) +
-    agentColor(padToWidth(truncateToWidth(shown, 7), 8)) +
-    (badges ? badges + ' ' : '') +
-    (glyph ? glyph + ' ' : '') +
-    statusCell +
-    teamSeg +
-    padToWidth(chalk.white(truncateToWidth(head, topicW)), topicW) +
-    ' ' + when.text
-  );
-}
-
 export async function maybeLiveIndex(options: SessionsOptions): Promise<Map<string, ActiveSession> | undefined> {
   if (options.live === false || options.json) return undefined;
   try {
@@ -1704,47 +1506,6 @@ function printSessionOverview(
   console.log(parts.join(chalk.gray('  ·  ')));
   if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
-}
-
-export function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
-  if (tree) {
-    const byDir = new Map<string, SessionMeta[]>();
-    for (const s of sessions) {
-      const key = s.cwd || s.project || 'unknown';
-      (byDir.get(key) ?? byDir.set(key, []).get(key)!).push(s);
-    }
-    const keys = [...byDir.keys()].sort((a, b) => {
-      const d = byDir.get(b)!.length - byDir.get(a)!.length;
-      return d !== 0 ? d : a.localeCompare(b);
-    });
-    let first = true;
-    for (const key of keys) {
-      if (!first) console.log();
-      first = false;
-      const group = byDir.get(key)!;
-      const cwd = group.find((s) => s.cwd && !s._remote)?.cwd;
-      const header = cwd ? linkPath(cwd, shortCwd(key)) : shortCwd(key);
-      console.log(`${chalk.cyan.bold(header)} ${chalk.gray(`(${group.length})`)}`);
-      for (const s of group) console.log(treeSessionRow(s, liveIndex?.get(s.id)));
-    }
-    const dirWord = keys.length === 1 ? 'directory' : 'directories';
-    console.log(chalk.gray(`\n${sessions.length} session${sessions.length === 1 ? '' : 's'} across ${keys.length} ${dirWord}.`));
-    if (hiddenCount > 0) console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
-    return;
-  }
-
-  const showTicket = sessions.some((s) => ticketLabel(s) !== '');
-  const cols = pickerColumnsFor(sessions);
-  const bookmarks = listBookmarks();
-  for (const session of sessions) {
-    console.log(flatSessionRow(session, liveIndex?.get(session.id), showTicket, cols, bookmarks.has(session.id)));
-  }
-
-  const countLine = `${sessions.length} session${sessions.length === 1 ? '' : 's'}.`;
-  console.log(chalk.gray(`\n${countLine}`));
-  if (hiddenCount > 0) {
-    console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
-  }
 }
 
 const TEAM_MODE_W = 5;
@@ -1843,395 +1604,6 @@ function printTeamsView(
   console.log(chalk.gray('newest-active team first · resume any row with `agents sessions resume <id>`'));
   if (hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
 }
-
-function renderTopicCell(
-  label: string | undefined | null,
-  topic: string | undefined | null,
-  query: string,
-  visibleWidth: number,
-  paddedWidth: number,
-): string {
-  const lbl = (label ?? '').trim();
-  const tpc = (topic ?? '').trim();
-  const sep = ' · ';
-  const raw = lbl && tpc ? `${lbl}${sep}${tpc}` : (lbl || tpc);
-  const visible = truncateToWidth(raw, visibleWidth);
-  const padding = ' '.repeat(Math.max(0, paddedWidth - stringWidth(visible)));
-  const labelEnd = lbl ? Math.min(lbl.length, visible.length) : 0;
-
-  let matchStart = -1, matchEnd = -1;
-  const q = query.trim().toLowerCase();
-  if (q) {
-    const lower = visible.toLowerCase();
-    for (const term of q.split(/\s+/).filter(Boolean)) {
-      const idx = lower.indexOf(term);
-      if (idx !== -1) { matchStart = idx; matchEnd = idx + term.length; break; }
-    }
-  }
-
-  const cuts = new Set<number>([0, labelEnd, visible.length]);
-  if (matchStart >= 0) { cuts.add(matchStart); cuts.add(matchEnd); }
-  const boundaries = [...cuts].sort((a, b) => a - b);
-
-  let out = '';
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    const s = boundaries[i], e = boundaries[i + 1];
-    if (s >= e) continue;
-    const text = visible.slice(s, e);
-    const isLabel = s < labelEnd;
-    const isMatch = matchStart >= 0 && s >= matchStart && e <= matchEnd;
-    out += (isMatch || isLabel) ? chalk.bold.white(text) : chalk.white(text);
-  }
-  return out + padding;
-}
-
-export interface SshOriginTag {
-  device?: string;
-}
-
-export interface PickerColumns {
-  showMachine?: boolean;
-  machineLabel?: (m: string) => string;
-  machineWidth?: number;
-  showModel?: boolean;
-  modelWidth?: number;
-  showTicket?: boolean;
-  showHost?: boolean;
-  showBookmark?: boolean;
-  showStatus?: boolean;
-  gutter?: number;
-}
-
-const PICKER_MACHINE_W = 11;
-const PICKER_MACHINE_MIN = 8;
-const PICKER_MACHINE_MAX = 18;
-const PICKER_MODEL_MIN = 6;
-const PICKER_MODEL_MAX = 13;
-
-function machineColumnWidth(machines: string[], label: (m: string) => string): number {
-  const widest = machines.reduce((w, m) => Math.max(w, stringWidth(label(m))), 0);
-  return Math.min(PICKER_MACHINE_MAX, Math.max(PICKER_MACHINE_MIN, widest + 1));
-}
-
-function modelColumnWidth(sessions: SessionMeta[]): number {
-  const widest = sessions.reduce((width, session) => (
-    Math.max(width, session.model ? stringWidth(modelLabel(session.model)) : 0)
-  ), 0);
-  return Math.min(PICKER_MODEL_MAX, Math.max(PICKER_MODEL_MIN, widest + 1));
-}
-
-export function machineLabeler(machines: string[]): (m: string) => string {
-  const uniq = [...new Set(machines.filter(Boolean))];
-  if (uniq.length < 2) return (m) => m;
-  const parts = uniq.map((m) => m.split('-'));
-  const min = Math.min(...parts.map((p) => p.length));
-  let shared = 0;
-  while (shared < min - 1 && parts.every((p) => p[shared] === parts[0][shared])) shared++;
-  if (shared === 0) return (m) => m;
-  return (m) => {
-    const p = m.split('-');
-    return p.length > shared ? p.slice(shared).join('-') : m;
-  };
-}
-
-export function pickerColumnsFor(sessions: SessionMeta[]): PickerColumns {
-  const machines = sessions.map((s) => s.machine).filter((m): m is string => !!m);
-  const distinct = [...new Set(machines)];
-  const machineLabel = machineLabeler(machines);
-  return {
-    showMachine: distinct.length > 1,
-    machineLabel,
-    machineWidth: machineColumnWidth(distinct, machineLabel),
-    showModel: sessions.some((s) => !!s.model),
-    modelWidth: modelColumnWidth(sessions),
-    showTicket: sessions.some((s) => ticketLabel(s) !== ''),
-    showBookmark: (() => {
-      const bookmarks = listBookmarks();
-      return bookmarks.size > 0 && sessions.some((s) => bookmarks.has(s.id));
-    })(),
-  };
-}
-
-const PICKER_HOST_W = 14;
-
-export function liveHostLabel(a: ActiveSession | undefined): string {
-  if (!a?.host) return '';
-  const viewer = a.viewingIn?.app;
-  return viewer && viewer !== a.host ? `${a.host}→${viewer}` : a.host;
-}
-
-export function formatPickerLabel(
-  s: SessionMeta,
-  query: string,
-  cols: PickerColumns = {},
-  ssh?: SshOriginTag,
-  host = '',
-  bookmarked = false,
-  live?: ActiveSession,
-): string {
-  const shown = sessionDisplayAgent(s);
-  const agentColor = colorAgent(shown);
-  const age = sessionAgeParts(s.timestamp, s.lastActivity);
-  const project = s.project || '-';
-  const sshPlain = ssh ? (ssh.device ? `ssh←${ssh.device} ` : 'ssh ') : '';
-  const sshSeg = sshPlain ? chalk.red(sshPlain) : '';
-  const sshW = sshPlain ? stringWidth(sshPlain) : 0;
-  const team = teamBadge(s);
-  const teamSeg = team.plain ? chalk.green(team.plain) : '';
-  const tag = originTag(s) || teamTag(s);
-  const label = (s as any).label;
-  const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
-  const versionStr = s.version || '-';
-  const wt = s.worktreeSlug ? chalk.magenta(`wt:${s.worktreeSlug}`) : '';
-
-  const machineW = cols.machineWidth ?? PICKER_MACHINE_W;
-  const machineCell = cols.showMachine
-    ? chalk.gray(padRight(truncate((cols.machineLabel?.(s.machine ?? '') ?? s.machine ?? '') || '-', machineW - 1), machineW))
-    : '';
-
-  const TICKET_W = 10;
-  const ticketCell = cols.showTicket
-    ? chalk.blue(padRight(truncate(ticketLabel(s) || '-', TICKET_W), TICKET_W + 1))
-    : '';
-
-  const hostCell = cols.showHost
-    ? chalk.gray(padRight(truncate(host || '-', PICKER_HOST_W - 1), PICKER_HOST_W))
-    : '';
-
-  const gutter = cols.gutter ?? 2;
-  const machineColW = cols.showMachine ? machineW : 0;
-  const ticketW = cols.showTicket ? TICKET_W + 1 : 0;
-  const hostW = cols.showHost ? PICKER_HOST_W : 0;
-  const wtW = wt ? stringWidth(wt) + 1 : 0;
-  const bookmarkW = cols.showBookmark ? 2 : 0;
-  const bookmarkCell = cols.showBookmark ? (bookmarked ? chalk.yellow('★ ') : '  ') : '';
-  const status = cols.showStatus ? liveStatusCell(live) : { cell: '', width: 0 };
-  const statusW = cols.showStatus ? LIVE_STATUS_W : 0;
-  const statusCell = cols.showStatus ? (status.cell || ' '.repeat(LIVE_STATUS_W)) : '';
-  const baseTopicW =
-    terminalWidth() - gutter - bookmarkW - statusW - (10 + 9 + 8 + 16) - machineColW - hostW - ticketW - wtW - sshW - team.width - stringWidth(age.last) - 1;
-  const when = timeCell(age, baseTopicW);
-  const topicW = Math.max(MIN_TOPIC_W, baseTopicW - when.extraW);
-
-  return (
-    bookmarkCell +
-    chalk.white(padRight(truncate(s.shortId, 9), 10)) +
-    agentColor(padRight(truncate(shown, 8), 9)) +
-    chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
-    machineCell +
-    hostCell +
-    chalk.cyan(padRight(truncate(project, 14), 16)) +
-    statusCell +
-    sshSeg +
-    teamSeg +
-    renderTopicCell(label, topic, query, topicW, topicW) +
-    ticketCell +
-    (wt ? wt + ' ' : '') +
-    when.text
-  );
-}
-
-const PICKER_TIPS: string[] = [
-  'Tip: narrow with -a/--agent (e.g. -a codex), or --project <name> for another folder.',
-  "Tip: --all searches every directory; -D/--device <machine> folds in another box's sessions.",
-  'Tip: just type to fuzzy-search prompts and responses; press space to preview a session.',
-  'Tip: --since 2d / --until <date> bound the time window; pass a session id to open it directly.',
-];
-
-export function formatPickerTip(sessions: SessionMeta[]): string {
-  return chalk.gray(PICKER_TIPS[sessions.length % PICKER_TIPS.length]);
-}
-
-export async function pickSessionInteractive(
-  sessions: SessionMeta[],
-  message = 'Search sessions:',
-  initialSearch?: string,
-  hiddenCount = 0,
-  enterHint?: string,
-  scope?: SessionSearchScope,
-): Promise<PickedSession | null> {
-  let linesAbovePrompt = 0;
-  if (hiddenCount > 0) {
-    console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
-    linesAbovePrompt += 1;
-  }
-  const cols = pickerColumnsFor(sessions);
-  try {
-    return await sessionPicker({
-      message,
-      subtitle: formatPickerTip(sessions),
-      sessions,
-      filter: (query: string) => {
-        if (!query.trim()) return sessions;
-        return filterSessionsByQuery(sessions, query, scope);
-      },
-      labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query, cols),
-      pageSize: PICKER_RECENT_COUNT,
-      initialSearch,
-      enterHint,
-      linesAbovePrompt,
-    });
-  } catch (err) {
-    if (isPromptCancelled(err)) return null;
-    throw err;
-  }
-}
-
-function warnNoPeerTarget(machine: string, session: SessionMeta): void {
-  console.log(chalk.yellow(`Session ${session.shortId} lives on ${machine}, which isn't a reachable device right now.`));
-  console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
-}
-
-export const LIVE_ROW_PREFIX = 'live:';
-
-function isIdlessLiveRow(s: SessionMeta): boolean {
-  return s.id.startsWith(LIVE_ROW_PREFIX);
-}
-
-export async function handlePickedSession(picked: PickedSession): Promise<void> {
-  if (isIdlessLiveRow(picked.session)) {
-    const where = picked.session.machine ? ` on ${picked.session.machine}` : '';
-    console.log(chalk.yellow(`This session hasn't reported a session id yet — nothing to open${where}.`));
-    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --device ${picked.session.machine}` : ''}`));
-    return;
-  }
-  if (picked.action === 'view') {
-    const readFrom = transcriptOnPeerOf(picked.session);
-    if (readFrom) {
-      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], readFrom);
-      if (rc === 'no-target') warnNoPeerTarget(readFrom, picked.session);
-      return;
-    }
-    await renderSession(picked.session, 'summary', {});
-    return;
-  }
-
-  if (await resumeOnOwnerIfRemote(picked.session)) return;
-  await resumeSessionInPlace(picked.session);
-}
-
-async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
-  const owner = sessionOwnerDevice(session);
-  if (!owner) return false;
-  console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
-  const rc = await runOnPeer(['sessions', 'resume', session.id], owner, {
-    tty: true,
-    env: { [RESUME_PINNED_ENV]: '1' },
-    sessionId: session.id,
-  });
-  if (rc === 'no-target') warnNoPeerTarget(owner, session);
-  return true;
-}
-
-export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
-  const owner = sessionOwnerDevice(session);
-  if (owner) {
-    console.error(chalk.red(`Session ${session.shortId} belongs to ${owner} — it cannot resume on this machine.`));
-    console.error(chalk.gray(`  Resume it there: agents sessions resume ${session.id}`));
-    process.exitCode = 1;
-    return;
-  }
-
-  const cwd = session.cwd && fs.existsSync(session.cwd)
-    ? session.cwd
-    : process.cwd();
-
-  const resume = buildSessionRecoveryCommand(session);
-
-  console.log(chalk.gray(`Resuming: ${resume.join(' ')} (cwd: ${cwd})`));
-
-  await spawnResumeCommand(resume, cwd);
-}
-
-export function buildSessionRecoveryCommand(session: Pick<SessionMeta, 'id'>, portable = false): string[] {
-  const args = sessionRecoveryRunArgs(session);
-  if (portable) return ['agents', ...args];
-  const invocation = getAgentsInvocation(args);
-  return [invocation.command, ...invocation.args];
-}
-
-export function resumeSpawnInvocation(
-  cmd: string[],
-  platform: NodeJS.Platform = process.platform,
-): { command: string; args: string[]; shell: boolean } {
-  const shell = needsWindowsShell(cmd[0], platform);
-  if (shell) {
-    return {
-      command: composeWin32CommandLine(cmd[0], cmd.slice(1)),
-      args: [],
-      shell: true,
-    };
-  }
-  return { command: cmd[0], args: cmd.slice(1), shell: false };
-}
-
-function spawnResumeCommand(cmd: string[], cwd: string): Promise<void> {
-  return new Promise<void>((resolve) => {
-    let child: ChildProcess;
-    try {
-      const { command, args, shell } = resumeSpawnInvocation(cmd);
-      child = spawn(command, args, {
-        cwd,
-        stdio: 'inherit',
-        shell,
-      });
-    } catch (err: any) {
-      console.error(chalk.red(`Failed to launch ${cmd[0]}: ${err.message}`));
-      resolve();
-      return;
-    }
-    child.on('error', (err: any) => {
-      console.error(chalk.red(`Failed to launch ${cmd[0]}: ${err.message}`));
-      if (err.code === 'ENOENT') {
-        console.error(chalk.gray(`Make sure '${cmd[0]}' is on your PATH.`));
-      }
-      resolve();
-    });
-    child.on('close', () => resolve());
-  });
-}
-
-function resumeArgv(agent: SessionMeta['agent'], id: string, launcher: string): string[] | null {
-  switch (agent) {
-    case 'claude': return [launcher, '--resume', id];
-    case 'codex': return [launcher, 'resume', id];
-    case 'opencode': return [launcher, '--session', id];
-    case 'muse': return [launcher, 'resume', id];
-    default: return null;
-  }
-}
-
-function versionedAliasIfPresent(agent: SessionMeta['agent'], version: string): string | null {
-  const cli = AGENTS[agent as AgentId]?.cliCommand ?? agent;
-  const base = path.join(getShimsDir(), `${cli}@${version}`);
-  if (process.platform === 'win32' && fs.existsSync(`${base}.cmd`)) return `${base}.cmd`;
-  if (fs.existsSync(base)) return base;
-  return null;
-}
-
-export function buildResumeCommand(session: SessionMeta): string[] | null {
-  if (!sessionAgentSupportsResume(session.agent)) return null;
-  switch (session.agent) {
-    case 'opencode':
-      return resumeArgv('opencode', session.id, 'opencode');
-
-    case 'claude':
-    case 'codex':
-    case 'muse': {
-      const cli = AGENTS[session.agent as AgentId]?.cliCommand ?? session.agent;
-      if (session.version) {
-        const alias = versionedAliasIfPresent(session.agent, session.version);
-        return resumeArgv(session.agent, session.id, alias ?? `${cli}@${session.version}`);
-      }
-      return resumeArgv(session.agent, session.id, cli);
-    }
-    default:
-      return null;
-  }
-}
-
-
-
 
 function formatSearchMessage(options: SessionFilterOptions): string {
   const filters: string[] = [];
@@ -2839,11 +2211,6 @@ function formatNoSessionsMessage(
 function formatUnmanagedHiddenFooter(hiddenCount: number): string {
   const noun = hiddenCount === 1 ? 'session' : 'sessions';
   return `(${hiddenCount} ${noun} from your own unmanaged installs hidden — use --unmanaged to show)`;
-}
-
-function formatTeamHiddenFooter(hiddenCount: number): string {
-  const noun = hiddenCount === 1 ? 'team session' : 'team sessions';
-  return `(${hiddenCount} ${noun} hidden — use --teams to show, or \`agents teams status\`)`;
 }
 
 function findClaudeHistoryEntry(idQuery: string): ClaudeHistoryEntry | null {

@@ -32,6 +32,19 @@ import {
 } from '@phnx-labs/sessions-cli/reader';
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { isPromptCancelled } from '../lib/format.js';
+import { runOnPeer } from '../lib/session/remote-list.js';
+import { RESUME_PINNED_ENV, sessionOwnerDevice } from '../lib/session/resume-owner.js';
+import { resumeSessionInPlace } from '../lib/session/resume-command.js';
+import { filterSessionsByQuery, type SessionSearchScope } from '../lib/session/selection.js';
+import {
+  formatPickerLabel,
+  formatPickerTip,
+  formatTeamHiddenFooter,
+  formatTodoCompact,
+  pickerColumnsFor,
+  renderSession,
+} from '../lib/session/presentation.js';
 export function transcriptOnPeerOf(session: SessionMeta): string | undefined {
   if (session._remote) return session.machine;
   if (
@@ -42,14 +55,6 @@ export function transcriptOnPeerOf(session: SessionMeta): string | undefined {
     return session.machine;
   }
   return undefined;
-}
-
-export function formatTodoCompact(todos?: Pick<TodoProgress, 'done' | 'total' | 'activeForm'> | null): string {
-  if (!todos || !Number.isFinite(todos.total) || todos.total < 1) return '';
-  const done = Number.isFinite(todos.done) ? Math.max(0, todos.done) : 0;
-  const tally = `✓${done}/${todos.total}`;
-  const step = todos.activeForm?.replace(/\s+/g, ' ').trim();
-  return step ? `${tally} · ${step}` : tally;
 }
 
 export function githubRepoUrlFromCwd(cwd?: string): string | undefined {
@@ -1051,4 +1056,87 @@ export async function sessionPicker(config: SessionPickerConfig): Promise<Picked
   }).finally(() => setRemotePreviewRepaint(undefined));
   if (!picked) return null;
   return { session: picked.item, action: 'resume' };
+}
+
+const PICKER_RECENT_COUNT = 15;
+
+export async function pickSessionInteractive(
+  sessions: SessionMeta[],
+  message = 'Search sessions:',
+  initialSearch?: string,
+  hiddenCount = 0,
+  enterHint?: string,
+  scope?: SessionSearchScope,
+): Promise<PickedSession | null> {
+  let linesAbovePrompt = 0;
+  if (hiddenCount > 0) {
+    console.log(chalk.gray(formatTeamHiddenFooter(hiddenCount)));
+    linesAbovePrompt += 1;
+  }
+  const cols = pickerColumnsFor(sessions);
+  try {
+    return await sessionPicker({
+      message,
+      subtitle: formatPickerTip(sessions),
+      sessions,
+      filter: (query: string) => {
+        if (!query.trim()) return sessions;
+        return filterSessionsByQuery(sessions, query, scope);
+      },
+      labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query, cols),
+      pageSize: PICKER_RECENT_COUNT,
+      initialSearch,
+      enterHint,
+      linesAbovePrompt,
+    });
+  } catch (err) {
+    if (isPromptCancelled(err)) return null;
+    throw err;
+  }
+}
+
+function warnNoPeerTarget(machine: string, session: SessionMeta): void {
+  console.log(chalk.yellow(`Session ${session.shortId} lives on ${machine}, which isn't a reachable device right now.`));
+  console.log(chalk.gray(`Register/wake it (ag devices), or run there: agents ssh ${machine}`));
+}
+
+export const LIVE_ROW_PREFIX = 'live:';
+
+function isIdlessLiveRow(s: SessionMeta): boolean {
+  return s.id.startsWith(LIVE_ROW_PREFIX);
+}
+
+export async function handlePickedSession(picked: PickedSession): Promise<void> {
+  if (isIdlessLiveRow(picked.session)) {
+    const where = picked.session.machine ? ` on ${picked.session.machine}` : '';
+    console.log(chalk.yellow(`This session hasn't reported a session id yet — nothing to open${where}.`));
+    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --device ${picked.session.machine}` : ''}`));
+    return;
+  }
+  if (picked.action === 'view') {
+    const readFrom = transcriptOnPeerOf(picked.session);
+    if (readFrom) {
+      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], readFrom);
+      if (rc === 'no-target') warnNoPeerTarget(readFrom, picked.session);
+      return;
+    }
+    await renderSession(picked.session, 'summary', {});
+    return;
+  }
+
+  if (await resumeOnOwnerIfRemote(picked.session)) return;
+  await resumeSessionInPlace(picked.session);
+}
+
+async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
+  const owner = sessionOwnerDevice(session);
+  if (!owner) return false;
+  console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
+  const rc = await runOnPeer(['sessions', 'resume', session.id], owner, {
+    tty: true,
+    env: { [RESUME_PINNED_ENV]: '1' },
+    sessionId: session.id,
+  });
+  if (rc === 'no-target') warnNoPeerTarget(owner, session);
+  return true;
 }

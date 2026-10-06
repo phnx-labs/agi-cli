@@ -65,8 +65,7 @@ import {
 } from '../lib/feed/answer.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { isValidMailboxId } from '../lib/mailbox.js';
-import { getActiveSessions } from '../lib/session/active.js';
-import { backfillActiveRowsFromMeta } from './sessions.js';
+import { backfillActiveRowsFromMeta, getActiveSessions } from '../lib/session/active.js';
 import { mailboxIdForActiveSession } from '../lib/mailbox-target.js';
 import { GLYPH, masthead } from '../lib/comms-render.js';
 import { discoverSessions } from '../lib/session/discover.js';

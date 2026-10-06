@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { effectiveMode, rehydrateCommand, buildMigrateResumeCommands } from './sessions-migrate.js';
-import { buildResumeCommand } from './sessions.js';
+import { buildResumeCommand } from '../lib/session/resume-command.js';
 import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { SESSION_AGENTS, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
