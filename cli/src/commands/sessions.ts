@@ -147,7 +147,17 @@ interface SessionFilterOptions {
   until?: string;
 }
 
-interface SessionsOptions extends SessionFilterOptions {
+export interface TranscriptRenderOptions {
+  json?: boolean;
+  markdown?: boolean;
+  redact?: boolean;
+  include?: string;
+  exclude?: string;
+  first?: string;
+  last?: string;
+}
+
+interface SessionsOptions extends SessionFilterOptions, TranscriptRenderOptions {
   unmanaged?: boolean;
   query?: string[];
   resolve?: string;
@@ -156,13 +166,6 @@ interface SessionsOptions extends SessionFilterOptions {
   resolveLaunchId?: string;
   limit?: string;
   sort?: string;
-  json?: boolean;
-  markdown?: boolean;
-  redact?: boolean;
-  include?: string;
-  exclude?: string;
-  first?: string;
-  last?: string;
   artifacts?: boolean;
   artifact?: string;
   active?: boolean;
@@ -1492,7 +1495,8 @@ async function sessionsAction(
   }
 
   if (options.cloud) {
-    await runCloudSessions(query, options);
+    const { runCloudTranscripts } = await import('./cloud-transcripts.js');
+    await runCloudTranscripts(query, options);
     return;
   }
 
@@ -2115,7 +2119,7 @@ function printSessionOverview(
   if (opts.hiddenUnmanaged) console.log(chalk.gray(formatUnmanagedHiddenFooter(opts.hiddenUnmanaged)));
 }
 
-function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
+export function printSessionTable(sessions: SessionMeta[], hiddenCount = 0, tree = false, liveIndex?: Map<string, ActiveSession>): void {
   if (tree) {
     const byDir = new Map<string, SessionMeta[]>();
     for (const s of sessions) {
@@ -2253,7 +2257,7 @@ function printTeamsView(
   if (hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
 }
 
-function buildFilterOptions(options: SessionsOptions): FilterOptions {
+export function buildFilterOptions(options: TranscriptRenderOptions): FilterOptions {
   const opts: FilterOptions = {};
   if (options.include) opts.include = parseRoleList(options.include, '--include');
   if (options.exclude) opts.exclude = parseRoleList(options.exclude, '--exclude');
@@ -2279,7 +2283,7 @@ function hasAnyFilter(opts: FilterOptions): boolean {
   return !!(opts.include?.length || opts.exclude?.length || opts.first !== undefined || opts.last !== undefined);
 }
 
-function resolveViewMode(options: SessionsOptions, filters: FilterOptions): ViewMode {
+export function resolveViewMode(options: TranscriptRenderOptions, filters: FilterOptions): ViewMode {
   if (options.markdown) return 'markdown';
   if (options.json) return 'json';
   if (hasAnyFilter(filters)) return 'markdown';
@@ -2344,7 +2348,7 @@ function renderArchivedSession(
   }
 }
 
-async function renderSession(
+export async function renderSession(
   session: SessionMeta,
   mode: ViewMode,
   filters: FilterOptions,
@@ -2811,74 +2815,6 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
   }
 }
 
-
-
-async function runCloudSessions(query: string | undefined, options: SessionsOptions): Promise<void> {
-  const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
-
-  let filterOpts: FilterOptions;
-  try {
-    filterOpts = buildFilterOptions(options);
-  } catch (err: any) {
-    console.error(chalk.red(err.message));
-    process.exit(1);
-  }
-
-  const mode = resolveViewMode(options, filterOpts);
-  const spinner = options.json ? null : interruptibleSpinner('Loading cloud sessions...').start();
-
-  let sessions: SessionMeta[];
-  try {
-    sessions = await discoverCloudSessions({ limit: parseInt(options.limit || '50', 10) });
-  } catch (err: any) {
-    spinner?.stop();
-    console.error(chalk.red(`Failed to list cloud sessions: ${err?.message || err}`));
-    process.exit(1);
-  }
-  spinner?.stop();
-
-  if (!query) {
-    if (options.json) {
-      process.stdout.write(JSON.stringify(sessions, null, 2) + '\n');
-      return;
-    }
-    if (sessions.length === 0) {
-      console.log(chalk.gray('No cloud sessions captured yet.'));
-      return;
-    }
-    printSessionTable(sessions);
-    return;
-  }
-
-  const matches = sessions.filter(
-    (s) => s.id === query || s.shortId === query || s.id.startsWith(query),
-  );
-  if (matches.length === 0) {
-    console.error(chalk.red(`No cloud session matching: ${query}`));
-    process.exit(1);
-  }
-  if (matches.length > 1) {
-    console.error(chalk.red(`Multiple cloud sessions match "${query}":`));
-    for (const m of matches.slice(0, 10)) {
-      console.error(chalk.cyan(`  ${m.shortId}  ${m.id}`));
-    }
-    process.exit(1);
-  }
-
-  const meta = matches[0];
-  const cachedSpinner = options.json ? null : interruptibleSpinner('Fetching session...').start();
-  let cachedPath: string;
-  try {
-    cachedPath = await ensureCloudSessionCached(meta.id);
-  } catch (err: any) {
-    cachedSpinner?.stop();
-    console.error(chalk.red(`Failed to fetch session: ${err?.message || err}`));
-    process.exit(1);
-  }
-  cachedSpinner?.stop();
-
-  await renderSession({ ...meta, filePath: cachedPath }, mode, filterOpts, options);
-}
 
 
 interface AgentFilter {

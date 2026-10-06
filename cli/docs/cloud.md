@@ -124,6 +124,7 @@ agents cloud providers
 | `agents cloud list` | List cloud tasks (most recent first) |
 | `agents cloud status <id>` | Show task detail and latest status |
 | `agents cloud logs <id>` | Stream live output from a running task |
+| `agents cloud transcripts [selector]` | List captured Rush Cloud run transcripts, or render one (same output as `agents sessions --cloud`) |
 | `agents cloud cancel <id>` | Cancel a running task |
 | `agents cloud message <id> <text>` | Send a follow-up to a finished or needs-review task |
 | `agents cloud providers` | List available providers and their status |
@@ -169,6 +170,24 @@ agents cloud providers
 |---|---|
 | `-f, --follow` | Follow output (default for running tasks) |
 | `--json` | JSON event stream |
+
+### `cloud transcripts` options
+
+Lists captured Rush Cloud runs through your `rush login` session, or renders the
+one whose id, short id, or id prefix matches `[selector]`. A missing or ambiguous
+selector, or a failed login, exits 1; it never falls back to local sessions.
+Every render fetches the transcript again into the agents cache. It reads
+transcripts only: the job commands above (`list`, `status`, `logs`) do not, and
+this command has no artifact or preview mode.
+
+| Flag | Description |
+|---|---|
+| `-n, --limit <n>` | Runs to list (default 50) |
+| `--json` | The run list without a selector; the run's event array with one |
+| `--markdown` | Render the transcript as markdown |
+| `--no-redact` | Turn off the default secret redaction (`--markdown` and `--json`) |
+| `--include <roles>` / `--exclude <roles>` | Keep or drop roles: `user`, `assistant`, `thinking`, `tools` |
+| `--first <n>` / `--last <n>` | Keep the first or last N turns |
 
 ## Providers
 
