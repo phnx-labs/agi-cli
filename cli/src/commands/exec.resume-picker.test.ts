@@ -128,9 +128,17 @@ describeLive('agents run <harness> --resume picker filters (real CLI, real PTY, 
     );
     expect(picked.screen).toContain('ancient task gamma');
 
-    const [, pickerRun, child, extra] = recordedRuns();
+    const clustered = await drive(
+      ['run', 'claude', '--resume', '--teams', '--since=60d', '-bn5'],
+      onceRendered('older task beta=>DOWNSPACE', 'older task beta=>ENTER'),
+    );
+    expect(clustered.screen).toContain('ancient task gamma');
+
+    const [, pickerRun, child, clusteredRun, clusteredChild, extra] = recordedRuns();
     expect(pickerRun).toEqual(['run', 'claude', '--resume', '--all', '--limit=5', '--since', '60d', '--', '--all', '-n', '1']);
     expect(child).toEqual(['run', 'claude', '--resume', OLD_ID, '--', '--all', '-n', '1']);
+    expect(clusteredRun).toEqual(['run', 'claude', '--resume', '--teams', '--since=60d', '-bn5']);
+    expect(clusteredChild).toEqual(['run', 'claude', '--resume', OLD_ID, '-b']);
     expect(extra).toBeUndefined();
   }, 120_000);
 

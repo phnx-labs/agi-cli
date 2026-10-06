@@ -204,6 +204,11 @@ describe('selected resume argv', () => {
       expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs })).toEqual([
         'run', 'claude', '--resume', 'abc12345', '--name', '--all', '--', '--all', '--since', '1d', '-n', '2',
       ]);
+      expect(buildSelectedResumeArgs('abc12345', undefined, {
+        runArgs: ['run', 'claude', '--resume', '--teams', '--since=60d', '-bn5', '--name', '-bn5', '--', '-bn5'],
+      })).toEqual(['run', 'claude', '--resume', 'abc12345', '-b', '--name', '-bn5', '--', '-bn5']);
+      expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs: ['run', 'claude', '--resume', '-bn', '5'] }))
+        .toEqual(['run', 'claude', '--resume', 'abc12345', '-b']);
     } finally {
       setArgvCommandTree(undefined);
     }

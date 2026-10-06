@@ -24,6 +24,7 @@ export interface RoutingOccurrence {
   start: number;
   end: number;
   value?: string;
+  kept?: string;
 }
 
 export interface ScannedArgv {
@@ -66,19 +67,35 @@ function lastValueIndex(args: string[], i: number, opt: Option): number {
   return j;
 }
 
-function lastCommandOptionIndex(args: string[], i: number, chain: Command[]): number {
+function lastLongOptionIndex(args: string[], i: number, chain: Command[]): number {
   const arg = args[i];
-  if (arg.startsWith('--')) {
-    if (arg.includes('=')) return i;
-    const opt = findOption(chain, arg);
-    return opt ? lastValueIndex(args, i, opt) : i;
-  }
+  if (arg.includes('=')) return i;
+  const opt = findOption(chain, arg);
+  return opt ? lastValueIndex(args, i, opt) : i;
+}
+
+function scanShortCluster(
+  args: string[],
+  i: number,
+  chain: Command[],
+  specs: StripSpec[],
+): { last: number; occurrence?: RoutingOccurrence } {
+  const arg = args[i];
   for (let k = 1; k < arg.length; k++) {
+    const spec = specs.find((s) => s.short === arg[k]);
+    if (spec) {
+      const kept = arg.slice(0, k);
+      if (!spec.takesValue) return { last: i, occurrence: { spec, start: i, end: i, kept: kept + arg.slice(k + 1) } };
+      const joined = arg.slice(k + 1).replace(/^=/, '');
+      if (joined) return { last: i, occurrence: { spec, start: i, end: i, value: joined, kept } };
+      const end = i + 1 < args.length ? i + 1 : i;
+      return { last: end, occurrence: { spec, start: i, end, value: end > i ? args[end] : undefined, kept } };
+    }
     const opt = findOption(chain, `-${arg[k]}`);
-    if (!opt) return i;
-    if (opt.required || opt.optional) return k === arg.length - 1 ? lastValueIndex(args, i, opt) : i;
+    if (!opt) return { last: i };
+    if (opt.required || opt.optional) return { last: k === arg.length - 1 ? lastValueIndex(args, i, opt) : i };
   }
-  return i;
+  return { last: i };
 }
 
 export function scanArgv(args: string[], extra: StripSpec[] = []): ScannedArgv {
@@ -109,7 +126,13 @@ export function scanArgv(args: string[], extra: StripSpec[] = []): ScannedArgv {
       if (takesNext) i++;
       continue;
     }
-    i = lastCommandOptionIndex(args, i, chain);
+    if (arg.startsWith('--')) {
+      i = lastLongOptionIndex(args, i, chain);
+      continue;
+    }
+    const cluster = scanShortCluster(args, i, chain, specs);
+    if (cluster.occurrence) routing.push(cluster.occurrence);
+    i = cluster.last;
   }
   return { commandIndex, routing };
 }
