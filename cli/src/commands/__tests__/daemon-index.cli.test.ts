@@ -62,10 +62,13 @@ describe('agents daemon index (real CLI parse, disposable HOME)', () => {
       ['--since', 'bogus'],
       ['--local', '--fleet'],
       ['--local', '--device', 'some-box'],
+      ['--device', 'some-box', '--since', 'bogus'],
+      ['--fleet', '--agent', 'nope'],
     ]) {
       const res = run(['daemon', 'index', 'backfill', 'tools', ...args]);
       expect(res.status, args.join(' ')).toBe(1);
       expect(res.stderr).not.toContain('does not support --device');
+      expect(res.stderr).not.toContain('some-box:');
     }
     const resources = run(['daemon', 'index', 'backfill', 'resources', '--until', 'later']);
     expect(resources.status).toBe(1);
@@ -130,7 +133,7 @@ describe('agents daemon index (real CLI parse, disposable HOME)', () => {
   });
 
   it('titles best-effort with no signed-in harness: nothing generated, still exits 0', () => {
-    const res = json<{ kind: string; generated: number; titles: unknown[] }>(['daemon', 'index', 'backfill', 'titles', '--json']);
-    expect(res).toMatchObject({ kind: 'titles-backfill', generated: 0, titles: [] });
+    const res = json<{ kind: string; scanned: number; generated: number; failed: number; titles: unknown[] }>(['daemon', 'index', 'backfill', 'titles', '--json']);
+    expect(res).toMatchObject({ kind: 'titles-backfill', scanned: 1, generated: 0, failed: 1, titles: [] });
   });
 });

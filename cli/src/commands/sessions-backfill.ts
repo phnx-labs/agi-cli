@@ -134,6 +134,8 @@ function peerArgs(options: ToolBackfillOptions): string[] {
 }
 
 export async function runToolsBackfill(options: ToolBackfillOptions): Promise<ToolBackfillEnvelope> {
+  parseAgent(options.agent);
+  assertTimeFilters(options);
   const hosts = mergeHosts(options);
   const includeLocal = options.local === true || hosts.length === 0;
   const fanOut = options.local !== true && (options.fleet === true || hosts.length > 0);
