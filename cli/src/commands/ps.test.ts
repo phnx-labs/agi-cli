@@ -172,7 +172,7 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
     return (JSON.parse(result.stdout) as ActiveSession[]).map((row) => row.sessionId!).sort();
   }
 
-  function liveFixture(): { tempHome: string; cwd: string; sleeper: ReturnType<typeof spawn> } {
+  function liveFixture(): { tempHome: string; cwd: string; sleeper: ReturnType<typeof spawn>; publish: () => void } {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ps-parity-'));
     const cwd = path.join(tempHome, 'work', 'ps-parity');
     fs.mkdirSync(cwd, { recursive: true });
@@ -205,29 +205,34 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
       row(indexedRoutineId),
       row(otherRoutineId, { origin: 'routine', routineName: 'weekly-audit' }),
     ];
-    const publish = spawnSync(process.execPath, [
-      '--import', tsxLoaderUrl, '-e',
-      `const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
-       m.writeActiveSessionsCache('local', ${JSON.stringify(rows)}, { capturedAt: Date.now() });`,
-    ], {
-      cwd,
-      env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' },
-      encoding: 'utf-8',
-    });
-    expect(publish.status, publish.stderr).toBe(0);
+    const publish = () => {
+      const res = spawnSync(process.execPath, [
+        '--import', tsxLoaderUrl, '-e',
+        `const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
+         m.writeActiveSessionsCache('local', ${JSON.stringify(rows)}, { capturedAt: Date.now() });`,
+      ], {
+        cwd,
+        env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' },
+        encoding: 'utf-8',
+      });
+      expect(res.status, res.stderr).toBe(0);
+    };
+    publish();
 
     for (const id of [bookmarkedId, waitingId]) {
       const bookmark = runAgents(['sessions', 'bookmark', id], cwd, tempHome);
       expect(bookmark.status, bookmark.stderr).toBe(0);
     }
-    return { tempHome, cwd, sleeper };
+    return { tempHome, cwd, sleeper, publish };
   }
 
   it('selects the same rows for --bookmarks, --routine [name], and --status waiting', () => {
-    const { tempHome, cwd, sleeper } = liveFixture();
+    const { tempHome, cwd, sleeper, publish } = liveFixture();
     try {
       const pair = (legacy: string[], replacement: string[]) => {
+        publish();
         const before = runAgents(['sessions', '--active', ...legacy, '--json', '--local'], cwd, tempHome);
+        publish();
         const after = runAgents(['ps', ...replacement, '--json', '--local'], cwd, tempHome);
         expect(after.status, after.stderr).toBe(before.status);
         expect(ids(after)).toEqual(ids(before));
