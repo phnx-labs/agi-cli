@@ -62,13 +62,14 @@ import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/feed/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
 import { die } from './lib/format.js';
-import { hasHostRoutingFlag } from './lib/hosts/routing-flag.js';
+import { commandTokenIndex, hasHostRoutingFlag, setArgvCommandTree } from './lib/hosts/routing-flag.js';
 
 const BRAND = resolveBrandName();
 
 const program = configureRootCommand(new Command(), BRAND, VERSION);
 registerCommandGroups(program, FRONT_DOOR_COMMAND_GROUPS);
 program.option('--help-all', 'Show help for all commands');
+setArgvCommandTree(program);
 
 
 function auditCommandPath(cmd: Command): string[] {
@@ -684,7 +685,7 @@ program.on('command:*', (operands) => {
 
   if (minDist === 1 && closest && !RETIRED_TOP_LEVEL_COMMANDS.has(unknown)) {
     const args = process.argv.slice(2);
-    args[0] = closest;
+    args[commandTokenIndex(args) ?? 0] = closest;
     void (async () => {
       if (LAZY_COMMAND_NAMES.has(closest)) {
         for (const loader of COMMAND_LOADERS[closest] ?? []) await reg(loader);
@@ -723,7 +724,8 @@ if (passedArgs[0] === 'sessions') {
     process.argv[nestedVersionIndex + 2] = '--session-version';
   }
 }
-const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
+const requestedCommandIndex = commandTokenIndex(passedArgs);
+const requestedCommand = requestedCommandIndex === undefined ? undefined : passedArgs[requestedCommandIndex];
 const verboseStartup = passedArgs.includes('--verbose');
 const helpAllRequested = passedArgs.includes('--help-all');
 const helpOrVersionRequested = passedArgs.some(
@@ -733,18 +735,6 @@ const isDocumentationRequest = helpOrVersionRequested || helpAllRequested;
 
 const brandDisabled = disabledCommandsForActiveBrand();
 const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(requestedCommand);
-
-if (
-  requestedCommand !== undefined &&
-  !isDocumentationRequest &&
-  !requestedIsDisabled &&
-  hasHostRoutingFlag(passedArgs)
-) {
-  const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
-  if (await maybeRunOnHost(requestedCommand, passedArgs)) {
-    process.exit(process.exitCode ?? 0);
-  }
-}
 
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
 const rootHelpRequested =
@@ -770,7 +760,21 @@ if (!helpAllRequested) {
 
 if (isLazyRequest && !requestedIsDisabled) {
   for (const loader of COMMAND_LOADERS[requestedCommand!]) await reg(loader);
-} else if (requestedIsUnknown && requestedCommand) {
+}
+
+if (
+  requestedCommand !== undefined &&
+  !requestedIsUnknown &&
+  !isDocumentationRequest &&
+  hasHostRoutingFlag(passedArgs)
+) {
+  const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
+  if (await maybeRunOnHost(requestedCommand, passedArgs)) {
+    process.exit(process.exitCode ?? 0);
+  }
+}
+
+if (requestedIsUnknown && requestedCommand) {
   const candidates = [...KNOWN_TOP_LEVEL_COMMANDS].filter((name) => !brandDisabled.has(name));
   const { closest, minDist } = closestTopLevelCommand(requestedCommand, candidates);
 
@@ -780,9 +784,8 @@ if (isLazyRequest && !requestedIsDisabled) {
     !requestedIsDisabled &&
     !RETIRED_TOP_LEVEL_COMMANDS.has(requestedCommand)
   ) {
-    passedArgs[0] = closest;
-    const argvCmdIndex = process.argv.findIndex((a, i) => i >= 2 && !a.startsWith('-'));
-    if (argvCmdIndex >= 0) process.argv[argvCmdIndex] = closest;
+    passedArgs[requestedCommandIndex!] = closest;
+    process.argv[requestedCommandIndex! + 2] = closest;
 
     if (LAZY_COMMAND_NAMES.has(closest)) {
       for (const loader of COMMAND_LOADERS[closest] ?? []) await reg(loader);
