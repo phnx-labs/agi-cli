@@ -5,7 +5,9 @@
   that desktop to the row's `observerTerminals`. Codex and Grok tabs launched with
   `--device auto` no longer stay on "tracking session": before, only Claude got a
   desktop-side observation, because only Claude has a pre-minted session id. A
-  `live-terminals.json` entry with a `terminalId` and no `sessionId` now produces a
-  terminal row instead of being dropped.
+  `live-terminals.json` agent entry with a `terminalId` and no (or an empty) `sessionId`
+  now produces a terminal row instead of being dropped. It is keyed by `terminalId`,
+  and no session id is guessed from its cwd. Shell tabs published by the extension
+  produce no session row unless an agent runs under them.
   Source: `cli/src/lib/launch-identity.ts`, `cli/src/lib/session/projection.ts`,
   `cli/src/lib/session/active.ts`.
