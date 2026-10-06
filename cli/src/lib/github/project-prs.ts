@@ -748,7 +748,7 @@ export function ghFailure(err: unknown): string {
 
 export const BLOCKED_WITHOUT_ADMIN = 'Blocked by branch protection; pass --admin to merge as an admin';
 
-const MERGEABLE_STATES = new Set(['clean', 'unstable', 'has_hooks']);
+const MERGEABLE_STATES = new Set(['clean', 'unstable', 'has_hooks', 'unknown', '']);
 
 export function mergeRefusalWithoutAdmin(state: string): string | null {
   if (MERGEABLE_STATES.has(state)) return null;
@@ -757,7 +757,7 @@ export function mergeRefusalWithoutAdmin(state: string): string | null {
     case 'dirty': return 'Has merge conflicts';
     case 'behind': return 'The branch is behind its base; update it, or pass --admin to merge as an admin';
     case 'draft': return 'Draft: mark it ready for review first';
-    default: return 'GitHub is still computing mergeability; try again in a moment';
+    default: return `GitHub reports the PR as ${state}; not merging`;
   }
 }
 
