@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
 import { registerSendCommand } from '../../commands/send.js';
+import { registerRunCommand } from '../../commands/exec.js';
+
+function registerRunTree(): Command {
+  const program = new Command();
+  registerRunCommand(program);
+  return program;
+}
 import { stripRoutingFlags } from './remote-cmd.js';
 import {
   commandTokenIndex,
@@ -120,6 +127,14 @@ describe('option-aware routing scan over the registered command tree', () => {
     const argv = [...SEND, '--device', 'a', '-Db', '--text', 'x'];
     expect(flagValue(argv, 'device', 'D')).toBe('a');
     expect(stripRoutingFlags(argv, ROUTING_OPTION_SPECS)).toEqual([...SEND, '--text', 'x']);
+  });
+
+  it('finds a selector inside a short-option cluster and keeps the rest of the cluster', () => {
+    const run = ['run', 'claude'];
+    setArgvCommandTree(registerRunTree());
+    expect(flagValue([...run, '-bDpeer'], 'device', 'D')).toBe('peer');
+    expect(stripRoutingFlags([...run, '-bD', 'peer', '--', '-bDx'], ROUTING_OPTION_SPECS)).toEqual([...run, '-b', '--', '-bDx']);
+    expect(stripRoutingFlags([...run, '--name', '-bDpeer'], ROUTING_OPTION_SPECS)).toEqual([...run, '--name', '-bDpeer']);
   });
 
   it('consumes a variadic option value only up to the next dash-led token', () => {

@@ -9,12 +9,13 @@ import { scanArgv, type StripSpec } from './routing-flag.js';
 export { HOST_ROUTING_SPECS, type StripSpec } from './routing-flag.js';
 
 export function stripRoutingFlags(args: string[], specs: StripSpec[]): string[] {
-  const dropped = new Set<number>();
+  const out: (string | undefined)[] = [...args];
   for (const r of scanArgv(args, specs).routing) {
     if (!specs.some((s) => s.long === r.spec.long)) continue;
-    for (let i = r.start; i <= r.end; i++) dropped.add(i);
+    for (let i = r.start; i <= r.end; i++) out[i] = undefined;
+    if (r.kept && r.kept !== '-') out[r.start] = r.kept;
   }
-  return args.filter((_, i) => !dropped.has(i));
+  return out.filter((a): a is string => a !== undefined);
 }
 
 type RunOptionForwarding =
