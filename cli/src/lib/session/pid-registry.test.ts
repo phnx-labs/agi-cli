@@ -189,7 +189,7 @@ describe('pid session registry', () => {
   it('keeps the launch origin when a SessionStart rewrite drops it (PHNX-4263)', () => {
     if (process.platform !== 'linux') return;
     const origin = { device: 'zion', terminalId: 'cx-tab' };
-    writePidSessionEntry({ pid: process.pid, agent: 'codex', launchId: 'launch', startedAtMs: 7, originTerminal: origin });
+    writePidSessionEntry({ pid: process.pid, agent: 'codex', launchId: 'launch', terminalId: 'cx-tab', startedAtMs: 7, originTerminal: origin });
     const file = path.join(getTerminalsDir(), 'by-pid', `${process.pid}.json`);
     const { originTerminal: _dropped, ...rewritten } = { ...JSON.parse(fs.readFileSync(file, 'utf8')), sessionId: 'sid' };
     fs.writeFileSync(file, JSON.stringify(rewritten));

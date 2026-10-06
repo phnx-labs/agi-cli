@@ -5,10 +5,11 @@ export function launchIdentityEnv(env: NodeJS.ProcessEnv = process.env): Record<
   const terminal = env.AGENT_TERMINAL_ID?.trim();
   const nested = env.AGENTS_RUNTIME === 'terminal' || env.AGENTS_RUNTIME === 'headless' || env.AGENTS_RUNTIME === 'teams';
   if (terminal && !nested) result.AGENT_TERMINAL_ID = terminal;
-  const originTerminal = env.AGENTS_ORIGIN_TERMINAL_ID?.trim() || terminal;
+  const inheritedTerminal = env.AGENTS_ORIGIN_TERMINAL_ID?.trim();
+  const originTerminal = inheritedTerminal || terminal;
   if (originTerminal) {
     result.AGENTS_ORIGIN_TERMINAL_ID = originTerminal;
-    result.AGENTS_ORIGIN_DEVICE = env.AGENTS_ORIGIN_DEVICE?.trim() || machineId();
+    result.AGENTS_ORIGIN_DEVICE = (inheritedTerminal && env.AGENTS_ORIGIN_DEVICE?.trim()) || machineId();
   }
   const parentLaunch = nested ? env.AGENT_LAUNCH_ID : env.AGENTS_PARENT_LAUNCH_ID;
   const parentSession = nested
@@ -27,7 +28,7 @@ export interface LaunchOrigin {
 export function launchOrigin(identity: Record<string, string> = launchIdentityEnv()): LaunchOrigin | undefined {
   const device = identity.AGENTS_ORIGIN_DEVICE;
   const terminalId = identity.AGENTS_ORIGIN_TERMINAL_ID;
-  return device && terminalId ? { device, terminalId } : undefined;
+  return device && terminalId && identity.AGENT_TERMINAL_ID ? { device, terminalId } : undefined;
 }
 
 export const LAUNCH_IDENTITY_KEYS = [
