@@ -61,7 +61,14 @@ agent process
 
 The action events on fd 4 come back to agents-cli, which records them in the
 durable `browser_sessions` row that `agents browser sessions` and
-`agents sessions --browser` read.
+`agents sessions --browser` read. The engine keeps its own task history in
+`~/.agents/.history/browser/history.db` (browser-cli 0.1.16+). agents-cli reads
+that file read-only, one summary per profile and task, and falls back to the
+`browser_sessions` row only for fields native history does not record. The
+feed's browser rows come from that merge, so a finished task with no capture
+still has a row, and it keeps its session link, start time, recorded capture
+counts and source machine after the live task is gone. Neither store is written
+by the reader.
 
 ### What lives where
 
@@ -275,6 +282,7 @@ browser-cli keeps every path the in-repo subsystem used:
 | `~/.agents/.cache/helpers/browser/browser.sock` | IPC socket |
 | `~/.agents/.cache/browser/<profile>@<device>/` | runtime chrome-data / pids |
 | `~/.agents/.history/browser-profiles/` | durable user-data dirs (logins survive) |
+| `~/.agents/.history/browser/history.db` | native task history (SQLite, WAL), read by the feed |
 | `~/.agents/devices/<machine>/agents.yaml` `browser:` | machine-local profiles |
 | `~/.agents/.cache/browser/actions/YYYY-MM-DD.jsonl` | local action ledger |
 
