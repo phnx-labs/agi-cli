@@ -885,7 +885,8 @@ SSH access (§7); rendering sessions that no harness produced.
   unavailable peer MUST retain its last rows until a reconnecting reset
   (`lib/feed/watch.ts`; `lib/feed/watch.test.ts`). A consumer that closes the
   pipe (EPIPE) MUST end the stream with exit 0 and nothing on stderr; any
-  other stdout write failure and an unexpected hub close MUST exit nonzero
+  other stdout write failure and a hub failure the existing reconnect does not
+  recover MUST exit nonzero
   (`commands/feed-watch.ts`; `commands/feed-watch.integration.test.ts`,
   `lib/feed/hub-server.test.ts`).
 - **SES-40b (MUST).** `agents feed answer <attention-key>` MUST atomically claim

@@ -3,6 +3,6 @@
   the Node CLI crashed with an unhandled `EPIPE` stack trace and exit 1, and under
   Bun it kept running and printed a stack trace on every heartbeat. It now ends
   the stream with exit 0 and nothing on stderr, matching `agents sessions watch
-  --json`. Any other stdout write failure, such as `ENOSPC`, still exits 1, and an
-  unexpected hub close still fails.
+  --json`. Any other stdout write failure, such as `ENOSPC`, still exits 1, and a
+  hub failure that reconnecting does not recover still fails.
   Source: `cli/src/commands/feed-watch.ts`.
