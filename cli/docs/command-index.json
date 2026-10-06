@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 474,
+  "commands": 475,
   "root": {
     "name": "agents",
     "path": "",
@@ -11428,6 +11428,25 @@
           "negate": false
         },
         {
+          "flags": "--bookmarks",
+          "description": "Only bookmarked sessions (bookmark one with `agents sessions bookmark <id>`)",
+          "long": "--bookmarks",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--routines, --routine [name]",
+          "description": "Only routine-run sessions; pass a name to narrow to one routine (fuzzy name matching)",
+          "short": "--routines",
+          "long": "--routine",
+          "required": false,
+          "optional": true,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--no-interactive",
           "description": "Print the roster instead of opening the picker on a TTY",
           "long": "--no-interactive",
@@ -11447,7 +11466,7 @@
           "negate": false
         }
       ],
-      "examples": "# What is running right now, here and on every reachable device\nagents ps\n\n# Machine-readable roster for this box only\nagents ps --json --local\n\n# One peer's running agents, over SSH\nagents ps --json -D yosemite-s0\n\n# Only agents waiting on you (exits 1 when any are waiting)\nagents ps --status waiting\n\n# Act on one row by its 8-character id\nagents ps focus 4b2f1a9c\nagents ps detach 4b2f1a9c\nagents ps stop 4b2f1a9c\nagents ps migrate 4b2f1a9c --auto",
+      "examples": "# What is running right now, here and on every reachable device\nagents ps\n\n# Machine-readable roster for this box only\nagents ps --json --local\n\n# One peer's running agents, over SSH\nagents ps --json -D yosemite-s0\n\n# Only agents waiting on you (exits 1 when any are waiting)\nagents ps --status waiting\n\n# Only bookmarked sessions, or the runs of one routine\nagents ps --bookmarks\nagents ps --routine nightly-review\n\n# Act on one row by its 8-character id\nagents ps focus 4b2f1a9c\nagents ps detach 4b2f1a9c\nagents ps stop 4b2f1a9c\nagents ps migrate 4b2f1a9c --auto\n\n# Where migrated sessions went\nagents ps migrations",
       "notes": "- On a TTY with no --status, ps opens the session picker filtered to running\n  sessions: r toggles that filter, f focuses, enter resumes, y copies the command.\n- Type into a running agent with: agents send --channel session --to <id> --text \"continue\"\n- Resume an ended session with: agents run --resume <id>\n- A session on another device is stopped, detached, or focused there over SSH.\n- Put -D and --status after the verb or after the roster flags, never before a\n  verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.",
       "subcommands": [
         {
@@ -11930,7 +11949,45 @@
             }
           ],
           "examples": "# Move the session in THIS pane onto the least-busy fleet worker\nagents ps migrate --auto\n\n# Move a specific session onto a named host\nagents ps migrate a1b2c3d4 --device yosemite-s1\n\n# Spin up a fresh ephemeral box and move onto it\nagents ps migrate --lease\n\n# Copy (don't stop the source), letting the agent wrap up its own dirty tree\nagents ps migrate --device box-a --keep --agent-wrapup",
-          "notes": "- Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).\n- Default --mode rehydrate: the transcript is shipped to the target and the agent reads it there\n  with 'agents sessions <id>' (its own judgment on --last/--include so long tool output can't\n  blow context), then continues. Robust across every harness.\n- --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:\n  the target agent must have the session registered, so migrate falls back to rehydrate when it can't.\n- The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).\n- Every migrate appends to the ledger — see 'agents sessions migrations' for where each session went.",
+          "notes": "- Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).\n- Default --mode rehydrate: the transcript is shipped to the target and the agent reads it there\n  with 'agents sessions <id>' (its own judgment on --last/--include so long tool output can't\n  blow context), then continues. Robust across every harness.\n- --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:\n  the target agent must have the session registered, so migrate falls back to rehydrate when it can't.\n- The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).\n- Every migrate appends to the ledger — see 'agents ps migrations' for where each session went.",
+          "subcommands": []
+        },
+        {
+          "name": "migrations",
+          "path": "ps migrations",
+          "aliases": [],
+          "description": "Show the migration ledger — sessions handed off to/from other machines.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Output the raw ledger as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--session <id>",
+              "description": "Only rows whose session id starts with this fragment",
+              "long": "--session",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         },
         {
