@@ -13,7 +13,7 @@ export function getProfileRuntimeDir(name: string): string {
   return path.join(getBrowserRuntimeDir(), name);
 }
 
-function profileOfCacheKey(key: string): string {
+export function profileOfCacheKey(key: string): string {
   const at = key.lastIndexOf('@');
   return at === -1 ? key : key.slice(0, at);
 }

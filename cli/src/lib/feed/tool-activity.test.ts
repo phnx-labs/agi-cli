@@ -1,11 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { collectToolRows, readLiveBrowserTasks, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
+import { collectToolRows, readLiveBrowserTasks, toolWatchRoots, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
 import type { BrowserSessionRow } from '../browser/sessions-list.js';
 import type { ComputerRunRow } from '../computer/sessions-list.js';
 import type { ToolRow } from './tools.js';
+import { nativeBrowserHistoryPath, readBrowserSessionRows } from '../browser/sessions-list.js';
+import { NativeHistoryWriter } from '../browser/native-history.test-fixture.js';
+import { getBrowserRuntimeDir } from '../state.js';
 
 const roots: string[] = [];
 function tempRoot(): string {
@@ -333,5 +336,133 @@ describe('a failed read never removes live rows', () => {
       await until('the root to be re-armed', () => watch.armed());
       expect(diffs[diffs.length - 1]!.upserts.map((row) => row.task)).toContain('second');
     } finally { controller.abort(); }
+  });
+});
+
+describe('native browser history on the feed (real history.db in WAL mode)', () => {
+  const realSources = { computerRows: () => [], bindings: () => [] };
+  let writer: NativeHistoryWriter;
+  let profile: string;
+  const runtimeDirs: string[] = [];
+
+  beforeEach(() => {
+    profile = `feed-${Math.random().toString(36).slice(2, 10)}`;
+    writer = new NativeHistoryWriter(nativeBrowserHistoryPath());
+  });
+  afterEach(() => {
+    writer.close();
+    for (const dir of runtimeDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const historyRoots = () => {
+    const historyDir = path.dirname(nativeBrowserHistoryPath());
+    return toolWatchRoots().filter((root) => !historyDir.startsWith(root + path.sep));
+  };
+  const rowFor = (rows: ToolRow[], task: string) => rows.filter((row) => row.kind === 'browser' && row.task === task);
+
+  it('a write that lands only in the WAL reaches the stream as exactly one upsert', async () => {
+    const controller = new AbortController();
+    const diffs: ToolDiff[] = [];
+    const watch = watchToolActivity({
+      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
+      sources: realSources, initial: collectToolRows('m1', realSources).rows, onDiff: (diff) => diffs.push(diff),
+    });
+    try {
+      await until('the history dir to be watched', () => watch.armed());
+      writer.put({ profile, task: 'wal-task', sessionId: 'sess-wal', startedAt: 1_000, lastActivity: 2_000 });
+      expect(fs.statSync(`${nativeBrowserHistoryPath()}-wal`).size).toBeGreaterThan(0);
+      await until('the WAL write to be projected', () => diffs.length > 0);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(diffs).toHaveLength(1);
+      expect(diffs[0]!.removes).toEqual([]);
+      expect(diffs[0]!.upserts.map((row) => row.task)).toEqual(['wal-task']);
+      expect(diffs[0]!.upserts[0]).toMatchObject({ live: false, sessionId: 'sess-wal', startedAtMs: 1_000, updatedAtMs: 2_000 });
+    } finally { controller.abort(); }
+  });
+
+  it('settles after each write: reading the history never re-triggers the watcher', async () => {
+    writer.close();
+    const writeOnce = (task: string, at: number) => {
+      const once = new NativeHistoryWriter(nativeBrowserHistoryPath());
+      once.put({ profile, task, startedAt: at, lastActivity: at });
+      once.close();
+    };
+    let reads = 0;
+    const sources = { ...realSources, browserRows: () => { reads++; return readBrowserSessionRows(); } };
+    const diffs: ToolDiff[] = [];
+    const controller = new AbortController();
+    const watch = watchToolActivity({
+      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
+      sources, initial: collectToolRows('m1', sources).rows, onDiff: (diff) => diffs.push(diff),
+    });
+    try {
+      await until('the history dir to be watched', () => watch.armed());
+      for (const [task, at] of [['closed-1', 10], ['closed-2', 20]] as const) {
+        const before = diffs.length;
+        writeOnce(task, at);
+        await until(`${task} to be projected`, () => diffs.length > before);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        const settled = reads;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(reads - settled, `reads after ${task} settled`).toBe(0);
+      }
+      expect(diffs.flatMap((diff) => diff.upserts).map((row) => row.task)).toEqual(['closed-1', 'closed-2']);
+    } finally {
+      controller.abort();
+      writer = new NativeHistoryWriter(nativeBrowserHistoryPath());
+    }
+  });
+
+  it('an unreadable history record keeps every healthy row and reports the snapshot incomplete', async () => {
+    writer.put({ profile, task: 'healthy', startedAt: 1, lastActivity: 2 });
+    const first = collectToolRows('m1', realSources);
+    expect(first.complete).toBe(true);
+    expect(rowFor(first.rows, 'healthy')).toHaveLength(1);
+
+    const controller = new AbortController();
+    const diffs: ToolDiff[] = [];
+    const watch = watchToolActivity({
+      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
+      sources: realSources, initial: first.rows, onDiff: (diff) => diffs.push(diff),
+    });
+    try {
+      await until('the history dir to be watched', () => watch.armed());
+      writer.rawRecord(profile, 'torn', '{"profile":', 3);
+      expect(collectToolRows('m1', realSources).complete).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(diffs).toEqual([]);
+
+      writer.rawRecord(profile, 'torn', JSON.stringify({ profile, task: 'torn', startedAt: 3, lastActivity: 3 }), 3);
+      await until('the repaired record to be projected', () => diffs.length > 0);
+      expect(diffs.flatMap((diff) => diff.removes)).toEqual([]);
+      expect(diffs.flatMap((diff) => diff.upserts).map((row) => row.task)).toEqual(['torn']);
+    } finally { controller.abort(); }
+  });
+
+  it('a live task that finishes stays one row, keeps its owner and loses only its controls', () => {
+    const runtime = path.join(getBrowserRuntimeDir(), profile);
+    runtimeDirs.push(runtime);
+    fs.mkdirSync(runtime, { recursive: true });
+    fs.writeFileSync(path.join(runtime, 'tasks.json'), JSON.stringify({
+      fin: { name: 'fin', profile, sessionId: 'sess-fin', createdAt: 1_000, lastActionAt: 1_500, currentTabId: 't1', tabs: { t1: {} } },
+    }));
+    writer.put({ profile, task: 'fin', sessionId: 'sess-fin', machine: 'origin-box', startedAt: 1_000, lastActivity: 1_500 });
+
+    const live = rowFor(collectToolRows('peer-a', realSources).rows, 'fin');
+    expect(live).toHaveLength(1);
+    expect(live[0]).toMatchObject({
+      live: true, owner: { sessionId: 'sess-fin' }, machine: 'origin-box',
+      closeCommand: { command: 'agents', args: ['browser', 'done', '--task', 'fin'], runOn: 'peer-a' },
+      showCommand: { command: 'agents', args: ['browser', 'tab', 'focus', 't1', '--task', 'fin'], runOn: 'peer-a' },
+    });
+
+    fs.writeFileSync(path.join(runtime, 'tasks.json'), '{}');
+    writer.put({ profile, task: 'fin', sessionId: 'sess-fin', startedAt: 1_000, lastActivity: 4_000 });
+    const finished = rowFor(collectToolRows('peer-a', realSources).rows, 'fin');
+    expect(finished).toHaveLength(1);
+    expect(finished[0]!.rowKey).toBe(live[0]!.rowKey);
+    expect(finished[0]).toMatchObject({ live: false, owner: { sessionId: 'sess-fin' }, updatedAtMs: 4_000, startedAtMs: 1_000 });
+    expect('closeCommand' in finished[0]!).toBe(false);
+    expect('showCommand' in finished[0]!).toBe(false);
   });
 });

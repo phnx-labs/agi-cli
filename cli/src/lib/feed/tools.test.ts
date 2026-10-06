@@ -92,7 +92,7 @@ describe('canonical tool rows', () => {
     const many = Array.from({ length: TOOL_CAPTURE_LIMIT + 25 }, (_, i) => (
       { kind: 'screenshot' as const, task: 'post', name: `s${i}.png`, path: `/caps/s${i}.png`, bytes: 1, mtimeMs: 10_000 - i }
     ));
-    const browser = projectBrowserToolRow('m1', browserRow({ artifacts: many, latestMtimeMs: 10_000 }));
+    const browser = projectBrowserToolRow('m1', browserRow({ artifacts: many, counts: { screenshot: many.length, pdf: 0, recording: 0, download: 0 }, latestMtimeMs: 10_000 }));
     expect(browser.captures).toHaveLength(TOOL_CAPTURE_LIMIT);
     expect(browser.captureCounts.screenshot).toBe(many.length);
 

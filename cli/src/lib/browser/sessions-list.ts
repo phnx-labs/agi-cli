@@ -4,10 +4,12 @@ import { formatBytes } from '../format.js';
 export { formatBytes };
 import * as path from 'path';
 
-import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs } from './paths.js';
+import { getBrowserRuntimeDir, getProfileRuntimeDir, listProfileCacheDirs, profileOfCacheKey } from './paths.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
+import Database from '../sqlite.js';
+import { getHistoryDir } from '../state.js';
 import { listPidSessionEntries } from '../session/pid-registry.js';
 import { loadHookSessionIndex } from '../session/hook-sessions.js';
 import { readRecentActivity } from '../feed/activity.js';
@@ -53,6 +55,18 @@ function walkFiles(dir: string): string[] {
   return out;
 }
 
+function listTaskArtifacts(dir: string, task: string): BrowserArtifact[] {
+  const artifacts: BrowserArtifact[] = [];
+  for (const file of walkFiles(dir)) {
+    const kind = EXT_KIND[path.extname(file).toLowerCase()];
+    if (!kind) continue;
+    const st = statSafe(file);
+    if (!st) continue;
+    artifacts.push({ kind, task, name: path.basename(file), path: file, bytes: st.size, mtimeMs: st.mtimeMs });
+  }
+  return artifacts;
+}
+
 function listProfileArtifacts(profile: string): BrowserArtifact[] {
   const root = getProfileRuntimeDir(profile);
   const artifacts: BrowserArtifact[] = [];
@@ -61,14 +75,7 @@ function listProfileArtifacts(profile: string): BrowserArtifact[] {
   let taskDirs: fs.Dirent[] = [];
   try { taskDirs = fs.readdirSync(sessionsRoot, { withFileTypes: true }); } catch {  }
   for (const t of taskDirs) {
-    if (!t.isDirectory()) continue;
-    for (const file of walkFiles(path.join(sessionsRoot, t.name))) {
-      const kind = EXT_KIND[path.extname(file).toLowerCase()];
-      if (!kind) continue;
-      const st = statSafe(file);
-      if (!st) continue;
-      artifacts.push({ kind, task: t.name, name: path.basename(file), path: file, bytes: st.size, mtimeMs: st.mtimeMs });
-    }
+    if (t.isDirectory()) artifacts.push(...listTaskArtifacts(path.join(sessionsRoot, t.name), t.name));
   }
 
   for (const file of walkFiles(path.join(root, 'downloads'))) {
@@ -144,6 +151,96 @@ export interface TaskIdentity {
   owner?: string;
   launchId?: string;
   sessionId?: string;
+  startedAt?: number;
+  lastActivity?: number;
+  machine?: string;
+  captureDir?: string;
+  capturesRemote?: string;
+  counts?: Partial<Record<ArtifactKind, number>>;
+}
+
+export interface BrowserTaskSummary extends Omit<TaskIdentity, 'owner'> {
+  profile: string;
+  task: string;
+  actor?: string;
+  startedAt: number;
+  lastActivity: number;
+}
+
+export const BROWSER_HISTORY_LIMIT = 2000;
+
+export function nativeBrowserHistoryPath(): string {
+  return path.join(getHistoryDir(), 'browser', 'history.db');
+}
+
+const SUMMARY_TEXT_FIELDS = ['actor', 'sessionId', 'launchId', 'machine', 'captureDir', 'capturesRemote'] as const;
+const COUNT_KINDS: ArtifactKind[] = ['screenshot', 'pdf', 'recording', 'download'];
+
+function parseSummary(file: string, raw: string): BrowserTaskSummary {
+  let value: unknown;
+  try { value = JSON.parse(raw); }
+  catch (error) { throw new Error(`unreadable browser history record in ${file}: ${(error as Error).message}`); }
+  const r = value as Record<string, unknown> | null;
+  if (!r || typeof r !== 'object' || typeof r.profile !== 'string' || typeof r.task !== 'string'
+    || !Number.isFinite(r.startedAt) || !Number.isFinite(r.lastActivity)) {
+    throw new Error(`unexpected browser history record in ${file}: needs profile, task and finite timestamps`);
+  }
+  const summary: BrowserTaskSummary = {
+    profile: r.profile, task: r.task, startedAt: r.startedAt as number, lastActivity: r.lastActivity as number,
+  };
+  for (const key of SUMMARY_TEXT_FIELDS) {
+    if (typeof r[key] === 'string') summary[key] = r[key] as string;
+  }
+  if (r.counts && typeof r.counts === 'object') {
+    const counts: Partial<Record<ArtifactKind, number>> = {};
+    for (const kind of COUNT_KINDS) {
+      const n = (r.counts as Record<string, unknown>)[kind];
+      if (Number.isFinite(n)) counts[kind] = n as number;
+    }
+    summary.counts = counts;
+  }
+  return summary;
+}
+
+/**
+ * The standalone browser's own task history (`.history/browser/history.db`,
+ * written by @phnx-labs/browser-cli `task-history.ts`). Opened read-only so a
+ * read never checkpoints the writer's WAL; an absent file is an empty history,
+ * any other failure throws so a feed snapshot reports itself incomplete.
+ */
+export function readNativeBrowserHistory(file = nativeBrowserHistoryPath(), limit = BROWSER_HISTORY_LIMIT): BrowserTaskSummary[] {
+  if (!fs.existsSync(file)) return [];
+  const db = new Database(file, { readOnly: true });
+  try {
+    const rows = db.prepare('SELECT record FROM tasks ORDER BY last_activity DESC LIMIT ?').all(limit) as { record: string }[];
+    return rows.map((row) => parseSummary(file, row.record));
+  } finally {
+    db.close();
+  }
+}
+
+function belongsToProfile(key: string, profile: string | undefined): boolean {
+  return !profile || key === profile || profileOfCacheKey(key) === profile;
+}
+
+/**
+ * One summary per profile+task: native history first, the agents-recorded
+ * `browser_sessions` row only for what native history does not say. Neither
+ * store is written.
+ */
+export function readBrowserTaskHistory(profile?: string): BrowserTaskSummary[] {
+  const merged = new Map<string, BrowserTaskSummary>();
+  const key = (s: { profile: string; task: string }) => `${s.profile}\0${s.task}`;
+  for (const legacy of listBrowserSessionRecords(undefined, { limit: BROWSER_HISTORY_LIMIT })) {
+    if (!belongsToProfile(legacy.profile, profile) || legacy.startedAt === undefined) continue;
+    merged.set(key(legacy), { ...legacy, startedAt: legacy.startedAt, lastActivity: legacy.lastActivity ?? legacy.startedAt });
+  }
+  for (const native of readNativeBrowserHistory()) {
+    if (!belongsToProfile(native.profile, profile)) continue;
+    const legacy = merged.get(key(native));
+    merged.set(key(native), legacy ? { ...legacy, ...native } : native);
+  }
+  return [...merged.values()];
 }
 
 export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
@@ -173,18 +270,17 @@ export function loadTaskIdentities(profile: string): Map<string, TaskIdentity> {
   return out;
 }
 
-export function loadDurableTaskIdentities(profile: string): Map<string, TaskIdentity> {
+export function loadDurableTaskIdentities(profile: string, history = readBrowserTaskHistory(profile)): Map<string, TaskIdentity> {
   const merged = new Map<string, TaskIdentity>();
-  for (const record of listBrowserSessionRecords(profile)) {
-    merged.set(record.task, {
-      owner: record.actor,
-      launchId: record.launchId,
-      sessionId: record.sessionId,
-    });
+  for (const record of history) {
+    if (record.profile !== profile) continue;
+    const { actor, profile: _profile, task: _task, ...rest } = record;
+    merged.set(record.task, { ...rest, owner: actor });
   }
   for (const [task, live] of loadTaskIdentities(profile)) {
     const durable = merged.get(task);
     merged.set(task, {
+      ...durable,
       owner: live.owner ?? durable?.owner,
       launchId: live.launchId ?? durable?.launchId,
       sessionId: live.sessionId ?? durable?.sessionId,
@@ -230,6 +326,16 @@ export interface BrowserSessionRow {
   artifacts: BrowserArtifact[];
   counts: Record<ArtifactKind, number>;
   latestMtimeMs: number;
+  startedAt?: number;
+  machine?: string;
+  captureDir?: string;
+  capturesRemote?: string;
+}
+
+function mergeCounts(found: Record<ArtifactKind, number>, recorded: Partial<Record<ArtifactKind, number>> | undefined): Record<ArtifactKind, number> {
+  const out = { ...found };
+  for (const kind of COUNT_KINDS) out[kind] = Math.max(found[kind], recorded?.[kind] ?? 0);
+  return out;
 }
 
 export function groupIntoRows(
@@ -252,6 +358,9 @@ export function groupIntoRows(
       list.push(a);
       byTask.set(a.task, list);
     }
+    for (const task of identities.keys()) {
+      if (!byTask.has(task)) byTask.set(task, []);
+    }
     for (const [task, artifacts] of byTask) {
       artifacts.sort((a, b) => b.mtimeMs - a.mtimeMs);
       const identity = identities.get(task);
@@ -271,8 +380,12 @@ export function groupIntoRows(
         linkStatus: linkedSession ? 'linked' : hasIdentityKey ? 'unresolved' : 'unlinked',
         linkedSession: linkedSession ?? undefined,
         artifacts,
-        counts: countByKind(artifacts),
-        latestMtimeMs: artifacts[0]?.mtimeMs ?? 0,
+        counts: mergeCounts(countByKind(artifacts), identity?.counts),
+        latestMtimeMs: Math.max(artifacts[0]?.mtimeMs ?? 0, identity?.lastActivity ?? 0),
+        ...(identity?.startedAt !== undefined ? { startedAt: identity.startedAt } : {}),
+        ...(identity?.machine ? { machine: identity.machine } : {}),
+        ...(identity?.captureDir ? { captureDir: identity.captureDir } : {}),
+        ...(identity?.capturesRemote ? { capturesRemote: identity.capturesRemote } : {}),
       });
     }
     if (downloads.length > 0) {
@@ -291,10 +404,24 @@ export function groupIntoRows(
   return rows;
 }
 
-export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
-  try { pruneToolSessions(); } catch {  }
+/** Task-first rows from captures, browser history and live task state. Reads only. */
+export function readBrowserSessionRows(profile?: string): BrowserSessionRow[] {
   const groups = listBrowserSessions(profile);
-  const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile)]));
+  const history = readBrowserTaskHistory(profile);
+  const byProfile = new Map(groups.map((g) => [g.profile, g]));
+  for (const record of history) {
+    let group = byProfile.get(record.profile);
+    if (!group) {
+      group = { profile: record.profile, artifacts: listProfileArtifacts(record.profile) };
+      byProfile.set(record.profile, group);
+      groups.push(group);
+    }
+    if (record.captureDir && !record.capturesRemote) {
+      const known = new Set(group.artifacts.map((a) => a.path));
+      group.artifacts.push(...listTaskArtifacts(record.captureDir, record.task).filter((a) => !known.has(a.path)));
+    }
+  }
+  const taskIdentities = new Map(groups.map((g) => [g.profile, loadDurableTaskIdentities(g.profile, history)]));
   const index = buildLaunchSessionIndex();
   return groupIntoRows(
     groups,
@@ -302,6 +429,11 @@ export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
     (launchId) => resolveLaunchSession(index, launchId),
     (sessionId) => getSessionById(sessionId),
   );
+}
+
+export function buildBrowserSessionRows(profile?: string): BrowserSessionRow[] {
+  try { pruneToolSessions(); } catch {  }
+  return readBrowserSessionRows(profile);
 }
 
 export function matchesBrowserSessionRow(row: BrowserSessionRow, query: string): boolean {

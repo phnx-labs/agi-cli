@@ -92,6 +92,9 @@ interface ToolRowBase {
 export interface BrowserToolRow extends ToolRowBase {
   kind: 'browser';
   profile: string;
+  machine?: string;
+  captureDir?: string;
+  capturesRemote?: string;
   url?: string;
   tabs?: ToolTab[];
   showCommand?: ToolCommand;
@@ -157,12 +160,6 @@ function knownMachine(machine: string | undefined): string | undefined {
   return machine && machine !== 'unknown' ? machine : undefined;
 }
 
-function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const item of items) counts[key(item)] = (counts[key(item)] ?? 0) + 1;
-  return counts;
-}
-
 export function boundBrowserRow(task: string, binding: { profile?: string }): BrowserSessionRow {
   return {
     kind: 'task', task, profile: binding.profile ?? '',
@@ -191,7 +188,7 @@ export function projectBrowserToolRow(
   const tabs = live?.tabs;
   const showTab = tabs?.find((tab) => tab.current && !tab.borrowed)?.id
     ?? tabs?.find((tab) => !tab.borrowed)?.id;
-  const startedAtMs = live?.startedAtMs ?? binding?.createdAt ?? oldest;
+  const startedAtMs = live?.startedAtMs ?? binding?.createdAt ?? row.startedAt ?? oldest;
   const updatedAtMs = Math.max(row.latestMtimeMs, live?.lastActionAtMs ?? 0) || startedAtMs;
   return {
     kind: 'browser',
@@ -208,8 +205,11 @@ export function projectBrowserToolRow(
     startedAtMs,
     updatedAtMs,
     captures,
-    captureCounts: countBy(row.artifacts, (artifact) => artifact.kind),
+    captureCounts: Object.fromEntries(Object.entries(row.counts).filter(([, n]) => n > 0)),
     profile: row.profile || live?.profile || '',
+    ...(row.machine ? { machine: row.machine } : {}),
+    ...(row.captureDir ? { captureDir: row.captureDir } : {}),
+    ...(row.capturesRemote ? { capturesRemote: row.capturesRemote } : {}),
     ...(url ? { url } : {}),
     ...(tabs ? { tabs } : {}),
     ...(isLive && showTab ? { showCommand: { command: 'agents' as const, args: ['browser', 'tab', 'focus', showTab, '--task', row.task!], runOn: host } } : {}),
