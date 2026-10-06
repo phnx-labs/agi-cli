@@ -48,6 +48,10 @@ interface ExecCommandActionOptions {
   interactive?: boolean;
   authCheck?: boolean;
   resume?: string | boolean;
+  all?: boolean;
+  teams?: boolean;
+  since?: string;
+  limit?: string;
   sessionId?: string;
   name?: string;
   notify?: boolean;
@@ -578,6 +582,19 @@ async function handleTerminalHandoff(
   }
 }
 
+export function resumePickerOptionConflict(
+  options: Pick<ExecCommandActionOptions, 'resume' | 'all' | 'teams' | 'since' | 'limit'>,
+): string | undefined {
+  const used = [
+    options.all && '--all',
+    options.teams && '--teams',
+    options.since !== undefined && '--since',
+    options.limit !== undefined && '--limit',
+  ].filter(Boolean);
+  if (used.length === 0 || options.resume === true || options.resume === '') return undefined;
+  return `${used.join(', ')} only filter the session picker, so pass them with a bare --resume (no id), e.g. agents run claude --resume --all --since 7d.`;
+}
+
 export function registerRunCommand(program: Command): void {
   const runCmd = program
     .command('run [agent] [prompt]')
@@ -628,6 +645,10 @@ export function registerRunCommand(program: Command): void {
     .option('--results [run-id]', 'With --broadcast: show one saved matrix run, or list saved runs newest first')
     .option('--concurrency <n>', 'With --broadcast: maximum cells running at once', '3')
     .option('--resume [id]', 'Resume a conversation with its account on the origin device. Omit the id for the shared session picker; #account filters the history. Pair an id with a prompt to continue headlessly.')
+    .option('--all', 'With a bare --resume: list sessions from every directory, not just this project (also lifts the 30d window)')
+    .option('--teams', 'With a bare --resume: include team-spawned sessions')
+    .option('--since <time>', 'With a bare --resume: only sessions newer than this (default 30d; e.g. 2h, 7d, 4w, or ISO date)')
+    .option('-n, --limit <n>', 'With a bare --resume: maximum sessions loaded into the picker (default 200)')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
@@ -882,7 +903,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         given. --cloud is mutually exclusive with --device/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value
@@ -892,6 +913,11 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
   runCmd.action(async (agentSpec: string | undefined, prompt: string | undefined, options: ExecCommandActionOptions, command: Command) => {
       bootMark('run-action:enter');
       const rawArgs: string[] = process.argv;
+      const pickerConflict = resumePickerOptionConflict(options);
+      if (pickerConflict) {
+        console.error(chalk.red(pickerConflict));
+        process.exit(1);
+      }
       const separatorIdx = rawArgs.indexOf('--');
       const passthroughArgs = separatorIdx === -1 ? [] : rawArgs.slice(separatorIdx + 1);
       const operandsBeforeSeparator = command.args.length - passthroughArgs.length;
@@ -1053,6 +1079,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           cwd: device ? options.remoteCwd ?? (options.cwd ? toRemotePortable(options.cwd) : undefined) : options.cwd,
           quiet: options.quiet,
           device,
+          all: options.all,
+          teams: options.teams,
+          since: options.since,
+          limit: options.limit,
           runArgs: rawArgs.slice(2),
         });
         return;

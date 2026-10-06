@@ -35,6 +35,7 @@ import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictR
 import { toRemotePortable } from '../lib/project-root.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 import { sessionHeadline } from '../lib/session/title.js';
+import { stripRoutingFlags, type StripSpec } from '../lib/hosts/remote-cmd.js';
 
 export const CONFIRM_THRESHOLD = 5;
 
@@ -343,9 +344,16 @@ export async function sessionsResumeAction(
   if (opened !== items.length) process.exitCode = 1;
 }
 
+const RUN_RESUME_PICKER_SPECS: StripSpec[] = [
+  { long: 'all', takesValue: false },
+  { long: 'teams', takesValue: false },
+  { long: 'since', takesValue: true },
+  { long: 'limit', short: 'n', takesValue: true },
+];
+
 export function buildSelectedResumeArgs(id: string, prompt: string | undefined, options: ResumeOptions): string[] {
   if (options.runArgs) {
-    const args = [...options.runArgs];
+    const args = stripRoutingFlags(options.runArgs, RUN_RESUME_PICKER_SPECS);
     const boundary = args.indexOf('--');
     const index = args.findIndex((arg, i) => (boundary < 0 || i < boundary) && (arg === '--resume' || arg === '--resume='));
     if (index < 0) throw new Error('The run command did not contain a bare --resume selector.');

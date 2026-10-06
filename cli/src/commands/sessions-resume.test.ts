@@ -23,6 +23,7 @@ import { shellQuote } from '../lib/terminal/index.js';
 import { execOnly } from '../lib/terminal/shell.js';
 import { buildFullCommandTree } from '../cli/command-registry.js';
 import { normalizeResumeDeviceArgs } from '../lib/startup/root-command.js';
+import { setArgvCommandTree } from '../lib/hosts/routing-flag.js';
 
 describe('resolveResumePacking', () => {
   it('opens every resumed session in its own tab by default', () => {
@@ -191,6 +192,21 @@ describe('selected resume argv', () => {
   it('rejects attach-only options that would launch a copy before lookup', async () => {
     await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, mode: 'edit' })).rejects.toThrow('--attach-only cannot');
     await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, agent: 'codex' })).rejects.toThrow('--attach-only cannot');
+  });
+
+  it('drops the picker-only filters from the child run, keeping option values and passthrough intact', async () => {
+    setArgvCommandTree(await buildFullCommandTree());
+    try {
+      const runArgs = [
+        'run', 'claude', '--resume', '--all', '--teams', '--since=7d', '-n5', '--name', '--all', '--limit', '9',
+        '--', '--all', '--since', '1d', '-n', '2',
+      ];
+      expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs })).toEqual([
+        'run', 'claude', '--resume', 'abc12345', '--name', '--all', '--', '--all', '--since', '1d', '-n', '2',
+      ]);
+    } finally {
+      setArgvCommandTree(undefined);
+    }
   });
 
   it('retains run flags and native passthrough while filling the selected identity', () => {
