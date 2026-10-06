@@ -44,6 +44,7 @@ import {
   formatTodoCompact,
   pickerColumnsFor,
   renderSession,
+  type SessionPreviewDigest,
 } from '../lib/session/presentation.js';
 export function transcriptOnPeerOf(session: SessionMeta): string | undefined {
   if (session._remote) return session.machine;
@@ -635,34 +636,6 @@ const DIRS_TOUCHED_MAX = 5;
 const CHANGED_FILES_MAX = 200;
 
 const PREVIEW_DIGEST_MAX_PARSE_BYTES = 4 * 1024 * 1024;
-
-export interface SessionPreviewDigest {
-  schemaVersion: 1;
-  firstUser: string;
-  lastAssistant: string;
-  filesRead: number;
-  toolCalls: number;
-  planFile: string;
-  todos?: TodoProgress;
-  subAgentCount: number;
-  backgroundShellCount?: number;
-  toolTags: string[];
-  changes: ReturnType<typeof changeCounts>;
-  changedFiles: FileChange[];
-  dirs: string[];
-  repos: string[];
-  artifacts: ReturnType<typeof extractArtifacts>;
-  skills: ReturnType<typeof extractSkills>;
-  plugins: string[];
-  hooks: ReturnType<typeof extractHooks>;
-  links: ReturnType<typeof extractLinks>;
-  errorCount: number;
-  firstError?: string;
-  toolHistogram: ReturnType<typeof toolHistogram>;
-  test: ReturnType<typeof detectTestResult>;
-  partial?: boolean;
-  partialReason?: string;
-}
 
 export function buildSessionPreviewDigest(events: SessionEvent[], session: SessionMeta): SessionPreviewDigest {
   let firstUser = '';

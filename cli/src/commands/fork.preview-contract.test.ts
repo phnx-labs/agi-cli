@@ -9,7 +9,7 @@ process.env.AGENTS_REAL_HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
-const { renderSessionPreview } = await import('./sessions.js');
+const { renderSessionPreview } = await import('./ps.js');
 const { buildForkRecap, forkLabelFor } = await import('../lib/session/fork.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { buildSessionDetailBlock } from './sessions.js';
+import { buildSessionDetailBlock } from './presentation.js';
 import type { SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { parseSession } from '@phnx-labs/sessions-cli/reader';
 

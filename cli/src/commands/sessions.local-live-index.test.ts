@@ -19,7 +19,8 @@ vi.mock('../lib/ssh-exec.js', async () => {
   return { ...actual, sshExec: sshExecMock, sshExecRaw: sshExecRawMock };
 });
 
-const { maybeLiveIndex, renderSessionPreview } = await import('./sessions.js');
+const { maybeLiveIndex } = await import('./sessions.js');
+const { renderSessionPreview } = await import('./ps.js');
 const { AgentProcess, AgentStatus } = await import('../lib/teams/agents.js');
 
 afterEach(() => {
