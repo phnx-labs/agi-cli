@@ -105,6 +105,11 @@ export function buildManifest(
     }
   }
 
+  manifest.retired = {
+    commands: retireRemoved(manifest.commands, previous?.commands, previous?.retired?.commands),
+    skills: retireRemoved(manifest.skills, previous?.skills, previous?.retired?.skills),
+  };
+
   if (previous?.rules && !isRulesStale(previous.rules, agent, version, cwd)) {
     manifest.rules = previous.rules;
   } else {
@@ -116,6 +121,18 @@ export function buildManifest(
     manifest.permissions = buildPermissions();
   }
   return manifest;
+}
+
+function retireRemoved<E>(
+  current: Record<string, E>,
+  previous: Record<string, E> | undefined,
+  previouslyRetired: Record<string, E> | undefined,
+): Record<string, E> {
+  const retired: Record<string, E> = {};
+  for (const [name, entry] of Object.entries({ ...previouslyRetired, ...previous })) {
+    if (!(name in current)) retired[name] = entry;
+  }
+  return retired;
 }
 
 export function isStale(

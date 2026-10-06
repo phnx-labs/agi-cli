@@ -451,7 +451,7 @@ export function marketplaceSpecForName(name: string | undefined, cwd: string = p
   return { kind: 'extra', alias, root: getExtraPluginsDir(alias) };
 }
 
-function listVersionMarketplaceNames(agent: AgentId, versionHome: string): string[] {
+export function listVersionMarketplaceNames(agent: AgentId, versionHome: string): string[] {
   const dir = path.join(versionHome, agentConfigDirName(agent), 'plugins', 'marketplaces');
   if (!fs.existsSync(dir)) return [];
   try {
@@ -1321,17 +1321,25 @@ function isOrphanMarketplacePlugin(
   return !active.names.has(pluginName);
 }
 
+export interface OrphanPluginScope {
+  marketplace: string;
+  dryRun?: boolean;
+}
+
 export function cleanOrphanedPluginSkills(
   agent: AgentId,
   versionHome: string,
   activePlugins: ActivePluginsInput,
-  version?: string
+  version?: string,
+  scope?: OrphanPluginScope,
 ): string[] {
   const active = indexActivePlugins(activePlugins);
   const cwd = process.cwd();
   const removed: string[] = [];
+  const removedPlugins = new Set<string>();
 
   for (const name of listVersionMarketplaceNames(agent, versionHome)) {
+    if (scope && (name !== scope.marketplace || !marketplaceSourceRepoExists(name, cwd))) continue;
     const spec = marketplaceSpecForName(name);
     const mktPluginsDir = path.join(marketplaceRoot(name, agent, versionHome), 'plugins');
     if (!fs.existsSync(mktPluginsDir)) continue;
@@ -1339,6 +1347,11 @@ export function cleanOrphanedPluginSkills(
     for (const entry of fs.readdirSync(mktPluginsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
       if (!isOrphanMarketplacePlugin(name, entry.name, active, cwd)) continue;
+      if (scope?.dryRun) {
+        removed.push(entry.name);
+        removedPlugins.add(entry.name);
+        continue;
+      }
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const trashDir = path.join(getTrashPluginsDir(), agent, version || 'unknown', entry.name);
@@ -1353,6 +1366,7 @@ export function cleanOrphanedPluginSkills(
           unregisterCopilotInstalledPlugin(entry.name, name, agent, versionHome);
         }
         removed.push(entry.name);
+        removedPlugins.add(entry.name);
         trashedHere = true;
       } catch {  }
     }
@@ -1373,6 +1387,11 @@ export function cleanOrphanedPluginSkills(
       if (dashIdx === -1) continue;
       const pluginName = entry.name.slice(0, dashIdx);
       if (active.names.has(pluginName)) continue;
+      if (scope && !removedPlugins.has(pluginName)) continue;
+      if (scope?.dryRun) {
+        removed.push(entry.name);
+        continue;
+      }
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const trashDir = path.join(getTrashPluginsDir(), agent, version || 'unknown', entry.name);
