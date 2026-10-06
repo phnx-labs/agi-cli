@@ -8,8 +8,9 @@ import {
   installComputerHelperMacLocal,
   activateComputerHelperMacLocal,
   probeComputerTrust,
-} from './computer.js';
-import { resolveComputerBin, ComputerClientError } from '../lib/computer-client.js';
+  resolveComputerBin,
+  ComputerClientError,
+} from '../lib/computer-client.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { installSetupTool } from '../lib/setup-tool-install.js';
 import { refreshToolSetup } from '../lib/setup-tool-status.js';

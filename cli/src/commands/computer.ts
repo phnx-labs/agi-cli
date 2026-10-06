@@ -47,16 +47,7 @@ import {
   resolveTcpEndpoint,
   resolveVncEndpoint,
 } from '../lib/computer/policy.js';
-import { buildComputerContext, type ComputerTargetContext } from '../lib/computer/context.js';
-import { recordComputerAction } from '../lib/computer/record.js';
-import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
-import { getConfigValue } from '../lib/device-config.js';
-import { parseAddress, sshTarget } from '../lib/address.js';
-import {
-  isComputerClientError,
-  resolveComputerBin,
-  runComputer,
-} from '../lib/computer-client.js';
+import { forwardToComputer, type ForwardToComputerOptions } from '../lib/computer-client.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 
 const COMPUTER_HELP_GROUPS = [
@@ -101,75 +92,7 @@ export function shouldBlockOffPlatform(opts: {
   return true;
 }
 
-export function withHostFlag(argv: string[], host?: string): string[] {
-  if (!host) return argv;
-  if (argv.some((arg) => arg === '--host' || arg.startsWith('--host='))) return argv;
-  const [verb, ...rest] = argv;
-  return [verb, '--host', host, ...rest];
-}
-
-export async function resolveDeviceHost(device: string): Promise<{ host: string; target: ComputerTargetContext }> {
-  const configured = getConfigValue('computer.host', { device }).value as string | undefined;
-  if (configured) {
-    const addr = parseAddress(configured);
-    if (addr.scheme === 'vnc' || addr.scheme === 'tcp') {
-      return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
-    }
-    const resolved = await resolveRemoteDevice(device, {});
-    const target = sshTarget(addr);
-    return {
-      host: configured,
-      target: { alias: device, host: target, user: addr.user ?? resolved.user, hostname: addr.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
-    };
-  }
-  const resolved = await resolveRemoteDevice(device, {
-    expectPlatform: 'windows',
-    forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
-  });
-  return {
-    host: `ssh://${resolved.target}`,
-    target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
-  };
-}
-
-async function forwardToComputer(opts: {
-  argv: string[];
-  device?: string;
-  record?: boolean;
-  capture?: boolean;
-}): Promise<{ exitCode: number; stdout: string }> {
-  let bin: string;
-  try {
-    bin = resolveComputerBin();
-  } catch (err) {
-    if (isComputerClientError(err)) {
-      console.error(err.message);
-      return { exitCode: 1, stdout: '' };
-    }
-    throw err;
-  }
-
-  const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
-  let host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
-  let target: ComputerTargetContext | undefined;
-  if (!host && opts.device) {
-    const resolved = await resolveDeviceHost(opts.device);
-    host = resolved.host;
-    target = resolved.target;
-  }
-  const context = await buildComputerContext({ device: opts.device, host, target, computerBin: bin });
-
-  return runComputer({
-    argv: withHostFlag(opts.argv, host),
-    context,
-    capture: opts.capture,
-    onEvent: opts.record === false
-      ? undefined
-      : (event) => recordComputerAction(event, { device: opts.device }),
-  });
-}
-
-async function forwardAndExit(opts: Parameters<typeof forwardToComputer>[0]): Promise<void> {
+async function forwardAndExit(opts: ForwardToComputerOptions): Promise<void> {
   const { exitCode } = await forwardToComputer(opts);
   if (exitCode !== 0) process.exit(exitCode);
 }
@@ -350,40 +273,4 @@ function registerSessionsCommand(program: Command): void {
     .action(async (opts: { machine?: string; limit?: number; json?: boolean; interactive?: boolean }) => {
       await runComputerSessionsCommand({ machine: opts.machine, limit: opts.limit, json: opts.json, interactive: opts.interactive });
     });
-}
-
-export async function installComputerHelperMacLocal(): Promise<void> {
-  const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
-  if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
-}
-
-export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
-  const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
-  if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
-  return { trusted: await probeComputerTrust() };
-}
-
-export function parseTrustFromStatusJson(stdout: string): boolean {
-  const start = stdout.indexOf('{');
-  if (start < 0) return false;
-  try {
-    const parsed = JSON.parse(stdout.slice(start)) as { trusted?: unknown };
-    return parsed.trusted === true;
-  } catch {
-    return false;
-  }
-}
-
-export async function probeComputerTrust(): Promise<boolean> {
-  try {
-    const { exitCode, stdout } = await forwardToComputer({
-      argv: ['status', '--json'],
-      record: false,
-      capture: true,
-    });
-    if (exitCode !== 0) return false;
-    return parseTrustFromStatusJson(stdout);
-  } catch {
-    return false;
-  }
 }

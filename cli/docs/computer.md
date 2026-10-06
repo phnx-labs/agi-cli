@@ -367,7 +367,7 @@ Every verb takes `--device <device>` to drive a Windows machine registered with
 `agents devices`. agents-cli resolves the name against the fleet — registry, ssh
 identity, platform — and forwards the resolved target on fd 3 **and** the
 standalone engine's own `--host <address>` (PHNX-4090; `resolveDeviceHost` in
-`commands/computer.ts`) — never `--device`, since the engine has no fleet
+`lib/computer-client.ts`) — never `--device`, since the engine has no fleet
 registry of its own to resolve a bare name against. A device's `computer.host`
 config (`agents config set devices.<name>.computer.host <address>`, next to
 `defaultBrowserProfile`) wins when set — it can be `ssh://user@host` (still
