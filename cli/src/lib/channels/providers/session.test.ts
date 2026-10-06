@@ -19,8 +19,6 @@ describe('session provider — refuses what it cannot deliver', () => {
   });
 });
 
-// Each pane runs a raw-mode reader that appends every byte it receives to a
-// file, so assertions are on delivered input, never on what a shell echoed.
 describe.skipIf(!isTmuxInstalled())('agents send --channel session — real tmux delivery', () => {
   const SHORT = 'cafe1234';
   const NAME = `ag-claude-${SHORT}`;

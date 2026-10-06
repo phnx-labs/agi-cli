@@ -61,9 +61,6 @@ export function readOwnerDest(meta: Meta): { channel: string; to: string } | nul
   return channel && to ? { channel, to } : null;
 }
 
-// The session channel types into a terminal, so its text is delivered byte for
-// byte: surrounding whitespace is input, and an explicitly empty message still
-// presses Enter. Every other channel trims.
 function resolveText(
   input: ResolveSendInput,
   verbatim: boolean,
