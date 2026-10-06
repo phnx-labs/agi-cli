@@ -150,7 +150,7 @@ function persistOwnership(entry: PidSessionEntry): void {
 }
 
 function restoreOwnership(entry: PidSessionEntry): PidSessionEntry {
-  if (entry.processIdentity && (entry.originTerminal || !entry.launchId)) return entry;
+  if (entry.processIdentity && (entry.originTerminal || !entry.terminalId || !entry.launchId)) return entry;
   try {
     const owner = JSON.parse(fs.readFileSync(ownershipPath(entry.pid), 'utf8')) as PidSessionEntry;
     if (owner.pid === entry.pid && owner.launchId === entry.launchId && owner.startedAtMs === entry.startedAtMs) {

@@ -23,6 +23,7 @@ import {
 import { buildRemoteAgentsInvocation, posixEnvExports } from './remote-cmd.js';
 import { resetActorCache, setActorResolvers } from '../actor.js';
 import { machineId } from '../machine-id.js';
+import { launchIdentityEnv, launchOrigin } from '../launch-identity.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
@@ -637,9 +638,21 @@ describe('withActorEnv — forward actor provenance across the SSH hop (RUSH-202
     const cmd = buildRemoteAgentsInvocation(['run', 'codex', '--interactive'], undefined, undefined, env);
     expect(cmd).toContain(`export AGENTS_ORIGIN_DEVICE=${machineId()}`);
     process.env.AGENTS_ORIGIN_DEVICE = 'zion';
+    process.env.AGENTS_ORIGIN_TERMINAL_ID = 'cx-1791286411284-2';
     expect(withActorEnv().AGENTS_ORIGIN_DEVICE).toBe('zion');
+    delete process.env.AGENTS_ORIGIN_TERMINAL_ID;
     delete process.env.AGENT_TERMINAL_ID;
     expect('AGENTS_ORIGIN_DEVICE' in withActorEnv()).toBe(false);
+  });
+
+  it('pairs an inherited origin device only with the inherited origin tab, and records no origin for a nested run (PHNX-4263)', () => {
+    expect(launchIdentityEnv({ AGENT_TERMINAL_ID: 'local-tab', AGENTS_ORIGIN_DEVICE: 'zion' }))
+      .toMatchObject({ AGENTS_ORIGIN_TERMINAL_ID: 'local-tab', AGENTS_ORIGIN_DEVICE: machineId() });
+    const remote = launchIdentityEnv({ AGENT_TERMINAL_ID: 'cx-tab', AGENTS_ORIGIN_TERMINAL_ID: 'cx-tab', AGENTS_ORIGIN_DEVICE: 'zion' });
+    expect(launchOrigin(remote)).toEqual({ device: 'zion', terminalId: 'cx-tab' });
+    const nested = launchIdentityEnv({ AGENTS_RUNTIME: 'headless', AGENT_TERMINAL_ID: 'cx-tab', AGENTS_ORIGIN_TERMINAL_ID: 'cx-tab', AGENTS_ORIGIN_DEVICE: 'zion' });
+    expect(nested).toMatchObject({ AGENTS_ORIGIN_TERMINAL_ID: 'cx-tab', AGENTS_ORIGIN_DEVICE: 'zion' });
+    expect(launchOrigin(nested)).toBeUndefined();
   });
 
   it('omits AGENT_TERMINAL_ID entirely when the launch came from no tracked terminal', () => {
