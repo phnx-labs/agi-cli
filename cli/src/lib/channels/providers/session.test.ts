@@ -78,6 +78,16 @@ describe.skipIf(!isTmuxInstalled())('agents send --channel session — real tmux
     expect(fs.existsSync(path.join(tempHome, 'nope'))).toBe(false);
   }, 60_000);
 
+  it('types dash-led text that looks like tmux or routing flags as literal input', async () => {
+    const { out } = await startReader(NAME, socket);
+    const text = '-Dx --device=other -l';
+
+    const sent = send(['--to', SHORT, '--text', text]);
+    expect(sent.status, sent.out).toBe(0);
+    expect(sent.json).toMatchObject({ ok: true, text, writes: 2 });
+    expect(await received(out, text.length + 1)).toBe(`${text}\r`);
+  }, 60_000);
+
   it('delivers explicitly whitespace-only text, and an explicitly empty message presses Enter alone', async () => {
     const { out } = await startReader(NAME, socket);
 
