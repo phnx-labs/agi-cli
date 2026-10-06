@@ -1,5 +1,232 @@
 # Changelog
 
+## 1.22.121
+
+- **`agents sessions` reads use the `sessions` binary this CLI already depends on.**
+  With `$SESSIONS_BIN` unset, a read runs the `@phnx-labs/sessions-cli` dependency
+  instead of requiring a second global `sessions` install. The package `exports`
+  map publishes only `./reader`, so the lookup walks Node's module paths and reads
+  the `bin` field. A non-empty `$SESSIONS_BIN` still pins the binary. An empty
+  `$SESSIONS_BIN` keeps the PATH lookup. No standalone at all, an older binary,
+  and a peer exit 127 still stay on the in-repo engine.
+  Source: `cli/src/lib/sessions-client.ts`.
+
+- **The transcript reader is imported from `@phnx-labs/sessions-cli/reader`, not kept
+  in-repo (PHNX-4118).** The pure parse→render→analyze pipeline (parse, render, state,
+  tool-calls, timeline, prompt, insights, bash-command, trajectory + text/html/lineage/
+  compare, digest, tail, highlights, shell-programs, team-filter, linear, artifacts,
+  stream-render, share-html, and the `SessionEvent`/`SessionMeta`/`SessionStep` types)
+  now comes from the published `@phnx-labs/sessions-cli@0.3.0` package's `/reader`
+  subpath — the same code the standalone `sessions` bin runs — deleting ~13k LOC of a
+  byte-for-byte in-repo copy. The reader is imported **in-process** (a normal
+  node_modules import, never a subprocess), so the indexer warm-tick (`db.ts`), the eval
+  loop (`lib/traces/sync.ts`), and live-state (`active.ts`) still parse without shelling
+  out. No user-visible behavior change: `sessions <id> --json`/`--markdown`, `trace`,
+  `timeline`, and `insights` render exactly as before. The CLI-owned half — the
+  writer/indexer, lifecycle, live-identity, and remote/sync code — stays in
+  `cli/src/lib/session/`. Source: `cli/package.json`, `cli/src/lib/session/`,
+  `cli/src/lib/traces/sync.ts`.
+
+- **Two processes can no longer both release the same feed answer claim.** The
+  release token was created empty and filled a moment later, so a peer that read
+  it in that gap judged it stale, deleted it, and released the claim a second
+  time. The token is now written to a temp file and linked into place with its
+  owner already inside, and a token whose owner cannot be read is aged by its
+  file time instead of being treated as abandoned. Source: `cli/src/lib/feed/feed.ts`
+  (`acquireReleaseToken`, PHNX-4131).
+
+- **`agents ps`: the live agent roster and the verbs that act on it (PHNX-4227, R1).**
+  `agents ps` lists the sessions running now on this machine and every reachable
+  device (`--json`, `--local`, `-D/--device`, `--status <state>`), and opens the
+  session picker filtered to running sessions on a TTY (`r` toggles the filter).
+  `agents ps stop|focus|detach|migrate <id>` run the same code as the `sessions`
+  verbs. `agents sessions --active` and every `sessions` verb keep working unchanged;
+  callers move in the next release. Source: `cli/src/commands/ps.ts`,
+  `cli/src/commands/ps-roster.ts`.
+- **`agents send --channel session --to <id>` types into a running agent's terminal**,
+  what `agents sessions inject <id>` does (text, then Enter, as two writes). The id
+  is a session id or prefix, the `<shortid>` of an `ag-<agent>-<shortid>` tmux name,
+  or a `%pane`; `--device <name>` delivers on another box. `--attach`, `--thread` and
+  `--from` are refused on this channel. Source: `cli/src/lib/channels/providers/session.ts`.
+- **`agents setup tools` installs or upgrades the standalone CLIs to their pinned
+  releases**: sessions-cli 0.5.0, browser-cli 0.1.15, secrets-cli 0.1.8,
+  computer-cli 0.1.5, term-cli 0.1.0. A newer install is left alone; exit 1 when a
+  tool is still below its pin. Source: `cli/src/lib/standalone-tools.ts`.
+- **Fix: `sessions --active` read empty after the daemon refreshed the live
+  snapshot.** The daemon published local rows without `machine`, which the running
+  filter requires, so the roster (and a peer's answer to `-D <device>`) was empty
+  whenever the daemon's snapshot was the newest. Rows are now stamped with this
+  machine's id. Source: `cli/src/lib/session/session-cache.ts`.
+- **`agents send --device <box>` now runs the send on that box**, for any channel. It
+  was refused before (`send` had no remote interpretation). It exists so
+  `--channel session` can reach a pane on another device.
+- **`agents setup secrets` installs secrets-cli 0.1.8, up from 0.1.5**, the same
+  version `agents setup tools` pins. Source: `cli/src/lib/secrets-cli.ts`.
+
+- **`agents projects todo add` takes a description, assignee, due date and priority
+  (PHNX-4244).** `--description`, `--assignee <name|email>`, `--due YYYY-MM-DD` and
+  `--priority urgent|high|medium|low|none` back AGI Menu's quick-add form; each beats
+  the same field typed in the line (so does `--project` now). The issue still lands in
+  the active cycle as Todo with no delegate, so any agent's queue picks it up. A title
+  under 3 or over 120 characters, a due date in the past, and a description over
+  10,000 characters are refused before anything is created.
+  Source: `cli/src/lib/quick-todo.ts`, `cli/src/commands/projects-todo.ts`.
+
+- **`agents setup browser` installs browser-cli 0.1.15, up from 0.1.5.** 0.1.15's
+  `browser profiles logins` reads Arc, Comet and pinned profiles from their real
+  stores and has a `--json` mode, which the fleet credentials-catalog hook uses to
+  tell agents which profile is signed in where. The pin only applies to a fresh
+  install; an existing `browser` is left alone. Source: `cli/src/lib/setup-tool-install.ts`.
+
+- **Session rows carry the facts the sidebar needs to read an agent at a glance (PHNX-4218).**
+  A watch row now includes the latest reply's `model`, the newest 20 failed or
+  policy-blocked calls, a 48-bucket activity histogram, the user's own turns, and
+  this session's subagents (task, type, tools, result). `subAgentCount` counts
+  this session's own subagent transcripts when it has any; an empty `subagents/`
+  directory no longer reports zero over the tool-call count. Pasted images are
+  written once under `~/.agents/.cache/attachments/<session>/` so the editor can
+  show them, including a paste larger than one timeline read. That record resumes
+  from the next tick instead of freezing the row, and its image bytes are not
+  stored in the timeline cache. An unfinished record that still fits in one
+  read is left until its newline arrives, so a long turn that is still flushing
+  is not dropped. Plans rendered by the artifacts CLI join the row by session id.
+  The projection comes from `@phnx-labs/sessions-cli@0.5.0` and is folded once
+  in the daemon timeline pass. Older extensions ignore the new fields.
+  Source: `cli/src/lib/session/glance-files.ts`, `cli/src/lib/session/timeline-pass.ts`,
+  `cli/src/lib/session/active.ts`, `cli/package.json`.
+
+- **Hooks no longer run twice after a sync.** Hook registrations are now matched to the
+  manifest by event, matcher and command, and any copy agents-cli wrote into another version
+  home or account slot is treated as its own and dropped. Before, a Claude or Codex account
+  slot kept the version-home registrations it carried forward next to its own, so every
+  Stop, SessionStart and prompt hook ran twice in an account session, and hooks deleted from
+  the source repos (or from a removed version) stayed registered. A hook whose script serves
+  several events (feed-publish) also kept a direct registration beside its shim, which ran it
+  twice on AskUserQuestion. The next sync removes the extra entries. Source:
+  `cli/src/lib/hooks/install.ts`.
+
+- **Installed host CLIs now follow their version pin.** The daemon's update tick
+  upgrades `browser`, `secrets`, `computer` and any other host CLI whose manifest
+  pins an npm version (`npm: "@phnx-labs/secrets-cli@0.1.8"`) when the installed
+  binary reports an older version. Before, the pin only applied to a first install,
+  so a box kept whatever version it started with. The upgrade targets the npm
+  prefix that owns the binary on PATH, is confirmed by re-running `--version`,
+  never installs a missing tool or downgrades one, ignores project-layer
+  manifests, and leaves the old version in place if the install fails. Source: `cli/src/lib/cli-resources.ts`
+  (`upgradeOutdatedClis`), `cli/src/lib/daemon/self-update-service.ts`.
+
+- **Act on a pull request from the CLI: ready, approve, comment (PHNX-4215).**
+  `agents projects prs ready|review --approve|comment <project> --repo R --number N`
+  join `prs merge`, each with a `--json` result AGI Menu reads. `review` reads the live
+  head, refuses one that moved since `--sha`, and records the approval against that
+  SHA; `comment` takes `--body` or `--body-file -`. Approve and comment are single REST
+  calls; ready is one GraphQL mutation because GitHub has no REST way to leave draft.
+  Source: `cli/src/lib/github/project-prs.ts`.
+- **AGI Menu preferences for pins, tabs, and milestone grouping (PHNX-3999).**
+  `menubar.menu.pinnedProjects`, `menubar.menu.tabOrder`, `menubar.menu.hiddenTabs`,
+  and `menubar.menu.groupTicketsByMilestone` sync fleet-wide. In
+  `agents menubar snapshot --json`, the boolean rides `menuPreferences` and the three
+  lists ride a new `menuListPreferences` map, so menus that predate them keep decoding
+  the snapshot. List keys take a JSON array or
+  comma-separated items and are validated when written. Source:
+  `cli/src/lib/device-config.ts`.
+
+- **AGI Menu 1.7.0: each project opens on a Tickets / Pull requests switch (PHNX-4215).**
+  The pull-request board lists a project's open PRs with author, ages, and a description
+  excerpt; filters for All, Ready, Drafts, Mine, and repo; scoping to the project's own
+  folders in a shared monorepo; and a two-click merge pinned to the head you saw. It reads
+  `agents projects prs` (1.22.119). The `menubar` floor moves to 1.7.0, so installed CLIs
+  download it on their next helper check. Source: `cli/src/lib/helper-versions.ts`.
+
+- **`agents menubar snapshot --json` names who is signed in, with a profile picture.**
+  The snapshot gains a top-level `me` object (`name`, `email`, `github`, `avatarUrl`,
+  `avatarSource`) so AGI Menu can show the person instead of initials. When you are
+  signed in with `agents auth login`, that session is the person: its name, email and
+  picture are used, and your `gh` account adds its login (and fills a missing name or
+  picture) only when its public profile email matches the session email. Without a
+  Phoenix ID session, the `gh` account supplies everything except the email. `me` is
+  null when neither is available. GitHub facts come from `gh api user`, recorded in
+  `~/.agents/.cache/github-viewer.json` (no email, only a SHA-256 of the public one).
+  A snapshot spawns `gh` only when that record is stale: at most once a day, or once
+  an hour after a failed read, which keeps the last good answer. Each spawn is capped
+  at 5 seconds. `agents auth login` and `agents auth whoami` now save your Phoenix ID display name,
+  and the session file is rewritten atomically and kept at mode 0600.
+  Source: `cli/src/lib/menubar/snapshot.ts`, `cli/src/lib/github/viewer.ts`.
+
+- **Slow monitors no longer restart the daemon every two minutes.** The monitors
+  service polled every due monitor one after another, so a set of slow polls
+  (`agents devices ps` takes about 30 s) kept its tick past the 2-minute deadline
+  and the daemon exited for a restart, which also dropped every `agents feed watch`
+  stream. A tick now runs up to four polls at once and starts new ones only in its
+  first minute; monitors it did not reach run first on the next tick. A timed-out
+  command poll now kills the whole pipeline, not just the shell. Source:
+  `cli/src/lib/monitors/engine.ts`, `cli/src/lib/monitors/sources/command.ts`,
+  `cli/src/lib/daemon/monitor-engine-service.ts`.
+
+- **Merge a blocked PR as an admin, or let it merge itself once checks pass.**
+  `agents projects prs merge` now refuses a PR that is not mergeable as-is (blocked by
+  branch protection, behind, or a state GitHub has not computed yet) unless `--admin`
+  is passed; `--admin` lets a repository admin merge past branch
+  protection where GitHub allows it, and is meant only for a person's explicit
+  confirm (AGI Menu's "Confirm admin merge"). The fleet's `gh-merge-guard` denies it
+  to agents. Refusals now read plainly: "Required check test hasn't passed", "The
+  head moved since you looked". New `agents projects prs automerge` turns GitHub
+  auto-merge on (pinned to the head you reviewed) or off with `--off`. `prs --json`
+  gains `merge: { viewerIsAdmin, adminBypass, autoMergeAllowed, methods }` per
+  repository and `autoMerge` per PR. `prs review --approve` on your own PR answers
+  without calling GitHub. Source: `cli/src/lib/github/project-prs.ts`.
+
+- **See CI and recently merged PRs in `agents projects prs`.** Every open PR row in
+  `--json` now carries `ciState` (GitHub's rollup of the head commit) and
+  `failingChecks`, and each repository adds `recentlyMerged` (PRs merged in the last
+  7 days, with CI on the merge commit), `defaultBranch` (the default branch head and
+  its CI), `ciError`, and `truncated`, so AGI Menu can show build health without
+  opening a browser. Everything is read over REST. A commit's CI is cached once all
+  of its checks finished, for an hour when green and five minutes when red, so a
+  re-run of a failed job shows up within five minutes. When a read fails, `ciError` says why instead of the
+  menu showing "no checks", and `truncated` marks a merged list that hit its page
+  cap. Shared monorepos scope merged PRs the same way as open ones. Source:
+  `cli/src/lib/github/project-prs.ts`.
+
+- **See why CI failed, re-run it, and spot a stalled release from `agents projects prs`.**
+  `agents projects prs failure <project> --repo <r> --sha <commit> --json` lists each
+  failing check on a commit with the error lines of its GitHub Actions job log
+  (timestamps, colour and runner cleanup removed, at most 12 lines), and
+  `agents projects prs rerun <project> --repo <r> --run-id <id>` re-runs a workflow
+  run's failed jobs. Each repository in `prs --json` now carries `release`: the latest
+  version tag, when it was cut, how many merges landed since, and the npm version of
+  the package it released, so AGI Menu can say "v1.22.121 tagged · npm still 1.22.120".
+  Two new AGI Menu preferences, `menubar.menu.prGroupOpen` and
+  `menubar.menu.prGroupMerged` (`none`, `type` or `day`), remember how the PR board is
+  grouped. All GitHub reads are REST. Source: `cli/src/lib/github/ci-failure.ts`,
+  `cli/src/lib/github/release-drift.ts`.
+
+- **Capture a to-do into Linear from one line: `agents projects todo`.** `add "Renew npm
+  token #AGI tomorrow !!"` reads the project, due day and priority from the text and
+  creates a Linear issue assigned to you in the active cycle; `list` shows your open
+  quick to-dos and anything due today or overdue; `done` closes one; `undo` reopens a
+  closed one or cancels a to-do created moments ago. All take `--json`; AGI Menu's Home
+  to-do line runs them. Linear is the record: nothing is stored locally. Source:
+  `cli/src/lib/quick-todo.ts`.
+
+- **The daemon no longer crash-loops on self-heal.** The self-heal pass compared every
+  synced skill and plugin file in every version home synchronously on the daemon's only
+  thread. On a box with many version homes that took over a minute, other services missed
+  their deadlines, the daemon exited for a restart, and the restart ran self-heal again
+  30 seconds later, pinning a CPU core and dropping the feed stream every ~77 seconds.
+  Self-heal now runs in its own child process (`agents __self-heal-run`), a restart no
+  longer re-runs it inside its 6-hour interval, and identical files are compared as raw
+  bytes instead of being decoded as text. Because a restart no longer triggers a pass, a
+  daemon restart (including after `agents upgrade`) no longer heals 30 seconds after boot; the
+  pass runs once 6 hours have passed since the previous one. Run `agents sync` to heal immediately. If you disabled self-heal as
+  a stopgap, turn it back on with `agents daemon services enable self-heal`.
+
+- **Session titles no longer show the injected credentials catalog.** The transcript
+  reader moves to `@phnx-labs/sessions-cli` 0.5.0, which treats the SessionStart
+  `## Credentials you can reach` block as injected context like `## Host & Fleet`, so a
+  harness that records hook output as a user turn (Codex) keeps the real first prompt as
+  its topic. Source: `cli/package.json`.
+
 ## 1.22.120
 
 - **An editor terminal now follows a `claude` restarted by hand (PHNX-4218).** After
