@@ -31,9 +31,8 @@ import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
-import { inferSessionState } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById, querySessions, getSessionById, readSessionContent, readArchivedSessionPreview, readSessionTimelineAny } from '../lib/session/db.js';
+import { findSessionsById, querySessions, getSessionById, readSessionTimelineAny } from '../lib/session/db.js';
 import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTail } from '@phnx-labs/sessions-cli/reader';
 import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
@@ -46,13 +45,11 @@ import {
   NO_TEAM_GROUP_KEY,
   type TeamSessionGroup,
 } from '@phnx-labs/sessions-cli/reader';
-import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import { runRemoteSessions, buildForwardedArgs, ensureWholeIndex } from '../lib/session/remote.js';
 import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeParts } from '../lib/session/relative-time.js';
-import { renderConversationMarkdown, renderSummary, renderSummaryHeader, computeSummaryStats, renderJson, filterEvents, parseRoleList, linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
+import { linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
-import { renderMarkdown } from '../lib/markdown.js';
 import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/scheduling/routines.js';
@@ -87,9 +84,25 @@ import {
   resolveRoutineName,
   runLiveRoster,
   shouldIncludeLocal,
-  signalBadges,
   statusColor,
 } from './ps-roster.js';
+import {
+  buildFilterOptions,
+  hasAnyFilter,
+  metaSignals,
+  renderSession,
+  resolveViewMode,
+  signalBadges,
+  type TranscriptRenderOptions,
+} from '../lib/session/presentation.js';
+export {
+  buildFilterOptions,
+  renderSession,
+  renderSessionLog,
+  renderSessionLogJson,
+  resolveViewMode,
+  type TranscriptRenderOptions,
+} from '../lib/session/presentation.js';
 import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsForkCommand } from './fork.js';
@@ -145,16 +158,6 @@ interface SessionFilterOptions {
   routine?: boolean | string;
   since?: string;
   until?: string;
-}
-
-export interface TranscriptRenderOptions {
-  json?: boolean;
-  markdown?: boolean;
-  redact?: boolean;
-  include?: string;
-  exclude?: string;
-  first?: string;
-  last?: string;
 }
 
 interface SessionsOptions extends SessionFilterOptions, TranscriptRenderOptions {
@@ -1921,14 +1924,6 @@ function originTag(session: SessionMeta): string {
   return `[routine${session.routineName ? ` · ${session.routineName}` : ''}] `;
 }
 
-function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
-  return {
-    pr: s.prUrl ? { url: s.prUrl, number: s.prNumber } : undefined,
-    worktree: s.worktreeSlug ? { path: s.cwd ?? '', slug: s.worktreeSlug } : undefined,
-    ticket: s.ticketId ? { id: s.ticketId } : undefined,
-  };
-}
-
 const MIN_TOPIC_W = 16;
 
 function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; text: string; extraW: number } {
@@ -2255,178 +2250,6 @@ function printTeamsView(
   console.log();
   console.log(chalk.gray('newest-active team first · resume any row with `agents sessions resume <id>`'));
   if (hiddenUnmanaged > 0) console.log(chalk.gray(formatUnmanagedHiddenFooter(hiddenUnmanaged)));
-}
-
-export function buildFilterOptions(options: TranscriptRenderOptions): FilterOptions {
-  const opts: FilterOptions = {};
-  if (options.include) opts.include = parseRoleList(options.include, '--include');
-  if (options.exclude) opts.exclude = parseRoleList(options.exclude, '--exclude');
-  if (opts.include && opts.exclude) {
-    throw new Error('--include and --exclude are mutually exclusive');
-  }
-  const parseCount = (raw: string, flag: string): number => {
-    const n = Number(raw);
-    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
-      throw new Error(`${flag} expects a positive integer, got "${raw}"`);
-    }
-    return n;
-  };
-  if (options.first !== undefined) opts.first = parseCount(options.first, '--first');
-  if (options.last !== undefined) opts.last = parseCount(options.last, '--last');
-  if (opts.first !== undefined && opts.last !== undefined) {
-    throw new Error('--first and --last are mutually exclusive');
-  }
-  return opts;
-}
-
-function hasAnyFilter(opts: FilterOptions): boolean {
-  return !!(opts.include?.length || opts.exclude?.length || opts.first !== undefined || opts.last !== undefined);
-}
-
-export function resolveViewMode(options: TranscriptRenderOptions, filters: FilterOptions): ViewMode {
-  if (options.markdown) return 'markdown';
-  if (options.json) return 'json';
-  if (hasAnyFilter(filters)) return 'markdown';
-  return 'summary';
-}
-
-export async function renderSessionLog(session: SessionMeta, mode: ViewMode = 'summary'): Promise<void> {
-  await renderSession(session, mode, {});
-}
-
-export async function renderSessionLogJson(session: SessionMeta): Promise<void> {
-  await renderSession(session, 'json', {});
-}
-
-function renderArchivedSession(
-  session: SessionMeta,
-  mode: ViewMode,
-  options: { redact?: boolean } = {},
-): void {
-  const redact = (text: string): string => options.redact !== false ? redactSecrets(text) : text;
-  const content = redact((readSessionContent(session.id) ?? '').trim());
-  const digestRaw = readArchivedSessionPreview<SessionPreviewDigest>(session.id);
-  const digest = digestRaw
-    ? { ...digestRaw, lastAssistant: redact(digestRaw.lastAssistant ?? '') }
-    : undefined;
-  if (mode === 'json') {
-    console.log(JSON.stringify({
-      session: {
-        ...session,
-        topic: session.topic != null ? redact(session.topic) : session.topic,
-        label: session.label != null ? redact(session.label) : session.label,
-        plan: session.plan != null ? redact(session.plan) : session.plan,
-        archived: true,
-      },
-      archived: true,
-      userContent: content,
-      preview: digest ?? null,
-    }, null, 2));
-    return;
-  }
-  const shown = sessionDisplayAgent(session);
-  const agentColor = colorAgent(shown);
-  const absTime = formatAbsoluteTime(session.timestamp);
-  const title = sessionHeadline(session);
-  console.log('');
-  if (title) console.log(chalk.bold.white(title));
-  console.log(
-    agentColor(shown) +
-    (session.version ? chalk.yellow(` ${session.version}`) : '') +
-    (session.project ? chalk.cyan(`  ${session.project}`) : '') +
-    chalk.gray(`  ${absTime} (${formatRelativeTime(session.timestamp)})`) +
-    (session.account ? chalk.gray(` · ${session.account}`) : '')
-  );
-  console.log(chalk.yellow('archived — transcript file removed; user turns served from the local DB'));
-  console.log(chalk.gray('─'.repeat(60)));
-  console.log(chalk.cyan('User:'));
-  console.log(content);
-  if (digest?.lastAssistant?.trim()) {
-    console.log('');
-    console.log(chalk.magenta('Last assistant:'));
-    console.log(digest.lastAssistant.trim());
-  }
-}
-
-export async function renderSession(
-  session: SessionMeta,
-  mode: ViewMode,
-  filters: FilterOptions,
-  options: { redact?: boolean } = {},
-): Promise<void> {
-  const { hydrateSessionTranscript, findLocalSessionTranscripts } = await import('../lib/session/discover.js');
-  session = await hydrateSessionTranscript(session);
-  const realPath = session.filePath.split('#')[0];
-  if (!fs.existsSync(realPath)) {
-    const archivedContent = readSessionContent(session.id);
-    if (archivedContent && archivedContent.trim() !== '') {
-      renderArchivedSession(session, mode, options);
-      return;
-    }
-    process.exitCode = 1;
-    console.log(chalk.yellow('Session transcript is unavailable after checking its recorded home and the session index.'));
-    console.log(chalk.gray(`Path: ${session.filePath}`));
-    if (session.version) console.log(chalk.gray(`Version: ${sessionDisplayAgent(session)} ${session.version}`));
-    if (session.project) console.log(chalk.gray(`Project: ${session.project}`));
-    if (session.account) console.log(chalk.gray(`Account: ${session.account}`));
-    console.log(chalk.gray(`Time: ${session.timestamp}`));
-    return;
-  }
-
-  const spinner = ora(`Parsing ${sessionDisplayAgent(session)} session...`).start();
-  const parsedEvents = parseSession(session.filePath, session.agent);
-  spinner.stop();
-
-  let events = filterEvents(parsedEvents, filters);
-
-  const shown = sessionDisplayAgent(session);
-  const agentColor = colorAgent(shown);
-  console.log('');
-
-  if (mode === 'summary') {
-    const stats = computeSummaryStats(events);
-    const modelStr = stats.models.length > 0 ? chalk.yellow(`  ${stats.models.join(', ')}`) : '';
-    const branchStr = session.gitBranch ? chalk.gray(` (${session.gitBranch})`) : '';
-    const absTime = formatAbsoluteTime(session.timestamp);
-
-    const title = sessionHeadline(session);
-    if (title) {
-      const badges = signalBadges(metaSignals(session));
-      console.log(chalk.bold.white(title) + (badges ? '  ' + badges : ''));
-    }
-    console.log(
-      agentColor(shown) +
-      (session.version ? chalk.yellow(` ${session.version}`) : '') +
-      modelStr +
-      (session.project ? chalk.cyan(`  ${session.project}`) + branchStr : branchStr) +
-      chalk.gray(`  ${absTime} (${formatRelativeTime(session.timestamp)})`) +
-      (session.account ? chalk.gray(` · ${session.account}`) : '')
-    );
-    const statsLine = renderSummaryHeader(stats);
-    if (statsLine) console.log(chalk.gray(statsLine));
-    console.log(chalk.gray('─'.repeat(60)));
-
-    process.stdout.write(renderSummary(events, session.cwd));
-    return;
-  }
-
-  if (mode === 'markdown') {
-    console.log(
-      agentColor(shown) +
-      (session.version ? chalk.yellow(` ${session.version}`) : '') +
-      (session.project ? chalk.cyan(` ${session.project}`) : '') +
-      chalk.gray(` ${formatRelativeTime(session.timestamp)}`) +
-      (session.account ? chalk.gray(` (${session.account})`) : '')
-    );
-    console.log(chalk.gray('─'.repeat(60)));
-    process.stdout.write(renderMarkdown(renderConversationMarkdown(events, { redact: options.redact !== false })));
-    return;
-  }
-
-  const todos = inferSessionState(parsedEvents, { cwd: session.cwd }).todos;
-  process.stdout.write(
-    renderJson(events, todos ? { ...session, todos } : session, { redact: options.redact !== false }),
-  );
 }
 
 function renderTopicCell(
@@ -4123,14 +3946,4 @@ function sessionDistance(session: SessionMeta, historyEntry: ClaudeHistoryEntry)
   const sessionTime = new Date(session.timestamp).getTime();
   if (Number.isNaN(sessionTime)) return Number.MAX_SAFE_INTEGER;
   return Math.abs(sessionTime - historyEntry.timestampMs);
-}
-
-
-function formatAbsoluteTime(isoTimestamp: string): string {
-  const d = new Date(isoTimestamp);
-  if (isNaN(d.getTime())) return isoTimestamp;
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  return `${months[d.getMonth()]} ${d.getDate()} ${hh}:${mm}`;
 }

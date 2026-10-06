@@ -1,6 +1,6 @@
 import * as path from 'path';
 import chalk from 'chalk';
-import { sessionDisplayAgent, linkUrl, linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
+import { sessionDisplayAgent, linkUrl } from '@phnx-labs/sessions-cli/reader';
 import { toComparablePath, homeDir } from '../lib/platform/index.js';
 import {
   getActiveSessions,
@@ -22,6 +22,7 @@ import { formatCompactAge } from '../lib/session/relative-time.js';
 import { colorAgent } from '../lib/agents.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { listBookmarks } from '../lib/session/bookmarks.js';
+import { signalBadges } from '../lib/session/presentation.js';
 import { formatTodoCompact, githubRepoUrlFromCwd } from './sessions-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 
@@ -171,24 +172,6 @@ export function isAwaitingUser(s: ActiveSession): boolean {
 
   if (s.status === 'abandoned' && s.pidAlive !== true) return false;
   return s.status === 'input_required' || s.activity === 'waiting_input';
-}
-
-
-export function signalBadges(s: Pick<ActiveSession, 'awaitingReason' | 'pr' | 'worktree' | 'ticket'>): string {
-  const parts: string[] = [];
-  if (s.awaitingReason === 'plan_review') parts.push(chalk.yellow('plan'));
-  else if (s.awaitingReason === 'question') parts.push(chalk.yellow('ask'));
-  else if (s.awaitingReason === 'permission') parts.push(chalk.yellow('perm'));
-  if (s.ticket) {
-    const url = linearIssueUrl(s.ticket.id);
-    parts.push(chalk.cyan(url ? linkUrl(url, s.ticket.id) : s.ticket.id));
-  }
-  if (s.pr) {
-    const label = `PR#${s.pr.number ?? '?'}`;
-    parts.push(chalk.blue(s.pr.url ? linkUrl(s.pr.url, label) : label));
-  }
-  if (s.worktree) parts.push(chalk.magenta(`wt:${s.worktree.slug}`));
-  return parts.join(' ');
 }
 
 function locatorBadge(s: ActiveSession): string {

@@ -4,7 +4,7 @@ import type { FilterOptions, SessionMeta } from '@phnx-labs/sessions-cli/reader'
 
 import { setHelpSections } from '../lib/help.js';
 import { interruptibleSpinner } from '../lib/spinner.js';
-import type { TranscriptRenderOptions } from './sessions.js';
+import type { TranscriptRenderOptions } from '../lib/session/presentation.js';
 
 export interface CloudTranscriptsOptions extends TranscriptRenderOptions {
   limit?: string;
@@ -14,7 +14,8 @@ const DEFAULT_LIMIT = '50';
 
 export async function runCloudTranscripts(query: string | undefined, options: CloudTranscriptsOptions): Promise<void> {
   const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
-  const { buildFilterOptions, resolveViewMode, renderSession, printSessionTable } = await import('./sessions.js');
+  const { buildFilterOptions, resolveViewMode, renderSession } = await import('../lib/session/presentation.js');
+  const { printSessionTable } = await import('./sessions.js');
 
   let filterOpts: FilterOptions;
   try {
