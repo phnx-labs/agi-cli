@@ -1,6 +1,7 @@
 import { installCli, installedCliVersion, type CliManifest } from './cli-resources.js';
 import { compareVersions } from './agent-spec/primitives.js';
 import { SECRETS_CLI_PACKAGE, SECRETS_CLI_VERSION } from './secrets-cli.js';
+import { invocation } from './secrets-client.js';
 
 export const STANDALONE_TOOLS = ['sessions', 'browser', 'secrets', 'computer', 'term'] as const;
 export type StandaloneTool = typeof STANDALONE_TOOLS[number];
@@ -24,10 +25,16 @@ export function pinnedSpec(tool: StandaloneTool): string {
   return `${pin.pkg}@${pin.floor}`;
 }
 
+function explicitBin(tool: StandaloneTool): string | null {
+  return tool === 'secrets' ? process.env.SECRETS_BIN?.trim() || null : null;
+}
+
 function pinManifest(tool: StandaloneTool): CliManifest {
+  const bin = explicitBin(tool);
+  const { command, prefix } = bin ? invocation(bin) : { command: tool, prefix: [] };
   return {
     name: tool,
-    check: { kind: 'version', cmd: tool, args: ['--version'] },
+    check: { kind: 'version', cmd: command, args: [...prefix, '--version'] },
     install: [{ npm: pinnedSpec(tool) }],
     source: 'builtin',
     path: '',
@@ -64,6 +71,11 @@ export async function ensureToolPins(
   for (const row of before) {
     if (row.state === 'ok' || opts.dryRun) {
       out.push(row);
+      continue;
+    }
+    const bin = explicitBin(row.tool);
+    if (bin) {
+      out.push({ ...row, state: 'failed', error: `SECRETS_BIN=${bin} reads ${row.installed ?? 'no version'}, below ${pinnedSpec(row.tool)}; point it at a newer build or unset it` });
       continue;
     }
     const result = installCli(pinManifest(row.tool), { logToStderr: opts.logToStderr });

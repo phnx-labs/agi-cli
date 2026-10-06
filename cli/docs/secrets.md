@@ -9,12 +9,12 @@ never rebundles the engine (DIST-1), so a missing `secrets` executable fails
 loud with install guidance rather than falling back to anything in-repo:
 
 ```
-agents clis install secrets
+agents setup tools --tool secrets
 # or: npm i -g @phnx-labs/secrets-cli@0.3.0
 # or: agents setup secrets
 ```
 
-Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`, or `secrets list --host <alias|user@host>` for another box). `agents secrets` was removed with no alias or forwarder (PHNX-4227): running it exits 1 with `error: 'agents secrets' was removed; use the standalone 'secrets' CLI (secrets --help).` The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
+Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`, or `secrets list --host <alias|user@host>` for another box). `agents secrets` was removed with no alias or forwarder (PHNX-4227): running it exits 1 with `error: 'agents secrets' was removed; use the standalone 'secrets' CLI (secrets --help).` The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it brings the standalone up to the pinned floor through the same `ensureToolPins` path as `agents setup tools` (an explicit `SECRETS_BIN` below the floor fails with the version it read instead of installing) and then hands off to the standalone's own `secrets migrate`.
 
 Read `secrets-client.md` for the process-client architecture (the wire
 protocol, the sync/async transports, the environment contract). This page
