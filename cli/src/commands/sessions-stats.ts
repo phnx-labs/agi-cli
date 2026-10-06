@@ -76,8 +76,15 @@ function installedResources(
 }
 
 export function registerSessionsStatsCommand(sessionsCmd: Command): void {
-  const stats = sessionsCmd
-    .command('stats')
+  configureStatsCommand(sessionsCmd.command('stats'), 'agents sessions stats');
+}
+
+export function registerInsightsResourcesCommand(insightsCmd: Command): void {
+  configureStatsCommand(insightsCmd.command('resources'), 'agents insights resources');
+}
+
+function configureStatsCommand(stats: Command, spelling: string): void {
+  stats
     .description('Which skills/commands you actually invoke, and which installed ones are dead weight.')
     .option('--kind <kind>', 'Limit to one kind: skill or command')
     .option('--plugin <name>', "Only this plugin's resources (r.plugin), not every resource a plugin-touching session used")
@@ -96,16 +103,16 @@ export function registerSessionsStatsCommand(sessionsCmd: Command): void {
   setHelpSections(stats, {
     examples: `
       # Most-invoked skills and commands, plus the installed ones you never invoke
-      agents sessions stats
+      ${spelling}
 
       # Just the dead weight — installed but never explicitly invoked
-      agents sessions stats --zero
+      ${spelling} --zero
 
       # Skills only, last 30 days, machine-readable
-      agents sessions stats --kind skill --since 30d --json
+      ${spelling} --kind skill --since 30d --json
 
       # One plugin's resources, least-used first
-      agents sessions stats --plugin rush --bottom
+      ${spelling} --plugin rush --bottom
 
       # Backfill historical sessions first if coverage is low
       agents sessions backfill resources
@@ -115,12 +122,24 @@ export function registerSessionsStatsCommand(sessionsCmd: Command): void {
       - Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.
       - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run \`agents sessions backfill resources\` once to fold in historical sessions (a low coverage line means it hasn't run).
       - --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level \`agents sessions --plugin\` which filters SESSIONS.
+      - The window is all time unless --since narrows it. \`agents insights resources\` and \`agents sessions stats\` are the same report; --json keeps \`kind: "sessions-stats"\` under either spelling.
     `,
   });
 }
 
+export function resolveStatsAgent(values: unknown[]): string | undefined {
+  const agents = [...new Set(values.flatMap(v => (Array.isArray(v) ? v : v === undefined ? [] : [v])).map(String))];
+  if (agents.length > 1) {
+    console.error(chalk.red(`error: resource usage filters on one --agent; got ${agents.join(', ')}`));
+    process.exit(1);
+  }
+  return agents[0];
+}
+
 async function statsAction(cmd: Command): Promise<void> {
-  const opts = cmd.optsWithGlobals() as StatsOpts;
+  const agentValues: unknown[] = [];
+  for (let c: Command | null = cmd; c; c = c.parent) agentValues.push(c.opts().agent);
+  const opts: StatsOpts = { ...(cmd.optsWithGlobals() as StatsOpts), agent: resolveStatsAgent(agentValues) };
 
   const kind = normalizeKind(opts.kind);
   const sinceMs = opts.since ? parseTimeFilter(opts.since) : undefined;

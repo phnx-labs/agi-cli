@@ -1,3 +1,9 @@
+import type { InjectOptions, InjectResult } from '../terminal/index.js';
+
+export type TerminalSendOptions = Pick<InjectOptions, 'enter' | 'combined'> & {
+  pane?: string;
+  socket?: string;
+};
 
 export interface SendOptions {
   target: string;
@@ -6,6 +12,7 @@ export interface SendOptions {
   from?: string;
   ownerScoped?: boolean;
   dryRun?: boolean;
+  terminal?: TerminalSendOptions;
 }
 
 export interface SendResult {
@@ -17,6 +24,9 @@ export interface SendResult {
   msgId?: string;
   body?: string;
   deliveries?: SendResult[];
+  backend?: InjectResult['backend'];
+  writes?: number;
+  confirmed?: boolean;
 }
 
 export interface ChannelProvider {

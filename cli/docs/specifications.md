@@ -1509,7 +1509,8 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   tool-search envelopes
   (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
   `lib/session/remote/remote-list.ts:98-115,337-541`).
-- **SES-IF-4b (MUST).** `sessions stats --json` MUST emit its own versioned
+- **SES-IF-4b (MUST).** `insights resources --json` and its older spelling
+  `sessions stats --json` MUST run the same action and emit its own versioned
   `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
   signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
   `SessionMeta[]` list or `{ session, events }` detail shape. `ranked` is the
@@ -1537,6 +1538,12 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   stays the ABSOLUTE count of sessions with ≥1 explicit invocation — the
   backfill hint keys on `sessionsScanned/sessionsIndexed`, never on
   `sessionsWithUsage`, which is sparse by nature and would nag forever (PHNX-2301).
+  Both parents also own `--agent` (`sessions` as one value, `insights` as a
+  repeatable list defaulting to `[]`); the rollup MUST read an empty list as no
+  filter and one value as that agent wherever it is written, and MUST exit 1 on
+  two different agents rather than filter on their union. The window is all time
+  unless `--since` narrows it; the default 30-day window of bare `insights` does
+  not apply.
   `sessions backfill resources --json` MUST emit the versioned
   `resources-backfill` envelope and populate `session_resource_usage` for
   historical sessions gated by `resource_scan_ledger`, never silently re-scanning

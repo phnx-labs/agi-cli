@@ -12,7 +12,7 @@ const {
   resourceUsageCoverage,
   backfillResourceUsage,
 } = await import('../db.js');
-const { diffZeroInvoked } = await import('../../../commands/sessions-stats.js');
+const { diffZeroInvoked, resolveStatsAgent } = await import('../../../commands/sessions-stats.js');
 
 const SEED_FILES_DIR = path.join(TEST_HOME, 'seed-files');
 fs.mkdirSync(SEED_FILES_DIR, { recursive: true });
@@ -208,5 +208,14 @@ describe('queryResourceUsageStats — plugin/source provenance never splits a re
     expect(dup[0].sessions).toBe(2);
     expect(dup[0].invocations).toBe(5);
     expect(dup[0].plugin).toBe('plugdup');
+  });
+});
+
+describe('resolveStatsAgent', () => {
+  it('collapses the per-level --agent shapes to one scalar or unset', () => {
+    expect(resolveStatsAgent([undefined, []])).toBeUndefined();
+    expect(resolveStatsAgent([undefined, ['claude']])).toBe('claude');
+    expect(resolveStatsAgent(['claude', undefined])).toBe('claude');
+    expect(resolveStatsAgent(['claude', ['claude', 'claude']])).toBe('claude');
   });
 });

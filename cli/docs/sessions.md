@@ -35,7 +35,9 @@ flowchart LR
 device, the same roster `agents sessions --active` prints. It is the home of the verbs
 that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`,
 plus `ps migrations` for the migration ledger (the `sessions` spellings run the same code). Typing into a running agent is
-`agents send --channel session --to <id>`; resuming an ended one is
+`agents send --channel session --to <id>` (or `--pane <%id> [--socket <path>]` for a
+known tmux pane, with `--no-enter` and `--combined` covering every `sessions inject`
+mode); resuming an ended one is
 `agents run --resume <id>`. Both moves are step A5 of PHNX-4227; the `sessions`
 group itself leaves agents-cli in a later release.
 

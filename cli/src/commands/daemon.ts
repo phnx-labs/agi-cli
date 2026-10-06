@@ -38,6 +38,7 @@ import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseDuration } from '../lib/hooks/cache.js';
 import { registerFunnelCommand } from './funnel.js';
+import { registerDaemonIndexCommand } from './daemon-index.js';
 import {
   DEFAULT_WEBHOOK_PORT,
   DEFAULT_WEBHOOK_RATE_LIMIT,
@@ -751,6 +752,10 @@ export function registerDaemonCommand(program: Command): void {
 
       # One-shot health check for scripts (non-zero exit on problems)
       agents daemon doctor
+
+      # Session-index maintenance, in the foreground (never starts the daemon)
+      agents daemon index optimize
+      agents daemon index backfill tools --fleet
     `,
     notes: `
       There is no 'agents daemon jobs' — scheduled work is 'agents routines',
@@ -985,6 +990,7 @@ export function registerDaemonCommand(program: Command): void {
     });
   registerWebhooksSubcommand(cmd);
   registerFunnelCommand(cmd);
+  registerDaemonIndexCommand(cmd);
 
   cmd.command('logs')
     .description('Read the daemon\'s own log (lifecycle + subsystem errors — not routine run output).')

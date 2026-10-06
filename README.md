@@ -337,7 +337,7 @@ agents sessions --include tools \
 # Count pre-indexed static git sites, containing calls, and sessions
 agents sessions --include tools --query 'program:git' --count --fleet --json
 
-# Populate historical tool rows once on each device
+# Populate historical tool rows once on each device (same as `agents daemon index backfill tools --fleet`)
 agents sessions backfill tools --fleet
 
 # Which skills/commands you actually invoke -- and which installed ones are dead weight
@@ -1398,7 +1398,16 @@ agents browser stop --service               # browser-scoped alias; next browser
 agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
+
+agents daemon index roots                   # transcript directories the indexer scans (JSON)
+agents daemon index optimize                # compact the FTS search index; no rows lost
+agents daemon index backfill tools --fleet  # one-shot historical parse (also: resources, titles)
 ```
+
+`agents daemon index` is foreground maintenance of the index the daemon's
+session-index service keeps current; it never starts or restarts the daemon.
+Each verb runs the same engine as its `agents sessions` spelling (`--roots`,
+`optimize`, `backfill`), which keeps working.
 
 Each hosted responsibility (browser IPC, scheduler, watchdog, device
 probe, self-heal, self-update, account-state refresh, state-dir checks) is an

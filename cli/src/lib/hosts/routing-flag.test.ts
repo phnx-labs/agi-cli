@@ -1,5 +1,14 @@
-import { describe, it, expect } from 'vitest';
-import { flagValue, hasHostRoutingFlag } from './routing-flag.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { Command } from 'commander';
+import { registerSendCommand } from '../../commands/send.js';
+import { stripRoutingFlags } from './remote-cmd.js';
+import {
+  commandTokenIndex,
+  flagValue,
+  hasHostRoutingFlag,
+  ROUTING_OPTION_SPECS,
+  setArgvCommandTree,
+} from './routing-flag.js';
 
 describe('flagValue', () => {
   it('reads the space-separated long form', () => {
@@ -56,5 +65,65 @@ describe('hasHostRoutingFlag', () => {
 
   it('does not treat --remote-cwd alone as a routing flag (local-only companion)', () => {
     expect(hasHostRoutingFlag(['view', '--remote-cwd', '/srv'])).toBe(false);
+  });
+});
+
+describe('option-aware routing scan over the registered command tree', () => {
+  beforeEach(() => {
+    const program = new Command().option('--verbose');
+    registerSendCommand(program);
+    setArgvCommandTree(program);
+  });
+  afterEach(() => setArgvCommandTree(undefined));
+
+  const SEND = ['send', '--channel', 'session', '--to', 'beef1234'];
+
+  it('keeps a routing-shaped --text value as the message and routes on the real selector', () => {
+    for (const text of ['--device=other', '-Dx', '--host=other', '--device', '-D']) {
+      const argv = [...SEND, '--text', text, '--no-enter', '--device', 'peer'];
+      expect(flagValue(argv, 'device', 'D'), text).toBe('peer');
+      expect(stripRoutingFlags(argv, ROUTING_OPTION_SPECS), text).toEqual([...SEND, '--text', text, '--no-enter']);
+    }
+  });
+
+  it('does not route on a selector-shaped message that precedes the real selector', () => {
+    const argv = [...SEND, '--text', '--device=other', '--device', 'peer'];
+    expect(flagValue(argv, 'device', 'D')).toBe('peer');
+    expect(hasHostRoutingFlag([...SEND, '--text', '--device=other'])).toBe(false);
+  });
+
+  it('treats a joined --text=--device=other as one option', () => {
+    const argv = [...SEND, '--text=--device=other', '-Dpeer'];
+    expect(flagValue(argv, 'device', 'D')).toBe('peer');
+    expect(stripRoutingFlags(argv, ROUTING_OPTION_SPECS)).toEqual([...SEND, '--text=--device=other']);
+  });
+
+  it('leaves everything after -- as positional data', () => {
+    const argv = [...SEND, '--device', 'peer', '--', '--device=other', '-Dx'];
+    expect(flagValue(argv, 'device', 'D')).toBe('peer');
+    expect(stripRoutingFlags(argv, ROUTING_OPTION_SPECS)).toEqual([...SEND, '--', '--device=other', '-Dx']);
+    expect(hasHostRoutingFlag([...SEND, '--', '--device=other'])).toBe(false);
+  });
+
+  it('finds the command after global routing and root options in every form', () => {
+    expect(commandTokenIndex(['--device', 'peer', ...SEND])).toBe(2);
+    expect(commandTokenIndex(['--device=peer', ...SEND])).toBe(1);
+    expect(commandTokenIndex(['-Dpeer', ...SEND])).toBe(1);
+    expect(commandTokenIndex(['--verbose', '--remote-cwd', '/srv', '-D', 'peer', ...SEND])).toBe(5);
+    expect(commandTokenIndex(['--', 'send'])).toBe(1);
+    expect(commandTokenIndex(['--', '--device=x', 'send'])).toBe(1);
+    expect(hasHostRoutingFlag(['--', 'send', '--device', 'peer'])).toBe(false);
+    expect(stripRoutingFlags(['--device', 'peer', ...SEND, '--text', 'x'], ROUTING_OPTION_SPECS)).toEqual([...SEND, '--text', 'x']);
+  });
+
+  it('keeps the first of repeated selectors and strips all of them', () => {
+    const argv = [...SEND, '--device', 'a', '-Db', '--text', 'x'];
+    expect(flagValue(argv, 'device', 'D')).toBe('a');
+    expect(stripRoutingFlags(argv, ROUTING_OPTION_SPECS)).toEqual([...SEND, '--text', 'x']);
+  });
+
+  it('consumes a variadic option value only up to the next dash-led token', () => {
+    const argv = [...SEND, '--url', 'https://a.test', 'https://b.test', '--device=peer'];
+    expect(flagValue(argv, 'device', 'D')).toBe('peer');
   });
 });

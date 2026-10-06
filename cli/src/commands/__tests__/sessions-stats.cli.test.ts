@@ -66,3 +66,31 @@ describe('agents sessions stats (real CLI parse)', () => {
     expect(typeof parsed.updated).toBe('number');
   });
 });
+
+describe('agents insights resources (real CLI parse)', () => {
+  function filters(args: string[]) {
+    const res = run(args);
+    expect(res.status, res.stderr).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { schemaVersion: number; kind: string; filters: Record<string, string | null> };
+    expect(parsed.schemaVersion).toBe(2);
+    expect(parsed.kind).toBe('sessions-stats');
+    return parsed.filters;
+  }
+
+  it('treats the insights default --agent [] as unset and keeps the all-time window', () => {
+    expect(filters(['insights', 'resources', '--json'])).toMatchObject({ agent: null, since: null });
+    expect(filters(['insights', '--json', 'resources'])).toMatchObject({ agent: null, since: null });
+  });
+
+  it('reads one --agent as a scalar wherever it is written', () => {
+    expect(filters(['insights', '--agent', 'claude', 'resources', '--json']).agent).toBe('claude');
+    expect(filters(['insights', 'resources', '--agent', 'claude', '--json']).agent).toBe('claude');
+    expect(filters(['insights', 'resources', '-a', 'kimi', '--json']).agent).toBe('kimi');
+  });
+
+  it('rejects two different agents instead of filtering on their union', () => {
+    const res = run(['insights', '--agent', 'claude', 'resources', '-a', 'kimi', '--json']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('resource usage filters on one --agent; got kimi, claude');
+  });
+});

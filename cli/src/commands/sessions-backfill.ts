@@ -49,6 +49,14 @@ function parseAgent(value: string | undefined): { agent?: SessionAgentId; versio
   return { agent: name, version: separator < 0 ? undefined : value.slice(separator + 1) || undefined };
 }
 
+function assertTimeFilters(options: { since?: string; until?: string }): void {
+  for (const [flag, value] of [['--since', options.since], ['--until', options.until]] as const) {
+    if (value !== undefined && parseTimeFilter(value) === 0) {
+      throw new Error(`${flag} must be a duration like 7d or an ISO date (got "${value}")`);
+    }
+  }
+}
+
 function mergeHosts(options: ToolBackfillOptions): string[] {
   const values = [options.host, options.device].flatMap((value) =>
     value === undefined ? [] : Array.isArray(value) ? value : [value]);
@@ -60,6 +68,7 @@ export async function backfillToolsLocal(
   oneBatch = false,
 ): Promise<ToolBackfillMachineResult> {
   const { agent, version } = parseAgent(options.agent);
+  assertTimeFilters(options);
   const sessions = await discoverSessions({
     agent,
     version,
@@ -125,6 +134,8 @@ function peerArgs(options: ToolBackfillOptions): string[] {
 }
 
 export async function runToolsBackfill(options: ToolBackfillOptions): Promise<ToolBackfillEnvelope> {
+  parseAgent(options.agent);
+  assertTimeFilters(options);
   const hosts = mergeHosts(options);
   const includeLocal = options.local === true || hosts.length === 0;
   const fanOut = options.local !== true && (options.fleet === true || hosts.length > 0);
@@ -198,6 +209,7 @@ interface ResourceBackfillEnvelope {
 
 async function runResourceBackfill(options: ResourceBackfillOptions): Promise<ResourceBackfillEnvelope> {
   const { agent, version } = parseAgent(options.agent);
+  assertTimeFilters(options);
   await discoverSessions({
     agent,
     version,
@@ -266,23 +278,40 @@ export async function runTitlesBackfill(options: TitleBackfillOptions): Promise<
 }
 
 export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
-  const backfill = sessionsCmd.command('backfill').description('Populate derived session data explicitly.');
-  const tools = backfill.command('tools').description('Parse historical tool calls once into the local SQLite index.');
+  registerBackfillCommand(sessionsCmd, 'agents sessions backfill');
+}
+
+export function registerBackfillCommand(parent: Command, invocation: string): void {
+  const backfill = parent.command('backfill').description('Populate derived session data explicitly.');
+  const tools = backfill
+    .command('tools')
+    .description('Parse historical tool calls once into the local SQLite index.')
+    .option('-a, --agent <agent>', 'Only this agent, optionally pinned to a version (e.g. codex, claude@2.1.45)')
+    .option('-p, --project <name>', 'Only sessions from this project')
+    .option('--since <time>', 'Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)')
+    .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
+    .option('--unmanaged', 'Include sessions from your own ~/.<agent> installs')
+    .option('--team, --teams', 'Include team-spawned sessions')
+    .option('--local', 'Only this machine')
+    .option('--fleet', 'Every registered online compute device, each keeping its own index')
+    .option('-D, --device <target...>', 'Only these devices (repeatable); cannot be combined with --local')
+    .option('--json', 'Emit the machine-readable result');
   setHelpSections(tools, {
     examples: `
       # Backfill this machine once; reruns resume and skip completed transcripts
-      agents sessions backfill tools
+      ${invocation} tools
 
       # Backfill every online compute device, keeping each index local
-      agents sessions backfill tools --fleet --json
+      ${invocation} tools --fleet --json
 
       # Narrow the historical work
-      agents sessions backfill tools --agent codex --since 7d
+      ${invocation} tools --agent codex --since 7d
     `,
     notes: `
       - This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.
       - New and changed sessions are indexed during their normal incremental scan.
       - No embeddings, vector database, network model, or semantic processing is used.
+      - Peers are driven with \`agents sessions backfill tools --local\`, which every released CLI understands.
     `,
   });
   tools.action(async (_options: unknown, command: Command) => {
@@ -309,21 +338,29 @@ export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
     }
   });
 
-  const resources = backfill.command('resources').description('Derive historical skill/slash-command usage once into the local SQLite index.');
+  const resources = backfill
+    .command('resources')
+    .description('Derive historical skill/slash-command usage once into the local SQLite index.')
+    .option('-a, --agent <agent>', 'Only this agent, optionally pinned to a version (e.g. claude, codex@0.116.0)')
+    .option('-p, --project <name>', 'Only sessions from this project')
+    .option('--since <time>', 'Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)')
+    .option('--until <time>', 'Only sessions older than this (ISO timestamp)')
+    .option('--team, --teams', 'Include team-spawned sessions')
+    .option('--json', 'Emit the machine-readable result');
   setHelpSections(resources, {
     examples: `
       # Fold every historical session on this machine into the usage index
-      agents sessions backfill resources
+      ${invocation} resources
 
       # Narrow the historical work
-      agents sessions backfill resources --agent claude --since 30d
+      ${invocation} resources --agent claude --since 30d
 
       # Machine-readable summary
-      agents sessions backfill resources --json
+      ${invocation} resources --json
     `,
     notes: `
       - Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by \`agents sessions stats\`.
-      - Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over \`agents ssh <host> agents sessions backfill resources\`).
+      - Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over \`agents ssh <host> ${invocation} resources\`).
       - Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.
       - Only slash commands and \`Skill\` tool calls are recorded — auto-triggered skills emit no signal.
     `,
@@ -359,13 +396,13 @@ export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
   setHelpSections(titles, {
     examples: `
       # Catch this machine up now (the daemon otherwise does a couple every 2 min)
-      agents sessions backfill titles
+      ${invocation} titles
 
       # Re-title one session after correcting its first message
-      agents sessions backfill titles --session 6fc1db18 --refresh
+      ${invocation} titles --session 6fc1db18 --refresh
 
       # Machine-readable
-      agents sessions backfill titles --limit 20 --json
+      ${invocation} titles --limit 20 --json
     `,
     notes: `
       - The headline ladder is: \`/rename\` label > this generated title > the user's first message. It is never the agent's latest turn.

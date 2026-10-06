@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 65,
-  "commands": 475,
+  "commands": 483,
   "root": {
     "name": "agents",
     "path": "",
@@ -2667,7 +2667,7 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Host a signed webhook receiver here, supervised and restarted on crash\nagents daemon webhooks add --secrets-bundle linear-webhook\nagents daemon webhooks list\n\n# Manage public ingress for daemon-world webhook receivers\nagents daemon funnel status yosemite-s0\nagents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor",
+      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Host a signed webhook receiver here, supervised and restarted on crash\nagents daemon webhooks add --secrets-bundle linear-webhook\nagents daemon webhooks list\n\n# Manage public ingress for daemon-world webhook receivers\nagents daemon funnel status yosemite-s0\nagents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
       "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\nalways. Use 'agents routines stats' for per-routine failure detail.\n\n'disable' is a persisted kill switch: it stops routines/add,\nroutines/start, routines/catchup, and webhook triggers from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. The inline scheduler re-evaluates its toggle on every reload as\nwell. A boot-disabled service other than webhook-receiver still needs\nan operator 'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
       "subcommands": [
         {
@@ -2866,6 +2866,356 @@
                   "negate": false
                 }
               ],
+              "subcommands": []
+            }
+          ]
+        },
+        {
+          "name": "index",
+          "path": "daemon index",
+          "aliases": [],
+          "description": "Maintain the session index the daemon keeps: transcript roots, FTS compaction, historical backfills. Runs in the foreground; never starts or restarts the daemon.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Directories the indexer scans, per agent (JSON)\nagents daemon index roots\n\n# Compact the full-text search index\nagents daemon index optimize\n\n# One-shot historical catch-up\nagents daemon index backfill tools --fleet\nagents daemon index backfill resources --since 30d\nagents daemon index backfill titles --limit 20",
+          "notes": "- The daemon's session-index service keeps new and changed sessions current on its own; these verbs are explicit maintenance on top of it.\n- Each verb is the same engine as its `agents sessions` spelling (`--roots`, `optimize`, `backfill`).",
+          "subcommands": [
+            {
+              "name": "backfill",
+              "path": "daemon index backfill",
+              "aliases": [],
+              "description": "Populate derived session data explicitly.",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": [
+                {
+                  "name": "resources",
+                  "path": "daemon index backfill resources",
+                  "aliases": [],
+                  "description": "Derive historical skill/slash-command usage once into the local SQLite index.",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "-a, --agent <agent>",
+                      "description": "Only this agent, optionally pinned to a version (e.g. claude, codex@0.116.0)",
+                      "short": "-a",
+                      "long": "--agent",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-p, --project <name>",
+                      "description": "Only sessions from this project",
+                      "short": "-p",
+                      "long": "--project",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--since <time>",
+                      "description": "Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)",
+                      "long": "--since",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--until <time>",
+                      "description": "Only sessions older than this (ISO timestamp)",
+                      "long": "--until",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--team, --teams",
+                      "description": "Include team-spawned sessions",
+                      "short": "--team",
+                      "long": "--teams",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--json",
+                      "description": "Emit the machine-readable result",
+                      "long": "--json",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "examples": "# Fold every historical session on this machine into the usage index\nagents daemon index backfill resources\n\n# Narrow the historical work\nagents daemon index backfill resources --agent claude --since 30d\n\n# Machine-readable summary\nagents daemon index backfill resources --json",
+                  "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents sessions stats`.\n- Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents daemon index backfill resources`).\n- Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n- Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
+                  "subcommands": []
+                },
+                {
+                  "name": "titles",
+                  "path": "daemon index backfill titles",
+                  "aliases": [],
+                  "description": "Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--session <id>",
+                      "description": "Title one session (full or short id), even if it is old or already titled",
+                      "long": "--session",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--limit <n>",
+                      "description": "Maximum titles to generate in this run",
+                      "long": "--limit",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--refresh",
+                      "description": "Regenerate even when the stored title still matches the session's first user message",
+                      "long": "--refresh",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--json",
+                      "description": "Emit the machine-readable result",
+                      "long": "--json",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "examples": "# Catch this machine up now (the daemon otherwise does a couple every 2 min)\nagents daemon index backfill titles\n\n# Re-title one session after correcting its first message\nagents daemon index backfill titles --session 6fc1db18 --refresh\n\n# Machine-readable\nagents daemon index backfill titles --limit 20 --json",
+                  "notes": "- The headline ladder is: `/rename` label > this generated title > the user's first message. It is never the agent's latest turn.\n- One cheap-model call per session (`--model cheap`, read-only plan mode), generated ONCE and persisted; a session whose first message has not changed is a pure cache hit.\n- Local-only: each box titles its own sessions and publishes them to the fleet via the session mirror, so a peer's rows already carry their titles.\n- Best-effort. With no signed-in harness nothing is generated and rows keep showing the user's own words.",
+                  "subcommands": []
+                },
+                {
+                  "name": "tools",
+                  "path": "daemon index backfill tools",
+                  "aliases": [],
+                  "description": "Parse historical tool calls once into the local SQLite index.",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "-a, --agent <agent>",
+                      "description": "Only this agent, optionally pinned to a version (e.g. codex, claude@2.1.45)",
+                      "short": "-a",
+                      "long": "--agent",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-p, --project <name>",
+                      "description": "Only sessions from this project",
+                      "short": "-p",
+                      "long": "--project",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--since <time>",
+                      "description": "Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)",
+                      "long": "--since",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--until <time>",
+                      "description": "Only sessions older than this (ISO timestamp)",
+                      "long": "--until",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--unmanaged",
+                      "description": "Include sessions from your own ~/.<agent> installs",
+                      "long": "--unmanaged",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--team, --teams",
+                      "description": "Include team-spawned sessions",
+                      "short": "--team",
+                      "long": "--teams",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--local",
+                      "description": "Only this machine",
+                      "long": "--local",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--fleet",
+                      "description": "Every registered online compute device, each keeping its own index",
+                      "long": "--fleet",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-D, --device <target...>",
+                      "description": "Only these devices (repeatable); cannot be combined with --local",
+                      "short": "-D",
+                      "long": "--device",
+                      "required": true,
+                      "optional": false,
+                      "variadic": true,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--json",
+                      "description": "Emit the machine-readable result",
+                      "long": "--json",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "examples": "# Backfill this machine once; reruns resume and skip completed transcripts\nagents daemon index backfill tools\n\n# Backfill every online compute device, keeping each index local\nagents daemon index backfill tools --fleet --json\n\n# Narrow the historical work\nagents daemon index backfill tools --agent codex --since 7d",
+                  "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents sessions backfill tools --local`, which every released CLI understands.",
+                  "subcommands": []
+                }
+              ]
+            },
+            {
+              "name": "optimize",
+              "path": "daemon index optimize",
+              "aliases": [],
+              "description": "Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Emit machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Compact the session/tool search index once it has grown fragmented\nagents daemon index optimize\n\n# Machine-readable segment counts\nagents daemon index optimize --json\n\n# Wire it to a weekly routine so the index never re-bloats\nagents routines add sessions-optimize --schedule \"0 4 * * 0\" --agent claude \\\n  --prompt \"Run: agents daemon index optimize\"",
+              "notes": "- FTS5 appends a segment on every insert and tombstones every delete; the scanner delete+inserts a session's docs on each rescan and never self-merges, so `tool_call_text_data` / `session_text_data` bloat with unmerged segments — GBs of index for tens of MB of content, and queries slow down.\n- This runs FTS5 `'optimize'`: it merges every segment into one and purges tombstones. Non-destructive — no searchable content is lost.\n- Reclaimed space becomes reusable free pages inside the DB file. To return it to the OS, use the operator lifecycle command `agents daemon stop`, run `VACUUM` against `~/.agents/.history/sessions/sessions.db`, then `agents daemon start`. `agents routines stop` disables only the scheduler service.",
+              "subcommands": []
+            },
+            {
+              "name": "roots",
+              "path": "daemon index roots",
+              "aliases": [],
+              "description": "Print the on-disk directories scanned for session transcripts, per agent, as JSON (for external watchers)",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Every existing transcript directory, including routine run archives\nagents daemon index roots",
+              "notes": "- Output is always a JSON array of { agent, dirs }; an agent with no existing directory is omitted.",
               "subcommands": []
             }
           ]
@@ -7029,7 +7379,7 @@
         }
       ],
       "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "cost",
@@ -7532,6 +7882,120 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "resources",
+          "path": "insights resources",
+          "aliases": [],
+          "description": "Which skills/commands you actually invoke, and which installed ones are dead weight.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--kind <kind>",
+              "description": "Limit to one kind: skill or command",
+              "long": "--kind",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--plugin <name>",
+              "description": "Only this plugin's resources (r.plugin), not every resource a plugin-touching session used",
+              "long": "--plugin",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-a, --agent <agent>",
+              "description": "Only sessions from this agent (e.g. claude)",
+              "short": "-a",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-p, --project <name>",
+              "description": "Only sessions in this project",
+              "short": "-p",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--machine <name>",
+              "description": "Only sessions recorded on this machine (host)",
+              "long": "--machine",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only sessions newer than this (e.g. 7d, 30d, or ISO date)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--top <n>",
+              "description": "How many ranked rows to show (default 20)",
+              "long": "--top",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--bottom",
+              "description": "Rank the least-invoked resources first instead of the most-invoked",
+              "long": "--bottom",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--zero",
+              "description": "Show only installed-but-never-invoked resources (the dead weight)",
+              "long": "--zero",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output the stats as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents insights resources\n\n# Just the dead weight — installed but never explicitly invoked\nagents insights resources --zero\n\n# Skills only, last 30 days, machine-readable\nagents insights resources --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents insights resources --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         }
       ]
@@ -16129,6 +16593,42 @@
           "negate": false
         },
         {
+          "flags": "--pane <id>",
+          "description": "session channel: tmux pane id to type into directly (e.g. %3), instead of --to",
+          "long": "--pane",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--socket <path>",
+          "description": "session channel: tmux socket the --pane lives on",
+          "long": "--socket",
+          "required": true,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--no-enter",
+          "description": "session channel: type the text without pressing Enter",
+          "long": "--no-enter",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": true
+        },
+        {
+          "flags": "--combined",
+          "description": "session channel: send text + Enter as one write",
+          "long": "--combined",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--json",
           "description": "output JSON",
           "long": "--json",
@@ -16157,8 +16657,8 @@
           "negate": false
         }
       ],
-      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.",
+      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Type into a known tmux pane, without pressing Enter\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"draft\" --no-enter\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
+      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
       "subcommands": []
     },
     {
@@ -16728,6 +17228,63 @@
               "args": [],
               "options": [
                 {
+                  "flags": "-a, --agent <agent>",
+                  "description": "Only this agent, optionally pinned to a version (e.g. claude, codex@0.116.0)",
+                  "short": "-a",
+                  "long": "--agent",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-p, --project <name>",
+                  "description": "Only sessions from this project",
+                  "short": "-p",
+                  "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--since <time>",
+                  "description": "Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)",
+                  "long": "--since",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--until <time>",
+                  "description": "Only sessions older than this (ISO timestamp)",
+                  "long": "--until",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--team, --teams",
+                  "description": "Include team-spawned sessions",
+                  "short": "--team",
+                  "long": "--teams",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Emit the machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -16808,6 +17365,100 @@
               "args": [],
               "options": [
                 {
+                  "flags": "-a, --agent <agent>",
+                  "description": "Only this agent, optionally pinned to a version (e.g. codex, claude@2.1.45)",
+                  "short": "-a",
+                  "long": "--agent",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-p, --project <name>",
+                  "description": "Only sessions from this project",
+                  "short": "-p",
+                  "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--since <time>",
+                  "description": "Only sessions newer than this (e.g. 2h, 7d, 4w, or an ISO date)",
+                  "long": "--since",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--until <time>",
+                  "description": "Only sessions older than this (ISO timestamp)",
+                  "long": "--until",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--unmanaged",
+                  "description": "Include sessions from your own ~/.<agent> installs",
+                  "long": "--unmanaged",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--team, --teams",
+                  "description": "Include team-spawned sessions",
+                  "short": "--team",
+                  "long": "--teams",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--local",
+                  "description": "Only this machine",
+                  "long": "--local",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--fleet",
+                  "description": "Every registered online compute device, each keeping its own index",
+                  "long": "--fleet",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-D, --device <target...>",
+                  "description": "Only these devices (repeatable); cannot be combined with --local",
+                  "short": "-D",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Emit the machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -16819,7 +17470,7 @@
                 }
               ],
               "examples": "# Backfill this machine once; reruns resume and skip completed transcripts\nagents sessions backfill tools\n\n# Backfill every online compute device, keeping each index local\nagents sessions backfill tools --fleet --json\n\n# Narrow the historical work\nagents sessions backfill tools --agent codex --since 7d",
-              "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.",
+              "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents sessions backfill tools --local`, which every released CLI understands.",
               "subcommands": []
             }
           ]
@@ -17437,7 +18088,7 @@
             }
           ],
           "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "mix",
@@ -18326,7 +18977,7 @@
             }
           ],
           "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents sessions stats\n\n# Just the dead weight — installed but never explicitly invoked\nagents sessions stats --zero\n\n# Skills only, last 30 days, machine-readable\nagents sessions stats --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents sessions stats --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
-          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         },
         {

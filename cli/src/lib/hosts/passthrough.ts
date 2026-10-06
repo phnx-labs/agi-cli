@@ -8,7 +8,6 @@ import {
   stripRoutingFlags,
   buildRemoteAgentsInvocation,
   stripClixml,
-  HOST_ROUTING_SPECS,
   type StripSpec,
 } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
@@ -19,7 +18,7 @@ import {
   resolveInteractiveDevice,
   interactiveUnsetError,
 } from '../devices/interactive-host.js';
-import { flagValue, hasHostRoutingFlag } from './routing-flag.js';
+import { flagValue, hasHostRoutingFlag, ROUTING_OPTION_SPECS } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
 import { markFleetRemote } from '../devices/connect.js';
@@ -116,12 +115,7 @@ export const OWN_HOST_COMMANDS = new Set([
   'apply',
 ]);
 
-const STRIP_SPECS: StripSpec[] = [
-  ...HOST_ROUTING_SPECS,
-  { long: 'no-tty', takesValue: false },
-  { long: 'hosts', takesValue: true },
-  { long: 'devices', takesValue: true },
-];
+const STRIP_SPECS: StripSpec[] = ROUTING_OPTION_SPECS;
 
 function firstSubcommand(allArgs: string[], group: string): string | undefined {
   const idx = allArgs.indexOf(group);
@@ -421,6 +415,8 @@ export async function maybeRunOnHost(
   if (!hostName && !hostsFlag && !devicesFlag) return false;
 
   if (OWN_HOST_COMMANDS.has(command)) return false;
+
+  if (command === 'daemon' && firstSubcommand(allArgs, 'daemon') === 'index') return false;
 
   if (command === 'teams') {
 

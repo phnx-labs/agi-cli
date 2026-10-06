@@ -10,6 +10,7 @@ import { resolveCloudPrompt, executeCloudDispatch } from '../lib/cloud/dispatch.
 import type { JobConfig, JobTrigger } from '../lib/scheduling/routines.js';
 import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/scheduling/routines.js';
 import { emit } from '../lib/feed/events.js';
+import { registerCloudTranscriptsCommand } from './cloud-transcripts.js';
 
 export function statusColor(status: string): (s: string) => string {
   switch (status) {
@@ -68,6 +69,9 @@ Examples:
 
   # Live-tail logs for a running task
   agents cloud logs tsk_4f2a91
+
+  # Read a captured Rush Cloud run's transcript (list without an id)
+  agents cloud transcripts 3f2a9c1e --markdown
 
   # Send a follow-up while the task is in needs-review
   agents cloud message tsk_4f2a91 "Looks good — also update the OpenAPI spec"
@@ -536,4 +540,6 @@ Examples:
         }
       }
     });
+
+  registerCloudTranscriptsCommand(cloud);
 }
