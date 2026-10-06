@@ -5,7 +5,7 @@ import { runLiveRoster, type LiveStatusFilter, type LiveStatusFlags } from './ps
 import { registerSessionsStopCommand } from './sessions-stop.js';
 import { registerFocusCommand } from './focus.js';
 import { registerDetachCommand } from './detach.js';
-import { registerSessionsMigrateCommand } from './sessions-migrate.js';
+import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
 
 export const PS_STATUSES: readonly LiveStatusFilter[] = [
   'working',
@@ -25,6 +25,8 @@ interface PsOptions {
   device?: string[];
   status?: string[];
   interactive?: boolean;
+  bookmarks?: boolean;
+  routine?: boolean | string;
 }
 
 export function statusFlags(values: string[] | undefined): LiveStatusFlags {
@@ -55,6 +57,8 @@ export function registerPsCommand(program: Command): void {
     .option('--local', 'Only this machine; skip the fleet fan-out')
     .option('-D, --device <target...>', 'Only these devices (alias from `agents devices`, user@host, or `all`; repeatable)')
     .option('--status <state...>', `Only these live states: ${PS_STATUSES.join(', ')} (repeatable or comma-separated)`)
+    .option('--bookmarks', 'Only bookmarked sessions (bookmark one with `agents sessions bookmark <id>`)')
+    .option('--routines, --routine [name]', 'Only routine-run sessions; pass a name to narrow to one routine (fuzzy name matching)')
     .option('--no-interactive', 'Print the roster instead of opening the picker on a TTY');
 
   setHelpSections(ps, {
@@ -71,11 +75,18 @@ export function registerPsCommand(program: Command): void {
       # Only agents waiting on you (exits 1 when any are waiting)
       agents ps --status waiting
 
+      # Only bookmarked sessions, or the runs of one routine
+      agents ps --bookmarks
+      agents ps --routine nightly-review
+
       # Act on one row by its 8-character id
       agents ps focus 4b2f1a9c
       agents ps detach 4b2f1a9c
       agents ps stop 4b2f1a9c
       agents ps migrate 4b2f1a9c --auto
+
+      # Where migrated sessions went
+      agents ps migrations
     `,
     notes: `
       - On a TTY with no --status, ps opens the session picker filtered to running
@@ -103,6 +114,8 @@ export function registerPsCommand(program: Command): void {
       local: opts.local,
       host: deviceScope(opts.device),
       interactive: opts.interactive,
+      bookmarks: opts.bookmarks,
+      routine: opts.routine,
     });
   });
 
@@ -110,4 +123,5 @@ export function registerPsCommand(program: Command): void {
   registerFocusCommand(ps, { group: 'ps', hidden: false });
   registerDetachCommand(ps, 'ps');
   registerSessionsMigrateCommand(ps, 'ps');
+  registerSessionsMigrationsCommand(ps, 'ps');
 }

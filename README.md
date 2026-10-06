@@ -367,7 +367,10 @@ agents ps                           # the live roster (opens the picker on a TTY
 agents ps --json --local            # this machine only, machine-readable
 agents ps --json -D box-a           # one peer, over SSH
 agents ps --status waiting          # only agents waiting on you (exit 1 if any)
+agents ps --bookmarks               # only bookmarked sessions
+agents ps --routine nightly-review  # only one routine's runs (omit the name for all routines)
 agents ps stop|focus|detach|migrate <id>   # act on one running agent
+agents ps migrations                # where migrated sessions went
 ```
 
 `agents sessions --active` and its status flags still answer with the same roster; `agents ps` is where the live verbs live from here on ([PHNX-4227](https://linear.app/getrush/issue/PHNX-4227)).

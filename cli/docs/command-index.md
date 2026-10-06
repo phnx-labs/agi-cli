@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 474 commands._
+_65 command groups · 475 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -477,6 +477,7 @@ agents ps                       List running agents on this machine and across t
 agents ps detach <id>           Send a live agent to the background — stop its terminal, keep it working headless
 agents ps focus [selector]      Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents ps migrate [session-id]  Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
+agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
 ```
 

@@ -91,12 +91,12 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command, group: 'ses
       - --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:
         the target agent must have the session registered, so migrate falls back to rehydrate when it can't.
       - The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).
-      - Every migrate appends to the ledger — see 'agents sessions migrations' for where each session went.
+      - Every migrate appends to the ledger — see 'agents ${group} migrations' for where each session went.
     `,
   });
 
   cmd.action(async (sessionId: string | undefined, options: MigrateOptions) => {
-    await sessionsMigrateAction(sessionId, options);
+    await sessionsMigrateAction(sessionId, options, group);
   });
 }
 
@@ -450,7 +450,7 @@ export function rehydrateCommand(source: SessionMeta): string[] {
   return [cli, prompt];
 }
 
-async function sessionsMigrateAction(sessionId: string | undefined, options: MigrateOptions): Promise<void> {
+async function sessionsMigrateAction(sessionId: string | undefined, options: MigrateOptions, group: 'sessions' | 'ps'): Promise<void> {
   if (options.mode && options.mode !== 'resume' && options.mode !== 'rehydrate') {
     fail(`--mode must be 'resume' or 'rehydrate' (got "${options.mode}").`);
   }
@@ -498,7 +498,7 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
   recordMigration({ ...base, status: 'completed' });
   console.log(
     chalk.green(`\nMigrated ${source.shortId} to ${target.name}${options.keep ? ' (copy)' : ''}.`) +
-      chalk.gray(" Tracked in 'agents sessions migrations'."),
+      chalk.gray(` Tracked in 'agents ${group} migrations'.`),
   );
 }
 
@@ -520,40 +520,41 @@ async function stopSource(source: SessionMeta, active: ActiveSession | undefined
   else console.log(chalk.yellow(`  Source tmux session ${name} was already gone.`));
 }
 
-export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
-  sessionsCmd
+export function registerSessionsMigrationsCommand(sessionsCmd: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+  const cmd = sessionsCmd
     .command('migrations')
     .description('Show the migration ledger — sessions handed off to/from other machines.')
     .option('--json', 'Output the raw ledger as JSON')
-    .option('--session <id>', 'Only rows whose session id starts with this fragment')
-    .action((options: { json?: boolean; session?: string }) => {
-      let recs = readMigrations();
-      if (options.session) recs = recs.filter((r) => r.sessionId.startsWith(options.session!) || r.shortId.startsWith(options.session!));
-      if (options.json) {
-        console.log(JSON.stringify(recs, null, 2));
-        return;
-      }
-      if (recs.length === 0) {
-        console.log(chalk.gray('No migrations recorded yet. Move one: agents sessions migrate --auto'));
-        return;
-      }
-      recs.reverse();
+    .option('--session <id>', 'Only rows whose session id starts with this fragment');
+  cmd.action((options: { session?: string }) => {
+    const json = (cmd.optsWithGlobals() as { json?: boolean }).json === true;
+    let recs = readMigrations();
+    if (options.session) recs = recs.filter((r) => r.sessionId.startsWith(options.session!) || r.shortId.startsWith(options.session!));
+    if (json) {
+      console.log(JSON.stringify(recs, null, 2));
+      return;
+    }
+    if (recs.length === 0) {
+      console.log(chalk.gray(`No migrations recorded yet. Move one: agents ${group} migrate --auto`));
+      return;
+    }
+    recs.reverse();
+    console.log(
+      chalk.bold('WHEN'.padEnd(18)) + chalk.bold('SESSION'.padEnd(11)) + chalk.bold('AGENT'.padEnd(9)) +
+        chalk.bold('ROUTE'.padEnd(30)) + chalk.bold('MODE'.padEnd(11)) + chalk.bold('STATUS'),
+    );
+    for (const r of recs) {
+      const when = r.at.slice(0, 16).replace('T', ' ');
+      const route = `${r.from.host} → ${r.to.box ?? r.to.host}`;
+      const kind = r.move ? r.mode : `${r.mode}·copy`;
+      const status = r.status === 'completed' ? chalk.green('ok') : chalk.red('failed');
+      const pr = r.wipPr ? chalk.gray(`  ${r.wipPr}`) : '';
       console.log(
-        chalk.bold('WHEN'.padEnd(18)) + chalk.bold('SESSION'.padEnd(11)) + chalk.bold('AGENT'.padEnd(9)) +
-          chalk.bold('ROUTE'.padEnd(30)) + chalk.bold('MODE'.padEnd(11)) + chalk.bold('STATUS'),
+        when.padEnd(18) + r.shortId.padEnd(11) + r.agent.padEnd(9) +
+          route.padEnd(30) + kind.padEnd(11) + status + pr,
       );
-      for (const r of recs) {
-        const when = r.at.slice(0, 16).replace('T', ' ');
-        const route = `${r.from.host} → ${r.to.box ?? r.to.host}`;
-        const kind = r.move ? r.mode : `${r.mode}·copy`;
-        const status = r.status === 'completed' ? chalk.green('ok') : chalk.red('failed');
-        const pr = r.wipPr ? chalk.gray(`  ${r.wipPr}`) : '';
-        console.log(
-          when.padEnd(18) + r.shortId.padEnd(11) + r.agent.padEnd(9) +
-            route.padEnd(30) + kind.padEnd(11) + status + pr,
-        );
-      }
-    });
+    }
+  });
 }
 
 function resolveSessionNameForPane(pane: string, socket?: string): string | undefined {

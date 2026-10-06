@@ -33,8 +33,8 @@ flowchart LR
 
 `agents ps` lists the sessions running right now on this machine and every reachable
 device, the same roster `agents sessions --active` prints. It is the home of the verbs
-that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`
-(the `sessions` spellings run the same code). Typing into a running agent is
+that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`,
+plus `ps migrations` for the migration ledger (the `sessions` spellings run the same code). Typing into a running agent is
 `agents send --channel session --to <id>`; resuming an ended one is
 `agents run --resume <id>`. Both moves are step A5 of PHNX-4227; the `sessions`
 group itself leaves agents-cli in a later release.
@@ -45,6 +45,8 @@ group itself leaves agents-cli in a later release.
 | `--local` | This machine only; no SSH fan-out |
 | `-D, --device <name...>` | Only these devices. Peers answer `agents sessions --active --json`, so a peer on an older release still works |
 | `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
+| `--bookmarks` | Only bookmarked sessions (`sessions --active --bookmarks`) |
+| `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag (`sessions --active --routine`) |
 | `--no-interactive` | Print instead of opening the picker on a TTY |
 
 On a TTY with no `--status`, `ps` opens the session picker seeded running-only; `r`
