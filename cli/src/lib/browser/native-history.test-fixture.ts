@@ -3,13 +3,6 @@ import * as path from 'node:path';
 import Database from '../sqlite.js';
 import type { BrowserTaskSummary } from './sessions-list.js';
 
-/**
- * A writer for the standalone browser's `history.db`, using the schema and upsert
- * of @phnx-labs/browser-cli `src/runtime/task-history.ts` (a46ee52f) verbatim, so
- * the reader is exercised against the real on-disk shape. The connection stays
- * open: WAL mode keeps unflushed writes in `history.db-wal`, which is what the
- * feed watcher must notice.
- */
 export class NativeHistoryWriter {
   private readonly db: Database;
 

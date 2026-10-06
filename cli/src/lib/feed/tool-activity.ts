@@ -168,7 +168,6 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
     if (stopped || watchers.get(root)) return;
     try {
       fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-      // A reader of a WAL database updates its -shm index; only -wal and the db itself carry writes.
       const watcher = fs.watch(root, { recursive: true }, (_event, file) => {
         if (!String(file ?? '').endsWith('-shm')) dirty = true;
       });

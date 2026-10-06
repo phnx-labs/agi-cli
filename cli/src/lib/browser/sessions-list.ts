@@ -202,12 +202,6 @@ function parseSummary(file: string, raw: string): BrowserTaskSummary {
   return summary;
 }
 
-/**
- * The standalone browser's own task history (`.history/browser/history.db`,
- * written by @phnx-labs/browser-cli `task-history.ts`). Opened read-only so a
- * read never checkpoints the writer's WAL; an absent file is an empty history,
- * any other failure throws so a feed snapshot reports itself incomplete.
- */
 export function readNativeBrowserHistory(file = nativeBrowserHistoryPath(), limit = BROWSER_HISTORY_LIMIT): BrowserTaskSummary[] {
   if (!fs.existsSync(file)) return [];
   const db = new Database(file, { readOnly: true });
@@ -223,11 +217,6 @@ function belongsToProfile(key: string, profile: string | undefined): boolean {
   return !profile || key === profile || profileOfCacheKey(key) === profile;
 }
 
-/**
- * One summary per profile+task: native history first, the agents-recorded
- * `browser_sessions` row only for what native history does not say. Neither
- * store is written.
- */
 export function readBrowserTaskHistory(profile?: string): BrowserTaskSummary[] {
   const merged = new Map<string, BrowserTaskSummary>();
   const key = (s: { profile: string; task: string }) => `${s.profile}\0${s.task}`;
@@ -404,7 +393,6 @@ export function groupIntoRows(
   return rows;
 }
 
-/** Task-first rows from captures, browser history and live task state. Reads only. */
 export function readBrowserSessionRows(profile?: string): BrowserSessionRow[] {
   const groups = listBrowserSessions(profile);
   const history = readBrowserTaskHistory(profile);
