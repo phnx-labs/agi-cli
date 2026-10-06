@@ -284,7 +284,6 @@ function createScanProgressTracker(
   };
 }
 
-const PICKER_RECENT_COUNT = 15;
 const DEFAULT_LIMIT = '50';
 const WHOLE_TEAM_POOL_LIMIT = 5000;
 const OVERVIEW_ROWS_PER_PROJECT = 5;
