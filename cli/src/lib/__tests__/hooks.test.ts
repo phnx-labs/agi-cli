@@ -79,6 +79,26 @@ describe('registerHooksToSettings - Codex', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('keeps a matcher hook on a no-matcher Codex event stable across repeated syncs', () => {
+    const versionHome = makeVersionHome();
+    makeScript('stop-check.sh');
+    const manifest: Record<string, ManifestHook> = {
+      'stop-check': { script: 'stop-check.sh', events: ['Stop', 'PreToolUse'], matcher: 'Bash' },
+    };
+
+    registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+    const result = registerHooksToSettings('codex', versionHome, manifest, agentsDir);
+    expect(result.errors).toHaveLength(0);
+
+    const hooksJson = JSON.parse(fs.readFileSync(path.join(versionHome, '.codex', 'hooks.json'), 'utf-8'));
+    expect(hooksJson.hooks.Stop).toHaveLength(1);
+    expect(hooksJson.hooks.Stop[0]).not.toHaveProperty('matcher');
+    expect(hooksJson.hooks.Stop[0].hooks).toHaveLength(1);
+    expect(hooksJson.hooks.PreToolUse).toHaveLength(1);
+    expect(hooksJson.hooks.PreToolUse[0].matcher).toBe('Bash');
+    expect(hooksJson.hooks.PreToolUse[0].hooks).toHaveLength(1);
+  });
+
   it('writes hooks.json with correct nested schema for UserPromptSubmit', () => {
     const versionHome = makeVersionHome();
     const scriptPath = makeScript('on-prompt.sh');

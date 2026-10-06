@@ -242,16 +242,23 @@ summary (`commands`, `run`, multi-section default).
 
 Event name mapping across agents is handled in `src/lib/hooks/install.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `GOOSE_EVENT_MAP`, `CURSOR_EVENT_MAP`, and `HERMES_EVENT_MAP`.
 
-## Version-home deduplication
+## Registration ownership
 
-Each installed harness version has its own synced hook scripts. Every native
-registrar emits one entry per logical manifest resource and event. For the
-Claude-shaped and Codex read-modify-write formats, existing registrations are
-also deduplicated by logical hook resource name, not absolute path, so the same
-hook copied under several version homes is registered once and the active
-version's command is authoritative. Other harnesses rewrite their one managed
-hook file from the manifest on each sync and therefore cannot accumulate sibling
-version paths there.
+Each installed harness version, and each account slot, has its own synced hook
+scripts. A registration is managed by agents-cli when its command points into a
+source repo's hooks dir, the shims dir, or any version home
+(`.history/versions/<agent>/<v>/home/`) or account slot
+(`.history/accounts/<agent>/<id>/`), including homes other than the one being
+written. For the Claude-shaped (Claude, Droid) and Codex read-modify-write
+formats, a managed registration survives a sync only if the manifest expects
+that exact event, matcher and command, and only once. A slot that carried a
+version home's `settings.json` forward therefore loses the version home's paths,
+and a script that serves several events (a shim on a matcher event, a direct
+path on a bare one) keeps exactly one command per event. Other harnesses keep a
+managed command only when the manifest resolves to it, and rewrite their one
+managed hook file from the manifest. Registrations outside these paths are the
+user's and are never touched; a hook hand-registered under another version home
+or slot path is treated as managed and dropped.
 
 Run `agents doctor` to inspect the copies. Identical same-name scripts across
 versions are warnings because they add runtime noise and cost if registered
