@@ -37,6 +37,7 @@ import { registerMixCommands } from '../lib/analytics/mix-commands.js';
 import { registerPerfSubcommand } from './perf.js';
 import { registerCostCommand } from './cost.js';
 import { registerOutputCommand } from './output.js';
+import { registerInsightsResourcesCommand } from './sessions-stats.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -574,7 +575,7 @@ function configureInsightsCommand(cmd: Command): void {
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
       Latency is \`agents insights perf\` (not mix). Quota is \`agents view\`. Spend is
       \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
-      is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`.
+      is \`agents insights resources\`. Former top-level \`agents trends\` is \`agents insights mix\`.
       One recipe is \`agents insights mix <recipe>\` (e.g. \`harness-mix\`); \`--list\` names them.
 
       The behavioural report parses in-scope transcripts once and caches facets; later runs
@@ -594,6 +595,7 @@ export function registerInsightsCommand(program: Command): void {
   registerCostCommand(cmd);
   registerOutputCommand(cmd);
   registerPerfSubcommand(cmd);
+  registerInsightsResourcesCommand(cmd);
 }
 
 export function registerSessionsInsightsCommand(sessions: Command): void {

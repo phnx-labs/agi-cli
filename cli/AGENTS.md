@@ -1754,7 +1754,7 @@ src/
                        #   `lib/browser-client.ts` (fd-3/fd-4, no fallback), mirroring `computer-client.ts`.
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
     project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias) — including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by `bash-command.ts`'s `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
+    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents insights resources` (also `agents sessions stats`) + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias) — including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by `bash-command.ts`'s `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --device;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
@@ -2479,7 +2479,7 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
   (SES-31..SES-37, SES-IF-4a); `agents sessions insights` emits aggregate-only
-  actions and keeps `agents insights` as its top-level alias (SES-IF-4c); `agents sessions stats` emits its own versioned
+  actions and keeps `agents insights` as its top-level alias (SES-IF-4c); `agents insights resources` (older spelling `agents sessions stats`) emits its own versioned
   `sessions-stats` rollup of skill/command usage and never the list/detail shape
   (SES-IF-4b); `agents sessions
   export --encrypt` seals every transcript
