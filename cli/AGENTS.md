@@ -491,11 +491,15 @@ while the box has no session.
   `ownerNotify.{signedIn, deviceToken}` in its daemon-state envelope; a headed
   peer's report older than `OWNER_NOTIFY_PEER_FRESH_MS` does not count, so a dead
   box is not elected). `deviceToken` is the worker's own verdict: a token is
-  present and rush/api has not answered 401 to it. A worker reporting `false` gets
-  the stored token re-pushed when the minter holds the live one, and otherwise a
-  revoke and fresh mint, so a lost memo or a replaced minter never strands it. The
-  minter revokes the `notify` token of any device that is no longer a worker peer,
-  and `agents auth logout` revokes the tokens that box minted.
+  present and rush/api has not answered 401 to it, and the next authenticated call
+  clears a 401 mark. A worker reporting `false` gets the stored token re-pushed
+  only when the minter holds the live one and its last push failed; a `false`
+  reported after a successful push gets a revoke and fresh mint, as does a token the
+  minter does not hold, so a rejected token, a lost memo, or a replaced minter never
+  strands it. Each signed-in headed box revokes only the tokens it minted, for a
+  device that is no longer a worker peer, and skips that pass when its device
+  registry is empty or any role is unreadable. `agents auth logout` revokes the
+  tokens that box minted.
 - **iMessage on a Mac.** The macOS-only `owner-device-delivery` daemon service
   claims queued rows every 15 s (`POST /me/device-deliveries/claim`, one atomic
   UPDATE server-side, so two signed-in Macs never send the same row), sends each

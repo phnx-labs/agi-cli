@@ -129,6 +129,7 @@ async function rushRequest<T>(method: 'POST' | 'PUT', route: string, body: unkno
   } catch (err) {
     throw new OwnerNotifyApiError(`Could not reach ${RUSH_API_BASE} (${(err as Error).message}).`, 0);
   }
+  if (response.ok && credential.kind === 'device') fs.rmSync(rejectedTokenPath(getCacheDir()), { force: true });
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   let payload: unknown = null;

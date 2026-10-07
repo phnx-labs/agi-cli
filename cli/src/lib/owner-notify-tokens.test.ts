@@ -44,11 +44,13 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
   let root: string;
   let cacheDir: string;
   let pushes: Array<{ bundle: string; host: string }>;
+  let pushOk: boolean;
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-notify-tokens-'));
     cacheDir = path.join(root, '.cache');
     pushes = [];
+    pushOk = true;
     api.deviceTokens.length = 0;
     api.requests.length = 0;
     identity.writeSession({ access_token: api.sessionToken });
@@ -70,8 +72,9 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     return api.deviceTokens.map((t) => t.id);
   }
 
-  function run(localName = 'zion', devices = ['zion', 'pinnacles', 'worker-a', 'worker-b']) {
+  function run(localName = 'zion', devices = ['zion', 'pinnacles', 'worker-a', 'worker-b'], now = Date.now()) {
     return tokens.syncOwnerNotifyTokens({
+      now: () => now,
       localName,
       userAgentsDir: root,
       cacheDir,
@@ -82,7 +85,7 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
       sshTarget: (d) => `user@${d.name}`,
       push: async (bundle: string, host: string): Promise<PushBundleResult> => {
         pushes.push({ bundle, host });
-        return { ok: true, host, bundle, keyCount: 1, message: 'pushed' };
+        return { ok: pushOk, host, bundle, keyCount: 1, message: pushOk ? 'pushed' : 'ssh failed' };
       },
     });
   }
@@ -117,15 +120,38 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     expect(again.skipped).toContainEqual({ device: 'worker-a', reason: 'token present' });
   });
 
-  it('re-pushes the stored token when the worker lost it, without minting a replacement', async () => {
+  it('re-pushes the stored token after a failed push, without minting a replacement', async () => {
     await peerState('worker-a', { signedIn: false, deviceToken: false });
-    await run('zion', ['zion', 'worker-a']);
-    const before = api.deviceTokens.map((t) => t.id);
+    pushOk = false;
+    const failed = await run('zion', ['zion', 'worker-a']);
+    expect(failed.errors).toContainEqual({ device: 'worker-a', message: 'ssh failed' });
+    const before = tokenIds();
+    pushOk = true;
     pushes = [];
     const again = await run('zion', ['zion', 'worker-a']);
     expect(again.minted).toEqual([]);
     expect(pushes).toEqual([{ bundle: '__notify-worker-a__', host: 'user@worker-a' }]);
-    expect(api.deviceTokens.map((t) => t.id)).toEqual(before);
+    expect(tokenIds()).toEqual(before);
+  });
+
+  it('waits for the report after a push, then revokes and re-mints a held token the worker still reports unusable', async () => {
+    const pushedAt = Date.now();
+    await peerState('worker-a', { signedIn: false, deviceToken: false }, pushedAt - 1_000);
+    await run('zion', ['zion', 'worker-a'], pushedAt);
+    const [first] = tokenIds();
+    pushes = [];
+    const waiting = await run('zion', ['zion', 'worker-a'], pushedAt + 60_000);
+    expect(waiting.skipped).toContainEqual({ device: 'worker-a', reason: 'waiting for the worker to report the pushed token' });
+    expect(pushes).toEqual([]);
+
+    await peerState('worker-a', { signedIn: false, deviceToken: false }, pushedAt + 120_000);
+    const replaced = await run('zion', ['zion', 'worker-a'], pushedAt + 180_000);
+    expect(replaced.minted).toEqual(['worker-a']);
+    expect(api.requests.map((r) => `${r.method} ${r.path}`)).toContain(`DELETE /api/v1/auth/tokens/${first}`);
+    const fresh = api.deviceTokens.find((t) => t.device === 'worker-a')!;
+    expect(fresh.id).not.toBe(first);
+    expect(claudeToken.readReservedCredential(reserved.ownerNotifyStoreName('worker-a'), reserved.OWNER_NOTIFY_TOKEN_KEY)).toBe(fresh.token);
+    expect(pushes).toEqual([{ bundle: '__notify-worker-a__', host: 'user@worker-a' }]);
   });
 
   it('only the first signed-in headed box by name mints', async () => {
@@ -172,21 +198,32 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     expect(pushes).toHaveLength(1);
   });
 
-  it('revokes the token of a device that left the fleet or stopped being a worker', async () => {
+  it('revokes a token it minted for a device that left the fleet, and never a token another box minted', async () => {
     await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('worker-b', { signedIn: false, deviceToken: false });
     await run('zion', ['zion', 'worker-a', 'worker-b']);
     api.deviceTokens.push({ id: 'tok-gone', token: 'gone', device: 'retired-box', createdAt: '' });
-    api.deviceTokens.push({ id: 'tok-headed', token: 'headed', device: 'pinnacles', createdAt: '' });
     const kept = api.deviceTokens.find((t) => t.device === 'worker-a')!.id;
 
     const result = await run('zion', ['zion', 'pinnacles', 'worker-a']);
-    expect(result.revoked.sort()).toEqual(['pinnacles', 'retired-box']);
-    expect(tokenIds()).toEqual([kept]);
+    expect(result.revoked).toEqual(['worker-b']);
+    expect(tokenIds().sort()).toEqual([kept, 'tok-gone'].sort());
+    expect(claudeToken.readReservedCredential(reserved.ownerNotifyStoreName('worker-b'), reserved.OWNER_NOTIFY_TOKEN_KEY)).toBeNull();
+  });
 
-    const dropped = await run('zion', ['zion']);
-    expect(dropped.revoked).toEqual(['worker-a']);
-    expect(api.deviceTokens).toEqual([]);
-    expect(claudeToken.readReservedCredential(reserved.ownerNotifyStoreName('worker-a'), reserved.OWNER_NOTIFY_TOKEN_KEY)).toBeNull();
+  it('revokes nothing when the device registry is empty or a role is unreadable', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await run('zion', ['zion', 'worker-a']);
+    const before = tokenIds();
+    expect(before).toHaveLength(1);
+
+    const empty = await run('zion', []);
+    expect(empty.revoked).toEqual([]);
+    expect(empty.skipped).toContainEqual({ device: 'zion', reason: 'stale-token revocation needs a device registry with every role readable' });
+    const unroled = await run('zion', ['zion', 'unroled-box']);
+    expect(unroled.revoked).toEqual([]);
+    expect(tokenIds()).toEqual(before);
+    expect(api.requests.filter((r) => r.method === 'DELETE')).toEqual([]);
   });
 
   it('logout revokes every token this box minted and forgets them', async () => {

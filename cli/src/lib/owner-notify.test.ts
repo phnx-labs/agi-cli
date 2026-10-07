@@ -98,6 +98,17 @@ describe('postOwnerNotification — the one owner path', () => {
     expect(ownerNotify.hasUsableDeviceToken(device)).toBe(true);
   });
 
+  it('clears the rejected mark once the same device token authenticates again', async () => {
+    identity.clearSession();
+    const device = ownerNotify.selfDeviceName();
+    authMint.writeReservedStoreItem(reserved.ownerNotifyStoreName(device), reserved.OWNER_NOTIFY_TOKEN_KEY, 'phx-device-flaky', 'test');
+    await expect(ownerNotify.postOwnerNotification({ event: 'failed', title: 't', body: 'b', dedupKey: 'k-6' })).rejects.toThrow(/re-mints it/);
+    expect(ownerNotify.hasUsableDeviceToken(device)).toBe(false);
+    api.deviceTokens.push({ id: 'tok-flaky', token: 'phx-device-flaky', device, createdAt: new Date().toISOString() });
+    await ownerNotify.postOwnerNotification({ event: 'failed', title: 't', body: 'b', dedupKey: 'k-7' });
+    expect(ownerNotify.hasUsableDeviceToken(device)).toBe(true);
+  });
+
   it('names the fix when rush/api rejects the session', async () => {
     identity.writeSession({ access_token: 'stale-token' });
     await expect(ownerNotify.postOwnerNotification({ event: 'message', title: 't', body: 'b', dedupKey: 'k-4' }))
