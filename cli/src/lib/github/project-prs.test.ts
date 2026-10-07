@@ -392,6 +392,25 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.merge).toEqual({ viewerIsAdmin: false, adminBypass: false, autoMergeAllowed: false, methods: ['squash', 'merge'] });
   });
 
+  it('--number with the GraphQL budget spent keeps REST head and checks, and says the review is unknown', async () => {
+    const routes = (review: string | Error) => recordedGh({
+      'repos/acme/mono': repoRead,
+      'user': '{"login":"octocat"}\n',
+      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': review,
+      'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
+      'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
+    });
+    const spent = routes(ghError('GraphQL: API rate limit exceeded for user ID 1.\n'));
+    const [repo] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, spent.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.error).toBeNull();
+    expect(repo.pullRequests[0]).toMatchObject({ headSha: 'o1', ciState: 'FAILURE', reviewDecision: null });
+    expect(repo.ciError).toMatch(/^review status unavailable: .*rate limit/i);
+    const broken = routes(ghError('gh: Server Error (HTTP 502)\n'));
+    const [failed] = (await buildProjectPrs(solo, { repo: 'acme/mono', number: 1 }, broken.gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(failed.error).toMatch(/502|Command failed|Server Error/);
+  });
+
   it('a failed merge-settings read leaves merge null and names itself in ciError, on both paths', async () => {
     const failing = (args: string[]) => {
       if (args.some((a) => a.includes('allow_rebase_merge'))) throw ghError('gh: Server Error (HTTP 502)\n');
