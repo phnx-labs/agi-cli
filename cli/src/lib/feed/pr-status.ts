@@ -103,7 +103,10 @@ export function checkItemsFrom(rollup?: unknown[]): PrCheckItem[] | undefined {
     const item: PrCheckItem = { name, state: checkItemState(row), ...(url ? { url } : {}) };
     byName.set(name, { item, atMs: at });
   }
-  const items = [...byName.values()].map((entry) => entry.item).slice(0, MAX_PR_CHECK_ITEMS);
+  const all = [...byName.values()].map((entry) => entry.item);
+  const rank = (item: PrCheckItem) => item.state === 'failed' ? 0 : item.state === 'running' ? 1 : 2;
+  const kept = new Set([...all].sort((a, b) => rank(a) - rank(b)).slice(0, MAX_PR_CHECK_ITEMS));
+  const items = all.filter((item) => kept.has(item));
   return items.length ? items : undefined;
 }
 

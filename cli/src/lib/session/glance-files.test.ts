@@ -98,6 +98,19 @@ describe('subagent model and prompt', () => {
     expect(grown.prompt).toBe(row.prompt);
   });
 
+  it('forgets model and prompt when the child transcript is rewritten shorter', () => {
+    const file = sessionWith('rewritten');
+    const dir = path.join(path.dirname(file), 'session', 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    const child = path.join(dir, 'agent-rewrite.jsonl');
+    fs.writeFileSync(child, line({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'the original long prompt text' } }) + reply('claude-opus-4-1', 'Done.'));
+    expect(readSessionSubagents(file, false, [], 1_000)![0]).toMatchObject({ prompt: 'the original long prompt text', model: 'claude-opus-4-1' });
+    fs.writeFileSync(child, line({ type: 'user', uuid: 'u9', message: { role: 'user', content: 'new' } }));
+    const [after] = readSessionSubagents(file, false, [], 1_000)!;
+    expect(after.prompt).toBe('new');
+    expect(after).not.toHaveProperty('model');
+  });
+
   it('clamps a long prompt and omits both fields when the transcript has neither', () => {
     const file = sessionWith('long-prompt');
     const dir = path.join(path.dirname(file), 'session', 'subagents');

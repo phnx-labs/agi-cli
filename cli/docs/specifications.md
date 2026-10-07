@@ -905,7 +905,8 @@ SSH access (§7); rendering sessions that no harness produced.
   `context`/`state`/`targetUrl` — with `state` one of `passed`/`failed`/
   `running`/`skipped` in the vocabulary `checks` uses (`SKIPPED` and `NEUTRAL`
   read `skipped`), a re-run name kept once at its latest run, and at most 30
-  entries. Each field is absent when unknown (`lib/feed/pr-status.ts`
+  entries (failed, then running, kept first when over the cap; rollup order
+  otherwise). Each field is absent when unknown (`lib/feed/pr-status.ts`
   `withPullRequestStatus`; `lib/feed/pr-status.test.ts`,
   `lib/feed/watch.test.ts`).
 - **SES-40d (MUST).** The stream is long-lived — one child per VS Code leader —

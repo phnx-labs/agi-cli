@@ -78,6 +78,10 @@ describe('checkItemsFrom', () => {
     const items = checkItemsFrom(many)!;
     expect(items).toHaveLength(MAX_PR_CHECK_ITEMS);
     expect(items.at(-1)!.name).toBe(`job-${MAX_PR_CHECK_ITEMS - 1}`);
+    const late = [...many, { name: 'late-failure', conclusion: 'FAILURE' }];
+    const capped = checkItemsFrom(late)!;
+    expect(capped).toHaveLength(MAX_PR_CHECK_ITEMS);
+    expect(capped.at(-1)).toEqual({ name: 'late-failure', state: 'failed' });
     expect(checkItemsFrom(undefined)).toBeUndefined();
     expect(checkItemsFrom([{ conclusion: 'SUCCESS' }])).toBeUndefined();
   });
