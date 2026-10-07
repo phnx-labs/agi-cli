@@ -83,7 +83,8 @@ describe('blockBroadcastContext', () => {
       blockBroadcastContext(block, { project: 'agents-cli' }),
     );
     expect(planned).toHaveLength(1);
-    const message = planned[0].text!;
+    expect(planned[0].owner).toMatchObject({ event: 'needs_you', source: { device: 'yosemite-s1' } });
+    const message = planned[0].owner!.body;
     expect(message).toContain('npm token expired, cannot publish');
     expect(message).toContain('Sent from');
     expect(message).toContain('yosemite-s1');

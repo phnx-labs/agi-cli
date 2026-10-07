@@ -79,7 +79,7 @@ export function registerModelsCommand(program: Command): void {
       if (!agentSpec && !all) {
         console.log(chalk.gray('\n  `agents models <agent>` for one harness · `--all` for the full model list'));
         console.log(chalk.gray('  `agents models tier set <agent> <tier> <model>` to override a tier'));
-        console.log(chalk.gray('  Permission modes (--mode plan|edit|auto|skip): `agents modes <agent>`'));
+        console.log(chalk.gray('  Permission modes (--mode plan|edit|auto|skip): `agents run --help`'));
       }
     });
 

@@ -1,15 +1,8 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import type { Meta } from './types.js';
-import { mailboxDir, peek } from './mailbox.js';
-import { registerBuiltinProviders } from './channels/providers/index.js';
-import {
-  registerChannelProvider,
-  resolveChannelProvider,
-  type ChannelProvider,
-} from './channels/registry.js';
 import {
   composeBroadcastMessage,
   effectiveBroadcastConfig,
@@ -32,6 +25,7 @@ const ctx = (over: Partial<FeedBroadcastContext> = {}): FeedBroadcastContext => 
   agent: 'claude',
   host: 'yosemite-s1',
   session: 'c854ae60-0bde-4049-bc8a-0b9674aeabd0',
+  eventKey: 'c854ae60-0bde-4049-bc8a-0b9674aeabd0:2026-10-06T12:00:00.000Z',
   ...over,
 });
 
@@ -351,24 +345,30 @@ describe('running sinks', () => {
 });
 
 describe('channel sink planning', () => {
-  it('plans the owner alias without requiring `to`, carrying its ctx for per-destination compose', () => {
-    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx());
-    expect(planned).toEqual([
-      {
-        name: 'owner',
-        channel: 'owner',
-        to: undefined,
-        text: composeBroadcastMessage(ctx()),
-        ctx: ctx(),
-        messageTemplate: '{message}',
+  it('plans the owner alias without requiring `to`, as one account notification with a plain body and its own title', () => {
+    const [planned] = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx());
+    expect(planned).toMatchObject({
+      name: 'owner',
+      channel: 'owner',
+      owner: {
+        event: 'message',
+        title: 'CI green, merging',
+        body: composeBroadcastMessage(ctx({ title: undefined })),
+        sessionId: 'c854ae60-0bde-4049-bc8a-0b9674aeabd0',
+        dedupKey: 'feed:c854ae60-0bde-4049-bc8a-0b9674aeabd0:2026-10-06T12:00:00.000Z',
+        source: { device: 'yosemite-s1', agent: 'claude' },
       },
-    ]);
+    });
   });
 
-  it('does NOT attach ctx to a direct channel sink — its one provider resolves the format at plan time', () => {
+  it('a blocked post plans the owner sink as needs_you keyed on the block', () => {
+    const [planned] = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ blockId: 'blk-9', level: 'important' }));
+    expect(planned.owner).toMatchObject({ event: 'needs_you', dedupKey: 'block:blk-9' });
+  });
+
+  it('does NOT build an owner notification for a direct channel sink', () => {
     const [planned] = planFeedBroadcast({ tg: { channel: 'telegram', to: '12345' } }, ctx());
-    expect(planned.ctx).toBeUndefined();
-    expect(planned.messageTemplate).toBeUndefined();
+    expect(planned.owner).toBeUndefined();
   });
 
   it('skips a non-owner channel sink with no recipient rather than sending with a hole in it', () => {
@@ -405,7 +405,7 @@ describe('channel sink planning', () => {
     expect(planned.text).toContain('https://linear.app/getrush/issue/PHNX-3572');
   });
 
-  it('a Slack sink gets a mrkdwn labeled crumb; an owner/iMessage sink stays plain (PHNX-3698)', () => {
+  it('a Slack sink gets a mrkdwn labeled crumb; the owner notification body stays plain (PHNX-3698)', () => {
     const config: FeedBroadcastConfig = {
       slackling: { channel: 'slack', to: 'C0' },
       phone: { channel: 'owner' },
@@ -414,9 +414,9 @@ describe('channel sink planning', () => {
     expect(slackSink.text).toContain(
       'Sent from <https://prix.dev/console/sessions/c854ae60-0bde-4049-bc8a-0b9674aeabd0|claude/c854ae60> on yosemite-s1',
     );
-    expect(ownerSink.text).toContain('Sent from claude/c854ae60 on yosemite-s1');
-    expect(ownerSink.text).not.toContain('<https://');
-    expect(ownerSink.text).not.toContain('/console/sessions/');
+    expect(ownerSink.owner?.body).toContain('Sent from claude/c854ae60 on yosemite-s1');
+    expect(ownerSink.owner?.body).not.toContain('<https://');
+    expect(ownerSink.owner?.body).not.toContain('/console/sessions/');
   });
 
   it('keys format off the RESOLVED provider — a channel aliased to slack via notify.transports gets mrkdwn', () => {
@@ -443,24 +443,18 @@ describe('channel sink planning', () => {
   });
 });
 
-describe('effectiveBroadcastConfig — the implicit owner fallback', () => {
-  const ownerMeta = { notify: { owner: { channel: 'mailbox', to: 'agents-feed-fallback-test' } } } as Meta;
-
-  it('falls back to notify.owner when feed.broadcast is unset/empty and the post is important', () => {
-    expect(effectiveBroadcastConfig(undefined, 'important', ownerMeta)).toEqual({ owner: { channel: 'owner' } });
-    expect(effectiveBroadcastConfig({}, 'important', ownerMeta)).toEqual({ owner: { channel: 'owner' } });
+describe('effectiveBroadcastConfig — the implicit owner sink', () => {
+  it('routes an important post to the owner when feed.broadcast is unset or empty', () => {
+    expect(effectiveBroadcastConfig(undefined, 'important')).toEqual({ owner: { channel: 'owner' } });
+    expect(effectiveBroadcastConfig({}, 'important')).toEqual({ owner: { channel: 'owner' } });
   });
 
-  it('stays record-only for a routine milestone post even with notify.owner configured', () => {
-    expect(effectiveBroadcastConfig(undefined, 'milestone', ownerMeta)).toBeUndefined();
-  });
-
-  it('does not fall back when notify.owner is not configured either', () => {
-    expect(effectiveBroadcastConfig(undefined, 'important', metaEmpty)).toBeUndefined();
+  it('stays record-only for a routine milestone post', () => {
+    expect(effectiveBroadcastConfig(undefined, 'milestone')).toBeUndefined();
   });
 
   it('never layers on top of an operator-declared feed.broadcast — the config always wins outright', () => {
-    expect(effectiveBroadcastConfig(CONFIG, 'important', ownerMeta)).toBe(CONFIG);
+    expect(effectiveBroadcastConfig(CONFIG, 'important')).toBe(CONFIG);
   });
 });
 
@@ -508,37 +502,6 @@ describe('withDesktopNotify — feed post --notify', () => {
 });
 
 describe('channel delivery — real provider registry, no mocking', () => {
-  const BOX = `agents-feed-broadcast-test-${process.pid}`;
-
-  afterEach(() => {
-    try {
-      fs.rmSync(mailboxDir(BOX), { recursive: true, force: true });
-    } catch {
-    }
-  });
-
-  it('delivers an owner-alias channel sink through the real mailbox provider', async () => {
-    const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
-    const postCtx = ctx({ level: 'important' });
-    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, postCtx);
-    const outcomes = await runFeedBroadcast(planned, meta);
-    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
-
-    const pending = peek(mailboxDir(BOX), BOX);
-    expect(pending.map((m) => m.text)).toContain(composeBroadcastMessage(postCtx));
-  });
-
-  it('was silent before RUSH-2123: --blocked with notify.owner set and no feed.broadcast now delivers', async () => {
-    const meta = { notify: { owner: { channel: 'mailbox', to: BOX } } } as Meta;
-    const postCtx = ctx({ level: 'important' });
-    const config = effectiveBroadcastConfig(undefined, 'important', meta);
-    expect(config).toBeDefined();
-
-    const outcomes = await runFeedBroadcast(planFeedBroadcast(config!, postCtx), meta);
-    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
-    expect(peek(mailboxDir(BOX), BOX)).toHaveLength(1);
-  });
-
   it('reports an unregistered channel provider without throwing — a bad config must not kill the fan-out', async () => {
     const planned = planFeedBroadcast(
       { tg: { channel: 'not-a-real-channel-42', to: 'x' } },
@@ -548,157 +511,5 @@ describe('channel delivery — real provider registry, no mocking', () => {
     expect(outcomes).toEqual([
       { name: 'tg', ok: false, error: expect.stringContaining('No channel provider') },
     ]);
-  });
-});
-
-describe.skipIf(process.platform !== 'linux')('feed owner sink forwards over SSH on local failure (PHNX-3303)', () => {
-  let tmp: string;
-  let sshRecord: string;
-  const saved = {
-    PATH: process.env.PATH,
-    devicesDir: process.env.AGENTS_DEVICES_DIR,
-    machineId: process.env.AGENTS_SYNC_MACHINE_ID,
-    humans: process.env.AGENTS_HUMANS_FILE,
-    sshRecord: process.env.SSH_RECORD,
-    guard: process.env.AGENTS_OWNER_NO_FORWARD,
-  };
-
-  beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-owner-forward-'));
-    const devicesDir = path.join(tmp, 'devices');
-    fs.mkdirSync(devicesDir, { recursive: true });
-    const now = new Date().toISOString();
-    fs.writeFileSync(path.join(devicesDir, 'registry.json'), JSON.stringify({
-      'mac-test': {
-        name: 'mac-test', platform: 'macos', shell: 'posix',
-        address: { via: 'manual', dnsName: 'mac-test.example' },
-        auth: { method: 'key' }, createdAt: now, updatedAt: now,
-      },
-    }));
-    process.env.AGENTS_DEVICES_DIR = devicesDir;
-    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self';
-    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
-
-    sshRecord = path.join(tmp, 'ssh.log');
-    process.env.SSH_RECORD = sshRecord;
-    const bin = path.join(tmp, 'bin');
-    fs.mkdirSync(bin, { recursive: true });
-    const ssh = path.join(bin, 'ssh');
-    fs.writeFileSync(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$SSH_RECORD"\nprintf '%s\\n' '{"ok":true,"channel":"imessage","id":"+18055551234"}'\nexit 0\n`);
-    fs.chmodSync(ssh, 0o755);
-    process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
-    delete process.env.AGENTS_OWNER_NO_FORWARD;
-  });
-
-  afterEach(() => {
-    for (const [k, v] of Object.entries({
-      PATH: saved.PATH, AGENTS_DEVICES_DIR: saved.devicesDir, AGENTS_SYNC_MACHINE_ID: saved.machineId,
-      AGENTS_HUMANS_FILE: saved.humans, SSH_RECORD: saved.sshRecord, AGENTS_OWNER_NO_FORWARD: saved.guard,
-    })) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-    fs.rmSync(tmp, { recursive: true, force: true });
-  });
-
-  it('delivers the important post via the macOS peer when this box cannot send iMessage', async () => {
-    const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
-    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
-    const outcomes = await runFeedBroadcast(planned, meta);
-
-    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
-    const log = fs.readFileSync(sshRecord, 'utf-8');
-    expect(log).toContain('mac-test.example');
-    expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
-    expect(log).toContain('send');
-  });
-
-  it('forwards an explicit Slack sink to the macOS peer', async () => {
-    const meta = { config: { interactiveHost: 'mac-test' } } as Meta;
-    const planned = planFeedBroadcast(
-      { engineering: { channel: 'slack', to: 'CENGINEERING' } },
-      ctx({ level: 'important' }),
-    );
-    const outcomes = await runFeedBroadcast(planned, meta);
-
-    expect(outcomes).toEqual([{ name: 'engineering', ok: true }]);
-    const log = fs.readFileSync(sshRecord, 'utf-8');
-    expect(log).toContain('mac-test.example');
-    expect(log).toContain('slack');
-    expect(log).toContain('CENGINEERING');
-    expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
-  });
-
-  it('keeps the clean local failure when no capable peer exists', async () => {
-    fs.writeFileSync(path.join(process.env.AGENTS_DEVICES_DIR!, 'registry.json'), JSON.stringify({}));
-    const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
-    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
-    const outcomes = await runFeedBroadcast(planned, meta);
-
-    expect(outcomes[0].ok).toBe(false);
-    expect(outcomes[0].error).toContain('iMessage requires macOS');
-    expect(fs.existsSync(sshRecord)).toBe(false);
-  });
-});
-
-describe('runFeedBroadcast owner fan-out composes per destination (PHNX-3698)', () => {
-  const savedHumans = process.env.AGENTS_HUMANS_FILE;
-  const savedWorkspace = process.env.LINEAR_WORKSPACE;
-  const captured: Record<string, string> = {};
-  let tmp: string;
-  let realImessage: ChannelProvider | undefined;
-  let realSlack: ChannelProvider | undefined;
-
-  const spy = (name: string): ChannelProvider => ({
-    name,
-    async send(text, opts) {
-      captured[name] = text;
-      return { ok: true, channel: name, id: opts.target };
-    },
-  });
-
-  beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-owner-perchan-'));
-    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml');
-    fs.writeFileSync(
-      process.env.AGENTS_HUMANS_FILE,
-      `version: 1\nowner:\n  channels:\n    - id: imessage\n      transport: rush\n      to: phone-owner\n    - id: slack\n      transport: rush\n      to: C0SLACKOWNER\n  policy:\n    normal: [imessage, slack]\n`,
-    );
-    process.env.LINEAR_WORKSPACE = 'getrush';
-    registerBuiltinProviders();
-    realImessage = resolveChannelProvider('imessage');
-    realSlack = resolveChannelProvider('slack');
-    registerChannelProvider(spy('imessage'));
-    registerChannelProvider(spy('slack'));
-  });
-
-  afterEach(() => {
-    if (realImessage) registerChannelProvider(realImessage);
-    if (realSlack) registerChannelProvider(realSlack);
-    if (savedHumans === undefined) delete process.env.AGENTS_HUMANS_FILE;
-    else process.env.AGENTS_HUMANS_FILE = savedHumans;
-    if (savedWorkspace === undefined) delete process.env.LINEAR_WORKSPACE;
-    else process.env.LINEAR_WORKSPACE = savedWorkspace;
-    for (const k of Object.keys(captured)) delete captured[k];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  });
-
-  it('delivers a mrkdwn body to the Slack owner channel and a plain one to iMessage', async () => {
-    const post = ctx({
-      level: 'important',
-      title: undefined,
-      text: 'Deploy never ran. PHNX-3689 is the root cause.',
-      ticket: undefined,
-    });
-    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, post);
-    const outcomes = await runFeedBroadcast(planned, metaEmpty);
-
-    expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].ok).toBe(true);
-    expect(captured.slack).toContain('<https://linear.app/getrush/issue/PHNX-3689|PHNX-3689>');
-    expect(captured.imessage).toContain('PHNX-3689');
-    expect(captured.imessage).not.toContain('<https://');
-    expect(captured.imessage).not.toContain('http');
-    expect(captured.slack).not.toEqual(captured.imessage);
   });
 });

@@ -20,8 +20,8 @@
  *              unwired-hook (a hook on disk that settings.json never fires) ·
  *              hook-runtime-broken (a wired hook's generated shim wrapper is
  *              missing or unusable) · cli-missing · ssh-key-enrollment ·
- *              owner-sink-unreachable (the feed/notify owner lane
- *              cannot reach the owner from this box).
+ *              owner-not-signed-in (no Phoenix session or worker device
+ *              token, so this box cannot reach the owner).
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
  *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
@@ -49,7 +49,6 @@ import type { DuplicateVersionHook } from '../hooks/install.js';
 import type { AgentsBinaryShadow } from '../binary-shadow.js';
 import type { LeakedDaemon } from '../daemon/leaked-daemons.js';
 import type { RcSecretFinding } from '../secrets-types.js';
-import type { OwnerSinkStatus } from '../channels/owner-sink.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';
 import type { FetchStatusMarker } from '../auto-pull.js';
@@ -124,7 +123,7 @@ export const ALL_FINDING_KINDS = [
   'ssh-key-enrollment',
   'stale-cli',
   'binary-shadow',
-  'owner-sink-unreachable',
+  'owner-not-signed-in',
   'leaked-daemon',
 ] as const;
 
@@ -135,7 +134,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'unwired-hook': 'critical',
   'hook-runtime-broken': 'critical',
   'cli-missing': 'critical',
-  'owner-sink-unreachable': 'critical',
+  'owner-not-signed-in': 'critical',
   'logout-unprovable': 'warning',
   'hook-runtime-visibility-unavailable': 'warning',
   'missing-resource': 'warning',
@@ -258,8 +257,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'remove or repoint the shadowing agents install(s)';
     case 'leaked-daemon':
       return 'kill <pid>';
-    case 'owner-sink-unreachable':
-      return 'check the channel transport: iMessage needs macOS, Slack needs SLACK_BOT_TOKEN in env or the webhooks bundle';
+    case 'owner-not-signed-in':
+      return 'agents auth login';
   }
 }
 
@@ -310,7 +309,7 @@ export interface LocalFindingInputs {
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
   windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
   isolatedVersions?: string[];
-  ownerSink?: OwnerSinkStatus;
+  ownerSignedIn?: boolean;
   binaryShadows?: AgentsBinaryShadow[];
   leakedDaemons?: LeakedDaemon[];
 }
@@ -327,19 +326,10 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     }));
   }
 
-  const sink = input.ownerSink;
-  if (sink?.configured && !sink.reachable) {
-    const chan = sink.channel ?? 'owner';
-    const why = sink.reason === 'imessage-not-macos'
-      ? 'iMessage requires macOS (peer-forward delivers from a macOS peer)'
-      : sink.reason === 'slack-no-token'
-        ? 'no SLACK_BOT_TOKEN — set it in env or the webhooks secrets bundle'
-        : sink.reason === 'channel-unsupported'
-          ? `${chan} transport removed (Rush daemon)`
-          : 'transport unreachable';
+  if (input.ownerSignedIn === false) {
     out.push(finding({
-      severity: FINDING_SEVERITY['owner-sink-unreachable'], kind: 'owner-sink-unreachable', device,
-      message: `${chan} → owner unreachable: ${why}`,
+      severity: FINDING_SEVERITY['owner-not-signed-in'], kind: 'owner-not-signed-in', device,
+      message: 'cannot reach the owner: no Phoenix session or worker device token',
     }));
   }
 
@@ -808,7 +798,7 @@ function subjectLabel(f: DoctorFinding): string {
 }
 
 function critLabel(f: DoctorFinding): { left: string; account: string; message: string } {
-  if (f.kind === 'owner-sink-unreachable') return { left: 'owner', account: '', message: f.message };
+  if (f.kind === 'owner-not-signed-in') return { left: 'owner', account: '', message: f.message };
   return {
     left: subjectLabel(f),
     account: f.account ?? '',

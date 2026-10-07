@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 65,
-  "commands": 483,
+  "groups": 60,
+  "commands": 478,
   "root": {
     "name": "agents",
     "path": "",
@@ -6220,72 +6220,6 @@
       ]
     },
     {
-      "name": "feedback",
-      "path": "feedback",
-      "aliases": [],
-      "description": "Open a pre-filled feedback Discussion or bug report",
-      "args": [
-        {
-          "name": "summary",
-          "required": false,
-          "variadic": true,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-b, --bug",
-          "description": "File as a bug report (opens issue tracker)",
-          "short": "-b",
-          "long": "--bug",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-i, --idea",
-          "description": "File as a feature idea (Discussions → Ideas)",
-          "short": "-i",
-          "long": "--idea",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-q, --question",
-          "description": "Ask a question (Discussions → Q&A)",
-          "short": "-q",
-          "long": "--question",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--print",
-          "description": "Print the URL instead of opening it",
-          "long": "--print",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
       "name": "harness",
       "path": "harness",
       "aliases": [
@@ -7082,80 +7016,6 @@
             }
           ],
           "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "humans",
-      "path": "humans",
-      "aliases": [],
-      "description": "Inspect owner identity and notification channel config (humans.yaml)",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Show owner identity and channel config as JSON\nagents humans show owner --json\n\n# Show owner identity in human-readable form\nagents humans show owner",
-      "notes": "humans.yaml is the canonical owner identity file at ~/.agents/humans.yaml.\nIt is populated by migrating notify.owner from agents.yaml and frontmatter\nfrom owner.md. Use `agents humans show owner` to inspect the current config.",
-      "subcommands": [
-        {
-          "name": "show",
-          "path": "humans show",
-          "aliases": [],
-          "description": "Show config from humans.yaml",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents humans show owner\nagents humans show owner --json",
-          "subcommands": [
-            {
-              "name": "owner",
-              "path": "humans show owner",
-              "aliases": [],
-              "description": "Show the configured owner identity and notification channels",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--json",
-                  "description": "Output as JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
         }
       ]
     },
@@ -9655,44 +9515,6 @@
       ]
     },
     {
-      "name": "modes",
-      "path": "modes",
-      "aliases": [],
-      "description": "Show which permission modes (--mode plan|edit|auto|skip) a harness supports for agents run / teams add",
-      "args": [
-        {
-          "name": "agentSpec",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--json",
-          "description": "Output machine-readable JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents modes\nagents modes claude\nagents modes claude@2.1.219\nagents modes cursor --json",
-      "notes": "Permission modes control how much the agent can do (not which LLM model\nruns — that is --model / agents models). Supported modes come from each\nharness's capabilities table; unsupported requests degrade (auto→edit,\nplan→safest native) or error (skip when missing).\n'full' is a silent alias for skip.\nagent@version is accepted so any configured run.defaults mode for that\nversion is shown; the mode list itself is per-agent today.",
-      "subcommands": []
-    },
-    {
       "name": "packages",
       "path": "packages",
       "aliases": [],
@@ -11816,7 +11638,7 @@
             },
             {
               "flags": "--older-than <days>",
-              "description": "Deprecated for trash/sessions; accepted but no data is deleted",
+              "description": "Deprecated for sessions; accepted but no data is deleted",
               "long": "--older-than",
               "required": true,
               "optional": false,
@@ -12744,37 +12566,6 @@
       ]
     },
     {
-      "name": "reminders",
-      "path": "reminders",
-      "aliases": [],
-      "description": "Personal operating reminders shown in the Claude statusline",
-      "args": [],
-      "options": [
-        {
-          "flags": "--json",
-          "description": "output as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "agents reminders          # list your operating reminders\nagents reminders --json   # machine-readable output",
-      "notes": "Reminders live in ~/.agents/reminders/reminders.yaml and sync across the fleet via 'agents repo push'.\nOne shows succinctly in the Claude statusline per session, chosen deterministically from the session id,\nso concurrent agents each show a different one and it stays stable within a session.",
-      "subcommands": []
-    },
-    {
       "name": "repos",
       "path": "repos",
       "aliases": [
@@ -13218,33 +13009,6 @@
           "subcommands": []
         }
       ]
-    },
-    {
-      "name": "restore",
-      "path": "restore",
-      "aliases": [],
-      "description": "Restore a soft-deleted agent version (e.g. \"codex@0.141.0\") removed via prune/remove",
-      "args": [
-        {
-          "name": "target",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
     },
     {
       "name": "route",
@@ -13717,7 +13481,7 @@
             },
             {
               "flags": "-m, --mode <mode>",
-              "description": "Execution mode: plan (read-only), edit (can write files), auto (the default; more autonomous than edit, mechanism per-harness — see `agents modes <agent>`), or skip (bypass all permission prompts). 'full' accepted as alias for skip.",
+              "description": "Execution mode: plan (read-only), edit (can write files), auto (the default; more autonomous than edit, mechanism per-harness — see `agents run --help`), or skip (bypass all permission prompts). 'full' accepted as alias for skip.",
               "short": "-m",
               "long": "--mode",
               "required": true,
@@ -16473,7 +16237,7 @@
         }
       ],
       "examples": "      # Headless, read-only: investigate or summarize without writing files\n      agents run claude \"summarize recent git commits\" --mode plan\n\n      # Headless, can edit: have the agent make changes\n      agents run claude \"fix lint errors in src/\" --mode edit\n\n      # Interactive (TUI): a bare run places itself like --device auto (a fleet\n      # worker, TUI forwarded over SSH); --local keeps it on this machine\n      agents run claude\n      agents run claude --local            # stay local (or pick this machine in claude@)\n\n      # Pick a signed-in account/version for only this run (# = account picker)\n      agents run claude#\n\n      # Pick the device this run lands on (@ = device picker); this machine\n      # first, offline rows disabled, fleet state aged in the prompt\n      agents run claude@\n\n      # Ask both, account first, then device — the run dispatches with the\n      # picked account to the picked device\n      agents run claude#@\n\n      # Full-auto: affinity-pick the host, then the harness with the most\n      # account headroom, then a balanced account on it\n      agents run auto \"fix the flaky test\" --mode edit\nagents run auto --device yosemite-s0 \"fix the flaky test\"   # pin the device\n      agents run auto --interactive --device auto --strategy balanced --mode auto\n\n      # Placement (one door — where the body runs). Old flags still work.\n      agents run claude \"…\" --where device:yosemite-s0   # = --device yosemite-s0\n      agents run claude \"…\" --where auto                 # = --device auto\n      agents run claude \"fix CI\" --where lease --mode edit\n\n      # Vendor cloud placement — the agent's own cloud runs the task and\n      # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow\n      agents run claude \"fix the flaky e2e\" --cloud --repo acme/example\n      agents run codex \"add parser tests\" --cloud --cloud-env env_a1b2c3\n      agents run droid \"QA the onboarding flow\" --cloud --no-follow\n      agents run claude \"…\" --where cloud          # same as --cloud\n\n      # Open the session in a terminal tab — detected from where your sessions\n      # already run (Ghostty / iTerm / Terminal.app); force one with a value\n      agents run claude --terminal\n      agents run claude --terminal ghostty\n\n      # Pipe JSON events to a parser (--quiet drops the preamble)\n      agents run claude \"...\" --json --quiet | jq\n\n      # Bounded run — kill the agent after 30 minutes\n      agents run claude \"generate sales report for yesterday\" --mode plan --timeout 30m\n\n      # Inject a keychain-backed secrets bundle\n      agents run claude \"deploy the worker\" --secrets prod --mode edit\n\n      # Run on a cloud box — reuses a warm box from the repo's profile pool when\n      # one is ready (kept after the run), else leases a fresh box, torn down after\n      agents run claude \"fix the failing tests\" --lease\n\n      # Force a brand-new box (destroyed after), or target a warm box by slug\n      agents run claude \"fix the failing tests\" --lease --fresh\n      agents run claude \"fix the failing tests\" --box warm-one\n\n      # Broadcast one prompt (or --task) across agents × models\n      agents run --broadcast claude,codex \"say hello\" --model cheap,default\n      agents run --broadcast --task hello-repo --model cheap\n      agents run --broadcast --list-tasks\n      agents run --broadcast --results --json\n\n      # Pass arbitrary native flags to the underlying CLI via -- separator\n      agents run kimi -- --plan --some-kimi-option value\n      agents run claude \"fix the bug\" -- --custom-flag",
-      "notes": "Modes (not every agent supports every mode — run `agents modes <agent>`):\n  plan  read-only investigation; no writes, no shell side-effects\n  edit  may edit files; prompts for shell / risky operations\n  auto  more autonomous than edit; the mechanism is per-harness --\n        claude, copilot: smart classifier auto-approves safe ops and\n               STILL PROMPTS for risky ones\n        codex: approval_policy=never over the edit sandbox; never\n               prompts at all, and a denied command fails instead\n  skip  bypass every permission prompt (dangerously-skip-permissions)\n  Legacy 'full' is silently rewritten to 'skip'.\n  List per-harness support + native flags: agents modes · agents modes claude\n  Models (cheap|default|best|ultra): agents models <agent[@version]>\n\nHeadless plan support (a prompt makes the run headless):\n  plan works headless on claude, codex, cursor, droid, opencode.\n  kimi, grok, antigravity have no headless plan mode — a headless\n  --mode plan auto-downgrades to --mode auto (with a stderr warning).\n  Interactive plan (omit the prompt) works everywhere it is listed.\n\nRun strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n  pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)\n  available  use pinned if it can run right now; otherwise switch to another signed-in version\n  balanced   distribute load across healthy accounts by remaining capacity (default)\n  A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n  --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n  Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each\n  excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.\n\n'auto' harness (agents run auto): picks the host (14d usage affinity,\nunless --device is given), the harness (installed CLIs weighted by\nbest-account headroom), and the account (the strategy above). Zero\nhealthy accounts on any harness exits nonzero with the earliest reset.\n\nPickers: a trailing # opens the account picker (agents run claude#) to\n  choose one installed account for this run — rows show identity, login\n  state, plan, and available limits; unsafe accounts stay visible but\n  disabled. A trailing @ opens the device picker (agents run claude@);\n  #@ asks both, account first, then device. The pickers cannot combine\n  with an explicit pin of the same thing (--account, --device/--on/\n  --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.\n\nInteractive placement: a bare 'agents run <harness>' (no prompt, real TTY)\n  places itself like --device auto — a fleet worker runs it, with the TUI\n  forwarded over SSH. Headless runs (any prompt, --json, no TTY) are\n  unchanged: they run in place. To stay on this machine, pass --local\n  (--device <this machine> means the same), or pick this machine (listed\n  first) in the '<harness>@' device picker. When placement finds no\n  healthy device the run fails loud and names the local spelling.\n\nFallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\nCloud placement: --cloud sends the run to the agent's native vendor cloud\n  (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the\n  same dispatch as agents cloud run --agent <agent>, tracked by agents\n  cloud list/status/logs/cancel/message. --provider overrides the routing;\n  --repo/--branch/--cloud-env refine the task. Agents without a native\n  cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is\n  given. --cloud is mutually exclusive with --device/--lease and with\n  local-run flags (--loop, --resume, --secrets, --terminal, …).\n\nResume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.\n\nPassthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n  agents run kimi -- --plan --some-native-flag value",
+      "notes": "Modes (not every agent supports every mode — see the table below):\n  plan  read-only investigation; no writes, no shell side-effects\n  edit  may edit files; prompts for shell / risky operations\n  auto  more autonomous than edit; the mechanism is per-harness --\n        claude, copilot: smart classifier auto-approves safe ops and\n               STILL PROMPTS for risky ones\n        codex: approval_policy=never over the edit sandbox; never\n               prompts at all, and a denied command fails instead\n  skip  bypass every permission prompt (dangerously-skip-permissions)\n  Legacy 'full' is silently rewritten to 'skip'.\n  Unsupported requests degrade: auto falls back to edit, plan to the\n  harness's safest native mode; skip errors where a harness has none.\n  Models (cheap|default|best|ultra): agents models <agent[@version]>\n\nMode support per harness (* = the harness's native default):\n  claude       plan* edit auto skip\n  codex        plan* edit auto skip\n  cursor       plan* edit skip\n  opencode     plan* edit\n  openclaw     plan* edit skip\n  copilot      plan* edit auto skip\n  amp          plan* edit\n  goose        edit*\n  antigravity  edit* skip\n  grok         plan* edit skip\n  kimi         plan* edit auto skip\n  droid        plan* edit auto skip\n  hermes       edit*\n  muse         plan* edit auto skip\n  warp         edit*\n\nHeadless plan support (a prompt makes the run headless):\n  plan works headless on claude, codex, cursor, droid, opencode.\n  kimi, grok, antigravity have no headless plan mode — a headless\n  --mode plan auto-downgrades to --mode auto (with a stderr warning).\n  Interactive plan (omit the prompt) works everywhere it is listed.\n\nRun strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n  pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)\n  available  use pinned if it can run right now; otherwise switch to another signed-in version\n  balanced   distribute load across healthy accounts by remaining capacity (default)\n  A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n  --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n  Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each\n  excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.\n\n'auto' harness (agents run auto): picks the host (14d usage affinity,\nunless --device is given), the harness (installed CLIs weighted by\nbest-account headroom), and the account (the strategy above). Zero\nhealthy accounts on any harness exits nonzero with the earliest reset.\n\nPickers: a trailing # opens the account picker (agents run claude#) to\n  choose one installed account for this run — rows show identity, login\n  state, plan, and available limits; unsafe accounts stay visible but\n  disabled. A trailing @ opens the device picker (agents run claude@);\n  #@ asks both, account first, then device. The pickers cannot combine\n  with an explicit pin of the same thing (--account, --device/--on/\n  --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.\n\nInteractive placement: a bare 'agents run <harness>' (no prompt, real TTY)\n  places itself like --device auto — a fleet worker runs it, with the TUI\n  forwarded over SSH. Headless runs (any prompt, --json, no TTY) are\n  unchanged: they run in place. To stay on this machine, pass --local\n  (--device <this machine> means the same), or pick this machine (listed\n  first) in the '<harness>@' device picker. When placement finds no\n  healthy device the run fails loud and names the local spelling.\n\nFallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\nCloud placement: --cloud sends the run to the agent's native vendor cloud\n  (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the\n  same dispatch as agents cloud run --agent <agent>, tracked by agents\n  cloud list/status/logs/cancel/message. --provider overrides the routing;\n  --repo/--branch/--cloud-env refine the task. Agents without a native\n  cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is\n  given. --cloud is mutually exclusive with --device/--lease and with\n  local-run flags (--loop, --resume, --secrets, --terminal, …).\n\nResume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.\n\nPassthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n  agents run kimi -- --plan --some-native-flag value",
       "subcommands": []
     },
     {
@@ -16568,7 +16332,7 @@
         },
         {
           "flags": "--to <target>",
-          "description": "recipient id, or \"owner\" for notify.owner in agents.yaml",
+          "description": "recipient id, or \"owner\" for your account's notification preferences",
           "long": "--to",
           "required": true,
           "optional": false,
@@ -16694,8 +16458,8 @@
           "negate": false
         }
       ],
-      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Type into a known tmux pane, without pressing Enter\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"draft\" --no-enter\n\n# Attach a local file\nagents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner is an address alias for notify.owner in agents.yaml, not a\nspecial control path.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
+      "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Type into a known tmux pane, without pressing Enter\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"draft\" --no-enter\n\n# Attach a local file (explicit channels only)\nagents send --channel slack --to \"#eng\" --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
+      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner posts one notification to your account (agents auth login). The\naccount's preferences, edited in the console Settings page, decide which of\nemail, Slack and iMessage it reaches; quiet hours and dedup apply there. A box\nwith no Phoenix session or worker device token fails loud instead. --to owner\ntakes no --channel, --thread or --attach.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
       "subcommands": []
     },
     {
@@ -21178,7 +20942,7 @@
             },
             {
               "flags": "-m, --mode <mode>",
-              "description": "Permissions: plan (read-only) | edit (can write files) | auto (more autonomous than edit, mechanism per-harness — see 'agents modes <agent>') | skip (bypass all permission prompts). 'full' accepted as alias for skip. Teammates run headless: plan works headless on claude/codex/cursor/droid/opencode; kimi/grok/antigravity have no headless plan mode and auto-downgrade a plan request to auto.",
+              "description": "Permissions: plan (read-only) | edit (can write files) | auto (more autonomous than edit, mechanism per-harness — see 'agents run --help') | skip (bypass all permission prompts). 'full' accepted as alias for skip. Teammates run headless: plan works headless on claude/codex/cursor/droid/opencode; kimi/grok/antigravity have no headless plan mode and auto-downgrade a plan request to auto.",
               "short": "-m",
               "long": "--mode",
               "required": true,
@@ -23331,7 +23095,7 @@
       "name": "trash",
       "path": "trash",
       "aliases": [],
-      "description": "Inspect and restore soft-deleted agent version directories",
+      "description": "Inspect, restore, and empty soft-deleted agent versions and resources",
       "args": [],
       "options": [
         {
@@ -23347,6 +23111,47 @@
       ],
       "subcommands": [
         {
+          "name": "empty",
+          "path": "trash empty",
+          "aliases": [],
+          "description": "Permanently delete trashed items, optionally only those trashed before a cutoff",
+          "args": [],
+          "options": [
+            {
+              "flags": "--older-than <duration>",
+              "description": "only items trashed at least this long ago (e.g. 30d, 12h)",
+              "long": "--older-than",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-y, --yes",
+              "description": "skip the confirmation prompt",
+              "short": "-y",
+              "long": "--yes",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents trash list\nagents trash empty --older-than 30d\nagents trash empty --yes",
+          "notes": "Removes items from ~/.agents/.history/trash for good; they cannot be\nrestored afterwards. An item's age is the time it was moved to trash.\nWithout --yes, a terminal asks first and a non-interactive shell refuses.",
+          "subcommands": []
+        },
+        {
           "name": "list",
           "path": "trash list",
           "aliases": [],
@@ -23355,6 +23160,33 @@
             {
               "name": "agent",
               "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "restore",
+          "path": "trash restore",
+          "aliases": [],
+          "description": "Restore the newest soft-deleted copy of an agent version (e.g. \"codex@0.141.0\")",
+          "args": [
+            {
+              "name": "target",
+              "required": true,
               "variadic": false,
               "description": ""
             }

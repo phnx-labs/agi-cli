@@ -33,9 +33,7 @@ const LEGACY_SYSTEM_AGENTS_DIR = path.join(HOME, '.agents-system');
 const META_FILE = path.join(USER_AGENTS_DIR, 'agents.yaml');
 const SYSTEM_META_FILE = path.join(SYSTEM_AGENTS_DIR, 'agents.yaml');
 
-const HUMANS_FILE = path.join(USER_AGENTS_DIR, 'humans.yaml');
 
-export function getHumansFilePath(): string { return process.env.AGENTS_HUMANS_FILE ?? HUMANS_FILE; }
 
 
 const SYSTEM_COMMANDS_DIR = path.join(SYSTEM_AGENTS_DIR, 'commands');
@@ -452,6 +450,7 @@ export function getTrashPluginsDir(): string { return path.join(TRASH_DIR, 'plug
 
 export function getTrashSubagentsDir(): string { return path.join(TRASH_DIR, 'subagents'); }
 export function getTrashWorkflowsDir(): string { return path.join(TRASH_DIR, 'workflows'); }
+export function getTrashFilesDir(): string { return path.join(TRASH_DIR, 'files'); }
 
 export function getExtraRepoDir(alias: string): string {
   return path.join(HOME, `.agents-${alias}`);
@@ -571,8 +570,11 @@ function writeIfChanged(filePath: string, content: string): boolean {
   return true;
 }
 
-export function commitCentralConfig(userDir: string): boolean {
-  const rel = 'agents.yaml';
+export function commitCentralConfig(
+  userDir: string,
+  rel = 'agents.yaml',
+  message = 'chore(config): update agents.yaml',
+): boolean {
   try {
     execFileSync('git', ['-C', userDir, 'rev-parse', '--is-inside-work-tree'], { stdio: 'ignore' });
   } catch {
@@ -587,7 +589,7 @@ export function commitCentralConfig(userDir: string): boolean {
     execFileSync(
       'git',
       ['-C', userDir, '-c', 'commit.gpgsign=false', 'commit', '--no-verify',
-        '-m', 'chore(config): update agents.yaml', '--', rel],
+        '-m', message, '--', rel],
       { stdio: 'ignore' },
     );
     return true;

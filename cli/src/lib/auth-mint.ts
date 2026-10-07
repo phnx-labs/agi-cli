@@ -280,9 +280,27 @@ export function seedReservedStoreKey(
 ): { bundle: string; key: string } {
   // Reserved worker bundles are real file-backed policy-never stores, never rotating OAuth/session credentials.
   assertStorableCredentialKind(kind, harness);
-  const name = reservedStoreName(harness);
+  return writeReservedStoreItem(
+    reservedStoreName(harness),
+    key,
+    value,
+    `Reserved ${harness} worker credentials (${kind}), one key per account; pushed to worker devices by the daemon. Never a native OAuth session.`,
+  );
+}
+
+/**
+ * Write (or rotate) one key in a reserved, FILE-backed, policy-`never` bundle.
+ * A keychain- or vault-backed store of the same name fails loud, since worker
+ * provisioning reads the file backend.
+ */
+export function writeReservedStoreItem(
+  name: string,
+  key: string,
+  value: string,
+  description: string,
+): { bundle: string; key: string } {
   const cleaned = value.trim();
-  if (!cleaned) throw new Error(`Empty ${kind} for reserved store '${name}' key ${key}.`);
+  if (!cleaned) throw new Error(`Empty value for reserved store '${name}' key ${key}.`);
   const item = secretsKeychainItem(name, key);
   try {
     if (bundleExistsSync(name)) {
@@ -307,7 +325,7 @@ export function seedReservedStoreKey(
       name,
       backend: 'file',
       policy: 'never',
-      description: `Reserved ${harness} worker credentials (${kind}), one key per account; pushed to worker devices by the daemon. Never a native OAuth session.`,
+      description,
       vars: { [key]: keychainRef(key) },
       meta: { [key]: { type: 'token' } },
     };
@@ -316,7 +334,7 @@ export function seedReservedStoreKey(
   } catch (err) {
     if (isSecretsClientError(err, 'OPERATION_FAILED')) {
       throw new Error(
-        `Could not write the reserved store '${name}' as a bundle: ${err.message}. agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<harness>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
+        `Could not write the reserved store '${name}' as a bundle: ${err.message}. agents-cli needs @phnx-labs/secrets-cli 0.1.1 or newer, which accepts the __<name>__ bundle name: npm i -g @phnx-labs/secrets-cli@latest`,
       );
     }
     throw err;

@@ -45,9 +45,9 @@ describe('feed post help', () => {
     const help = post?.helpInformation() ?? '';
 
     expect(help).toContain('launch activity / pid registry');
-    expect(FEED_POST_HELP).toContain('A milestone is always recorded, but it does not text');
+    expect(FEED_POST_HELP).toContain('A milestone is always recorded, but it does not reach');
     expect(FEED_POST_HELP).toContain('Add --level important for a');
-    expect(FEED_POST_HELP).toContain('The owner destination comes from humans.yaml');
+    expect(FEED_POST_HELP).toContain('reaches the owner through\nyour account (agents auth login)');
   });
 });
 

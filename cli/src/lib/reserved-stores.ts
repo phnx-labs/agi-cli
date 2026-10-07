@@ -63,9 +63,22 @@ export function reservedStoreName(harness: AgentId): string {
   return name;
 }
 
+// One store per worker, because the bundle push is whole-bundle: a shared store would hand every worker every other worker's token.
+const OWNER_NOTIFY_STORE_PREFIX = '__notify-';
+const OWNER_NOTIFY_STORE_PATTERN = /^__notify-[a-z0-9][a-z0-9._-]{0,36}__$/;
+
+export const OWNER_NOTIFY_TOKEN_KEY = 'PHOENIX_DEVICE_TOKEN';
+
+export function ownerNotifyStoreName(device: string): string {
+  const name = `${OWNER_NOTIFY_STORE_PREFIX}${device.trim().toLowerCase()}__`;
+  if (!OWNER_NOTIFY_STORE_PATTERN.test(name)) throw new Error(`Device name '${device}' cannot key an owner-notify token store.`);
+  return name;
+}
+
 export function isReservedStoreName(name: string): boolean {
   const n = name.trim().toLowerCase();
   if (n === AUTH_STORE_ALIAS) return true;
+  if (OWNER_NOTIFY_STORE_PATTERN.test(n)) return true;
   return AGENT_IDS.some((id) => RESERVED_STORES[id].toLowerCase() === n);
 }
 

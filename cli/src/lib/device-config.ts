@@ -136,7 +136,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'machine',
     type: 'string',
     description:
-      "Which browser THIS machine shows YOU a page in (an .html artifact, `agents feedback`, a login " +
+      "Which browser THIS machine shows YOU a page in (an .html artifact, a login " +
       "dashboard): a profile name, or `os` for the OS default handler. Unset follows browser.profile. " +
       "Distinct from browser.profile, which is the profile agents DRIVE — see RUSH-2709 for why " +
       "collapsing the two was a mistake. Set it to `os` to keep the OS default handler.",

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ALL_AGENT_IDS, AGENTS } from './agents.js';
 import { AGENT_COMMANDS } from './exec.js';
 import {
-  formatModeFlags,
+  formatModeSupportTable,
   getAgentModesCatalog,
   MODE_DESCRIPTIONS,
 } from './agent-modes.js';
@@ -47,12 +47,16 @@ describe('getAgentModesCatalog', () => {
   });
 });
 
-describe('formatModeFlags', () => {
-  it('renders empty flags as harness default', () => {
-    expect(formatModeFlags([])).toBe('(harness default)');
-  });
-
-  it('joins flag tokens', () => {
-    expect(formatModeFlags(['--permission-mode', 'plan'])).toBe('--permission-mode plan');
+describe('formatModeSupportTable', () => {
+  it('lists every non-deprecated harness with its supported modes and starred default', () => {
+    const lines = formatModeSupportTable().split('\n');
+    const live = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
+    expect(lines).toHaveLength(live.length);
+    for (const agent of live) {
+      const row = lines.find((line) => line.split(/\s+/)[0] === agent);
+      expect(row, agent).toBeDefined();
+      const cat = getAgentModesCatalog(agent);
+      expect(row!.trim().split(/\s+/).slice(1)).toEqual(cat.modes.map((m) => (m.isDefault ? `${m.mode}*` : m.mode)));
+    }
   });
 });

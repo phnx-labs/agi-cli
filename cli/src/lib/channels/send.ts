@@ -1,11 +1,9 @@
 import type { Meta } from '../types.js';
-import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
 import { lookupTransport, resolveTransport } from './resolve.js';
 import type { SendResult, TerminalSendOptions } from './registry.js';
 import { SESSION_CHANNEL } from './providers/session.js';
 import { sendToOwner } from '../notify.js';
-import type { SinkMessageFormat } from '../sink-format.js';
 
 interface SendEnvelope {
   text: string;
@@ -14,7 +12,6 @@ interface SendEnvelope {
   thread?: string;
   attachments?: string[];
   from?: string;
-  ownerScoped?: boolean;
   dryRun?: boolean;
   terminal?: TerminalSendOptions;
 }
@@ -29,7 +26,6 @@ export interface ResolveSendInput {
   urls?: string[];
   from?: string;
   dryRun?: boolean;
-  ownerMode?: boolean;
   terminal?: TerminalSendOptions;
 }
 
@@ -51,14 +47,6 @@ export function composeSendText(text: string, urls?: string[], verbatim = false)
     .filter((u) => !body.includes(u));
   if (extra.length === 0) return body;
   return body ? `${body}\n${extra.join('\n')}` : extra.join('\n');
-}
-
-export function readOwnerDest(meta: Meta): { channel: string; to: string } | null {
-  const canonical = getOwnerNotifyFromHumans();
-  if (canonical) return canonical;
-  const channel = meta.notify?.owner?.channel?.trim();
-  const to = meta.notify?.owner?.to?.trim();
-  return channel && to ? { channel, to } : null;
 }
 
 function resolveText(
@@ -104,20 +92,13 @@ function terminalOptionsError(terminal: TerminalSendOptions | undefined, to: str
 }
 
 export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): ResolveSendResult {
-  let channel = (input.channel ?? '').trim();
+  const channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
-  const usedOwnerAlias = isOwnerAlias(to);
-  const ownerAddressed = input.ownerMode || usedOwnerAlias;
-
-  if (ownerAddressed) {
-    const owner = getOwnerNotifyFromHumans() ?? meta.notify?.owner;
-    const ownerChannel = owner?.channel ?? '';
-    const ownerTo = owner?.to ?? '';
-    if (!channel) channel = ownerChannel;
-    if (!to || usedOwnerAlias) to = ownerTo;
+  if (isOwnerAlias(to)) {
+    return { ok: false, error: '--to owner routes through your account preferences; it takes no --channel. Drop --channel, or address a recipient explicitly.' };
   }
 
-  const isSession = !ownerAddressed && Boolean(channel)
+  const isSession = Boolean(channel)
     && lookupTransport(channel, meta).providerName === SESSION_CHANNEL;
   if (input.terminal && !isSession) {
     return {
@@ -134,13 +115,9 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
   const { text } = resolvedText;
 
   if (!channel || !to) {
-    const hint =
-      ownerAddressed
-        ? 'Set owner.channels and owner.policy.normal in humans.yaml, or pass --channel and --to explicitly.'
-        : isSession
-          ? 'Need --to <session> (find ids with: agents ps) or --pane <tmux pane id>.'
-          : 'Need --channel and --to (or --to owner with notify.owner configured). ' +
-            'Example: agents send --channel desktop --to local --text "hi"';
+    const hint = isSession
+      ? 'Need --to <session> (find ids with: agents ps) or --pane <tmux pane id>.'
+      : 'Need --channel and --to, or --to owner. Example: agents send --channel desktop --to local --text "hi"';
     return { ok: false, error: hint };
   }
 
@@ -159,7 +136,6 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
       thread: input.thread?.trim() || undefined,
       attachments: attachments.length ? attachments : undefined,
       from: input.from?.trim() || undefined,
-      ownerScoped: usedOwnerAlias || (input.ownerMode === true && !input.to?.trim()),
       dryRun: input.dryRun,
       terminal: isSession ? input.terminal : undefined,
     },
@@ -174,31 +150,40 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
     thread: envelope.thread,
     attachments: envelope.attachments,
     from: envelope.from,
-    ownerScoped: envelope.ownerScoped,
     dryRun: envelope.dryRun,
     terminal: envelope.terminal,
   });
 }
 
+function ownerSendError(input: ResolveSendInput): string | null {
+  if (input.channel?.trim()) return '--to owner routes through your account preferences; it takes no --channel. Drop --channel, or address a recipient explicitly.';
+  if (input.terminal) return '--pane, --socket, --no-enter and --combined only apply to --channel session.';
+  if (input.thread?.trim()) return '--thread does not apply to --to owner; the account decides where the message lands.';
+  if (input.attachments?.length) return '--attach does not apply to --to owner; owner notifications carry text and a link. Pass --url instead.';
+  return null;
+}
+
 export async function sendMessage(
   input: ResolveSendInput,
   meta: Meta,
-  ownerCompose?: (format: SinkMessageFormat) => string,
 ): Promise<{ result: SendResult; envelope: SendEnvelope } | { error: string }> {
+  if (isOwnerAlias(input.to)) {
+    const refused = ownerSendError(input);
+    if (refused) return { error: refused };
+    const resolvedText = resolveText(input, false);
+    if (!resolvedText.ok) return resolvedText;
+    const { ownerMessageNotification } = await import('../owner-message.js');
+    const notification = ownerMessageNotification(resolvedText.text, {
+      ...(input.from?.trim() ? { agent: input.from.trim() } : {}),
+      ...(input.urls?.[0]?.trim() ? { url: input.urls[0].trim() } : {}),
+    });
+    const result = await sendToOwner(notification, { dryRun: input.dryRun });
+    return {
+      result,
+      envelope: { text: notification.body, channel: 'owner', to: 'owner', dryRun: input.dryRun },
+    };
+  }
   const resolved = resolveSendEnvelope(input, meta);
   if (!resolved.ok) return { error: resolved.error };
-  const ownerPolicyRequest = resolved.envelope.ownerScoped === true
-    && !input.channel?.trim()
-    && (!input.to?.trim() || isOwnerAlias(input.to));
-  const result = ownerPolicyRequest
-    ? await sendToOwner(resolved.envelope.text, {
-        meta,
-        dryRun: resolved.envelope.dryRun,
-        thread: resolved.envelope.thread,
-        attachments: resolved.envelope.attachments,
-        from: resolved.envelope.from,
-        ...(ownerCompose ? { composeForFormat: ownerCompose } : {}),
-      })
-    : await deliverEnvelope(resolved.envelope, meta);
-  return { result, envelope: resolved.envelope };
+  return { result: await deliverEnvelope(resolved.envelope, meta), envelope: resolved.envelope };
 }

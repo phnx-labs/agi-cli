@@ -5,8 +5,8 @@ import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader
 import { deriveShortId } from '../text/short-id.js';
 import { getCacheDir } from '../state.js';
 import { readToken, rushOrgHandle } from '../cloud/rush.js';
+import { RUSH_API_BASE } from '../rush-api.js';
 
-const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const CLOUD_CACHE_DIR = path.join(getCacheDir(), 'cloud-runs');
 const CLOUD_EXECUTION_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -23,7 +23,7 @@ interface CloudSessionRow {
 }
 
 async function api(endpoint: string, token: string, accept?: string): Promise<Response> {
-  return fetch(`${PROXY_BASE}${endpoint}`, {
+  return fetch(`${RUSH_API_BASE}${endpoint}`, {
     headers: { Authorization: `Bearer ${token}`, ...(accept ? { Accept: accept } : {}) },
   });
 }

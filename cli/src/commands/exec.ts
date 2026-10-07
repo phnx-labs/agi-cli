@@ -8,6 +8,7 @@ import { RUN_AUTO_KEYWORD } from '../lib/types.js';
 import type { ResolvedRunDefaults } from '../lib/run-defaults.js';
 import type { DeviceAutoApplyResult } from '../lib/smart-launch.js';
 import { setHelpSections } from '../lib/help.js';
+import { formatModeSupportTable } from '../lib/agent-modes.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 import { isHumanFacingRun } from './run-account-picker.js';
 import { getUserAgentsDir, readMeta } from '../lib/state.js';
@@ -843,7 +844,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       agents run claude "fix the bug" -- --custom-flag
     `,
     notes: `
-      Modes (not every agent supports every mode — run \`agents modes <agent>\`):
+      Modes (not every agent supports every mode — see the table below):
         plan  read-only investigation; no writes, no shell side-effects
         edit  may edit files; prompts for shell / risky operations
         auto  more autonomous than edit; the mechanism is per-harness --
@@ -853,8 +854,12 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                      prompts at all, and a denied command fails instead
         skip  bypass every permission prompt (dangerously-skip-permissions)
         Legacy 'full' is silently rewritten to 'skip'.
-        List per-harness support + native flags: agents modes · agents modes claude
+        Unsupported requests degrade: auto falls back to edit, plan to the
+        harness's safest native mode; skip errors where a harness has none.
         Models (cheap|default|best|ultra): agents models <agent[@version]>
+
+      Mode support per harness (* = the harness's native default):
+${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n')}
 
       Headless plan support (a prompt makes the run headless):
         plan works headless on claude, codex, cursor, droid, opencode.

@@ -3,10 +3,16 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { confirm } from '@inquirer/prompts';
+
 import type { AgentId } from '../lib/types.js';
 import { resolveAgentName, agentLabel } from '../lib/agents.js';
-import { getTrashVersionsDir } from '../lib/state.js';
+import { getTrashDir, getTrashVersionsDir } from '../lib/state.js';
 import { getVersionDir } from '../lib/installations/versions.js';
+import { parseDuration } from '../lib/hooks/cache.js';
+import { emptyTrash, listTrashItems } from '../lib/trash.js';
+import { setHelpSections } from '../lib/help.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 
 interface TrashEntry {
   agent: AgentId;
@@ -123,7 +129,7 @@ export function restoreVersion(target: string): void {
   const dest = getVersionDir(agent, version);
   if (fs.existsSync(dest)) {
     console.error(chalk.red(`Cannot restore: ${dest} already exists.`));
-    console.error(chalk.gray('Move or remove the existing dir first, then re-run restore.'));
+    console.error(chalk.gray('Move or remove the existing dir first, then re-run agents trash restore.'));
     process.exit(1);
   }
   try {
@@ -142,17 +148,10 @@ export function restoreVersion(target: string): void {
   console.log(chalk.green(`Restored ${agentLabel(agent)}@${version} to ${dest}`));
 }
 
-export function registerRestoreCommand(program: Command): void {
-  program
-    .command('restore <target>')
-    .description('Restore a soft-deleted agent version (e.g. "codex@0.141.0") removed via prune/remove')
-    .action((target: string) => restoreVersion(target));
-}
-
 export function registerTrashCommands(program: Command): void {
   const trash = program
     .command('trash')
-    .description('Inspect and restore soft-deleted agent version directories');
+    .description('Inspect, restore, and empty soft-deleted agent versions and resources');
 
   trash
     .command('list [agent]')
@@ -181,6 +180,67 @@ export function registerTrashCommands(program: Command): void {
         );
       }
       console.log();
-      console.log(chalk.gray('Restore with: agents restore <agent>@<version>'));
+      console.log(chalk.gray('Restore with: agents trash restore <agent>@<version>'));
     });
+
+  trash
+    .command('restore <target>')
+    .description('Restore the newest soft-deleted copy of an agent version (e.g. "codex@0.141.0")')
+    .action((target: string) => restoreVersion(target));
+
+  const empty = trash
+    .command('empty')
+    .description('Permanently delete trashed items, optionally only those trashed before a cutoff')
+    .option('--older-than <duration>', 'only items trashed at least this long ago (e.g. 30d, 12h)')
+    .option('-y, --yes', 'skip the confirmation prompt')
+    .action(async (opts: { olderThan?: string; yes?: boolean }) => runTrashEmpty(opts));
+
+  setHelpSections(empty, {
+    examples: `
+      agents trash list
+      agents trash empty --older-than 30d
+      agents trash empty --yes
+    `,
+    notes: `
+      Removes items from ~/.agents/.history/trash for good; they cannot be
+      restored afterwards. An item's age is the time it was moved to trash.
+      Without --yes, a terminal asks first and a non-interactive shell refuses.
+    `,
+  });
+}
+
+async function runTrashEmpty(opts: { olderThan?: string; yes?: boolean }): Promise<void> {
+  let olderThanMs: number | undefined;
+  if (opts.olderThan !== undefined) {
+    const seconds = parseDuration(opts.olderThan);
+    if (seconds === null) {
+      console.error(chalk.red(`Invalid --older-than '${opts.olderThan}'. Use a number with s, m, h or d (e.g. 30d).`));
+      process.exit(1);
+    }
+    olderThanMs = seconds * 1000;
+  }
+  const now = Date.now();
+  const due = listTrashItems().filter((item) => olderThanMs === undefined || now - item.trashedAtMs >= olderThanMs);
+  if (due.length === 0) {
+    console.log(chalk.gray(opts.olderThan ? `Nothing in trash is older than ${opts.olderThan}.` : 'Trash is empty.'));
+    return;
+  }
+  const bytes = due.reduce((sum, item) => sum + dirSizeBytes(item.path), 0);
+  if (!opts.yes) {
+    if (!isInteractiveTerminal()) {
+      console.error(chalk.yellow(`Would permanently delete ${due.length} trashed item(s) (${humanSize(bytes)}). Pass --yes to confirm.`));
+      process.exit(1);
+    }
+    let ok = false;
+    try {
+      ok = await confirm({ message: `Permanently delete ${due.length} trashed item(s) (${humanSize(bytes)})?`, default: false });
+    } catch (err) {
+      if (isPromptCancelled(err)) { console.log(chalk.gray('Cancelled')); return; }
+      throw err;
+    }
+    if (!ok) { console.log(chalk.gray('Cancelled')); return; }
+  }
+  const { removed, kept } = emptyTrash({ olderThanMs, now });
+  console.log(chalk.green(`Deleted ${removed.length} trashed item(s) (${humanSize(bytes)}) from ${getTrashDir()}.`));
+  if (kept > 0) console.log(chalk.gray(`${kept} newer item(s) kept.`));
 }

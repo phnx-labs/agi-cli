@@ -5,9 +5,7 @@ import { setHelpSections } from '../lib/help.js';
 import { readMeta } from '../lib/state.js';
 import { sendMessage, isOwnerAlias, type ResolveSendInput } from '../lib/channels/send.js';
 import type { TerminalSendOptions } from '../lib/channels/registry.js';
-import { ownerMessageComposer } from '../lib/owner-message.js';
 import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
-import type { SinkMessageFormat } from '../lib/sink-format.js';
 
 interface SendCliOpts {
   text?: string;
@@ -60,22 +58,10 @@ async function runSend(
   opts: SendCliOpts,
 ): Promise<void> {
   const meta = readMeta();
-  let input = toInput(positionalText, opts);
+  const input = toInput(positionalText, opts);
+  if (isOwnerAlias(opts.to)) fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });
 
-  let ownerCompose: ((format: SinkMessageFormat) => string) | undefined;
-  if (isOwnerAlias(opts.to) && !input.terminal) {
-    const flagged = opts.text?.trim() ?? '';
-    const positional = (positionalText ?? '').trim();
-    const raw = flagged || positional;
-    const bothDiffer = flagged !== '' && positional !== '' && flagged !== positional;
-    if (raw && !bothDiffer) {
-      ownerCompose = ownerMessageComposer(raw);
-      input = { ...input, text: ownerCompose('plain'), positionalText: undefined };
-      fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });
-    }
-  }
-
-  const out = await sendMessage(input, meta, ownerCompose);
+  const out = await sendMessage(input, meta);
   if ('error' in out) {
     die(out.error);
   }
@@ -109,8 +95,11 @@ const SHARED_NOTES = `
     message           - CONTROL a running agent through its mailbox
     send --channel session - type text + Enter into a running agent's terminal
 
-  --to owner is an address alias for notify.owner in agents.yaml, not a
-  special control path.
+  --to owner posts one notification to your account (agents auth login). The
+  account's preferences, edited in the console Settings page, decide which of
+  email, Slack and iMessage it reaches; quiet hours and dedup apply there. A box
+  with no Phoenix session or worker device token fails loud instead. --to owner
+  takes no --channel, --thread or --attach.
 
   --channel session resolves --to (a session id or unique prefix, the
   <shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the
@@ -133,7 +122,7 @@ export function registerSendCommand(program: Command): void {
       'Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.',
     )
     .option('--text <text>', 'message body (preferred over positional text)')
-    .option('--to <target>', 'recipient id, or "owner" for notify.owner in agents.yaml')
+    .option('--to <target>', 'recipient id, or "owner" for your account\'s notification preferences')
     .option('--channel <name>', 'channel / provider (required unless --to owner)')
     .option('--thread <id>', 'channel thread id / timestamp')
     .option('--attach <path...>', 'local file attachment path (repeatable)')
@@ -162,8 +151,8 @@ export function registerSendCommand(program: Command): void {
       # Type into a known tmux pane, without pressing Enter
       agents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text "draft" --no-enter
 
-      # Attach a local file
-      agents send --to owner --text "screenshot" --attach ./out/cover.png
+      # Attach a local file (explicit channels only)
+      agents send --channel slack --to "#eng" --text "screenshot" --attach ./out/cover.png
 
       # Legacy positional text still works
       agents send "hi" --channel desktop --to local

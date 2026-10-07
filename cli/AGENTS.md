@@ -27,8 +27,9 @@ delegates each selected phase to its existing `agents setup <capability>` wizard
 engine the setup-token mint behind `agents accounts add`/`login` spawns on demand, PHNX-4091);
 presence on PATH is its whole readiness signal — there is nothing else to configure.
 
-`agents reminders` lists personal operating reminders kept in
-`~/.agents/reminders/reminders.yaml` (each a `short`/`full` pair). They surface
+Personal operating reminders live in
+`~/.agents/reminders/reminders.yaml` (each a `short`/`full` pair; there is no
+command for them, PHNX-4267 retired `agents reminders`). They surface
 succinctly in the Claude statusline — one per session, chosen deterministically
 from the session id (`pickReminderForSession` in
 [`src/lib/reminders.ts`](src/lib/reminders.ts)) so concurrent agents each show a
@@ -45,8 +46,8 @@ email it is signed into (plus the org name for a Team/Enterprise seat, via
 shared with the usage ingest) from the `.claude.json` Claude is actually running with —
 `$CLAUDE_CONFIG_DIR`'s home under the shim, else `$HOME` — so the 5h/7d figures next
 to it are attributed at a glance. A malformed file is swallowed
-by the statusline (a broken prompt is worse than a missing line) but surfaced by
-`agents reminders`. The file syncs across the fleet via `agents repo push/pull`.
+by the statusline (a broken prompt is worse than a missing line). The file syncs
+across the fleet via `agents repo push/pull`.
 
 Artifact sharing is no longer part of agents-cli. The `agents artifacts`
 command group, the managed share Worker, and the `lib/share/` engine were removed
@@ -459,15 +460,47 @@ state engine's todos/plan/phase plus, when the timeline pass has folded any, the
 last few narration headlines (§Session request + timeline above) — forcing strict
 JSON and returning `undefined` (→ `skipped`) on any error.
 
-Owner-addressed delivery is policy fan-out, not primary/fallback selection.
-`agents send --to owner` and an important feed's `channel: owner` sink resolve every addressable id in
-`humans.yaml`'s `owner.policy.normal`, in policy order. Each destination is
-attempted independently; a partial failure is reported alongside successful
-deliveries. Rush-backed destinations that cannot deliver on the originating
-worker forward their explicit channel and target to a capable macOS peer, so
-the peer never re-expands the owner policy and duplicates another channel.
-Legacy `notify.owner` and a humans file without `policy.normal` retain the
-historical single-destination behavior.
+**Owner notifications have one path: the account (PHNX-4267).** Every owner-bound
+event (`agents send --to owner`, a `--blocked` or important `feed post`, an urgent
+feed block, a failed routine) is one `POST /me/notifications` to rush/api through
+[`src/lib/owner-notify.ts`](src/lib/owner-notify.ts) `postOwnerNotification`.
+rush/api owns the preferences (edited in the console Settings page), quiet hours,
+dedup on `(event, dedupKey)`, and delivery: email and Slack go out server-side,
+iMessage is queued as a `device_deliveries` row. Event mapping: a block is
+`needs_you` (the only event that bypasses quiet hours), a failed routine is
+`failed`, everything else is `message`; a green routine stays silent. The bearer is
+this box's Phoenix session, else the `notify`-scoped device token in this worker's
+reserved store `__notify-<device>__`. Neither is an `OwnerNotSignedInError`, never
+a local fallback; `agents doctor` reports it as `owner-not-signed-in` (critical).
+There is no `humans.yaml`, no `notify.owner`, and no SSH forward to a Mac peer any
+more; the one-shot `migrateHumansToAccount` (`installations/migrate.ts`) uploads an
+existing `humans.yaml` to `PUT /me/preferences` on the first signed-in run, moves
+it to trash and commits the removal, and leaves it in place (retrying next run)
+while the box has no session.
+
+- **Worker device tokens.** A worker holds no Phoenix session. The elected
+  signed-in headed box (`syncOwnerNotifyTokens` in
+  [`src/lib/owner-notify-tokens.ts`](src/lib/owner-notify-tokens.ts), run on the
+  `auth-sync` tick) mints one token per `role=worker` peer
+  (`POST /api/v1/auth/tokens {device, scopes:["notify"]}`) into that worker's own
+  reserved store `__notify-<worker>__`, then pushes that one bundle to that one
+  worker. One bundle per worker, because the push is whole-bundle and a shared
+  store would hand every worker every other worker's token. It is never pushed to
+  a headed peer. Minting replaces a device's previous token server-side, so only
+  the first signed-in headed box by name mints (each box publishes
+  `ownerNotify.{signedIn, deviceToken}` in its daemon-state envelope), and it never
+  replaces a token another box minted. A worker that reports `deviceToken: false`
+  while its token is still live gets the stored token re-pushed; revoking a token
+  in the account makes the next tick mint a fresh one.
+- **iMessage on a Mac.** The macOS-only `owner-device-delivery` daemon service
+  claims queued rows every 15 s (`POST /me/device-deliveries/claim`, one atomic
+  UPDATE server-side, so two signed-in Macs never send the same row), sends each
+  through the osascript builder in `channels/providers/rush.ts`, and reports the
+  result. It is idle on a box with no session and no device token.
+- **Explicit channels are a different feature.** `agents send --channel slack --to
+  '#eng'` and feed `channel:` sinks still deliver through the local providers
+  (`notify.transports` still remaps a channel name). They no longer fall back to an
+  SSH forward when this box cannot deliver.
 
 Feed channel sinks may override their outbound body with a `message:` template
 using the same placeholders as command sinks (`{message}`, `{ticket}`, `{ticket_url}`, `{project}`,
@@ -482,13 +515,12 @@ render a link** (PHNX-3698, `composeBroadcastMessage` in `feed-broadcast.ts`).
 (`sinkMessageFormat` in `sink-format.ts`, keyed on the destination's **resolved
 provider** — the same `notify.transports` remap delivery uses, so an aliased Slack
 sink still turns blue), and the body is re-rendered in that format. This is a
-**per-destination** decision, not a per-sink one: the owner policy fan-out
-(`sendToOwner`) resolves each of `owner.policy.normal`'s channels independently, so
-a policy that lists both iMessage and Slack sends the plain sentence to iMessage and
-the labeled-link variant to Slack from the **one** post — **never a trailing URL
-line**:
-- **Slack (any destination that resolves to the `slack` provider — a `channel:`
-  sink OR a Slack channel in the owner policy) → mrkdwn labeled links**
+**per-destination** decision, not a per-sink one: a Slack `channel:` sink gets the
+labeled-link variant and a plain one gets the plain sentence from the **one** post,
+**never a trailing URL line**. The owner sink always sends the plain body with the
+title, url, session and ticket as separate fields; the account renders it per
+channel:
+- **Slack (any destination that resolves to the `slack` provider) → mrkdwn labeled links**
   (`<url|label>`, blue tappable text). The `Sent from claude/6fc1db18 on zion` crumb
   becomes `<https://prix.dev/console/sessions/<full-id>|claude/6fc1db18>` (the 8-char
   crumb is upgraded to the full indexed id via `resolveFullSessionId`, `session/db.ts`,
@@ -497,17 +529,17 @@ line**:
   `<https://linear.app/<ws>/issue/<KEY>|<KEY>>` in place
   (`linearIssueKeys`/`LINEAR_KEY_DENYLIST` in `session/linear.ts`, the same
   canonical detector `detectTicket` uses).
-- **iMessage / owner-scoped rush / `command:` / desktop / every other channel →
+- **iMessage / `command:` / desktop / the owner sink / every other channel →
   plain.** They cannot render a labeled link and a dumped naked URL reads as noise,
   so the message stays the human sentence with **no URLs** (keys and crumb as text).
 
 An **important** post (and every `--blocked` post) fires a best-effort background
 `agents traces sync` (`fireTraceSyncInBackground`, `run-trace-sync.ts`, gated
 exactly like the run-exit arm) so that console page exists when a Slack crumb is
-tapped. **`agents send --to owner` routes through this same composer** (`ownerMessageComposer`/`composeOwnerMessage`, `owner-message.ts`): the
-owner fan-out re-renders the body per destination — plain for iMessage/rush, mrkdwn
-for a Slack owner channel — rather than dumping the raw body or sending one plain
-string to every channel (PHNX-3698). A non-owner `agents send` (explicit
+tapped. **`agents send --to owner` routes through this same composer**
+(`ownerMessageNotification`, `owner-message.ts`, over `ownerNotificationFromContext`
+in `feed-broadcast.ts`), so an owner ping carries the same plain body, footer and
+fields as an important feed post. A non-owner `agents send` (explicit
 `--channel`/`--to`) is delivered verbatim.
 
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
@@ -727,8 +759,10 @@ the outstanding retry set. A `--dry-run` never touches the ledger.
 ## Authentication — Phoenix ID
 
 `agents auth login` signs in with **Phoenix ID** (`id.byphoenix.com`), the one family
-identity shared with the Rush CLI and prix.dev — signing in here creates **no** Rush
-account. It runs the RFC 8628 **device flow**: `startDeviceAuthorization()` →
+identity shared with the Rush CLI and prix.dev. The first Phoenix-authenticated
+request rush/api sees provisions the matching Rush user row (owner decision 2026-10-07,
+PHNX-4267), which is what lets a CLI sign-in reach the owner's notification
+preferences. It runs the RFC 8628 **device flow**: `startDeviceAuthorization()` →
 `POST /api/v1/auth/device/authorization`, print the short `user_code` + verification URL
 (works on any browser/phone, including SSH/headless hosts), then `pollDeviceToken()` polls
 `POST /api/v1/auth/device/token` until approval (`src/lib/identity/index.ts`).
@@ -749,7 +783,10 @@ signs out nothing else).
 - The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
   holds its own copy of the same Phoenix bearer. The surfaces that use it are `agents traces
   sync` and the managed `agents sessions export/backup` target, each verifying the bearer at
-  `${PHOENIX_ID_BASE}/api/v1/auth/me`.
+  `${PHOENIX_ID_BASE}/api/v1/auth/me`, and owner notifications, which send it to rush/api
+  (`RUSH_PROXY_BASE`, default `https://api.prix.dev`, `src/lib/rush-api.ts`). A worker never
+  receives this bearer; it gets a `notify`-scoped device token instead (see owner
+  notifications above).
 
 ## Core design choices (read this first)
 
@@ -1030,8 +1067,8 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `ssh-key-enrollment` and `owner-sink-unreachable` (the feed/notify
-owner-delivery lane can't reach the owner from this box, RUSH-2262); **warning**
+`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `ssh-key-enrollment` and `owner-not-signed-in` (no Phoenix
+session or worker device token, so this box cannot reach the owner; remediation `agents auth login`, PHNX-4267); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,

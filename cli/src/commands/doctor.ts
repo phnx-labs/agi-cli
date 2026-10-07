@@ -50,8 +50,7 @@ import { inspectReservedAuthBundle } from '../lib/secrets-policy.js';
 import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
-import { readMeta } from '../lib/state.js';
-import { probeOwnerSink } from '../lib/channels/owner-sink.js';
+import { resolveOwnerCredential } from '../lib/owner-notify.js';
 import { unifiedDiff, colorizeUnifiedDiff } from '../lib/diff-text.js';
 import { listCliStatus, listCliStatusAsync } from '../lib/cli-resources.js';
 import { setHelpSections } from '../lib/help.js';
@@ -472,7 +471,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         isolatedVersions: localReports
           .filter((rep) => isVersionIsolated(rep.agent, rep.version))
           .map((rep) => `${rep.agent}@${rep.version}`),
-        ownerSink: await probeOwnerSink(readMeta()),
+        ownerSignedIn: resolveOwnerCredential() !== null,
         binaryShadows: detectAgentsBinaryShadows(),
         leakedDaemons: findLeakedDaemons(),
       }));
@@ -1383,7 +1382,7 @@ export function registerDoctorCommand(program: Command): void {
             ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
             : undefined,
           isolatedVersions,
-          ownerSink: await probeOwnerSink(readMeta()),
+          ownerSignedIn: resolveOwnerCredential() !== null,
           leakedDaemons: findLeakedDaemons(),
         });
 

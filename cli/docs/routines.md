@@ -1518,22 +1518,20 @@ runs are finalized by the daemon's running-job sweep and do not emit one.
 Desktop notifications never leave the machine, so a failed routine on a headless
 fleet box was invisible until someone looked. On a **failure only** — a
 `failed`/`timeout` finish, or a pre-spawn failure such as `auth_failed` — the
-daemon also pings the **owner's phone**, through the same channel stack `agents
-notify` uses (the `owner.channels` in `humans.yaml`, or the legacy
-`notify.owner` in `agents.yaml`). This is the failure the per-routine `agents
-notify` prompt can never send itself: when the routine's own agent fails to
+daemon also posts a `failed` event to the owner's account
+(`postOwnerNotification`, PHNX-4267), which delivers it to the channels the owner
+enabled for failures in the console Settings page. This is the failure the
+per-routine prompt can never send itself: when the routine's own agent fails to
 spawn, that prompt never runs.
 
 - **Only failures.** A green routine of any kind stays silent. The desktop
   thresholds above are unchanged; this is an additional failures-only lane.
-- **In-process, not `ssh`.** The daemon calls the channel providers directly
-  (`src/lib/routine-notify-owner.ts`) — it does not shell out to `ssh mac-mini
-  agents send --to owner`.
-- **Fallback channel.** If the primary owner channel cannot deliver from this
-  box, the daemon walks the remaining configured `owner.channels` in order
-  (e.g. an OpenClaw channel after iMessage). Telegram and intrusive (voice)
-  channels are excluded; an owner whose only channel is Telegram gets no ping.
-- **Deduped** per job+runId, so a run reaches the owner at most once.
+- **In-process, not `ssh`.** The daemon calls rush/api directly
+  (`src/lib/routine-notify-owner.ts`) with this box's Phoenix session or, on a
+  worker, its `notify`-scoped device token. A box with neither logs the failure
+  to deliver; `agents doctor` reports it as `owner-not-signed-in`.
+- **Deduped server-side** on `routine:<job>:<runId>`, so a run reaches the owner
+  at most once even if two daemons report it. Quiet hours hold it back.
 
 ## Commands
 

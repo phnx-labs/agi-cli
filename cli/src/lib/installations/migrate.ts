@@ -18,10 +18,12 @@ import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activati
 import { evaluateActivationReadiness } from '../routine-readiness.js';
 import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 import { detrackViaGitExclude } from '../project-resources.js';
-import { META_HEADER as DEVICE_META_HEADER } from '../state.js';
+import { META_HEADER as DEVICE_META_HEADER, commitCentralConfig } from '../state.js';
 
 const LEGACY_DEFAULT_BROWSER_PROFILE_NAME = 'default';
 import { COMPILED_HEADER_PROJECT } from '../rules/compile.js';
+import { putOwnerPreferences, resolveOwnerCredential, type OwnerChannel, type OwnerEvent, type OwnerPreferencesPatch } from '../owner-notify.js';
+import { moveFileToTrash } from '../trash.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 const USER_DIR = path.join(HOME, '.agents');
@@ -1474,87 +1476,97 @@ export function migrateCliDirToClis(agentsDirs: string[]): void {
   }
 }
 
-function migrateHumans(): void {
-  const humansFile = path.join(USER_DIR, 'humans.yaml');
-  if (fs.existsSync(humansFile)) return;
+export const LEGACY_HUMANS_FILE = 'humans.yaml';
 
-  const agentsYamlPath = path.join(USER_DIR, 'agents.yaml');
-  const ownerMdPath = path.join(USER_DIR, 'owner.md');
+type HumansChannelEntry = { id?: unknown; transport?: unknown; to?: unknown };
 
-  let notifyOwner: { channel: string; to: string } | undefined;
-  let ownerName: string | undefined;
-  let ownerTimezone: string | undefined;
-  let ownerQuietHours: string | undefined;
-  let ownerDefaultSeverity: string | undefined;
-  let ownerChannels: unknown[] | undefined;
-  let ownerPolicy: unknown | undefined;
+const SEVERITY_EVENTS: Record<'low' | 'normal' | 'critical', OwnerEvent[]> = {
+  critical: ['needs_you'],
+  normal: ['failed', 'message'],
+  low: ['completed'],
+};
 
-  if (fs.existsSync(agentsYamlPath)) {
-    try {
-      const raw = fs.readFileSync(agentsYamlPath, 'utf-8');
-      const doc = yaml.parse(raw) as Record<string, unknown> | null;
-      const notify = doc?.['notify'] as Record<string, unknown> | undefined;
-      const owner = notify?.['owner'] as Record<string, unknown> | undefined;
-      const channel = typeof owner?.['channel'] === 'string' ? owner['channel'] : undefined;
-      const to = typeof owner?.['to'] === 'string' ? owner['to'] : undefined;
-      if (channel && to) {
-        notifyOwner = { channel, to };
-      }
-    } catch {  }
+function accountChannelFor(transport: string): OwnerChannel | null {
+  const t = transport.trim().toLowerCase();
+  return t === 'imessage' || t === 'slack' || t === 'email' ? t : null;
+}
+
+/**
+ * Translate humans.yaml into a `/me/preferences` patch. Severity policy maps onto
+ * events (critical → needs_you, normal → failed + message, low → completed).
+ * Transports the account cannot deliver (telegram, desktop, a command) have no
+ * equivalent and are reported back as dropped.
+ */
+export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreferencesPatch; dropped: string[] } {
+  const owner = (doc && typeof doc === 'object' ? (doc as Record<string, unknown>).owner : undefined) as Record<string, unknown> | undefined;
+  const rawChannels = Array.isArray(owner?.channels) ? owner!.channels as HumansChannelEntry[] : [];
+  const legacy = owner?.notify as { channel?: unknown; to?: unknown } | undefined;
+  const channels = rawChannels.length > 0
+    ? rawChannels
+    : (typeof legacy?.channel === 'string' ? [{ id: legacy.channel, transport: legacy.channel, to: legacy.to }] : []);
+  const byId = new Map<string, OwnerChannel>();
+  const dropped: string[] = [];
+  let imessageAddress: string | undefined;
+  for (const entry of channels) {
+    if (typeof entry.id !== 'string') continue;
+    const transport = typeof entry.transport === 'string' ? entry.transport : entry.id;
+    const channel = accountChannelFor(transport);
+    if (!channel) { dropped.push(`${entry.id} (${transport})`); continue; }
+    byId.set(entry.id, channel);
+    if (channel === 'imessage' && typeof entry.to === 'string' && entry.to.trim()) imessageAddress ??= entry.to.trim();
   }
-
-  if (fs.existsSync(ownerMdPath)) {
-    try {
-      const raw = fs.readFileSync(ownerMdPath, 'utf-8');
-      const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-      if (fmMatch) {
-        const fm = yaml.parse(fmMatch[1]) as Record<string, unknown> | null;
-        if (fm && typeof fm === 'object') {
-          if (typeof fm['name'] === 'string') ownerName = fm['name'];
-          if (typeof fm['timezone'] === 'string') ownerTimezone = fm['timezone'];
-          if (typeof fm['quiet_hours'] === 'string') ownerQuietHours = fm['quiet_hours'];
-          if (typeof fm['default_severity'] === 'string') ownerDefaultSeverity = fm['default_severity'];
-          if (Array.isArray(fm['channels'])) ownerChannels = fm['channels'] as unknown[];
-          if (fm['policy'] && typeof fm['policy'] === 'object') ownerPolicy = fm['policy'];
+  const policy = (owner?.policy ?? {}) as Partial<Record<'low' | 'normal' | 'critical', unknown>>;
+  const [firstChannel] = byId.keys();
+  const preferences: NonNullable<OwnerPreferencesPatch['preferences']> = [];
+  if (byId.size > 0) {
+    for (const severity of ['critical', 'normal', 'low'] as const) {
+      const listed = Array.isArray(policy[severity])
+        ? (policy[severity] as unknown[]).filter((id): id is string => typeof id === 'string')
+        : (severity === 'low' ? [] : [firstChannel]);
+      const enabled = new Set(listed.map((id) => byId.get(id)).filter((c): c is OwnerChannel => Boolean(c)));
+      for (const event of SEVERITY_EVENTS[severity]) {
+        for (const channel of ['email', 'slack', 'imessage'] as const) {
+          preferences.push({ event, channel, enabled: enabled.has(channel) });
         }
       }
-    } catch {  }
+    }
   }
+  const patch: OwnerPreferencesPatch = {};
+  if (preferences.length > 0) patch.preferences = preferences;
+  const settings: NonNullable<OwnerPreferencesPatch['settings']> = {};
+  if (typeof owner?.timezone === 'string' && owner.timezone.trim()) settings.timezone = owner.timezone.trim();
+  const quiet = typeof owner?.quiet_hours === 'string' ? owner.quiet_hours.match(/^\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*$/) : null;
+  if (quiet) {
+    settings.quietStart = quiet[1].padStart(5, '0');
+    settings.quietEnd = quiet[2].padStart(5, '0');
+  }
+  if (Object.keys(settings).length > 0) patch.settings = settings;
+  if (imessageAddress) patch.destinations = { imessage: { address: imessageAddress } };
+  return { patch, dropped };
+}
 
-  if (!notifyOwner && !ownerName && !ownerTimezone && !ownerQuietHours && !ownerDefaultSeverity && !ownerChannels && !ownerPolicy) return;
-
-  const humansDoc: Record<string, unknown> = { version: 1 };
-  const ownerDoc: Record<string, unknown> = {};
-  if (ownerName) ownerDoc['name'] = ownerName;
-  if (ownerTimezone) ownerDoc['timezone'] = ownerTimezone;
-  if (ownerQuietHours) ownerDoc['quiet_hours'] = ownerQuietHours;
-  if (ownerDefaultSeverity) ownerDoc['default_severity'] = ownerDefaultSeverity;
-  if (notifyOwner) ownerDoc['notify'] = notifyOwner;
-  if (ownerChannels) ownerDoc['channels'] = ownerChannels;
-  if (ownerPolicy) ownerDoc['policy'] = ownerPolicy;
-  humansDoc['owner'] = ownerDoc;
-
+/**
+ * One-shot: upload humans.yaml to the account, then move it to trash. Needs a
+ * Phoenix session (a worker's device token cannot write preferences); without
+ * one, or when the upload fails, the file stays and the step reports 'pending'
+ * so the next run retries.
+ */
+export async function migrateHumansToAccount(userDir: string = USER_DIR): Promise<'absent' | 'pending' | 'migrated'> {
+  const humansFile = path.join(userDir, LEGACY_HUMANS_FILE);
+  if (!fs.existsSync(humansFile)) return 'absent';
+  if (resolveOwnerCredential()?.kind !== 'session') return 'pending';
+  const { patch, dropped } = humansToPreferencesPatch(yaml.parse(fs.readFileSync(humansFile, 'utf-8')));
   try {
-    const header = '# humans.yaml — owner identity and notification channels\n# Managed by agents-cli. See: agents humans --help\n';
-    fs.writeFileSync(humansFile, header + yaml.stringify(humansDoc, { lineWidth: 120 }), { encoding: 'utf-8', mode: 0o600 });
-    console.error('Migrated owner config to humans.yaml');
+    if (Object.keys(patch).length > 0) await putOwnerPreferences(patch);
   } catch (err) {
-    console.error(`humans.yaml migration: could not write (${(err as Error).message})`);
-    return;
+    console.error(`humans.yaml migration: ${(err as Error).message} The file is kept and the upload retries next run.`);
+    return 'pending';
   }
-
-  if (notifyOwner && fs.existsSync(agentsYamlPath)) {
-    try {
-      const raw = fs.readFileSync(agentsYamlPath, 'utf-8');
-      const doc = yaml.parseDocument(raw);
-      const notifyNode = doc.get('notify') as yaml.YAMLMap | null;
-      if (notifyNode instanceof yaml.YAMLMap) {
-        notifyNode.delete('owner');
-        if (notifyNode.items.length === 0) doc.delete('notify');
-      }
-      fs.writeFileSync(agentsYamlPath, stringifyDoc(doc), 'utf-8');
-    } catch {  }
-  }
+  const trashed = moveFileToTrash(humansFile);
+  commitCentralConfig(userDir, LEGACY_HUMANS_FILE, 'chore(config): humans.yaml moved to account notification preferences');
+  console.error(`Moved owner notification settings from ${humansFile} to your account (console Settings). Old file: ${trashed}`);
+  if (dropped.length > 0) console.error(`No account equivalent, not migrated: ${dropped.join(', ')}`);
+  return 'migrated';
 }
 
 export function seedActiveCursorLoginPerVersion(): void {
@@ -1664,7 +1676,7 @@ export async function runMigration(): Promise<void> {
   if (fs.existsSync(projectDotAgents)) cliMigrateDirs.push(projectDotAgents);
   migrateCliDirToClis(cliMigrateDirs);
   migrateAgentsYaml();
-  migrateHumans();
+  await migrateHumansToAccount();
   deleteSystemPromptsJson();
   migrateSystemConfigJson();
   detrackUserChangelog();

@@ -745,55 +745,25 @@ describe('remediationFor', () => {
     expect(remediationFor({ ...base, kind: 'stale-cli' })).toBe('upgrade');
   });
 
-  it('owner-sink-unreachable → transport-specific remediation', () => {
-    const r = remediationFor({ ...base, kind: 'owner-sink-unreachable' });
-    expect(r).toContain('SLACK_BOT_TOKEN');
+  it('owner-not-signed-in → agents auth login', () => {
+    expect(remediationFor({ ...base, kind: 'owner-not-signed-in' })).toBe('agents auth login');
   });
 });
 
-describe('owner-sink-unreachable finding (RUSH-2262)', () => {
-  it('a configured-but-unreachable owner lane is a CRITICAL naming the reason', () => {
-    const notMacos = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'imessage', reason: 'imessage-not-macos' },
-    }));
-    expect(notMacos).toHaveLength(1);
-    expect(notMacos[0]).toMatchObject({
-      severity: 'critical', kind: 'owner-sink-unreachable', device: 'boxA',
+describe('owner-not-signed-in finding (PHNX-4267)', () => {
+  it('a box with no way to reach the owner is a CRITICAL rendered under an `owner` subject', () => {
+    const findings = buildLocalFindings(localInput({ ownerSignedIn: false }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'critical', kind: 'owner-not-signed-in', device: 'boxA', remediation: 'agents auth login',
     });
-    expect(notMacos[0].message).toContain('imessage');
-    expect(notMacos[0].message).toContain('macOS');
-
-    const noToken = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'slack', reason: 'slack-no-token' },
-    }));
-    expect(noToken).toHaveLength(1);
-    expect(noToken[0].message).toContain('SLACK_BOT_TOKEN');
-    expect(noToken[0].severity).toBe(FINDING_SEVERITY['owner-sink-unreachable']);
-  });
-
-  it('a reachable owner lane emits NO finding', () => {
-    expect(buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: true, channel: 'imessage' },
-    }))).toEqual([]);
-  });
-
-  it('an un-opted-in box (no owner configured) emits NO finding', () => {
-    expect(buildLocalFindings(localInput({
-      ownerSink: { configured: false, reachable: false },
-    }))).toEqual([]);
-    expect(buildLocalFindings(localInput())).toEqual([]);
-  });
-
-  it('renders in the CRITICAL section with an `owner` subject, not a blank label', () => {
-    const findings = buildLocalFindings(localInput({
-      ownerSink: { configured: true, reachable: false, channel: 'slack', reason: 'slack-no-token' },
-    }));
-    const out = renderFindings(findings, { boxA: {} }, { fleet: false, baseline: 'boxA' })
-      .map(stripAnsi);
-    const critLine = out.find((l) => l.includes('owner unreachable'));
-    expect(critLine).toBeDefined();
+    const out = renderFindings(findings, { boxA: {} }, { fleet: false, baseline: 'boxA' }).map(stripAnsi);
+    const critLine = out.find((l) => l.includes('cannot reach the owner'));
     expect(critLine).toMatch(/\bowner\b/);
-    expect(critLine).toContain('SLACK_BOT_TOKEN');
+  });
+
+  it('a signed-in box emits NO finding', () => {
+    expect(buildLocalFindings(localInput({ ownerSignedIn: true }))).toEqual([]);
   });
 });
 

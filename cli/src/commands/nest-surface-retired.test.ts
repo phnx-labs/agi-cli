@@ -140,7 +140,7 @@ describe('PHNX-3391 moved `perf` under `agents insights perf`', () => {
   });
 });
 
-describe('PHNX-3391 removed `list` (duplicate of `view`) and `trash restore` (duplicate of `restore`)', () => {
+describe('PHNX-3391 removed `list` (duplicate of `view`)', () => {
   it('list is gone from the root tree and marked retired; view remains', async () => {
     const program = await buildFullCommandTree();
     const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
@@ -156,14 +156,27 @@ describe('PHNX-3391 removed `list` (duplicate of `view`) and `trash restore` (du
     expect(r.status).not.toBe(0);
     expect(r.stderr ?? '').toMatch(/unknown command/i);
   });
+});
 
-  it('top-level `restore` stays; `trash` keeps only `list` (no `trash restore`)', async () => {
+describe('PHNX-4267 retired humans/reminders/modes/feedback/restore; restore and empty live under trash', () => {
+  const RETIRED = ['humans', 'reminders', 'modes', 'feedback', 'restore'];
+
+  it('each is gone from the root tree and marked retired', async () => {
     const program = await buildFullCommandTree();
     const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
-    expect(names).toContain('restore');
+    for (const name of RETIRED) {
+      expect(names, name).not.toContain(name);
+      expect(isKnownTopLevelCommand(name), name).toBe(false);
+      expect(RETIRED_TOP_LEVEL_COMMANDS.has(name), name).toBe(true);
+    }
     const trash = program.commands.find((c) => c.name() === 'trash');
-    const trashSubs = trash?.commands.map((c) => c.name()) ?? [];
-    expect(trashSubs).toContain('list');
-    expect(trashSubs).not.toContain('restore');
+    expect(trash?.commands.map((c) => c.name()).sort()).toEqual(['empty', 'list', 'restore']);
+  });
+
+  it('a bare `agents modes` is an unknown command, not an auto-correct to models', () => {
+    const home = guardedHome();
+    const r = run(home, 'modes');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toMatch(/unknown command/i);
   });
 });

@@ -972,7 +972,7 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     const modeList = modeCat.modes.map((m) => (m.isDefault ? `${m.mode}*` : m.mode)).join('/');
     const cfg = modeCat.configuredMode ? chalk.gray(`  run default: ${modeCat.configuredMode}`) : '';
     console.log(`  ${'modes'.padEnd(10)} ${chalk.cyan(modeList)}${cfg}`);
-    console.log(chalk.gray(`             agents modes ${agent}  ·  agents models ${agent}@${version}`));
+    console.log(chalk.gray(`             agents run --help (modes)  ·  agents models ${agent}@${version}`));
   }
 
   if (itemsByKind) {

@@ -605,42 +605,10 @@ export interface Meta {
     templateHash?: string;
   };
   notify?: {
-    owner?: { channel: string; to: string };
     transports?: Record<string, string>;
   };
 }
 
-
-export interface HumanChannel {
-  id: string;
-  transport: string;
-  to?: string;
-  watch?: boolean;
-  cmd?: string;
-  creds?: string;
-  intrusive?: boolean;
-}
-
-export interface HumanPolicy {
-  low?: string[];
-  normal?: string[];
-  critical?: string[];
-}
-
-export interface HumanOwner {
-  name?: string;
-  timezone?: string;
-  quiet_hours?: string;
-  default_severity?: 'low' | 'normal' | 'critical';
-  notify?: { channel: string; to: string };
-  channels?: HumanChannel[];
-  policy?: HumanPolicy;
-}
-
-export interface HumansConfig {
-  version: 1;
-  owner?: HumanOwner;
-}
 
 export interface HostEntry {
   source: 'ssh-config' | 'inline';

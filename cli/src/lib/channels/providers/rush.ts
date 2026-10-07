@@ -25,12 +25,12 @@ export function buildImessageOsascriptArgs(text: string, phone: string): string[
   return ['-e', script];
 }
 
-async function sendImessage(text: string, opts: SendOptions): Promise<SendResult> {
+export async function sendImessage(text: string, opts: SendOptions): Promise<SendResult> {
   const channel = 'imessage';
   if (opts.dryRun) return { ok: true, channel, id: opts.target };
 
   if (platform() !== 'darwin') {
-    return { ok: false, channel, id: opts.target, error: 'iMessage requires macOS (peer-forward handles Linux delivery)' };
+    return { ok: false, channel, id: opts.target, error: 'iMessage requires macOS' };
   }
   if ((opts.attachments?.length ?? 0) > 0) {
     return { ok: false, channel, id: opts.target, error: 'iMessage attachments not supported via osascript' };

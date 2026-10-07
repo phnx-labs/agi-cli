@@ -17,7 +17,7 @@ export function setRemindersFilePathForTest(filePath: string | null): string | n
   return prev;
 }
 
-export function remindersFilePath(): string {
+function remindersFilePath(): string {
   return remindersFilePathOverride ?? path.join(getUserAgentsDir(), 'reminders', 'reminders.yaml');
 }
 

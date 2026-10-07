@@ -33,15 +33,14 @@ import { getGlobalDefault } from '../lib/installations/versions.js';
 import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { getTrashDir } from '../lib/state.js';
 import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/scheduling/routines.js';
 
 type ResourceType = 'commands' | 'skills' | 'hooks' | 'plugins' | 'subagents';
-type StateType = 'trash' | 'sessions' | 'runs';
+type StateType = 'sessions' | 'runs';
 type PruneType = ResourceType | 'versions' | StateType;
 
 const RESOURCE_TYPES: ResourceType[] = ['commands', 'skills', 'hooks', 'plugins', 'subagents'];
-const STATE_TYPES: StateType[] = ['trash', 'sessions', 'runs'];
+const STATE_TYPES: StateType[] = ['sessions', 'runs'];
 const ALL_TYPES: PruneType[] = [...RESOURCE_TYPES, 'versions', ...STATE_TYPES];
 
 interface PruneOptions {
@@ -162,21 +161,6 @@ function parseTarget(arg: string | undefined): ParsedTarget {
   console.log(chalk.gray(`Available types: ${ALL_TYPES.join(', ')}`));
   console.log(chalk.gray(formatAgentError(arg)));
   process.exit(1);
-}
-
-async function runTrashPrune(options: PruneOptions): Promise<void> {
-  const trashDir = getTrashDir();
-  if (!fs.existsSync(trashDir)) {
-    console.log(chalk.green('Trash is empty.'));
-    return;
-  }
-
-  if (options.olderThan || options.yes || options.dryRun) {
-    console.log(chalk.gray('Trash expiry flags are accepted for compatibility but do not delete data.'));
-  }
-  console.log(chalk.yellow('Trash is durable. agents-cli does not hard-delete soft-deleted version data.'));
-  console.log(chalk.gray('Inspect recoverable versions with: agents trash list'));
-  console.log(chalk.gray(`Trash path: ${trashDir}`));
 }
 
 async function runSessionsPrune(options: PruneOptions): Promise<void> {
@@ -314,7 +298,7 @@ export function registerPruneCommand(program: Command): void {
     .option('--all', 'For orphan cleanup: sweep every installed version (default: current default version per agent)')
     .option('--dry-run', 'Show what would be removed without deleting (default for state targets)')
     .option('-y, --yes', 'Skip confirmation prompt')
-    .option('--older-than <days>', 'Deprecated for trash/sessions; accepted but no data is deleted')
+    .option('--older-than <days>', 'Deprecated for sessions; accepted but no data is deleted')
     .option('--keep <n>', 'For runs: keep the last N runs per job (default: 10)')
     .addHelpText('after', `
 Targets:
@@ -324,7 +308,6 @@ Targets:
   hooks      Orphan hook scripts only
   versions   Older duplicate version installs only
   <agent>    Older duplicate versions for one agent (e.g. 'claude')
-  trash      No-op compatibility target; trash is durable
   sessions   No-op compatibility target; session history is durable
   runs       Routine execution logs, keeping only --keep per job (default 10)
 
@@ -347,9 +330,6 @@ Examples:
   # Sweep every installed version's orphans, not only the defaults
   agents prune cleanup --all
 
-  # Show the durable-trash notice
-  agents prune cleanup trash --dry-run
-
   # Show the durable-session notice
   agents prune cleanup sessions --dry-run
 
@@ -366,19 +346,16 @@ What's an orphan?
   reconciled into the version install.
 
 Durability:
-  Version directories are NEVER hard-deleted by agents-cli. Version prune and
-  cleanup move them to ~/.agents/.history/trash/versions/<agent>/<version>/<timestamp>/.
-  Session records are also durable; the sessions target remains only as a no-op
-  compatibility shim.
+  Version prune and cleanup move version directories to
+  ~/.agents/.history/trash/versions/<agent>/<version>/<timestamp>/. Nothing is
+  hard-deleted until you run \`agents trash empty\`. Session records are durable;
+  the sessions target remains only as a no-op compatibility shim.
 `)
     .action(async (target: string | undefined, options: PruneOptions) => {
       const parsed = parseTarget(target);
 
       if (parsed.stateType) {
         switch (parsed.stateType) {
-          case 'trash':
-            await runTrashPrune(options);
-            break;
           case 'sessions':
             await runSessionsPrune(options);
             break;
