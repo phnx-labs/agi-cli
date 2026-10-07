@@ -313,6 +313,10 @@ export function resolveLaunchId(envLaunchId: string | undefined): string {
 }
 
 // Child runs shed parent session/mailbox/account/exec-home identity; lineage is reintroduced only through explicit parent fields.
+export function inheritsHarnessMode(options: ExecOptions): boolean {
+  return options.modeWasImplicit === true && implicitModeFor(options.agent) === 'plan';
+}
+
 export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { ...sanitizeProcessEnv(process.env) };
 
@@ -351,7 +355,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
   // Bind the standalone secrets client to the same store agents-cli resolved.
   result.SECRETS_HOME = result.SECRETS_HOME ?? getUserAgentsDir();
-  if (options.modeWasImplicit) {
+  if (inheritsHarnessMode(options)) {
     delete result.AGENTS_RUN_MODE;
   } else {
     result.AGENTS_RUN_MODE = resolveHeadlessMode(
@@ -700,7 +704,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
     normalizeMode(options.mode),
     interactive,
     options.modeWarningContext,
-    options.modeWasImplicit ? { quiet: true } : options.modeWarningState,
+    inheritsHarnessMode(options) ? { quiet: true } : options.modeWarningState,
   );
   const modeFlags = template.modeFlags[resolvedMode];
   if (!modeFlags) {
@@ -719,9 +723,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
   if (preModeArgs) {
     cmd.push(...preModeArgs);
   }
-  // No mode chosen (no --mode, no run.<agent>.mode): pass no permission flags
-  // and let the harness's own config decide.
-  if (!options.modeWasImplicit) {
+  if (!inheritsHarnessMode(options)) {
     const modeArgsOverride = launchAdapter.execModeArgs?.(launchArgsCtx);
     if (modeArgsOverride !== undefined) {
       cmd.push(...modeArgsOverride);
