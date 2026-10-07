@@ -605,7 +605,7 @@ export async function buildProjectPrs(
           return {
             slug, sharedWith, pullRequests: [enriched], merge,
             recentlyMerged: [], defaultBranch: null,
-            ciError: reviewError ?? (mergeError === null ? null : ghFailure(mergeError)),
+            ciError: [reviewError, mergeError === null ? null : ghFailure(mergeError)].filter(Boolean).join('; ') || null,
             truncated: false, release: null, releaseError: null, error: null,
           };
         }
