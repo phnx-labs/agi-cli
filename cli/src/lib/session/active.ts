@@ -254,6 +254,20 @@ export interface SessionImportantMessage {
   kind: ImportantMessageKind;
 }
 
+export interface PrCheckItem {
+  name: string;
+  state: 'passed' | 'failed' | 'running' | 'skipped';
+  url?: string;
+}
+
+export type SessionPr = DetectedPr & {
+  headSha?: string;
+  title?: string;
+  checkItems?: PrCheckItem[];
+};
+
+export type WatchSubagent = import('@phnx-labs/sessions-cli/reader').SessionSubagent & { model?: string; prompt?: string };
+
 export interface ActiveSession {
   context: ActiveContext;
   kind: string;
@@ -281,14 +295,14 @@ export interface ActiveSession {
   failures?: import('@phnx-labs/sessions-cli/reader').SessionFailure[];
   activityHistogram?: import('@phnx-labs/sessions-cli/reader').SessionActivityHistogram;
   userTurns?: import('@phnx-labs/sessions-cli/reader').SessionUserTurn[];
-  subagents?: import('@phnx-labs/sessions-cli/reader').SessionSubagent[];
+  subagents?: WatchSubagent[];
   tokPerSec?: number;
   awaitingReason?: AwaitingReason;
   question?: StructuredQuestion;
   plan?: string;
   todos?: TodoProgress;
   tail?: string[];
-  pr?: DetectedPr;
+  pr?: SessionPr;
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;
   rateLimited?: boolean;

@@ -4,7 +4,9 @@ import { createHash } from 'node:crypto';
 import { getUserAgentsDir } from '../state.js';
 import { indexArtifactSidecars, mergeArtifacts, parseClaudeContent, sanitizeEvents } from '@phnx-labs/sessions-cli/reader';
 import type { SessionEvent, SessionSubagent } from '@phnx-labs/sessions-cli/reader';
-import type { ActiveSession } from './active.js';
+import type { ActiveSession, WatchSubagent } from './active.js';
+
+export const SUBAGENT_PROMPT_MAX_CHARS = 400;
 
 const directoryCache = new Map<string, { mtimeMs: number; files: string[] }>();
 
@@ -18,6 +20,10 @@ interface ChildFold {
   startedAtMs?: number;
   endedAtMs?: number;
   resultExcerpt?: string;
+  model?: string;
+  prompt?: string;
+  promptTurnId?: string;
+  promptDone?: boolean;
   agentType: string;
   description: string;
   toolUseId?: string;
@@ -59,10 +65,23 @@ function foldChildEvents(fold: ChildFold, events: SessionEvent[]): void {
       fold.endedAtMs = Math.max(fold.endedAtMs ?? atMs, atMs);
     }
     if (event.type === 'tool_use' && !event._local) fold.toolCount++;
+    if (event.role === 'assistant' && event.model && (event.type === 'message' || event.type === 'usage')) fold.model = event.model;
     if (event.type === 'message' && event.role === 'assistant' && event.content) {
       fold.resultExcerpt = event.content.slice(0, 200);
     }
+    if (event.type === 'message' && event.role === 'user' && !fold.promptDone) foldPrompt(fold, event);
   }
+}
+
+function foldPrompt(fold: ChildFold, event: SessionEvent): void {
+  if (fold.prompt !== undefined && event._turnId !== fold.promptTurnId) { fold.promptDone = true; return; }
+  if (event._synthetic || event._meta) return;
+  const text = (event.content ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return;
+  const joined = fold.prompt ? `${fold.prompt} ${text}` : text;
+  fold.prompt = joined.length > SUBAGENT_PROMPT_MAX_CHARS ? joined.slice(0, SUBAGENT_PROMPT_MAX_CHARS) : joined;
+  fold.promptTurnId = event._turnId;
+  if (event._turnId === undefined || joined.length >= SUBAGENT_PROMPT_MAX_CHARS) fold.promptDone = true;
 }
 
 function advanceChild(file: string, fold: ChildFold, size: number): void {
@@ -73,6 +92,10 @@ function advanceChild(file: string, fold: ChildFold, size: number): void {
     fold.startedAtMs = undefined;
     fold.endedAtMs = undefined;
     fold.resultExcerpt = undefined;
+    fold.model = undefined;
+    fold.prompt = undefined;
+    fold.promptTurnId = undefined;
+    fold.promptDone = undefined;
   }
   const end = Math.min(size, fold.offset + MAX_CHILD_BYTES_PER_READ);
   if (end <= fold.offset) return;
@@ -100,10 +123,10 @@ export function readSessionSubagents(
   parentLive: boolean,
   failedCalls: readonly string[] = [],
   nowMs = Date.now(),
-): SessionSubagent[] | undefined {
+): WatchSubagent[] | undefined {
   const files = claudeSubagentFiles(sessionFile);
   if (!files) return undefined;
-  const rows: SessionSubagent[] = [];
+  const rows: WatchSubagent[] = [];
   for (const file of files) {
     try {
       const stat = fs.statSync(file);
@@ -129,6 +152,10 @@ export function readSessionSubagents(
           startedAtMs: fold?.startedAtMs,
           endedAtMs: fold?.endedAtMs,
           resultExcerpt: fold?.resultExcerpt,
+          model: fold?.model,
+          prompt: fold?.prompt,
+          promptTurnId: fold?.promptTurnId,
+          promptDone: fold?.promptDone,
           agentType: typeof meta.agentType === 'string' ? meta.agentType : '',
           description: typeof meta.description === 'string' ? meta.description : '',
           toolUseId: typeof meta.toolUseId === 'string' ? meta.toolUseId : undefined,
@@ -152,6 +179,8 @@ export function readSessionSubagents(
         ...(fold.startedAtMs !== undefined ? { startedAtMs: fold.startedAtMs, endedAtMs: fold.endedAtMs } : {}),
         toolCount: fold.toolCount,
         ...(fold.resultExcerpt ? { resultExcerpt: fold.resultExcerpt } : {}),
+        ...(fold.model ? { model: fold.model } : {}),
+        ...(fold.prompt ? { prompt: fold.prompt } : {}),
         transcriptPath: file,
       });
     } catch {  }

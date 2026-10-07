@@ -2,14 +2,19 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ActiveSession } from '../session/active.js';
 import type { DetectedPr } from '@phnx-labs/sessions-cli/reader';
+import type { PrCheckItem, SessionPr } from '../session/active.js';
 import type { GhExec } from '../github/pr-mergeable.js';
 import type { PullRequestAttentionSignal } from './attention.js';
 
 const execFileAsync = promisify(execFile);
 export const PR_STATUS_TTL_MS = 45_000;
-const PR_STATUS_FIELDS = 'number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup';
+const PR_STATUS_FIELDS = 'number,title,headRefOid,state,isDraft,reviewDecision,mergeable,statusCheckRollup';
+export const MAX_PR_CHECK_ITEMS = 30;
+const FAILED_VERDICTS = ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'];
+const PENDING_VERDICTS = ['PENDING', 'EXPECTED', 'STALE'];
 
 export interface PullRequestStatus extends PullRequestAttentionSignal {
+  headRefOid?: string;
   statusCheckRollup?: unknown[];
 }
 
@@ -62,16 +67,57 @@ export function checksVerdict(rollup?: unknown[]): DetectedPr['checks'] {
   for (const check of rollup) {
     const row = check as { conclusion?: string; status?: string; state?: string };
     const verdict = (row.conclusion || row.state || '').toUpperCase();
-    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(verdict)) return 'failing';
-    if (verdict === '' ? (row.status ?? '').toUpperCase() !== 'COMPLETED' : ['PENDING', 'EXPECTED', 'STALE'].includes(verdict)) pending = true;
+    if (FAILED_VERDICTS.includes(verdict)) return 'failing';
+    if (verdict === '' ? (row.status ?? '').toUpperCase() !== 'COMPLETED' : PENDING_VERDICTS.includes(verdict)) pending = true;
   }
   return pending ? 'pending' : 'passing';
 }
 
-export function withPullRequestStatus<T extends { pr?: DetectedPr }>(row: T, status?: PullRequestStatus): T {
+interface RollupEntry {
+  name?: string; context?: string;
+  conclusion?: string; state?: string; status?: string;
+  detailsUrl?: string; targetUrl?: string;
+  startedAt?: string; completedAt?: string;
+}
+
+function checkItemState(row: RollupEntry): PrCheckItem['state'] {
+  const verdict = (row.conclusion || row.state || '').toUpperCase();
+  if (FAILED_VERDICTS.includes(verdict)) return 'failed';
+  if (verdict === 'SKIPPED' || verdict === 'NEUTRAL') return 'skipped';
+  if (verdict === '' ? (row.status ?? '').toUpperCase() !== 'COMPLETED' : PENDING_VERDICTS.includes(verdict)) return 'running';
+  return 'passed';
+}
+
+export function checkItemsFrom(rollup?: unknown[]): PrCheckItem[] | undefined {
+  if (!rollup || rollup.length === 0) return undefined;
+  const byName = new Map<string, { item: PrCheckItem; atMs: number }>();
+  for (const check of rollup) {
+    const row = (check ?? {}) as RollupEntry;
+    const name = row.name || row.context;
+    if (!name) continue;
+    const atMs = Date.parse(row.completedAt || row.startedAt || '');
+    const at = Number.isFinite(atMs) && atMs > 0 ? atMs : -Infinity;
+    const previous = byName.get(name);
+    if (previous && previous.atMs > at) continue;
+    const url = row.detailsUrl || row.targetUrl;
+    const item: PrCheckItem = { name, state: checkItemState(row), ...(url ? { url } : {}) };
+    byName.set(name, { item, atMs: at });
+  }
+  const all = [...byName.values()].map((entry) => entry.item);
+  const rank = (item: PrCheckItem) => item.state === 'failed' ? 0 : item.state === 'running' ? 1 : 2;
+  const kept = new Set([...all].sort((a, b) => rank(a) - rank(b)).slice(0, MAX_PR_CHECK_ITEMS));
+  const items = all.filter((item) => kept.has(item));
+  return items.length ? items : undefined;
+}
+
+export function withPullRequestStatus<T extends { pr?: SessionPr }>(row: T, status?: PullRequestStatus): T {
   if (!row.pr || !status) return row;
-  const pr: DetectedPr = {
+  const checkItems = checkItemsFrom(status.statusCheckRollup);
+  const pr: SessionPr = {
     ...row.pr,
+    ...(status.title ? { title: status.title } : {}),
+    ...(status.headRefOid ? { headSha: status.headRefOid } : {}),
+    ...(checkItems ? { checkItems } : {}),
     ...(status.state !== undefined ? { state: status.state } : {}),
     ...(status.isDraft !== undefined ? { isDraft: status.isDraft } : {}),
     ...(status.reviewDecision !== undefined ? { reviewDecision: status.reviewDecision } : {}),
