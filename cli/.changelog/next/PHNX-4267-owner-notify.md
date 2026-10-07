@@ -10,10 +10,15 @@
 - **Workers get a scoped device token automatically (PHNX-4267).** The first signed-in personal or
   desktop box mints one `notify`-scoped Phoenix device token per `role=worker` device and pushes
   it into that worker's own `__notify-<worker>__` reserved store on the `auth-sync` tick. It is
-  never pushed to a headed device. Source: `cli/src/lib/owner-notify-tokens.ts`.
+  never pushed to a headed device. A worker whose token was rejected or lost gets a replacement;
+  a device that leaves the fleet or stops being a worker has its token revoked, and
+  `agents auth logout` revokes the tokens that box minted. Source:
+  `cli/src/lib/owner-notify-tokens.ts`.
 - **A signed-in Mac sends the iMessages (PHNX-4267).** The new macOS-only `owner-device-delivery`
   daemon service claims queued iMessage deliveries every 15 seconds, sends them through Messages
-  and reports each result. Source: `cli/src/lib/daemon/owner-device-delivery-service.ts`.
+  and reports each result. Delivery is at-least-once: a sent message whose result report fails is
+  sent again after the 5-minute stale-claim window. Source:
+  `cli/src/lib/daemon/owner-device-delivery-service.ts`.
 - **`humans.yaml` moves to your account, once (PHNX-4267).** On the first run with a Phoenix
   session, `~/.agents/humans.yaml` is uploaded to your notification preferences (channels, policy,
   quiet hours, timezone, iMessage handle), moved to trash, and its removal committed. Without a

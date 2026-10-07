@@ -465,7 +465,7 @@ event (`agents send --to owner`, a `--blocked` or important `feed post`, an urge
 feed block, a failed routine) is one `POST /me/notifications` to rush/api through
 [`src/lib/owner-notify.ts`](src/lib/owner-notify.ts) `postOwnerNotification`.
 rush/api owns the preferences (edited in the console Settings page), quiet hours,
-dedup on `(event, dedupKey)`, and delivery: email and Slack go out server-side,
+dedup on `(event, dedupKey)` (`postOwnerNotification` prefixes every producer key with `owner:` so it can never collide with a cloud-run key), and delivery: email and Slack go out server-side,
 iMessage is queued as a `device_deliveries` row. Event mapping: a block is
 `needs_you` (the only event that bypasses quiet hours), a failed routine is
 `failed`, everything else is `message`; a green routine stays silent. The bearer is
@@ -488,15 +488,22 @@ while the box has no session.
   store would hand every worker every other worker's token. It is never pushed to
   a headed peer. Minting replaces a device's previous token server-side, so only
   the first signed-in headed box by name mints (each box publishes
-  `ownerNotify.{signedIn, deviceToken}` in its daemon-state envelope), and it never
-  replaces a token another box minted. A worker that reports `deviceToken: false`
-  while its token is still live gets the stored token re-pushed; revoking a token
-  in the account makes the next tick mint a fresh one.
+  `ownerNotify.{signedIn, deviceToken}` in its daemon-state envelope; a headed
+  peer's report older than `OWNER_NOTIFY_PEER_FRESH_MS` does not count, so a dead
+  box is not elected). `deviceToken` is the worker's own verdict: a token is
+  present and rush/api has not answered 401 to it. A worker reporting `false` gets
+  the stored token re-pushed when the minter holds the live one, and otherwise a
+  revoke and fresh mint, so a lost memo or a replaced minter never strands it. The
+  minter revokes the `notify` token of any device that is no longer a worker peer,
+  and `agents auth logout` revokes the tokens that box minted.
 - **iMessage on a Mac.** The macOS-only `owner-device-delivery` daemon service
   claims queued rows every 15 s (`POST /me/device-deliveries/claim`, one atomic
   UPDATE server-side, so two signed-in Macs never send the same row), sends each
   through the osascript builder in `channels/providers/rush.ts`, and reports the
-  result. It is idle on a box with no session and no device token.
+  result. It is idle on a box with no session and no device token. Delivery is
+  at-least-once: when the send succeeds but the result report fails, the row
+  becomes claimable again after rush/api's 5-minute stale-claim window and the
+  iMessage is sent a second time.
 - **Explicit channels are a different feature.** `agents send --channel slack --to
   '#eng'` and feed `channel:` sinks still deliver through the local providers
   (`notify.transports` still remaps a channel name). They no longer fall back to an
@@ -775,7 +782,7 @@ truncated bearer and a pre-existing looser file is tightened.
 `refreshSessionProfile` (run by `whoami`) merges `/auth/me`'s name and picture into
 the file only if it still holds the same token and user after the fetch. Every backend call reuses
 it as `Authorization: Bearer <access_token>` against Phoenix ID; `agents auth whoami`
-resolves it at `GET /api/v1/auth/me`; `agents auth logout` deletes the file (local-only —
+resolves it at `GET /api/v1/auth/me`; `agents auth logout` revokes the worker owner-notify tokens this box minted, then deletes the file (local-only —
 signs out nothing else).
 
 - `PHOENIX_ID_BASE` (default `https://id.byphoenix.com`) points the CLI at a different

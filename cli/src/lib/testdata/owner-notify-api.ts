@@ -32,6 +32,8 @@ export interface OwnerNotifyApi {
   sessionToken: string;
   deviceTokens: DeviceToken[];
   deliveries: Delivery[];
+  /** The dedupKey of every accepted-shape POST /me/notifications, exactly as received. */
+  dedupKeys: string[];
   imessageAddress: string | null;
   preferencesStatus: number;
   close(): Promise<void>;
@@ -51,6 +53,7 @@ export async function startOwnerNotifyApi(sessionToken = 'phx-session-token'): P
     sessionToken,
     deviceTokens: [],
     deliveries: [],
+    dedupKeys: [],
     imessageAddress: '+15555550100',
     preferencesStatus: 200,
     close: async () => {},
@@ -100,6 +103,7 @@ export async function startOwnerNotifyApi(sessionToken = 'phx-session-token'): P
         if (!body || !EVENTS.has(String(body.event)) || typeof body.title !== 'string' || typeof body.body !== 'string' || typeof body.dedupKey !== 'string') {
           return send(res, 400, { error: 'invalid notification', code: 'INVALID_BODY' });
         }
+        api.dedupKeys.push(body.dedupKey);
         const key = `${body.event}\0${body.dedupKey}`;
         if (seen.has(key)) return send(res, 200, { dispatchId: null, delivered: [], queued: [], skipped: [], suppressed: 'duplicate' });
         seen.add(key);

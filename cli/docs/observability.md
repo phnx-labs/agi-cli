@@ -98,7 +98,9 @@ everything else `message`. A box with no Phoenix session (`agents auth login`) a
 on a worker, no device token cannot reach the owner: the sink reports a failure and
 `agents doctor` shows `owner-not-signed-in`. Workers receive a `notify`-scoped
 device token from a signed-in personal or desktop box automatically; iMessage is
-sent by a signed-in Mac's daemon (`owner-device-delivery`). See
+sent by a signed-in Mac's daemon (`owner-device-delivery`), at least once: if the
+send succeeds but its result report fails, the row is re-claimed after 5 minutes
+and sent again. See
 [`../AGENTS.md`](../AGENTS.md) for the mechanism.
 
 Channel sinks may set `message:` to customize their outbound body. It supports

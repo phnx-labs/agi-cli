@@ -59,11 +59,15 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  function peerState(name: string, ownerNotify: { signedIn: boolean; deviceToken: boolean }) {
+  function peerState(name: string, ownerNotify: { signedIn: boolean; deviceToken: boolean }, receivedAt?: number) {
     return usageSync.applyPeerFleetState(
       { version: shared.FLEET_SHARED_STATE_VERSION, device: name, ownerNotify },
-      { device: 'local-observer', userAgentsDir: root, cachePath: path.join(root, 'usage.json') },
+      { device: 'local-observer', userAgentsDir: root, cachePath: path.join(root, 'usage.json'), receivedAt },
     );
+  }
+
+  function tokenIds(): string[] {
+    return api.deviceTokens.map((t) => t.id);
   }
 
   function run(localName = 'zion', devices = ['zion', 'pinnacles', 'worker-a', 'worker-b']) {
@@ -124,19 +128,76 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     expect(api.deviceTokens.map((t) => t.id)).toEqual(before);
   });
 
-  it('only the first signed-in headed box mints, and it never replaces a token another box minted', async () => {
+  it('only the first signed-in headed box by name mints', async () => {
     await peerState('worker-a', { signedIn: false, deviceToken: false });
     await peerState('pinnacles', { signedIn: true, deviceToken: false });
     const fromZion = await run('zion');
     expect(fromZion.minter).toBe('pinnacles');
     expect(fromZion.minted).toEqual([]);
+    expect(api.deviceTokens).toEqual([]);
+  });
 
-    await peerState('zion', { signedIn: true, deviceToken: false });
+  it('ignores a headed peer whose signed-in report is stale, so a dead box is not elected', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('pinnacles', { signedIn: true, deviceToken: false }, Date.now() - tokens.OWNER_NOTIFY_PEER_FRESH_MS - 60_000);
+    const fromZion = await run('zion');
+    expect(fromZion.minter).toBe('zion');
+    expect(fromZion.minted).toEqual(['worker-a']);
+  });
+
+  it('leaves a token another box minted while the worker reports it usable', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: true });
     api.deviceTokens.push({ id: 'tok-foreign', token: 'foreign', device: 'worker-a', createdAt: '' });
-    const fromPinnacles = await run('pinnacles');
-    expect(fromPinnacles.minter).toBe('pinnacles');
-    expect(fromPinnacles.skipped).toContainEqual({ device: 'worker-a', reason: 'its token was minted by another device' });
-    expect(api.deviceTokens.find((t) => t.device === 'worker-a')?.id).toBe('tok-foreign');
+    const result = await run('zion', ['zion', 'worker-a']);
+    expect(result.skipped).toContainEqual({ device: 'worker-a', reason: 'token present' });
+    expect(tokenIds()).toEqual(['tok-foreign']);
+  });
+
+  it('replaces a live token it does not hold when the worker reports none, so a lost memo or replaced minter never strands it', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    api.deviceTokens.push({ id: 'tok-foreign', token: 'foreign', device: 'worker-a', createdAt: '' });
+    const result = await run('zion', ['zion', 'worker-a']);
+    expect(result.minted).toEqual(['worker-a']);
+    expect(api.requests.map((r) => `${r.method} ${r.path}`)).toContain('DELETE /api/v1/auth/tokens/tok-foreign');
+    const fresh = api.deviceTokens.find((t) => t.device === 'worker-a')!;
+    expect(fresh.id).not.toBe('tok-foreign');
+    expect(claudeToken.readReservedCredential(reserved.ownerNotifyStoreName('worker-a'), reserved.OWNER_NOTIFY_TOKEN_KEY)).toBe(fresh.token);
+    expect(pushes).toEqual([{ bundle: '__notify-worker-a__', host: 'user@worker-a' }]);
+
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+    pushes = [];
+    const afterMemoLoss = await run('zion', ['zion', 'worker-a']);
+    expect(afterMemoLoss.minted).toEqual(['worker-a']);
+    expect(api.deviceTokens.filter((t) => t.device === 'worker-a')).toHaveLength(1);
+    expect(pushes).toHaveLength(1);
+  });
+
+  it('revokes the token of a device that left the fleet or stopped being a worker', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await run('zion', ['zion', 'worker-a', 'worker-b']);
+    api.deviceTokens.push({ id: 'tok-gone', token: 'gone', device: 'retired-box', createdAt: '' });
+    api.deviceTokens.push({ id: 'tok-headed', token: 'headed', device: 'pinnacles', createdAt: '' });
+    const kept = api.deviceTokens.find((t) => t.device === 'worker-a')!.id;
+
+    const result = await run('zion', ['zion', 'pinnacles', 'worker-a']);
+    expect(result.revoked.sort()).toEqual(['pinnacles', 'retired-box']);
+    expect(tokenIds()).toEqual([kept]);
+
+    const dropped = await run('zion', ['zion']);
+    expect(dropped.revoked).toEqual(['worker-a']);
+    expect(api.deviceTokens).toEqual([]);
+    expect(claudeToken.readReservedCredential(reserved.ownerNotifyStoreName('worker-a'), reserved.OWNER_NOTIFY_TOKEN_KEY)).toBeNull();
+  });
+
+  it('logout revokes every token this box minted and forgets them', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('worker-b', { signedIn: false, deviceToken: false });
+    await run();
+    api.deviceTokens.push({ id: 'tok-other', token: 'other', device: 'worker-c', createdAt: '' });
+    const out = await tokens.revokeMintedOwnerNotifyTokens(cacheDir);
+    expect(out).toEqual({ revoked: ['worker-a', 'worker-b'], errors: [] });
+    expect(tokenIds()).toEqual(['tok-other']);
+    expect(await tokens.revokeMintedOwnerNotifyTokens(cacheDir)).toEqual({ revoked: [], errors: [] });
   });
 
   it.skipIf(process.getuid?.() === 0)('revokes a freshly minted token when it cannot be stored, so the next tick mints again', async () => {

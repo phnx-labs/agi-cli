@@ -41,7 +41,7 @@ agents add <specs...>  Download and install agent CLI versions. Enables subsidiz
 ```
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
-agents auth logout                     Clear this machine's session (no other device is affected)
+agents auth logout                     Clear this machine's session and revoke the worker owner-notify tokens it minted
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space

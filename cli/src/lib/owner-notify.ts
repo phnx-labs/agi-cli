@@ -1,8 +1,12 @@
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { readSession } from './identity/client.js';
 import { readReservedCredential } from './claude-account-token.js';
 import { machineId, normalizeHost } from './machine-id.js';
 import { OWNER_NOTIFY_TOKEN_KEY, canHoldOwnerNotifyToken, ownerNotifyStoreName } from './reserved-stores.js';
 import { RUSH_API_BASE } from './rush-api.js';
+import { getCacheDir } from './state.js';
 
 export const OWNER_EVENTS = ['needs_you', 'completed', 'failed', 'spend_threshold', 'message'] as const;
 export type OwnerEvent = (typeof OWNER_EVENTS)[number];
@@ -75,6 +79,40 @@ export function resolveOwnerCredential(): OwnerCredential | null {
   return device ? { kind: 'device', token: device } : null;
 }
 
+// rush/api dedups on (user, event, dedupKey) in a namespace it shares with cloud-run
+// events, so every owner key is prefixed here and nowhere else.
+export const OWNER_DEDUP_PREFIX = 'owner:';
+
+function rejectedTokenPath(cacheDir: string): string {
+  return path.join(cacheDir, 'owner-notify-rejected.json');
+}
+
+function tokenFingerprint(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function markDeviceTokenRejected(token: string, cacheDir = getCacheDir()): void {
+  fs.mkdirSync(cacheDir, { recursive: true });
+  fs.writeFileSync(rejectedTokenPath(cacheDir), `${JSON.stringify({ sha256: tokenFingerprint(token), at: new Date().toISOString() })}\n`, { mode: 0o600 });
+}
+
+function isDeviceTokenRejected(token: string, cacheDir: string): boolean {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(rejectedTokenPath(cacheDir), 'utf-8')) as { sha256?: unknown };
+    return parsed.sha256 === tokenFingerprint(token);
+  } catch {
+    return false;
+  }
+}
+
+/** A device token this worker holds that rush/api has not rejected. Peers read it as `ownerNotify.deviceToken`. */
+export function hasUsableDeviceToken(device: string, cacheDir = getCacheDir()): boolean {
+  const self = normalizeHost(device);
+  if (!canHoldOwnerNotifyToken(self)) return false;
+  const token = readReservedCredential(ownerNotifyStoreName(self), OWNER_NOTIFY_TOKEN_KEY);
+  return token !== null && !isDeviceTokenRejected(token, cacheDir);
+}
+
 function requireOwnerCredential(): OwnerCredential {
   const credential = resolveOwnerCredential();
   if (!credential) throw new OwnerNotSignedInError();
@@ -102,6 +140,7 @@ async function rushRequest<T>(method: 'POST' | 'PUT', route: string, body: unkno
     const fields = payload && typeof payload === 'object' ? payload as { error?: unknown; code?: unknown } : {};
     const detail = typeof fields.error === 'string' ? fields.error : `${response.status} ${response.statusText}`;
     const code = typeof fields.code === 'string' ? fields.code : undefined;
+    if (response.status === 401 && credential.kind === 'device') markDeviceTokenRejected(credential.token);
     const hint = response.status === 401
       ? (credential.kind === 'session'
           ? " Run 'agents auth login'."
@@ -113,7 +152,10 @@ async function rushRequest<T>(method: 'POST' | 'PUT', route: string, body: unkno
 }
 
 export function postOwnerNotification(notification: OwnerNotification): Promise<OwnerNotifyResult> {
-  return rushRequest<OwnerNotifyResult>('POST', '/me/notifications', notification);
+  return rushRequest<OwnerNotifyResult>('POST', '/me/notifications', {
+    ...notification,
+    dedupKey: `${OWNER_DEDUP_PREFIX}${notification.dedupKey}`,
+  });
 }
 
 export async function claimDeviceDeliveries(device: string, limit = 10): Promise<DeviceDelivery[]> {

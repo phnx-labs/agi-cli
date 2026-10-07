@@ -126,10 +126,10 @@ export function registerAuthCommand(program: Command): void {
 agents auth whoami                        # who this machine is signed in as
 agents auth space create "Design Team"    # start a space
 agents auth space invite ada@example.com  # add a teammate
-agents auth logout                        # clear this machine only`,
+agents auth logout                        # sign this machine out; revokes the worker tokens it minted`,
     notes: `Signing in is optional — every local feature works with no account; team spaces are what it unlocks.
 Sign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.
-The session lives in this machine's agents state dir, so logging out here signs out nothing else.
+The session lives in this machine's agents state dir, so logging out here signs out no other device. It does revoke the owner-notify device tokens this machine minted for workers; the next signed-in personal device mints replacements.
 Point at a different backend with PHOENIX_ID_BASE (defaults to the production service).
 Harness worker credentials are minted by \`agents accounts add <harness> [name]\` / \`agents accounts login <harness>#<name>\`, not by this command.`,
   });
@@ -150,10 +150,18 @@ Harness worker credentials are minted by \`agents accounts add <harness> [name]\
 
   auth
     .command('logout')
-    .description("Clear this machine's session (no other device is affected)")
+    .description("Clear this machine's session and revoke the worker owner-notify tokens it minted")
     .action(() =>
-      runOrDie(() => {
+      runOrDie(async () => {
         const session = readSession();
+        if (session) {
+          const { revokeMintedOwnerNotifyTokens } = await import('../lib/owner-notify-tokens.js');
+          const tokens = await revokeMintedOwnerNotifyTokens();
+          if (tokens.revoked.length > 0) console.log(chalk.gray(`Revoked the owner-notify device tokens this machine minted for ${tokens.revoked.join(', ')}.`));
+          for (const err of tokens.errors) {
+            console.error(chalk.yellow(`Could not revoke the owner-notify token for ${err.device}: ${err.message}. Revoke it in the account's API tokens.`));
+          }
+        }
         clearSession();
         console.log(session ? chalk.green(`Signed out ${session.email ?? 'this machine'}.`) : chalk.gray('Already signed out.'));
       }));

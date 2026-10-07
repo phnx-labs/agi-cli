@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { pushBundleToHostAsync } from './secrets-client.js';
+import { deleteBundleSync, deleteKeychainTokenSync, pushBundleToHostAsync, secretsKeychainItem } from './secrets-client.js';
 import type { PushBundleResult } from './secrets-types.js';
 import { readReservedCredential } from './claude-account-token.js';
 import { writeReservedStoreItem } from './auth-mint.js';
 import { OWNER_NOTIFY_TOKEN_KEY, canHoldOwnerNotifyToken, ownerNotifyStoreName } from './reserved-stores.js';
-import { readSession } from './identity/client.js';
+import { PhoenixApiError, readSession } from './identity/client.js';
 import { listApiTokens, mintDeviceToken, revokeApiToken, type ApiTokenSummary } from './identity/index.js';
 import { isDialableDevice, loadDevicesSync, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
@@ -14,8 +14,13 @@ import { machineId, normalizeHost } from './machine-id.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import { readFleetSharedDeviceStates, updateFleetSharedDeviceStateAsync } from './fleet-shared-state.js';
 import { getCacheDir, getUserAgentsDir } from './state.js';
+import { hasUsableDeviceToken } from './owner-notify.js';
+import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
 const OWNER_NOTIFY_PUSH_DEADLINE_MS = 20_000;
+// A headed peer whose report is older than three exchange intervals is treated as gone,
+// so a dead box cannot stay elected minter.
+export const OWNER_NOTIFY_PEER_FRESH_MS = 3 * USAGE_SYNC_INTERVAL_MS;
 
 type Role = ReturnType<typeof selfConfiguredDeviceRole>;
 
@@ -24,9 +29,7 @@ export async function publishOwnerNotifyState(
 ): Promise<{ signedIn: boolean; deviceToken: boolean; changed: boolean }> {
   const device = opts.device ?? machineId();
   const signedIn = Boolean(readSession()?.access_token);
-  const self = normalizeHost(device);
-  const deviceToken = canHoldOwnerNotifyToken(self)
-    && readReservedCredential(ownerNotifyStoreName(self), OWNER_NOTIFY_TOKEN_KEY) !== null;
+  const deviceToken = hasUsableDeviceToken(device);
   const write = await updateFleetSharedDeviceStateAsync(
     device,
     { ownerNotify: { signedIn, deviceToken } },
@@ -43,6 +46,7 @@ interface OwnerNotifySyncResult {
   minter: string | null;
   minted: string[];
   pushed: string[];
+  revoked: string[];
   skipped: Array<{ device: string; reason: string }>;
   errors: Array<{ device: string; message: string }>;
 }
@@ -57,6 +61,7 @@ interface OwnerNotifySyncDeps {
   isPinned?: (name: string) => boolean;
   push?: (bundle: string, host: string) => Promise<PushBundleResult>;
   sshTarget?: (device: DeviceProfile) => string;
+  now?: () => number;
 }
 
 function memoPath(root: string): string {
@@ -77,7 +82,7 @@ function writeMemo(root: string, memo: Record<string, string>): void {
 }
 
 export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Promise<OwnerNotifySyncResult> {
-  const result: OwnerNotifySyncResult = { minter: null, minted: [], pushed: [], skipped: [], errors: [] };
+  const result: OwnerNotifySyncResult = { minter: null, minted: [], pushed: [], revoked: [], skipped: [], errors: [] };
   const localName = deps.localName ?? machineId();
   const localNorm = normalizeHost(localName);
   const selfRole = (deps.selfRole ?? selfConfiguredDeviceRole)();
@@ -90,8 +95,15 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
   result.errors.push(...read.errors);
   const stateByDevice = new Map(read.states.map((s) => [normalizeHost(s.device), s]));
 
+  const now = (deps.now ?? Date.now)();
   const signedInHeaded = [localName, ...devices
-    .filter((d) => isHeadedDeviceRole(peerRole(d.name)) && stateByDevice.get(normalizeHost(d.name))?.ownerNotify?.signedIn === true)
+    .filter((d) => {
+      const state = stateByDevice.get(normalizeHost(d.name));
+      return isHeadedDeviceRole(peerRole(d.name))
+        && state?.ownerNotify?.signedIn === true
+        && state.receivedAt !== undefined
+        && now - state.receivedAt <= OWNER_NOTIFY_PEER_FRESH_MS;
+    })
     .map((d) => d.name)];
   result.minter = electOwnerNotifyMinter(signedInHeaded);
   const workers = devices.filter((d) => peerRole(d.name) === 'worker');
@@ -110,14 +122,26 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
 
   let tokens: ApiTokenSummary[];
   try {
-    tokens = (await listApiTokens()).filter((t) => t.kind === 'device');
+    tokens = (await listApiTokens()).filter((t) => t.kind === 'device' && t.device !== null && t.scopes.includes('notify'));
   } catch (err) {
     result.errors.push({ device: localName, message: `list device tokens: ${(err as Error).message}` });
     return result;
   }
 
+  const workerNames = new Set(workers.map((w) => normalizeHost(w.name)));
+  for (const stale of tokens.filter((t) => !workerNames.has(normalizeHost(t.device!)))) {
+    try {
+      await revokeOwnerNotifyToken(normalizeHost(stale.device!), stale.id, memo);
+      result.revoked.push(stale.device!);
+    } catch (err) {
+      result.errors.push({ device: stale.device!, message: `revoke token of a device that is no longer a worker: ${(err as Error).message}` });
+    }
+  }
+  writeMemo(cacheDir, memo);
+
   for (const worker of workers) {
     const name = normalizeHost(worker.name);
+    const store = ownerNotifyStoreName(name);
     const peerState = stateByDevice.get(name)?.ownerNotify;
     if (!peerState) { result.skipped.push({ device: worker.name, reason: 'no owner-notify state from this peer yet' }); continue; }
     if (!isDialableDevice(worker)) { result.skipped.push({ device: worker.name, reason: 'unreachable' }); continue; }
@@ -125,15 +149,18 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
       result.skipped.push({ device: worker.name, reason: `host key not pinned; run \`agents ssh ${worker.name}\` once` });
       continue;
     }
-    const onServer = tokens.find((t) => t.device !== null && normalizeHost(t.device) === name);
-    if (onServer && memo[name] !== onServer.id) {
-      result.skipped.push({ device: worker.name, reason: 'its token was minted by another device' });
-      continue;
-    }
-    if (onServer && peerState.deviceToken) { result.skipped.push({ device: worker.name, reason: 'token present' }); continue; }
+    if (peerState.deviceToken) { result.skipped.push({ device: worker.name, reason: 'token present' }); continue; }
+    let onServer = tokens.find((t) => normalizeHost(t.device!) === name);
     try {
+      // Re-push only a token this box still holds AND recorded as the live one; anything else
+      // (a lost memo, a replaced minter, a wiped store) strands the worker, so replace it.
+      const holdsLive = onServer !== undefined && memo[name] === onServer.id
+        && readReservedCredential(store, OWNER_NOTIFY_TOKEN_KEY) !== null;
+      if (onServer && !holdsLive) {
+        await revokeApiToken(onServer.id);
+        onServer = undefined;
+      }
       if (!onServer) {
-        const store = ownerNotifyStoreName(name);
         const minted = await mintDeviceToken(name, ['notify']);
         try {
           writeReservedStoreItem(
@@ -150,7 +177,7 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
         writeMemo(cacheDir, memo);
         result.minted.push(worker.name);
       }
-      const out = await push(ownerNotifyStoreName(name), sshTarget(worker));
+      const out = await push(store, sshTarget(worker));
       if (out.ok) result.pushed.push(worker.name);
       else result.errors.push({ device: worker.name, message: out.message });
     } catch (err) {
@@ -158,4 +185,41 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
     }
   }
   return result;
+}
+
+async function revokeOwnerNotifyToken(name: string, id: string, memo: Record<string, string>): Promise<void> {
+  try {
+    await revokeApiToken(id);
+  } catch (err) {
+    if (!(err instanceof PhoenixApiError && err.status === 404)) throw err;
+  }
+  if (memo[name] === id) {
+    delete memo[name];
+    if (canHoldOwnerNotifyToken(name)) {
+      const store = ownerNotifyStoreName(name);
+      deleteKeychainTokenSync(secretsKeychainItem(store, OWNER_NOTIFY_TOKEN_KEY));
+      deleteBundleSync(store);
+    }
+  }
+}
+
+/**
+ * Revoke every worker token this box minted (its memo), for `agents auth logout`.
+ * Run while the session is still present: revocation needs it.
+ */
+export async function revokeMintedOwnerNotifyTokens(
+  cacheDir = getCacheDir(),
+): Promise<{ revoked: string[]; errors: Array<{ device: string; message: string }> }> {
+  const out = { revoked: [] as string[], errors: [] as Array<{ device: string; message: string }> };
+  const memo = readMemo(cacheDir);
+  for (const [name, id] of Object.entries(memo)) {
+    try {
+      await revokeOwnerNotifyToken(name, id, memo);
+      out.revoked.push(name);
+    } catch (err) {
+      out.errors.push({ device: name, message: (err as Error).message });
+    }
+  }
+  if (Object.keys(memo).length > 0 || out.revoked.length > 0) writeMemo(cacheDir, memo);
+  return out;
 }

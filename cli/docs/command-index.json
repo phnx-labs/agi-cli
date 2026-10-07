@@ -727,8 +727,8 @@
           "negate": false
         }
       ],
-      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
-      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\nHarness worker credentials are minted by `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`, not by this command.",
+      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # sign this machine out; revokes the worker tokens it minted",
+      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out no other device. It does revoke the owner-notify device tokens this machine minted for workers; the next signed-in personal device mints replacements.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\nHarness worker credentials are minted by `agents accounts add <harness> [name]` / `agents accounts login <harness>#<name>`, not by this command.",
       "subcommands": [
         {
           "name": "login",
@@ -754,7 +754,7 @@
           "name": "logout",
           "path": "auth logout",
           "aliases": [],
-          "description": "Clear this machine's session (no other device is affected)",
+          "description": "Clear this machine's session and revoke the worker owner-notify tokens it minted",
           "args": [],
           "options": [
             {

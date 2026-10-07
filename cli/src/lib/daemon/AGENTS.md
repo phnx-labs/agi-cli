@@ -84,7 +84,8 @@ record of `null` for it.
   `owner-device-delivery` (`owner-device-delivery-service.ts`: every 15 s claims
   the iMessage deliveries rush/api queued for the owner, sends them through
   Messages and reports each result; idle without a Phoenix session or device
-  token — PHNX-4267), and — since
+  token. At-least-once: a sent message whose result report fails is re-claimed
+  after rush/api's 5-minute stale-claim window and sent again — PHNX-4267), and — since
   PHNX-3695 — `self-update` (`self-update-service.ts`: checks npm for a newer
   agents-cli roughly every 75 minutes, installs + byte-verifies it with the
   same primitives `agents upgrade` uses, best-effort pulls the `.system`

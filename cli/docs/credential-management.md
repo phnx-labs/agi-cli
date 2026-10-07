@@ -192,11 +192,19 @@ the owner with its own session.
 Minting for a device replaces that device's previous token server-side, so the
 `auth-sync` tick (`syncOwnerNotifyTokens`, `lib/owner-notify-tokens.ts`) has a
 single executor: the first signed-in headed box by name, from the
-`ownerNotify.signedIn` each box publishes in its daemon-state envelope. That box
-never replaces a token another box minted, re-pushes its stored token when the
-worker reports `ownerNotify.deviceToken: false`, and mints afresh after the owner
-revokes a worker's token. A peer on an older CLI publishes no `ownerNotify` and is
-skipped, fail closed.
+`ownerNotify.signedIn` each box publishes in its daemon-state envelope. A headed
+peer counts only while its report is fresh (`receivedAt` within
+`OWNER_NOTIFY_PEER_FRESH_MS`, three 15-minute exchange intervals), so a dead box
+cannot stay elected. The worker's own `ownerNotify.deviceToken` verdict is what
+decides: `true` means it holds a token rush/api has not rejected (a 401 on that
+token marks it rejected on the worker). On `false` the minter re-pushes the token
+only when it holds the live one (its memo names the server's token id and its
+store still has the value); otherwise it revokes the server's token and mints a
+replacement, so a lost memo or a replaced minting box never strands a worker. The
+minter also revokes every `notify` token whose device is no longer a `role=worker`
+peer (left the fleet, or turned headed), and `agents auth logout` revokes the
+tokens that box minted before clearing its session. A peer on an older CLI
+publishes no `ownerNotify` and is skipped, fail closed.
 
 ## Provisioning model — the canonical, non-reversible flow (owner requirement)
 
