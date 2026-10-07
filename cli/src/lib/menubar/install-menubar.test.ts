@@ -863,11 +863,6 @@ describe('cachedReleaseBundlePath', () => {
 });
 
 describe('menubarGateVersion (R5: helpers auto-update)', () => {
-  // updateMenubarHelperIfNewer gated on the CACHED source for the cached
-  // version before downloading. For a release not yet on disk that source does
-  // not exist, so the gate saw no Developer-ID bundle and refused every new
-  // release (zion stayed on 1.14.13 with 1.15.0 published). The gate now judges
-  // the bundle it just downloaded; its version is read from that bundle's path.
   it('judges the downloaded release, not the cached one', () => {
     const downloaded = path.join(menubarHelperCacheDir('1.15.0'), 'MenubarHelper.app');
     expect(menubarGateVersion(downloaded, () => '1.14.13')).toBe('1.15.0');

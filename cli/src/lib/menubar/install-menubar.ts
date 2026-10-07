@@ -525,23 +525,10 @@ function stampMenubarHeal(): void {
   } catch {  }
 }
 
-/**
- * The version the ownership gate compares against the installed helper: that
- * of the bundle about to be installed when one is given (an update's freshly
- * downloaded release), else the cached/shipped source's.
- */
 export function menubarGateVersion(source: string | null, cached: () => string = availableHelperLabel): string {
   return source ? stampVersionLabel(stampFor(source)) ?? LOCAL_BUILD_LABEL : cached();
 }
 
-/**
- * May THIS install replace the running helper? `source` is the bundle it would
- * install. An update must pass the bundle it just downloaded: the default,
- * `sourceAppPath()`, is the CACHED bundle for the cached version, which for a
- * release that has not been downloaded yet does not exist — so its Developer ID
- * check read false and every new release was refused as "another install owns
- * the helper" (R5: helpers must auto-update).
- */
 function mayHealMenubar(needsDevIdHeal: boolean, source: string | null = sourceAppPath()): boolean {
   const plistEntry = readPlistEnvValue('AGENTS_ENTRY');
   const src = source;
@@ -936,13 +923,9 @@ export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force
   if (menubarUpdateOutcome(release.helperVersion, available) === 'current') {
     return { outcome: 'current', installed, available, detail: `AGI Menu ${installed} is the newest published build` };
   }
-  // A dry run downloads nothing, so it reports the build it would fetch; the
-  // ownership gate below needs the downloaded bundle to judge.
   if (opts.dryRun) return { outcome: 'updated', installed, available, detail: `would update AGI Menu ${installed} → ${available}` };
 
   try {
-    // Fetch (sha256 + Developer ID + notarization verified) BEFORE the gate,
-    // and gate on that bundle — see mayHealMenubar.
     const src = await downloadMenubarHelperApp(available);
     if (!mayHealMenubar(false, src)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
     const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
