@@ -28,6 +28,7 @@ import {
   menubarHealReplacedBundle,
   menubarPlistNeedsRepoint,
   mayInstallMenubarHelper,
+  menubarGateVersion,
   MENUBAR_HELPER_EXECUTABLE_NAME,
   processesToEnd,
   resetMenubarAccessibilityTcc,
@@ -337,17 +338,6 @@ describe('mayInstallMenubarHelper', () => {
     cooldownMs: HOUR,
     sourceIsDeveloperId: true,
   };
-
-  it('lets the owner upgrade to a newer release only once its bundle is on disk (R5)', () => {
-    // updateMenubarHelperIfNewer gates on the bundle it will install. Before the
-    // fix it gated BEFORE downloading, on the cached path for a version not yet
-    // fetched: no bundle, so "not Developer ID", and every new release was
-    // skipped as "another install owns the helper" (seen on zion, 1.14.13 -> 1.15.0).
-    const owner = { ...base, plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
-                    installedVersion: '1.14.13', currentVersion: '1.15.0' };
-    expect(mayInstallMenubarHelper({ ...owner, sourceIsDeveloperId: false })).toBe(false);
-    expect(mayInstallMenubarHelper({ ...owner, sourceIsDeveloperId: true })).toBe(true);
-  });
 
   it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
     expect(mayInstallMenubarHelper({
@@ -869,5 +859,21 @@ describe('auto-update decision (menubarUpdateSkipReason / menubarUpdateOutcome)'
 describe('cachedReleaseBundlePath', () => {
   it('is the floor cache until a newer version has been resolved', () => {
     expect(cachedReleaseBundlePath()).toBe(cachedFloorBundlePath());
+  });
+});
+
+describe('menubarGateVersion (R5: helpers auto-update)', () => {
+  // updateMenubarHelperIfNewer gated on the CACHED source for the cached
+  // version before downloading. For a release not yet on disk that source does
+  // not exist, so the gate saw no Developer-ID bundle and refused every new
+  // release (zion stayed on 1.14.13 with 1.15.0 published). The gate now judges
+  // the bundle it just downloaded; its version is read from that bundle's path.
+  it('judges the downloaded release, not the cached one', () => {
+    const downloaded = path.join(menubarHelperCacheDir('1.15.0'), 'MenubarHelper.app');
+    expect(menubarGateVersion(downloaded, () => '1.14.13')).toBe('1.15.0');
+  });
+
+  it('falls back to the cached source when no bundle is given', () => {
+    expect(menubarGateVersion(null, () => '1.14.13')).toBe('1.14.13');
   });
 });
