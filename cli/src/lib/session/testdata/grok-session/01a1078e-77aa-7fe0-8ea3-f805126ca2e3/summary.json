@@ -1,0 +1,24 @@
+{
+  "info": {
+    "id": "01a1078e-77aa-7fe0-8ea3-f805126ca2e3",
+    "cwd": "/home/user/src/agents-cli"
+  },
+  "agent_id": "ag1.00000000000000000000000000000000",
+  "attempt_id": "at1.00000000000000000000000000000000",
+  "session_summary": "Sessions reads use bundled sessions-cli binary",
+  "created_at": "2026-10-04T15:35:39.767108012Z",
+  "updated_at": "2026-10-07T00:23:57.360230392Z",
+  "num_messages": 2903,
+  "num_chat_messages": 359,
+  "current_model_id": "grok-4.7",
+  "next_trace_turn": 19,
+  "chat_format_version": 1,
+  "git_root_dir": "/home/user/src/agents-cli/",
+  "head_branch": "main",
+  "grok_home": "/home/user/.agents/.history/versions/grok/0.2.101/home/.grok",
+  "last_active_at": "2026-10-07T00:23:57.360230392Z",
+  "generated_title": "Sessions reads use bundled sessions-cli binary",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high"
+}
