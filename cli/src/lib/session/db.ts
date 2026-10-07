@@ -2529,6 +2529,14 @@ export function latestSessionFileForCwd(agent: SessionAgentId, cwd: string, opti
   return row.file_path;
 }
 
+export function indexedSessionIdForFile(agent: string, filePath: string): string | undefined {
+  if (!filePath) return undefined;
+  const row = getDB()
+    .prepare(`SELECT id FROM sessions WHERE file_path = ? AND agent = ? LIMIT 1`)
+    .get(filePath, agent) as { id: string } | undefined;
+  return row?.id;
+}
+
 function buildSessionWhere(options: QueryOptions): { clause: string; params: any[] } {
   const where: string[] = [];
   const params: any[] = [];

@@ -1,0 +1,3 @@
+{"type":"system","content":"You are Grok 4.7 released by xAI. You are an interactive CLI tool that helps users with software engineering tasks."}
+{"type":"user","synthetic_reason":"compaction_meta","content":[{"type":"text","text":"<user_info>\nOS Version: linux\nShell: /usr/bin/zsh\n</user_info>"}]}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nShort about number 2, okay let's fix it please.\n</user_query>"}]}

@@ -22,7 +22,7 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
+import { latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
 import { parseSession } from '@phnx-labs/sessions-cli/reader';
@@ -642,9 +642,10 @@ function indexedSessionFileForId(kind: string, sessionId: string): string | unde
 }
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
-function sessionIdFromFile(file?: string): string | undefined {
+export function sessionIdFromFile(kind: string, file?: string): string | undefined {
   if (!file) return undefined;
-  return path.basename(file).match(UUID_RE)?.[0];
+  if (kind === 'claude') return path.basename(file).match(UUID_RE)?.[0];
+  return indexedSessionIdForFile(kind, file);
 }
 
 interface LiveSignals {
@@ -831,7 +832,7 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const pidAlive = a.pid ? isPidAlive(a.pid) : true;
     const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
-    const resolvedId = ownSessionId ?? sessionIdFromFile(sessionFile);
+    const resolvedId = ownSessionId ?? sessionIdFromFile(a.agentType, sessionFile);
     const execHost = a.hostName ? normalizeHost(a.hostName) : undefined;
     const offloaded = execHost !== undefined && execHost !== self;
     return applyState({
@@ -891,7 +892,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       host: detectHost(t.pid, procByPid),
       tty: procByPid.get(t.pid)?.tty,
       pid: t.pid,
-      sessionId: resolvedId ?? sessionIdFromFile(sessionFile),
+      sessionId: resolvedId ?? sessionIdFromFile(sessionKind, sessionFile),
       launchId: pidEntry?.launchId,
       terminalId: pidEntry?.terminalId ?? t.terminalId,
       originTerminal: pidEntry?.originTerminal,
@@ -1071,6 +1072,7 @@ export function resolveCwds(
 
 async function getCwdForPid(pid: number): Promise<string | undefined> {
   if (process.platform === 'win32') return undefined;
+  if (process.platform === 'linux') return fs.promises.readlink(`/proc/${pid}/cwd`).catch(() => undefined);
   let out: string;
   try {
     const res = await execFileAsync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], {
@@ -1262,7 +1264,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
-    const resolvedId = exactId ?? sessionIdFromFile(sessionFile);
+    const resolvedId = exactId ?? sessionIdFromFile(kind, sessionFile);
     const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
     const label = name;
     out.push(applyState({
@@ -1415,7 +1417,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       harness: id.harness,
       host: 'tmux',
       pid,
-      sessionId: id.sessionId ?? sessionIdFromFile(sessionFile),
+      sessionId: id.sessionId ?? sessionIdFromFile(id.agent, sessionFile),
       cwd,
       topic,
       tokPerSec,
@@ -1423,11 +1425,11 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       startedAtMs: liveEntry?.startedAtMs ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       provenance,
-      owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(sessionFile)),
+      owner: resolveOwner(liveEntry?.actor, id.sessionId ?? sessionIdFromFile(id.agent, sessionFile)),
       launchId: liveEntry?.launchId,
       terminalId: liveEntry?.terminalId,
       originTerminal: liveEntry?.originTerminal,
-      paneId: id.sessionId ?? sessionIdFromFile(sessionFile) ? undefined : pane,
+      paneId: id.sessionId ?? sessionIdFromFile(id.agent, sessionFile) ? undefined : pane,
       tmuxName: sessName,
     }, state, sessionFile, pidAlive));
   }

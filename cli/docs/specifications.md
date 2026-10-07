@@ -1621,7 +1621,7 @@ normative — a change that widens/narrows a cell is a spec change.
 | Process table source | `ps` | `ps` | `Get-CimInstance Win32_Process` (`active.ts:793-799`) |
 | PID-reuse start-time guard | yes | yes | **no** — bare existence (`active.ts:299-300`) |
 | Live-process provenance | `ps eww` | `/proc/<pid>/environ` | **none** (`provenance.ts:196-217`) |
-| cwd of a live process | `lsof` | `lsof`/`/proc` | pid-registry only (no `lsof`, `active.ts:856-858`) |
+| cwd of a live process | `lsof` | `readlink /proc/<pid>/cwd`; unreadable means unknown, never the error text | pid-registry only (no `lsof`) |
 | Codex home relocation (SUN_LEN socket) | yes (`lib/codex-home.ts` ~`:64-70`) | n/a | n/a |
 | Foreign-absolute-cwd drive rebase | n/a | n/a | **prohibited** (SES-6) |
 | Remote shell for `--device` | `bash -lc` | `bash -lc` | PowerShell (`lib/session/remote/remote.ts:117-121`) |

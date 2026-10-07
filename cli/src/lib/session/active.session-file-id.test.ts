@@ -12,7 +12,8 @@ process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;
 
 const db = await import('./db.js');
-const { findSessionFileForKind } = await import('./active.js');
+const { findSessionFileForKind, sessionIdFromFile } = await import('./active.js');
+const { readGrokMeta } = await import('./discover.js');
 
 const CWD = path.join(testHome, 'project');
 fs.mkdirSync(CWD, { recursive: true });
@@ -82,5 +83,39 @@ describe('findSessionFileForKind — a known id selects its OWN transcript', () 
 
   it('an untracked harness still yields undefined', () => {
     expect(findSessionFileForKind('not-a-harness', CWD, '01a00504-8ac6-7e10-9799-da813a02c003')).toBeUndefined();
+  });
+});
+
+describe('sessionIdFromFile — a Grok transcript yields the id its index row carries (PHNX-4263)', () => {
+  const GROK_ID = '01a1078e-77aa-7fe0-8ea3-f805126ca2e3';
+
+  function indexRealGrokSession(): string {
+    const sessionDir = path.join(testHome, '.grok', 'sessions', encodeURIComponent(CWD), GROK_ID);
+    fs.cpSync(path.join(import.meta.dirname, 'testdata', 'grok-session', GROK_ID), sessionDir, { recursive: true });
+    const summaryPath = path.join(sessionDir, 'summary.json');
+    const summary = JSON.parse(fs.readFileSync(summaryPath, 'utf8'));
+    summary.info.cwd = CWD;
+    summary.last_active_at = minsAgo(1);
+    fs.writeFileSync(summaryPath, JSON.stringify(summary));
+    const parsed = readGrokMeta(summaryPath)!;
+    const stat = fs.statSync(summaryPath);
+    db.upsertSessionsBatch([{ meta: parsed.meta, content: parsed.content, scan: { fileMtimeMs: stat.mtimeMs, fileSize: stat.size } }]);
+    return summaryPath;
+  }
+
+  it('the cwd-matched summary.json resolves to its session id, not null', () => {
+    const summaryPath = indexRealGrokSession();
+
+    const sessionFile = findSessionFileForKind('grok', CWD, undefined);
+    expect(sessionFile).toBe(summaryPath);
+    expect(path.basename(sessionFile!)).toBe('summary.json');
+    expect(sessionIdFromFile('grok', sessionFile)).toBe(GROK_ID);
+  });
+
+  it('a file the index does not hold, or holds for another harness, yields no id', () => {
+    const summaryPath = indexRealGrokSession();
+
+    expect(sessionIdFromFile('codex', summaryPath)).toBeUndefined();
+    expect(sessionIdFromFile('grok', path.join(CWD, 'unindexed', 'summary.json'))).toBeUndefined();
   });
 });

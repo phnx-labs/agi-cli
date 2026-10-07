@@ -228,6 +228,15 @@ describe('resolveCwds', () => {
     const cwds = await resolveCwds(pids, probe);
     expect(cwds).toEqual(['cwd-5', 'cwd-4', 'cwd-3', 'cwd-2', 'cwd-1']);
   });
+
+  it.runIf(process.platform !== 'win32' && process.getuid?.() !== 0)(
+    'an unreadable cwd is unknown, never the probe error text (PHNX-4263)',
+    async () => {
+      const [own, init] = await resolveCwds([process.pid, 1]);
+      expect(own).toBe(fs.realpathSync(process.cwd()));
+      expect(init).toBeUndefined();
+    },
+  );
 });
 
 describe('enrichProvenance', () => {
