@@ -525,9 +525,17 @@ function stampMenubarHeal(): void {
   } catch {  }
 }
 
-function mayHealMenubar(needsDevIdHeal: boolean): boolean {
+/**
+ * May THIS install replace the running helper? `source` is the bundle it would
+ * install. An update must pass the bundle it just downloaded: the default,
+ * `sourceAppPath()`, is the CACHED bundle for the cached version, which for a
+ * release that has not been downloaded yet does not exist — so its Developer ID
+ * check read false and every new release was refused as "another install owns
+ * the helper" (R5: helpers must auto-update).
+ */
+function mayHealMenubar(needsDevIdHeal: boolean, source: string | null = sourceAppPath()): boolean {
   const plistEntry = readPlistEnvValue('AGENTS_ENTRY');
-  const src = sourceAppPath();
+  const src = source;
   return mayInstallMenubarHelper({
     plistEntry,
     activeEntry: resolveCliEntry(),
@@ -535,7 +543,7 @@ function mayHealMenubar(needsDevIdHeal: boolean): boolean {
     helperExecMissing: !fs.existsSync(installedExecutablePath()),
     needsDevIdHeal,
     installedVersion: stampVersionLabel(readInstalledMenubarStamp()),
-    currentVersion: availableHelperLabel(),
+    currentVersion: src ? stampVersionLabel(stampFor(src)) ?? LOCAL_BUILD_LABEL : availableHelperLabel(),
     msSinceLastHeal: msSinceLastMenubarHeal(),
     cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
     sourceIsDeveloperId: Boolean(src) && hasDeveloperIdSignature(src as string),
@@ -919,11 +927,15 @@ export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force
   if (menubarUpdateOutcome(release.helperVersion, available) === 'current') {
     return { outcome: 'current', installed, available, detail: `AGI Menu ${installed} is the newest published build` };
   }
-  if (!mayHealMenubar(false)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
+  // A dry run downloads nothing, so it reports the build it would fetch; the
+  // ownership gate below needs the downloaded bundle to judge.
   if (opts.dryRun) return { outcome: 'updated', installed, available, detail: `would update AGI Menu ${installed} → ${available}` };
 
   try {
+    // Fetch (sha256 + Developer ID + notarization verified) BEFORE the gate,
+    // and gate on that bundle — see mayHealMenubar.
     const src = await downloadMenubarHelperApp(available);
+    if (!mayHealMenubar(false, src)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
     const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
     if (!exec) return { outcome: 'failed', installed, available, detail: 'the verified bundle could not be installed' };
     try { fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src))); } catch {  }
