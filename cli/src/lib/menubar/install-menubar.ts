@@ -526,6 +526,15 @@ function stampMenubarHeal(): void {
 }
 
 /**
+ * The version the ownership gate compares against the installed helper: that
+ * of the bundle about to be installed when one is given (an update's freshly
+ * downloaded release), else the cached/shipped source's.
+ */
+export function menubarGateVersion(source: string | null, cached: () => string = availableHelperLabel): string {
+  return source ? stampVersionLabel(stampFor(source)) ?? LOCAL_BUILD_LABEL : cached();
+}
+
+/**
  * May THIS install replace the running helper? `source` is the bundle it would
  * install. An update must pass the bundle it just downloaded: the default,
  * `sourceAppPath()`, is the CACHED bundle for the cached version, which for a
@@ -543,7 +552,7 @@ function mayHealMenubar(needsDevIdHeal: boolean, source: string | null = sourceA
     helperExecMissing: !fs.existsSync(installedExecutablePath()),
     needsDevIdHeal,
     installedVersion: stampVersionLabel(readInstalledMenubarStamp()),
-    currentVersion: src ? stampVersionLabel(stampFor(src)) ?? LOCAL_BUILD_LABEL : availableHelperLabel(),
+    currentVersion: menubarGateVersion(src),
     msSinceLastHeal: msSinceLastMenubarHeal(),
     cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
     sourceIsDeveloperId: Boolean(src) && hasDeveloperIdSignature(src as string),

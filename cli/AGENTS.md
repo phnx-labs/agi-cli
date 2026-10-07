@@ -2409,7 +2409,7 @@ always existed (#2109). `mayInstallMenubarHelper` gates it: the plist's
 `AGENTS_ENTRY` names the owner, and only the owner reinstalls freely. A same-install
 upgrade keeps its entry path, so `npm update` still lands normally.
 
-Three escapes keep the gate from becoming a **stuck state**, which is how the first
+Four escapes keep the gate from becoming a **stuck state**, which is how the first
 version of it regressed: (1) **repairs are never gated** — a missing helper
 executable or a Developer-ID heal proceeds from any install, since a bundle that
 isn't there cannot be contested and blocking it leaves the menu bar dead with no
@@ -2421,7 +2421,13 @@ otherwise a non-owner may still take over **once per
 a stale-but-present copy — an old nvm node dir nobody runs — owns the plist forever
 while the user's actual daily driver upgrades and never heals again. The cooldown
 turns an every-invocation storm into at most one restart per hour while leaving
-every install able to make progress. `agents menubar setup` bypasses the gate
+every install able to make progress. (4) **A newer Developer-ID release upgrades
+from any install** (`updateMenubarHelperIfNewer`): the update downloads and verifies
+the release first, then gates on THAT bundle (`menubarGateVersion`), and a newer
+signed build passes the version branch regardless of the plist owner. It converges:
+once the helper is on the newest build, every install reads "current". Before this,
+the update gated on the cached bundle for a release not yet downloaded, read "not
+Developer ID", and refused every new release (R5). `agents menubar setup` bypasses the gate
 entirely and stays the immediate manual fix.
 
 Two caveats worth knowing before you tune any of this. **(a)** Escapes (2) AND (3)
