@@ -312,11 +312,11 @@ export function resolveLaunchId(envLaunchId: string | undefined): string {
   return inbound ? inbound : randomUUID();
 }
 
-// Child runs shed parent session/mailbox/account/exec-home identity; lineage is reintroduced only through explicit parent fields.
 export function inheritsHarnessMode(options: ExecOptions): boolean {
   return options.modeWasImplicit === true && implicitModeFor(options.agent) === 'plan';
 }
 
+// Child runs shed parent session/mailbox/account/exec-home identity; lineage is reintroduced only through explicit parent fields.
 export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   const result: NodeJS.ProcessEnv = { ...sanitizeProcessEnv(process.env) };
 
