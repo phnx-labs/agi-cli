@@ -1962,6 +1962,14 @@ repo-root `native/` tree to reach: it left with the computer engine, PHNX-4075.)
 
 ## Build, test, dev
 
+**Command reference:** `scripts/generate-reference.sh` writes the HTML tree plus
+JSON and Markdown indexes from the real Commander definitions via the shared
+`@phnx-labs/cli-docs` renderer. `--check` compares without writing; `--out-dir`
+creates a separate preview. The impact gate checks all three formats on command,
+help, generator, generated-output, and package/lock changes, including release
+version bumps. `release.sh` regenerates and stages all three before constructing
+the release commit. See [the reference workflow](docs/README.md#generated-command-reference).
+
 ```bash
 bun install && bun run build && bun test
 ```
@@ -2246,8 +2254,9 @@ and `npm pack` (so the
 recorded tarball is the real release tree's, carrying the new version), but the
 expensive suite run is inherited. The soundness gate is
 `release-attestation.sh derive` — it fails **closed** unless the tree diff between
-base and release touches only `package.json`, `.changelog/**`, `CHANGELOG.md`, and
-`docs/command-index.{md,json}` (the exact set `release.sh` stages), so a code
+base and release touches only `package.json`, `.changelog/**`, `CHANGELOG.md`,
+`docs/command-index.{md,json}`, and `docs/command-reference.html` (the exact set
+`release.sh` stages), so a code
 change can never ride a stale pass. The derived record inherits the base's
 lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
 identical to the release tree's, so `release.sh`'s `require()` still keys to it

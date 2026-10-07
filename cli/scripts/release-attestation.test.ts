@@ -392,6 +392,8 @@ describeUnix('release-attestation.sh', () => {
         fs.writeFileSync(path.join(root, 'cli/.changelog/1.0.1.md'), '- note\n');
         fs.mkdirSync(path.join(root, 'cli/docs'), { recursive: true });
         fs.writeFileSync(path.join(root, 'cli/docs/command-index.md'), '# index\n');
+        fs.writeFileSync(path.join(root, 'cli/docs/command-index.json'), '{"tree":[]}\n');
+        fs.writeFileSync(path.join(root, 'cli/docs/command-reference.html'), '<html>reference</html>\n');
       });
       const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
       const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);

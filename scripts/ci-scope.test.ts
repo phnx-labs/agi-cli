@@ -193,6 +193,19 @@ describe('ownership globs and companions', () => {
 });
 
 describe('selectImpact policy', () => {
+  test.each([
+    'cli/docs/command-reference.html',
+    'cli/scripts/generate-reference.sh',
+    'cli/src/lib/help.ts',
+    'cli/src/lib/startup/root-command.ts',
+    'cli/package.json',
+    'cli/bun.lock',
+  ])('%s selects the generated-reference freshness check', (file) => {
+    const plan = selectImpact({ files: [file], repoRoot: REPO, related: false });
+    expect(plan.checks).toContain('command-index');
+    expect(plan.budget_sec).toBeUndefined();
+  });
+
   test('a command definition selects command-index and docs, not daemon', () => {
     const plan = selectImpact({
       files: ['cli/src/commands/run.ts'],
@@ -616,7 +629,8 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
       expect(plan.suite).toBe('selected');
       expect(plan.unmapped).toEqual([]);
       expect(plan.tests.map((t) => t.file)).toEqual(['cli/src/lib/version.test.ts']);
-      expect(plan.checks).toEqual(['typecheck']);
+      expect(plan.checks).toEqual(['command-index', 'docs', 'typecheck']);
+      expect(plan.budget_sec).toBeUndefined();
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
     }

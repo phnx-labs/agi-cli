@@ -73,6 +73,17 @@ groups:
     checks: [command-index, docs, typecheck]
     budget_sec: 120
 
+  - id: command-reference-freshness
+    when:
+      - cli/src/lib/help.ts
+      - cli/src/lib/startup/root-command.ts
+      - cli/package.json
+      - cli/bun.lock
+      - cli/scripts/generate-reference.sh
+      - cli/scripts/generate-reference.test.ts
+      - cli/docs/command-reference.html
+    checks: [command-index, docs]
+
   - id: cli-docs
     when:
       - cli/docs/**
