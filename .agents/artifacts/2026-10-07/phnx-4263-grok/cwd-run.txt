@@ -1,0 +1,14 @@
+PHNX-4263: the branch's resolveCwds against a live sandboxed Grok process (Linux fleet box, 2026-10-07).
+The branch cli/ tree was staged in a scratch dir, run with bun under a temp HOME, then removed.
+pid 291175 is a grok binary inside a bubblewrap sandbox (--unshare-all, private tmpfs GROK_HOME) started by a
+non-agents service; its /proc/<pid>/cwd link is unreadable to the same uid.
+
+host: <linux-fleet-box>  grok pid 291175: /grok --permission-mode dontAsk --disable-web-search --no-su
+lsof -Fn (what main publishes as cwd):
+n/proc/291175/cwd (readlink: Permission denied)
+branch resolveCwds([291175, 1, self]):
+[{"pid":291175,"cwd":null},{"pid":1,"cwd":null},{"pid":1514664,"cwd":"/home/<user>/.agents/scratch/phnx-4263/cli"}]
+
+Touched tests on a Linux fleet worker (scripts/test.sh --device auto -- src/lib/session/active.session-file-id.test.ts src/lib/session/active.test.ts):
+ Test Files  2 passed (2)
+      Tests  74 passed (74)
