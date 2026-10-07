@@ -95,7 +95,7 @@ export function resolveSendEnvelope(input: ResolveSendInput, meta: Meta): Resolv
   const channel = (input.channel ?? '').trim();
   let to = (input.to ?? '').trim();
   if (isOwnerAlias(to)) {
-    return { ok: false, error: '--to owner routes through your account preferences; it takes no --channel. Drop --channel, or address a recipient explicitly.' };
+    return { ok: false, error: '--to owner sends to your account, whose notification preferences pick the channels, so it cannot be combined with --channel (a feed sink uses `channel: owner` instead). Drop --channel, or name an explicit recipient.' };
   }
 
   const isSession = Boolean(channel)
@@ -156,7 +156,7 @@ export async function deliverEnvelope(envelope: SendEnvelope, meta: Meta): Promi
 }
 
 function ownerSendError(input: ResolveSendInput): string | null {
-  if (input.channel?.trim()) return '--to owner routes through your account preferences; it takes no --channel. Drop --channel, or address a recipient explicitly.';
+  if (input.channel?.trim()) return '--to owner sends to your account, whose notification preferences pick the channels, so it cannot be combined with --channel (a feed sink uses `channel: owner` instead). Drop --channel, or name an explicit recipient.';
   if (input.terminal) return '--pane, --socket, --no-enter and --combined only apply to --channel session.';
   if (input.thread?.trim()) return '--thread does not apply to --to owner; the account decides where the message lands.';
   if (input.attachments?.length) return '--attach does not apply to --to owner; owner notifications carry text and a link. Pass --url instead.';

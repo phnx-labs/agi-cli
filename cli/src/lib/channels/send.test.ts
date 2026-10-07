@@ -78,7 +78,7 @@ describe('resolveSendEnvelope', () => {
 
   it('refuses --to owner as an envelope: the owner path goes through the account, not a channel', () => {
     const r = resolveSendEnvelope({ text: 'ping', to: 'owner' }, metaEmpty);
-    expect(r).toEqual({ ok: false, error: expect.stringMatching(/takes no --channel/) });
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/cannot be combined with --channel/) });
   });
 
   it('requires channel and to for non-owner destinations', () => {

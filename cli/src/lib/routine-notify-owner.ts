@@ -18,7 +18,6 @@ function failureReason(
   return `Exited with code ${meta.exitCode ?? '?'}`;
 }
 
-// A green run stays silent: routines fire on a schedule, so only a failure is worth the owner's attention.
 function routineFinishOwnerText(
   meta: Pick<RunMeta, 'jobName' | 'status' | 'exitCode' | 'errorMessage' | 'agent' | 'workflow' | 'command'>,
   host: string,

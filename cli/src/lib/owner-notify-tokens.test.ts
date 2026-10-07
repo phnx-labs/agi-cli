@@ -7,13 +7,13 @@ import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { DeviceProfile } from './devices/registry.js';
 import type { PushBundleResult } from './secrets-types.js';
 
-// The Phoenix base is read at import, so the modules under test load after the fixture is up.
 let api: OwnerNotifyApi;
 let tokens: typeof import('./owner-notify-tokens.js');
 let identity: typeof import('./identity/client.js');
 let shared: typeof import('./fleet-shared-state.js');
 let reserved: typeof import('./reserved-stores.js');
 let claudeToken: typeof import('./claude-account-token.js');
+let usageSync: typeof import('./accounting/usage-sync.js');
 
 beforeAll(async () => {
   api = await startOwnerNotifyApi();
@@ -24,6 +24,7 @@ beforeAll(async () => {
   shared = await import('./fleet-shared-state.js');
   reserved = await import('./reserved-stores.js');
   claudeToken = await import('./claude-account-token.js');
+  usageSync = await import('./accounting/usage-sync.js');
 });
 
 afterAll(async () => {
@@ -39,7 +40,7 @@ const ROLES: Record<string, 'personal' | 'desktop' | 'worker'> = {
 };
 
 describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker', () => {
-  useFreshSecretsHome();
+  const secretsHomeDir = useFreshSecretsHome();
   let root: string;
   let cacheDir: string;
   let pushes: Array<{ bundle: string; host: string }>;
@@ -49,6 +50,7 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     cacheDir = path.join(root, '.cache');
     pushes = [];
     api.deviceTokens.length = 0;
+    api.requests.length = 0;
     identity.writeSession({ access_token: api.sessionToken });
   });
 
@@ -57,8 +59,11 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  function peerState(name: string, ownerNotify: { signedIn: boolean; deviceToken: boolean }): void {
-    shared.updateFleetSharedDeviceState(name, { ownerNotify }, root);
+  function peerState(name: string, ownerNotify: { signedIn: boolean; deviceToken: boolean }) {
+    return usageSync.applyPeerFleetState(
+      { version: shared.FLEET_SHARED_STATE_VERSION, device: name, ownerNotify },
+      { device: 'local-observer', userAgentsDir: root, cachePath: path.join(root, 'usage.json') },
+    );
   }
 
   function run(localName = 'zion', devices = ['zion', 'pinnacles', 'worker-a', 'worker-b']) {
@@ -79,9 +84,9 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
   }
 
   it('mints for each worker that reports owner-notify state, stores it in that worker\'s own bundle, and pushes only there', async () => {
-    peerState('worker-a', { signedIn: false, deviceToken: false });
-    peerState('worker-b', { signedIn: false, deviceToken: false });
-    peerState('pinnacles', { signedIn: false, deviceToken: false });
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('worker-b', { signedIn: false, deviceToken: false });
+    await peerState('pinnacles', { signedIn: false, deviceToken: false });
 
     const result = await run();
     expect(result.minter).toBe('zion');
@@ -98,9 +103,9 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
   });
 
   it('a second tick neither re-mints nor re-pushes once the worker reports its token', async () => {
-    peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
     await run('zion', ['zion', 'worker-a']);
-    peerState('worker-a', { signedIn: false, deviceToken: true });
+    await peerState('worker-a', { signedIn: false, deviceToken: true });
     pushes = [];
     const again = await run('zion', ['zion', 'worker-a']);
     expect(again.minted).toEqual([]);
@@ -109,7 +114,7 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
   });
 
   it('re-pushes the stored token when the worker lost it, without minting a replacement', async () => {
-    peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
     await run('zion', ['zion', 'worker-a']);
     const before = api.deviceTokens.map((t) => t.id);
     pushes = [];
@@ -120,18 +125,37 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
   });
 
   it('only the first signed-in headed box mints, and it never replaces a token another box minted', async () => {
-    peerState('worker-a', { signedIn: false, deviceToken: false });
-    peerState('pinnacles', { signedIn: true, deviceToken: false });
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    await peerState('pinnacles', { signedIn: true, deviceToken: false });
     const fromZion = await run('zion');
     expect(fromZion.minter).toBe('pinnacles');
     expect(fromZion.minted).toEqual([]);
 
-    peerState('zion', { signedIn: true, deviceToken: false });
+    await peerState('zion', { signedIn: true, deviceToken: false });
     api.deviceTokens.push({ id: 'tok-foreign', token: 'foreign', device: 'worker-a', createdAt: '' });
     const fromPinnacles = await run('pinnacles');
     expect(fromPinnacles.minter).toBe('pinnacles');
     expect(fromPinnacles.skipped).toContainEqual({ device: 'worker-a', reason: 'its token was minted by another device' });
     expect(api.deviceTokens.find((t) => t.device === 'worker-a')?.id).toBe('tok-foreign');
+  });
+
+  it.skipIf(process.getuid?.() === 0)('revokes a freshly minted token when it cannot be stored, so the next tick mints again', async () => {
+    await peerState('worker-a', { signedIn: false, deviceToken: false });
+    const secretsHome = secretsHomeDir();
+    fs.chmodSync(secretsHome, 0o500);
+    let result: Awaited<ReturnType<typeof run>>;
+    try {
+      result = await run('zion', ['zion', 'worker-a']);
+    } finally {
+      fs.chmodSync(secretsHome, 0o700);
+    }
+    expect(result.errors.map((e) => e.device)).toContain('worker-a');
+    expect(pushes).toEqual([]);
+    expect(api.requests.map((r) => `${r.method} ${r.path}`)).toEqual(expect.arrayContaining([
+      'POST /api/v1/auth/tokens',
+      expect.stringMatching(/^DELETE \/api\/v1\/auth\/tokens\/tok-/),
+    ]));
+    expect(api.deviceTokens).toEqual([]);
   });
 
   it('does nothing on a worker or a signed-out headed box, and skips a peer on an older CLI', async () => {

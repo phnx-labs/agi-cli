@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { startOwnerNotifyApi, type OwnerNotifyApi } from '../testdata/owner-notify-api.js';
 
-// Off macOS the real osascript sender refuses, which exercises claim → send → report without texting anyone.
 describe.skipIf(process.platform === 'darwin')('OwnerDeviceDeliveryService', () => {
   let api: OwnerNotifyApi;
   let service: InstanceType<typeof import('./owner-device-delivery-service.js').OwnerDeviceDeliveryService>;

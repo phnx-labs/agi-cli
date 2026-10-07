@@ -26,7 +26,6 @@ function ownerMessageContext(rawText: string, opts: OwnerMessageOptions): FeedBr
   };
 }
 
-// Each `agents send --to owner` is its own message, so its dedup key is unique per invocation.
 export function ownerMessageNotification(rawText: string, opts: OwnerMessageOptions = {}): OwnerNotification {
   const notification = ownerNotificationFromContext(ownerMessageContext(rawText, opts), 'message', `send:${randomUUID()}`);
   if (!notification) throw new Error('Message is empty.');

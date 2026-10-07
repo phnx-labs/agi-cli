@@ -1491,12 +1491,6 @@ function accountChannelFor(transport: string): OwnerChannel | null {
   return t === 'imessage' || t === 'slack' || t === 'email' ? t : null;
 }
 
-/**
- * Translate humans.yaml into a `/me/preferences` patch. Severity policy maps onto
- * events (critical → needs_you, normal → failed + message, low → completed).
- * Transports the account cannot deliver (telegram, desktop, a command) have no
- * equivalent and are reported back as dropped.
- */
 export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreferencesPatch; dropped: string[] } {
   const owner = (doc && typeof doc === 'object' ? (doc as Record<string, unknown>).owner : undefined) as Record<string, unknown> | undefined;
   const rawChannels = Array.isArray(owner?.channels) ? owner!.channels as HumansChannelEntry[] : [];
@@ -1539,32 +1533,42 @@ export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreference
   if (quiet) {
     settings.quietStart = quiet[1].padStart(5, '0');
     settings.quietEnd = quiet[2].padStart(5, '0');
+  } else if (typeof owner?.quiet_hours === 'string' && owner.quiet_hours.trim()) {
+    dropped.push(`quiet_hours '${owner.quiet_hours}' (expected HH:MM-HH:MM)`);
   }
   if (Object.keys(settings).length > 0) patch.settings = settings;
   if (imessageAddress) patch.destinations = { imessage: { address: imessageAddress } };
   return { patch, dropped };
 }
 
-/**
- * One-shot: upload humans.yaml to the account, then move it to trash. Needs a
- * Phoenix session (a worker's device token cannot write preferences); without
- * one, or when the upload fails, the file stays and the step reports 'pending'
- * so the next run retries.
- */
-export async function migrateHumansToAccount(userDir: string = USER_DIR): Promise<'absent' | 'pending' | 'migrated'> {
+const HUMANS_RETRY_MS = 60 * 60_000;
+
+export async function migrateHumansToAccount(
+  userDir: string = USER_DIR,
+  failureStamp: string = path.join(CACHE_DIR, 'humans-migration-failed'),
+): Promise<'absent' | 'pending' | 'migrated'> {
   const humansFile = path.join(userDir, LEGACY_HUMANS_FILE);
   if (!fs.existsSync(humansFile)) return 'absent';
   if (resolveOwnerCredential()?.kind !== 'session') return 'pending';
+  try {
+    if (Date.now() - fs.statSync(failureStamp).mtimeMs < HUMANS_RETRY_MS) return 'pending';
+  } catch {  }
   const { patch, dropped } = humansToPreferencesPatch(yaml.parse(fs.readFileSync(humansFile, 'utf-8')));
   try {
     if (Object.keys(patch).length > 0) await putOwnerPreferences(patch);
   } catch (err) {
-    console.error(`humans.yaml migration: ${(err as Error).message} The file is kept and the upload retries next run.`);
+    fs.mkdirSync(path.dirname(failureStamp), { recursive: true });
+    fs.writeFileSync(failureStamp, `${(err as Error).message}\n`);
+    console.error(`humans.yaml migration: ${(err as Error).message} The file is kept and the upload retries in an hour.`);
     return 'pending';
   }
+  fs.rmSync(failureStamp, { force: true });
   const trashed = moveFileToTrash(humansFile);
-  commitCentralConfig(userDir, LEGACY_HUMANS_FILE, 'chore(config): humans.yaml moved to account notification preferences');
+  const committed = commitCentralConfig(userDir, LEGACY_HUMANS_FILE, 'chore(config): humans.yaml moved to account notification preferences');
   console.error(`Moved owner notification settings from ${humansFile} to your account (console Settings). Old file: ${trashed}`);
+  if (!committed && fs.existsSync(path.join(userDir, '.git'))) {
+    console.error(`Could not commit the removal of ${LEGACY_HUMANS_FILE}; commit and push it with: agents repo push`);
+  }
   if (dropped.length > 0) console.error(`No account equivalent, not migrated: ${dropped.join(', ')}`);
   return 'migrated';
 }

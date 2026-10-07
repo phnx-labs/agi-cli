@@ -1,10 +1,3 @@
-/**
- * Test fixture: one local HTTP server implementing the owner-notify contract
- * shapes of rush/api (/me/notifications, /me/device-deliveries/*, PUT
- * /me/preferences) and phoenix-id (/api/v1/auth/tokens, /auth/me), so the CLI's
- * real fetch paths run end to end. Point RUSH_PROXY_BASE and PHOENIX_ID_BASE at
- * `url` before importing the modules under test.
- */
 import * as http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -75,6 +68,14 @@ export async function startOwnerNotifyApi(sessionToken = 'phx-session-token'): P
       const device = api.deviceTokens.find((t) => t.token === bearer);
       const isSession = bearer === api.sessionToken;
       if (!isSession && !device) return send(res, 401, { error: 'Unauthorized', code: 'UNAUTHORIZED' });
+
+      const tokenId = url.pathname.match(/^\/api\/v1\/auth\/tokens\/([^/]+)$/);
+      if (tokenId && req.method === 'DELETE') {
+        if (!isSession) return send(res, 403, { error: 'device_token_forbidden' });
+        const before = api.deviceTokens.length;
+        api.deviceTokens = api.deviceTokens.filter((t) => t.id !== decodeURIComponent(tokenId[1]));
+        return send(res, before === api.deviceTokens.length ? 404 : 204);
+      }
 
       if (url.pathname === '/api/v1/auth/tokens') {
         if (!isSession) return send(res, 403, { error: 'device_token_forbidden' });

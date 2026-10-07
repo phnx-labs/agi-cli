@@ -102,12 +102,14 @@ export interface ApiTokenSummary {
   createdAt: string;
 }
 
-// Minting for a device that already holds a token replaces it server-side.
 export const mintDeviceToken = (device: string, scopes: DeviceTokenScope[]): Promise<MintedDeviceToken> =>
   phoenixRequest<MintedDeviceToken>('POST', '/api/v1/auth/tokens', { body: { device, scopes } });
 
 export const listApiTokens = (): Promise<ApiTokenSummary[]> =>
   phoenixRequest<ApiTokenSummary[]>('GET', '/api/v1/auth/tokens');
+
+export const revokeApiToken = (id: string): Promise<void> =>
+  phoenixRequest<void>('DELETE', `/api/v1/auth/tokens/${encodeURIComponent(id)}`);
 
 export async function refreshSessionProfile(known?: WhoAmI): Promise<void> {
   const session = readSession();

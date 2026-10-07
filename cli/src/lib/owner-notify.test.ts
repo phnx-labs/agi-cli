@@ -4,7 +4,6 @@ import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import type { OpenBlock } from './feed/feed.js';
 import type { Meta } from './types.js';
 
-// The API bases are read at import, so every module under test loads after the fixture is up.
 let api: OwnerNotifyApi;
 let ownerNotify: typeof import('./owner-notify.js');
 let identity: typeof import('./identity/client.js');
@@ -137,7 +136,7 @@ describe('producers map onto account events', () => {
     expect(String(sent.dedupKey)).toMatch(/^send:/);
     expect(String(sent.body)).toContain('need a decision on the release');
 
-    expect(await send.sendMessage({ to: 'owner', channel: 'slack', text: 'x' }, {} as Meta)).toEqual({ error: expect.stringMatching(/takes no --channel/) });
+    expect(await send.sendMessage({ to: 'owner', channel: 'slack', text: 'x' }, {} as Meta)).toEqual({ error: expect.stringMatching(/cannot be combined with --channel/) });
     expect(await send.sendMessage({ to: 'owner', text: 'x', attachments: ['/tmp/a.png'] }, {} as Meta)).toEqual({ error: expect.stringMatching(/--attach does not apply/) });
     expect(notifications()).toHaveLength(1);
   });

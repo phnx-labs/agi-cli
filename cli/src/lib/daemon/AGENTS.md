@@ -79,7 +79,12 @@ record of `null` for it.
   (`webhook-receiver-service.ts`), `daemon-heartbeat`
   (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
   `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`
-  (`auth-sync-service.ts`), `usage-sync` (`usage-sync-service.ts`), and — since
+  (`auth-sync-service.ts`: also mints and pushes owner-notify device tokens to
+  workers, PHNX-4267), `usage-sync` (`usage-sync-service.ts`), the darwin-only
+  `owner-device-delivery` (`owner-device-delivery-service.ts`: every 15 s claims
+  the iMessage deliveries rush/api queued for the owner, sends them through
+  Messages and reports each result; idle without a Phoenix session or device
+  token — PHNX-4267), and — since
   PHNX-3695 — `self-update` (`self-update-service.ts`: checks npm for a newer
   agents-cli roughly every 75 minutes, installs + byte-verifies it with the
   same primitives `agents upgrade` uses, best-effort pulls the `.system`

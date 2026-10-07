@@ -241,5 +241,6 @@ export async function storePeerFleetSharedDeviceState(
   if (state.auth !== undefined) patch.auth = state.auth;
   if (state.sessions !== undefined) patch.sessions = state.sessions;
   if (state.accounts !== undefined) patch.accounts = state.accounts;
+  if (state.ownerNotify !== undefined) patch.ownerNotify = state.ownerNotify;
   return updateFleetSharedDeviceStateAsync(state.device, patch, userAgentsDir);
 }

@@ -1,17 +1,7 @@
-/**
- * The only path that reaches the owner (PHNX-4267). Every owner notification is
- * one authenticated call to rush/api, which owns the preferences, quiet hours,
- * dedup and delivery. Email and Slack go out server-side; iMessage is queued as
- * a device delivery that a signed-in Mac claims (owner-device-delivery service).
- *
- * The bearer is this box's Phoenix session, else the scoped device token a
- * headed box minted and pushed into this worker's reserved store. Neither means
- * the owner is unreachable from here: that is an error, never a local fallback.
- */
 import { readSession } from './identity/client.js';
 import { readReservedCredential } from './claude-account-token.js';
 import { machineId, normalizeHost } from './machine-id.js';
-import { OWNER_NOTIFY_TOKEN_KEY, ownerNotifyStoreName } from './reserved-stores.js';
+import { OWNER_NOTIFY_TOKEN_KEY, canHoldOwnerNotifyToken, ownerNotifyStoreName } from './reserved-stores.js';
 import { RUSH_API_BASE } from './rush-api.js';
 
 export const OWNER_EVENTS = ['needs_you', 'completed', 'failed', 'spend_threshold', 'message'] as const;
@@ -79,7 +69,9 @@ export function selfDeviceName(): string {
 export function resolveOwnerCredential(): OwnerCredential | null {
   const session = readSession()?.access_token?.trim();
   if (session) return { kind: 'session', token: session };
-  const device = readReservedCredential(ownerNotifyStoreName(selfDeviceName()), OWNER_NOTIFY_TOKEN_KEY);
+  const self = selfDeviceName();
+  if (!canHoldOwnerNotifyToken(self)) return null;
+  const device = readReservedCredential(ownerNotifyStoreName(self), OWNER_NOTIFY_TOKEN_KEY);
   return device ? { kind: 'device', token: device } : null;
 }
 

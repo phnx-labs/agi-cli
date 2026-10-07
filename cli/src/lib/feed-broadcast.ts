@@ -266,7 +266,6 @@ const OWNER_DEFAULT_TITLES: Record<OwnerEvent, string> = {
   message: 'Message from your agent',
 };
 
-// The account renders per channel, so the body is always plain and the title rides separately.
 export function ownerNotificationFromContext(
   ctx: FeedBroadcastContext,
   event: OwnerEvent,

@@ -26,7 +26,6 @@ owner:
     low: []
 `;
 
-// The rush/api base is read at import, so the migration module loads after the fixture is up.
 let api: OwnerNotifyApi;
 let migrate: typeof import('./migrate.js');
 let identity: typeof import('../identity/client.js');
@@ -78,7 +77,7 @@ describe('migrateHumansToAccount — one-shot upload of humans.yaml', () => {
 
   it('signed in: PUTs the settings to /me/preferences, moves the file to trash, and commits the removal', async () => {
     identity.writeSession({ access_token: api.sessionToken });
-    expect(await migrate.migrateHumansToAccount(userDir)).toBe('migrated');
+    expect(await migrate.migrateHumansToAccount(userDir, path.join(userDir, '.failed-stamp'))).toBe('migrated');
     const put = api.requests.find((r) => r.method === 'PUT' && r.path === '/me/preferences');
     expect(put?.bearer).toBe(api.sessionToken);
     expect(put?.body).toMatchObject({ destinations: { imessage: { address: '+15555550123' } }, settings: { timezone: 'America/Los_Angeles' } });
@@ -88,15 +87,20 @@ describe('migrateHumansToAccount — one-shot upload of humans.yaml', () => {
   });
 
   it('signed out: leaves the file and reports pending so the next run retries', async () => {
-    expect(await migrate.migrateHumansToAccount(userDir)).toBe('pending');
+    expect(await migrate.migrateHumansToAccount(userDir, path.join(userDir, '.failed-stamp'))).toBe('pending');
     expect(fs.existsSync(path.join(userDir, 'humans.yaml'))).toBe(true);
     expect(api.requests).toEqual([]);
   });
 
-  it('a rejected upload keeps the file and stays pending', async () => {
+  it('a rejected upload keeps the file, stays pending, and backs off instead of retrying on every command', async () => {
     identity.writeSession({ access_token: api.sessionToken });
     api.preferencesStatus = 400;
-    expect(await migrate.migrateHumansToAccount(userDir)).toBe('pending');
+    expect(await migrate.migrateHumansToAccount(userDir, path.join(userDir, '.failed-stamp'))).toBe('pending');
     expect(fs.existsSync(path.join(userDir, 'humans.yaml'))).toBe(true);
+
+    api.requests.length = 0;
+    api.preferencesStatus = 200;
+    expect(await migrate.migrateHumansToAccount(userDir, path.join(userDir, '.failed-stamp'))).toBe('pending');
+    expect(api.requests).toEqual([]);
   });
 });

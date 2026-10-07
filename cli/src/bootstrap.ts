@@ -895,7 +895,6 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isR
       fs.existsSync(path.join(getUserAgentsDir(), 'humans.yaml')) &&
       (await import('./lib/identity/client.js')).readSession()
     ) {
-      // The humans.yaml upload waits for a sign-in, so it retries outside the one-shot sentinel.
       const { migrateHumansToAccount } = await import('./lib/installations/migrate.js');
       await migrateHumansToAccount();
     }

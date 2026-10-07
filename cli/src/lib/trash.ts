@@ -2,10 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getTrashDir, getTrashFilesDir } from './state.js';
 
-// Depth below each category at which one trashed item sits, mirroring its writer
-// (softDeleteVersionDir, the hook/command/skill/subagent removers, removeWorkflow,
-// the account-home migration).
-// Any other top-level child (a dedupe batch, a loose dir) is one item itself.
 const ITEM_DEPTH: Record<string, number> = {
   versions: 3,
   homes: 3,
@@ -35,7 +31,6 @@ function childrenAtDepth(dir: string, depth: number): string[] {
   return names.flatMap((name) => childrenAtDepth(path.join(dir, name), depth - 1));
 }
 
-// A move into the trash changes the item's inode, so ctime is when it was trashed.
 export function listTrashItems(root = getTrashDir()): TrashItem[] {
   let names: string[];
   try {

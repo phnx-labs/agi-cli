@@ -1,29 +1,12 @@
-/**
- * Worker device tokens for owner notifications (PHNX-4267).
- *
- * A worker holds no Phoenix session, so a signed-in headed box mints one
- * `notify`-scoped device token per `role=worker` peer and pushes it through the
- * ordinary reserved-store bundle push into `__notify-<worker>__`. The token is
- * durable, non-rotating, revocable per device, and can call nothing but the
- * three owner-notify routes (credential-management.md invariant 3). It never
- * reaches a headed peer (invariant 7).
- *
- * Exactly one headed box mints, because minting for a device replaces that
- * device's previous token server-side: two minters would revoke each other.
- * The minter is the first signed-in headed device by name (each box publishes
- * `ownerNotify.signedIn` in its daemon-state envelope), and it never replaces a
- * token another box minted. Revoking a token from the account frees the slot,
- * and the next tick mints a fresh one.
- */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { pushBundleToHostAsync } from './secrets-client.js';
 import type { PushBundleResult } from './secrets-types.js';
 import { readReservedCredential } from './claude-account-token.js';
 import { writeReservedStoreItem } from './auth-mint.js';
-import { OWNER_NOTIFY_TOKEN_KEY, ownerNotifyStoreName } from './reserved-stores.js';
+import { OWNER_NOTIFY_TOKEN_KEY, canHoldOwnerNotifyToken, ownerNotifyStoreName } from './reserved-stores.js';
 import { readSession } from './identity/client.js';
-import { listApiTokens, mintDeviceToken, type ApiTokenSummary } from './identity/index.js';
+import { listApiTokens, mintDeviceToken, revokeApiToken, type ApiTokenSummary } from './identity/index.js';
 import { isDialableDevice, loadDevicesSync, type DeviceProfile } from './devices/registry.js';
 import { sshTargetFor } from './devices/connect.js';
 import { isDevicePinned, isHostPinned, managedKnownHostsPath } from './devices/known-hosts.js';
@@ -41,7 +24,9 @@ export async function publishOwnerNotifyState(
 ): Promise<{ signedIn: boolean; deviceToken: boolean; changed: boolean }> {
   const device = opts.device ?? machineId();
   const signedIn = Boolean(readSession()?.access_token);
-  const deviceToken = readReservedCredential(ownerNotifyStoreName(normalizeHost(device)), OWNER_NOTIFY_TOKEN_KEY) !== null;
+  const self = normalizeHost(device);
+  const deviceToken = canHoldOwnerNotifyToken(self)
+    && readReservedCredential(ownerNotifyStoreName(self), OWNER_NOTIFY_TOKEN_KEY) !== null;
   const write = await updateFleetSharedDeviceStateAsync(
     device,
     { ownerNotify: { signedIn, deviceToken } },
@@ -148,13 +133,19 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
     if (onServer && peerState.deviceToken) { result.skipped.push({ device: worker.name, reason: 'token present' }); continue; }
     try {
       if (!onServer) {
+        const store = ownerNotifyStoreName(name);
         const minted = await mintDeviceToken(name, ['notify']);
-        writeReservedStoreItem(
-          ownerNotifyStoreName(name),
-          OWNER_NOTIFY_TOKEN_KEY,
-          minted.token,
-          `Owner-notify device token for ${name} (scope notify); pushed only to that worker by the daemon.`,
-        );
+        try {
+          writeReservedStoreItem(
+            store,
+            OWNER_NOTIFY_TOKEN_KEY,
+            minted.token,
+            `Owner-notify device token for ${name} (scope notify); pushed only to that worker by the daemon.`,
+          );
+        } catch (err) {
+          await revokeApiToken(minted.id);
+          throw err;
+        }
         memo[name] = minted.id;
         writeMemo(cacheDir, memo);
         result.minted.push(worker.name);

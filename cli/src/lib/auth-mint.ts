@@ -288,11 +288,6 @@ export function seedReservedStoreKey(
   );
 }
 
-/**
- * Write (or rotate) one key in a reserved, FILE-backed, policy-`never` bundle.
- * A keychain- or vault-backed store of the same name fails loud, since worker
- * provisioning reads the file backend.
- */
 export function writeReservedStoreItem(
   name: string,
   key: string,
