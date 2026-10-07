@@ -60,7 +60,7 @@ describeExec('buildExecCommand', () => {
       expect(cmd[cmd.length - 1]).toBe('rc');
     });
 
-    it.each(ALL_AGENTS)('%s gets no permission flags when no mode was chosen', (agent) => {
+    it.each(ALL_AGENTS.filter((agent) => agent !== 'codex'))('%s gets no permission flags when no mode was chosen', (agent) => {
       const permissionFlags = new Set([
         ...Object.values(AGENT_COMMANDS[agent].modeFlags).flat().filter((arg) => arg.startsWith('-')),
         '-c',
@@ -69,6 +69,11 @@ describeExec('buildExecCommand', () => {
         const cmd = buildExecCommand(opts({ agent, interactive, prompt: interactive ? undefined : 'go', modeWasImplicit: true }));
         expect(cmd.filter((arg) => permissionFlags.has(arg) && !AGENT_COMMANDS[agent].base.includes(arg))).toEqual([]);
       }
+    });
+
+    it('codex keeps its intrinsic edit policy when no mode was chosen, even as a raw binary', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', prompt: 'go', modeWasImplicit: true, mode: 'edit' }));
+      expect(cmd).toContain('approval_policy="on-request"');
     });
 
     it('claude skip produces --dangerously-skip-permissions', () => {

@@ -2497,8 +2497,9 @@ schema (`--json` passes through each agent's native stream format).
   `permissions.defaultMode`, …), and MUST NOT set `AGENTS_RUN_MODE`. This holds
   for interactive and headless runs alike; it is what lets a passthrough verb
   such as `agents run claude -- rc` reach the harness without a stray
-  `--permission-mode` in front of it. Codex still lands in `edit` because its
-  launcher (`shimLaunchArgs`) applies that policy to every launch. Explicit
+  `--permission-mode` in front of it. Codex is the exception: its intrinsic
+  default is `edit` (`implicitModeFor`), so an omitted mode still emits the
+  `edit` policy on every launch path, shim or raw binary. Explicit
   `plan` MUST remain filesystem-read-only with network enabled; explicit and
   configured modes MUST be passed through unchanged.
 - **EXEC-23 (MUST).** A prompt-less run inferred as interactive at a
