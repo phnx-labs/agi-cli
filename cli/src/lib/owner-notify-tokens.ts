@@ -18,8 +18,6 @@ import { hasUsableDeviceToken } from './owner-notify.js';
 import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
 const OWNER_NOTIFY_PUSH_DEADLINE_MS = 20_000;
-// A headed peer whose report is older than three exchange intervals is treated as gone,
-// so a dead box cannot stay elected minter.
 export const OWNER_NOTIFY_PEER_FRESH_MS = 3 * USAGE_SYNC_INTERVAL_MS;
 
 type Role = ReturnType<typeof selfConfiguredDeviceRole>;
@@ -152,8 +150,6 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
     if (peerState.deviceToken) { result.skipped.push({ device: worker.name, reason: 'token present' }); continue; }
     let onServer = tokens.find((t) => normalizeHost(t.device!) === name);
     try {
-      // Re-push only a token this box still holds AND recorded as the live one; anything else
-      // (a lost memo, a replaced minter, a wiped store) strands the worker, so replace it.
       const holdsLive = onServer !== undefined && memo[name] === onServer.id
         && readReservedCredential(store, OWNER_NOTIFY_TOKEN_KEY) !== null;
       if (onServer && !holdsLive) {
@@ -203,10 +199,6 @@ async function revokeOwnerNotifyToken(name: string, id: string, memo: Record<str
   }
 }
 
-/**
- * Revoke every worker token this box minted (its memo), for `agents auth logout`.
- * Run while the session is still present: revocation needs it.
- */
 export async function revokeMintedOwnerNotifyTokens(
   cacheDir = getCacheDir(),
 ): Promise<{ revoked: string[]; errors: Array<{ device: string; message: string }> }> {

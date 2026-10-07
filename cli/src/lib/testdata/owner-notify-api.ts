@@ -32,7 +32,6 @@ export interface OwnerNotifyApi {
   sessionToken: string;
   deviceTokens: DeviceToken[];
   deliveries: Delivery[];
-  /** The dedupKey of every accepted-shape POST /me/notifications, exactly as received. */
   dedupKeys: string[];
   imessageAddress: string | null;
   preferencesStatus: number;

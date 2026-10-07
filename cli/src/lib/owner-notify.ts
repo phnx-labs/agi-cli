@@ -79,8 +79,6 @@ export function resolveOwnerCredential(): OwnerCredential | null {
   return device ? { kind: 'device', token: device } : null;
 }
 
-// rush/api dedups on (user, event, dedupKey) in a namespace it shares with cloud-run
-// events, so every owner key is prefixed here and nowhere else.
 export const OWNER_DEDUP_PREFIX = 'owner:';
 
 function rejectedTokenPath(cacheDir: string): string {
@@ -105,7 +103,6 @@ function isDeviceTokenRejected(token: string, cacheDir: string): boolean {
   }
 }
 
-/** A device token this worker holds that rush/api has not rejected. Peers read it as `ownerNotify.deviceToken`. */
 export function hasUsableDeviceToken(device: string, cacheDir = getCacheDir()): boolean {
   const self = normalizeHost(device);
   if (!canHoldOwnerNotifyToken(self)) return false;
