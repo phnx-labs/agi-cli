@@ -351,13 +351,17 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   result.AGENTS_RUNTIME = resolveInteractive(options) ? 'terminal' : 'headless';
   // Bind the standalone secrets client to the same store agents-cli resolved.
   result.SECRETS_HOME = result.SECRETS_HOME ?? getUserAgentsDir();
-  result.AGENTS_RUN_MODE = resolveHeadlessMode(
-    options.agent,
-    normalizeMode(options.mode),
-    resolveInteractive(options),
-    options.modeWarningContext,
-    options.modeWarningState,
-  );
+  if (options.modeWasImplicit) {
+    delete result.AGENTS_RUN_MODE;
+  } else {
+    result.AGENTS_RUN_MODE = resolveHeadlessMode(
+      options.agent,
+      normalizeMode(options.mode),
+      resolveInteractive(options),
+      options.modeWarningContext,
+      options.modeWarningState,
+    );
+  }
   result.AGENTS_HISTORY_DIR = getHistoryDir();
   if (options.agent) {
     const runVersion = options.version ?? resolveVersion(options.agent, options.cwd || process.cwd());
@@ -696,7 +700,7 @@ export function buildExecCommand(options: ExecOptions): string[] {
     normalizeMode(options.mode),
     interactive,
     options.modeWarningContext,
-    options.modeWarningState,
+    options.modeWasImplicit ? { quiet: true } : options.modeWarningState,
   );
   const modeFlags = template.modeFlags[resolvedMode];
   if (!modeFlags) {
@@ -715,19 +719,17 @@ export function buildExecCommand(options: ExecOptions): string[] {
   if (preModeArgs) {
     cmd.push(...preModeArgs);
   }
-  const modeArgsOverride = launchAdapter.execModeArgs?.(launchArgsCtx);
-  if (modeArgsOverride !== undefined) {
-    cmd.push(...modeArgsOverride);
-  } else if (resumeSpec && 'subcommand' in resumeSpec) {
-    if (resolvedMode === 'skip') {
+  // No mode chosen (no --mode, no run.<agent>.mode): pass no permission flags
+  // and let the harness's own config decide.
+  if (!options.modeWasImplicit) {
+    const modeArgsOverride = launchAdapter.execModeArgs?.(launchArgsCtx);
+    if (modeArgsOverride !== undefined) {
+      cmd.push(...modeArgsOverride);
+    } else if (resumeSpec && 'subcommand' in resumeSpec && resolvedMode === 'skip') {
       cmd.push('--dangerously-bypass-approvals-and-sandbox');
-    } else if (interactive) {
-      cmd.push(...modeFlags);
     } else {
       cmd.push(...modeFlags);
     }
-  } else {
-    cmd.push(...modeFlags);
   }
 
   if (!interactive && template.printFlags) {

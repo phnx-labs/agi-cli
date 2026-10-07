@@ -599,7 +599,7 @@ export function registerRunCommand(program: Command): void {
   const runCmd = program
     .command('run [agent] [prompt]')
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.')
-    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (more autonomous than edit, mechanism per-harness: smart classifier auto-approves safe ops and still prompts for risky ones on Claude/Copilot; approval_policy=never over the edit sandbox on Codex, which never prompts), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. \'full\' accepted as alias for skip.', 'plan')
+    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (more autonomous than edit, mechanism per-harness: smart classifier auto-approves safe ops and still prompts for risky ones on Claude/Copilot; approval_policy=never over the edit sandbox on Codex, which never prompts), skip (bypass all permission prompts). Omitted, no permission flag is passed and the harness\'s own settings decide (Codex\'s launcher applies its edit policy); set a default with agents config set run.<agent>@*.mode <mode>. \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
     .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
     .option(
@@ -1175,7 +1175,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             command.setOptionValueWithSource('mode', resolvedResumeSource.mode, 'implied');
           }
           else if (!options.quiet) process.stderr.write(chalk.yellow(
-            `[agents] session ${resolvedResumeSource.shortId} predates stored launch modes; using --mode ${options.mode}\n`,
+            `[agents] session ${resolvedResumeSource.shortId} predates stored launch modes; using the default mode\n`,
           ));
         }
 
@@ -2670,7 +2670,6 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         process.exit(1);
       }
 
-      const modeIsDefault = modeSource === 'default';
       let requestedMode = normalizeMode(mode);
       const { modeWasImplicit } = await import('../lib/codex-policy.js');
       const wasModeImplicit = modeWasImplicit(modeSource, modeFromRunDefault);
@@ -2688,7 +2687,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         prompt,
         interactive: resolveInteractive({ prompt, headless: options.headless, interactive: options.interactive || forceInteractive }),
         mode: resolvedMode as ExecMode,
-        modeIsDefault,
+        modeIsDefault: modeFromRunDefault,
       });
       if (stallCmd) {
         console.error(
