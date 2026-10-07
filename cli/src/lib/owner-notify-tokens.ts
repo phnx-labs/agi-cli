@@ -14,6 +14,7 @@ import { machineId, normalizeHost } from './machine-id.js';
 import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole } from './device-config.js';
 import { readFleetSharedDeviceStates, updateFleetSharedDeviceStateAsync } from './fleet-shared-state.js';
 import { getCacheDir, getUserAgentsDir } from './state.js';
+import { atomicWriteFileSync } from './fs-atomic.js';
 import { hasUsableDeviceToken } from './owner-notify.js';
 import { USAGE_SYNC_INTERVAL_MS } from './accounting/usage-sync.js';
 
@@ -86,7 +87,7 @@ function readMemo(root: string): Memo {
 
 function writeMemo(root: string, memo: Memo): void {
   fs.mkdirSync(root, { recursive: true });
-  fs.writeFileSync(memoPath(root), `${JSON.stringify(memo, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+  atomicWriteFileSync(memoPath(root), `${JSON.stringify(memo, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
 }
 
 export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Promise<OwnerNotifySyncResult> {
