@@ -77,7 +77,9 @@ flowchart LR
    (every six hours; `agents doctor` shows it, `agents sync` runs it)
    and the end of `agents upgrade`. A local-build install, an opted-out Mac and
    a Mac that never enabled the menu bar are left alone; the multi-install
-   ownership contest still applies. The floor bump in step 2 is therefore the
+   ownership contest still applies, judged on the build just downloaded (its
+   Developer ID signature and version), never on a cached copy that may not
+   exist yet. The floor bump in step 2 is therefore the
    *tested-against* record and the offline answer, not the release switch.
 
 ### Staging a bundle in this repo

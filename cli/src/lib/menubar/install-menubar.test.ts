@@ -338,6 +338,17 @@ describe('mayInstallMenubarHelper', () => {
     sourceIsDeveloperId: true,
   };
 
+  it('lets the owner upgrade to a newer release only once its bundle is on disk (R5)', () => {
+    // updateMenubarHelperIfNewer gates on the bundle it will install. Before the
+    // fix it gated BEFORE downloading, on the cached path for a version not yet
+    // fetched: no bundle, so "not Developer ID", and every new release was
+    // skipped as "another install owns the helper" (seen on zion, 1.14.13 -> 1.15.0).
+    const owner = { ...base, plistEntry: brew, activeEntry: brew, ownerEntryExists: true,
+                    installedVersion: '1.14.13', currentVersion: '1.15.0' };
+    expect(mayInstallMenubarHelper({ ...owner, sourceIsDeveloperId: false })).toBe(false);
+    expect(mayInstallMenubarHelper({ ...owner, sourceIsDeveloperId: true })).toBe(true);
+  });
+
   it('refuses a foreign install while the recorded owner still exists (#2109)', () => {
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: true,
