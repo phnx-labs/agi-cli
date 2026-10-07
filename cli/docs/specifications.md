@@ -896,8 +896,18 @@ SSH access (§7); rendering sessions that no harness produced.
   claim (`lib/feed/answer.ts`; `lib/feed/answer.test.ts`).
 - **SES-40c (MUST).** Pull-request status used by attention and PR-board
   projections MUST be sourced by the CLI on a bounded TTL and include
-  `number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup`
-  (`lib/feed/pr-status.ts`).
+  `number,title,headRefOid,state,isDraft,reviewDecision,mergeable,statusCheckRollup`
+  (`lib/feed/pr-status.ts`). A live row's `pr` MUST carry, from that same
+  single read and with no further GitHub call: `title`, `headSha` (the
+  `headRefOid`), `checks` (the rollup folded to `passing`/`failing`/`pending`),
+  and `checkItems`, one `{ name, state, url? }` per rollup entry — a CheckRun's
+  `name`/`conclusion`/`status`/`detailsUrl` or a legacy StatusContext's
+  `context`/`state`/`targetUrl` — with `state` one of `passed`/`failed`/
+  `running`/`skipped` in the vocabulary `checks` uses (`SKIPPED` and `NEUTRAL`
+  read `skipped`), a re-run name kept once at its latest run, and at most 30
+  entries. Each field is absent when unknown (`lib/feed/pr-status.ts`
+  `withPullRequestStatus`; `lib/feed/pr-status.test.ts`,
+  `lib/feed/watch.test.ts`).
 - **SES-40d (MUST).** The stream is long-lived — one child per VS Code leader —
   so its steady-state cost MUST NOT scale with the size of the activity corpus
   or with the number of rows on the stream. Activity MUST be read from a
@@ -1058,7 +1068,12 @@ SSH access (§7); rendering sessions that no harness produced.
   failed or policy-blocked calls. `activityHistogram` is 48 buckets across the
   folded span; a partial fold (`offset < fileSize`) MUST omit it. `userTurns` is
   the user's own turns. `subagents` is this session's own
-  `subagents/agent-*.jsonl` children. `subAgentCount` MUST use that file count
+  `subagents/agent-*.jsonl` children; on a live row each child MAY carry
+  `model` (the model id its latest reply reports) and `prompt` (its first
+  genuine user turn, whitespace-collapsed, at most 400 characters), read in the
+  same bounded incremental fold as its tool count and never by a second read
+  of the transcript. A Previous row's children come from the persisted timeline
+  and do not carry them. `subAgentCount` MUST use that file count
   when the directory contains transcripts, and MUST keep the tool-call count when
   the directory is missing or empty. Pasted images are written once under
   `~/.agents/.cache/attachments/<sessionId>/` and the inline bytes MUST NOT

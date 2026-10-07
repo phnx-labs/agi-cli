@@ -204,3 +204,32 @@ describe('tool-setup rows ride the local stream', () => {
     expect(notify).toBeUndefined();
   });
 });
+
+describe('feed watch PR status on the row', () => {
+  it('carries headSha, title and per-check items to the stream and through a peer hop', async () => {
+    const pr = { url: 'https://github.com/o/r/pull/41', number: 41 };
+    const row = {
+      ...session('pr-row', { cwd: '/repo/pr-row', pr }),
+      rowKey: 'k-pr-row', sourceDevice: 'worker-a', confirmedProject: null,
+      previous: false, resumable: true, unwatched: false, viewingIn: null, recovery: null,
+    } as import('../session/watch.js').SessionWatchRow;
+    const gh = async () => JSON.stringify({
+      number: 41, title: 'feat: row checks', headRefOid: 'feedface41', state: 'OPEN', isDraft: false,
+      reviewDecision: 'REVIEW_REQUIRED', mergeable: 'MERGEABLE',
+      statusCheckRollup: [{ __typename: 'CheckRun', name: 'Tests / test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://ci/41' }],
+    });
+    const [upsert] = await projectSessionEnvelope(
+      { version: 1, type: 'upsert', streamId: 's', sequence: 1, capturedAt: 1, scope: 'worker-a', rowKey: row.rowKey, row },
+      new FeedWatchState('peer'), gh,
+    );
+    const expected = {
+      title: 'feat: row checks', headSha: 'feedface41', checks: 'failing',
+      checkItems: [{ name: 'Tests / test', state: 'failed', url: 'https://ci/41' }],
+    };
+    expect(upsert).toMatchObject({ type: 'agent.upsert', agent: { pr: expected } });
+
+    const wire = JSON.parse(JSON.stringify(upsert)) as FeedWatchEnvelope;
+    const forwarded = new FeedSessionProjection(new FeedWatchState('coordinator')).apply(normalizePeerEnvelope(wire));
+    expect(forwarded.find((event) => event.type === 'agent.upsert')).toMatchObject({ agent: { pr: expected } });
+  });
+});

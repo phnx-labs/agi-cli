@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { claudeSubagentFiles, materializeInlineImages, readSessionSubagents, resolvedSubAgentCount } from './glance-files.js';
+import { claudeSubagentFiles, materializeInlineImages, readSessionSubagents, resolvedSubAgentCount, SUBAGENT_PROMPT_MAX_CHARS } from './glance-files.js';
 import type { SessionEvent } from '@phnx-labs/sessions-cli/reader';
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'glance-files-'));
@@ -61,6 +61,57 @@ describe('subagent counts', () => {
     const second = readSessionSubagents(file, false, [], 1_000)!;
     expect(second[0].toolCount).toBe(total);
     expect(second[0].status).toBe('done');
+  });
+});
+
+describe('subagent model and prompt', () => {
+  function line(record: Record<string, unknown>): string {
+    return JSON.stringify({ timestamp: '2026-10-07T00:00:00.000Z', ...record }) + '\n';
+  }
+  function reply(model: string, text: string): string {
+    return line({ type: 'assistant', uuid: `a-${model}-${text}`, message: { role: 'assistant', model, content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } } });
+  }
+
+  it('reads the prompt from the first real user turn and the model from the latest reply', () => {
+    const file = sessionWith('model-prompt');
+    const dir = path.join(path.dirname(file), 'session', 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    const child = path.join(dir, 'agent-explore.jsonl');
+    fs.writeFileSync(child, [
+      line({ type: 'user', uuid: 'u0', isMeta: true, message: { role: 'user', content: 'injected context' } }),
+      line({ type: 'user', uuid: 'u1', message: { role: 'user', content: [
+        { type: 'text', text: 'Find   every caller\n\n of  readPullRequestStatus' },
+        { type: 'text', text: 'and report  them.' },
+      ] } }),
+      reply('claude-sonnet-4-5', 'Looking.'),
+      line({ type: 'user', uuid: 'u2', message: { role: 'user', content: 'a later turn is not the prompt' } }),
+      reply('claude-opus-4-1', 'Done.'),
+    ].join(''));
+
+    const [row] = readSessionSubagents(file, false, [], 1_000)!;
+    expect(row.prompt).toBe('Find every caller of readPullRequestStatus and report them.');
+    expect(row.model).toBe('claude-opus-4-1');
+
+    fs.appendFileSync(child, reply('claude-haiku-4-5', 'More.'));
+    const [grown] = readSessionSubagents(file, false, [], 1_000)!;
+    expect(grown.model).toBe('claude-haiku-4-5');
+    expect(grown.prompt).toBe(row.prompt);
+  });
+
+  it('clamps a long prompt and omits both fields when the transcript has neither', () => {
+    const file = sessionWith('long-prompt');
+    const dir = path.join(path.dirname(file), 'session', 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agent-long.jsonl'),
+      line({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'word '.repeat(300) } }));
+    fs.writeFileSync(path.join(dir, 'agent-empty.jsonl'), toolLine('toolu_9'));
+    const rows = readSessionSubagents(file, false, [], 1_000)!;
+    const long = rows.find(r => r.id === 'agent-long')!;
+    expect(long.prompt!.length).toBe(SUBAGENT_PROMPT_MAX_CHARS);
+    expect(long.prompt!.startsWith('word word')).toBe(true);
+    const empty = rows.find(r => r.id === 'agent-empty')!;
+    expect(empty).not.toHaveProperty('prompt');
+    expect(empty).not.toHaveProperty('model');
   });
 });
 
