@@ -189,11 +189,22 @@ export async function fetchReviewAndHead(
   };
 }
 
-export async function enrichPr(repo: string, pr: ProjectPr, gh: GhExec = ghExec): Promise<ProjectPr> {
-  const { reviewDecision, headRefOid } = await fetchReviewAndHead(repo, pr.number, gh);
-  const head = headRefOid || pr.headSha;
+export async function enrichPr(
+  repo: string, pr: ProjectPr, gh: GhExec = ghExec,
+): Promise<{ pr: ProjectPr; reviewError: string | null }> {
+  let review: { reviewDecision: string | null; headRefOid: string | null };
+  let reviewError: string | null = null;
+  try {
+    review = await fetchReviewAndHead(repo, pr.number, gh);
+  } catch (err) {
+    const message = ghFailure(err);
+    if (!isRateLimited(message)) throw err;
+    review = { reviewDecision: null, headRefOid: null };
+    reviewError = `review status unavailable: ${message}`;
+  }
+  const head = review.headRefOid || pr.headSha;
   const checks = await rollupForSha(repo, head, gh);
-  return { ...pr, headSha: head, checks, reviewDecision, ...ciFromRollupItems(checks) };
+  return { pr: { ...pr, headSha: head, checks, reviewDecision: review.reviewDecision, ...ciFromRollupItems(checks) }, reviewError };
 }
 
 export const MERGED_WINDOW_DAYS = 7;
@@ -589,11 +600,13 @@ export async function buildProjectPrs(
         );
         if (opts.number !== undefined) {
           const pr = await fetchOnePr(slug, opts.number, gh);
-          const enriched = await enrichPr(slug, pr, gh);
+          const { pr: enriched, reviewError } = await enrichPr(slug, pr, gh);
           const { merge, error: mergeError } = await mergeRead;
           return {
             slug, sharedWith, pullRequests: [enriched], merge,
-            recentlyMerged: [], defaultBranch: null, ciError: mergeError === null ? null : ghFailure(mergeError), truncated: false, release: null, releaseError: null, error: null,
+            recentlyMerged: [], defaultBranch: null,
+            ciError: reviewError ?? (mergeError === null ? null : ghFailure(mergeError)),
+            truncated: false, release: null, releaseError: null, error: null,
           };
         }
         const errors = new CiErrors();
