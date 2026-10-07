@@ -2491,10 +2491,16 @@ schema (`--json` passes through each agent's native stream format).
   args (`harness/adapters/codex.ts` `shimLaunchArgs`, consumed by the POSIX shim
   and the versioned alias). A bare `codex` invocation carries no mode at all and
   a human is at that terminal, so an approval prompt is the useful outcome there.
-- **EXEC-22b (MUST).** When `--mode` is omitted and the selected or fallback
-  harness is Codex, the mode MUST resolve to `edit`. Explicit `plan` MUST remain
-  filesystem-read-only with network enabled; explicit/configured modes MUST not
-  be replaced by the intrinsic Codex default.
+- **EXEC-22b (MUST).** When no mode was chosen — no `--mode` and no
+  `run.<agent>@<version>.mode` from `agents config` — `buildExecCommand` MUST
+  pass no permission-mode flags, so the harness's own settings decide (Claude's
+  `permissions.defaultMode`, …), and MUST NOT set `AGENTS_RUN_MODE`. This holds
+  for interactive and headless runs alike; it is what lets a passthrough verb
+  such as `agents run claude -- rc` reach the harness without a stray
+  `--permission-mode` in front of it. Codex still lands in `edit` because its
+  launcher (`shimLaunchArgs`) applies that policy to every launch. Explicit
+  `plan` MUST remain filesystem-read-only with network enabled; explicit and
+  configured modes MUST be passed through unchanged.
 - **EXEC-23 (MUST).** A prompt-less run inferred as interactive at a
   non-TTY MUST be refused before spawn rather than hang on dead stdin
   (`inferredInteractiveWithoutTty`, `lib/exec.ts:320-326`; enforced

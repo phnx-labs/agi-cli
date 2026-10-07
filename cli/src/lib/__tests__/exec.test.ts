@@ -54,6 +54,23 @@ describeExec('buildExecCommand', () => {
       expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('acceptEdits');
     });
 
+    it('passes no mode flags when no mode was chosen, so a passthrough verb reaches claude first', () => {
+      const cmd = buildExecCommand(opts({ agent: 'claude', prompt: undefined, interactive: true, modeWasImplicit: true, passthroughArgs: ['rc'] }));
+      expect(cmd).not.toContain('--permission-mode');
+      expect(cmd[cmd.length - 1]).toBe('rc');
+    });
+
+    it.each(ALL_AGENTS)('%s gets no permission flags when no mode was chosen', (agent) => {
+      const permissionFlags = new Set([
+        ...Object.values(AGENT_COMMANDS[agent].modeFlags).flat().filter((arg) => arg.startsWith('-')),
+        '-c',
+      ]);
+      for (const interactive of [true, false]) {
+        const cmd = buildExecCommand(opts({ agent, interactive, prompt: interactive ? undefined : 'go', modeWasImplicit: true }));
+        expect(cmd.filter((arg) => permissionFlags.has(arg) && !AGENT_COMMANDS[agent].base.includes(arg))).toEqual([]);
+      }
+    });
+
     it('claude skip produces --dangerously-skip-permissions', () => {
       const cmd = buildExecCommand(opts({ agent: 'claude', mode: 'skip' }));
       expect(cmd).toContain('--dangerously-skip-permissions');

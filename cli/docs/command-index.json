@@ -15833,7 +15833,7 @@
       "options": [
         {
           "flags": "-m, --mode <mode>",
-          "description": "How much the agent can do: plan (read-only), edit (can write files), auto (more autonomous than edit, mechanism per-harness: smart classifier auto-approves safe ops and still prompts for risky ones on Claude/Copilot; approval_policy=never over the edit sandbox on Codex, which never prompts), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. 'full' accepted as alias for skip.",
+          "description": "How much the agent can do: plan (read-only), edit (can write files), auto (more autonomous than edit, mechanism per-harness: smart classifier auto-approves safe ops and still prompts for risky ones on Claude/Copilot; approval_policy=never over the edit sandbox on Codex, which never prompts), skip (bypass all permission prompts). Omitted, no permission flag is passed and the harness's own settings decide (Codex's launcher applies its edit policy); set a default with agents config set run.<agent>@*.mode <mode>. 'full' accepted as alias for skip.",
           "short": "-m",
           "long": "--mode",
           "required": true,
