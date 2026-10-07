@@ -62,6 +62,8 @@ describe('migrateHumansToAccount — one-shot upload of humans.yaml', () => {
   beforeEach(() => {
     userDir = fs.mkdtempSync(path.join(os.tmpdir(), 'humans-migrate-'));
     execFileSync('git', ['init', '-q', userDir]);
+    execFileSync('git', ['-C', userDir, 'config', 'user.email', 't@t']);
+    execFileSync('git', ['-C', userDir, 'config', 'user.name', 't']);
     execFileSync('git', ['-C', userDir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init']);
     fs.writeFileSync(path.join(userDir, 'humans.yaml'), HUMANS);
     execFileSync('git', ['-C', userDir, 'add', 'humans.yaml']);
