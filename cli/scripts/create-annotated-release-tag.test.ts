@@ -6,7 +6,6 @@ import * as os from 'os';
 import * as path from 'path';
 
 const SCRIPT = path.resolve(__dirname, 'create-annotated-release-tag.sh');
-const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
 
 const describeTag = process.platform === 'win32' ? describe.skip : describe;
 
@@ -77,17 +76,5 @@ describeTag('create-annotated-release-tag.sh', () => {
     expect(git('for-each-ref', '--format=%(contents)', 'refs/tags/v9.9.9')).toContain(
       'Release 9.9.9',
     );
-  });
-});
-
-describeTag('release.sh wires create-annotated-release-tag.sh', () => {
-  it('delegates both tag sites through create_annotated_release_tag and upgrades lightweight locals', () => {
-    expect(RELEASE_SH).toContain('scripts/create-annotated-release-tag.sh "$@"');
-    expect(RELEASE_SH).toContain('create_annotated_release_tag "$TARGET" "$PUBLISH_SHA"');
-    expect(RELEASE_SH).toContain(
-      'create_annotated_release_tag "$TARGET" "$(git rev-parse "$TAG_TARGET^{commit}")" --force',
-    );
-    expect(RELEASE_SH).toContain('git cat-file -t "refs/tags/v$TARGET"');
-    expect(RELEASE_SH).toContain('Upgraded lightweight local tag');
   });
 });

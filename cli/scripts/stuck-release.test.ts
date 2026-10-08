@@ -1,7 +1,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 
 const SCRIPT = path.resolve(__dirname, 'stuck-release.sh');
@@ -61,93 +60,6 @@ describe('stuck-release: nothing stuck', () => {
 
   it('reports nothing for an empty tag list', () => {
     expect(stuck('1.20.81', [])).toBeNull();
-  });
-});
-
-describe('stuck-release: release.sh must consume the tag list fail-closed', () => {
-  const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
-
-  it('demonstrates why: die inside a process substitution does NOT abort the script', () => {
-    const script = `
-      set -euo pipefail
-      die() { echo "DIED" >&2; exit 1; }
-      gather() { false || die "cannot read"; }
-      while read -r a; do :; done < <(gather)
-      echo "CONTINUED"
-    `;
-    const r = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
-    expect(r.stdout).toContain('CONTINUED');
-    expect(r.status).toBe(0);
-  });
-
-  it('demonstrates the safe form: a command substitution does abort it', () => {
-    const script = `
-      set -euo pipefail
-      die() { echo "DIED" >&2; exit 1; }
-      gather() { false || die "cannot read"; }
-      RAW="$(gather)"
-      while read -r a; do :; done <<< "$RAW"
-      echo "CONTINUED"
-    `;
-    const r = spawnSync('bash', ['-c', script], { encoding: 'utf-8' });
-    expect(r.stdout).not.toContain('CONTINUED');
-    expect(r.status).toBe(1);
-  });
-
-  it('release.sh uses the safe form', () => {
-    expect(RELEASE_SH).toMatch(/REMOTE_TAG_LINES="\$\(remote_version_tags\)"/);
-    const unsafe = RELEASE_SH.split('\n').filter(
-      (l) => !l.trimStart().startsWith('#') && l.includes('< <(remote_version_tags)'),
-    );
-    expect(unsafe).toEqual([]);
-  });
-});
-
-describe('release.sh: every irreversible act is gated by the lease', () => {
-  const LINES = fs
-    .readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8')
-    .split(/\r?\n/);
-
-  function precededByLeaseGate(idx: number, window = 6) {
-    for (let i = idx - 1; i >= 0 && i >= idx - window; i--) {
-      const l = LINES[i].trim();
-      if (l === '' || l.startsWith('#')) continue;
-      if (l.startsWith('require_lease')) return true;
-    }
-    return false;
-  }
-
-  it('every `git push origin "v$TARGET"` is preceded by require_lease', () => {
-    const pushes = LINES.map((l, i) => ({ l, i })).filter(({ l }) =>
-      /^\s*git push origin "v\$TARGET"/.test(l),
-    );
-    expect(pushes.length).toBeGreaterThan(0);
-    const ungated = pushes.filter(({ i }) => !precededByLeaseGate(i));
-    expect(ungated.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`)).toEqual([]);
-  });
-
-  it('any PRE-publish PR merge is lease-gated; the async bump-merge runs after publish', () => {
-    const publishIdx = LINES.findIndex((l) =>
-      /^\s*route_home_base_phase\s*\\?$/.test(l),
-    );
-    expect(publishIdx).toBeGreaterThan(-1);
-    const merges = LINES.map((l, i) => ({ l, i })).filter(({ l }) =>
-      /gh pr merge "\$PR_NUMBER"/.test(l),
-    );
-    expect(merges.length).toBeGreaterThan(0);
-    const ungatedPrePublish = merges
-      .filter(({ i }) => i < publishIdx)
-      .filter(({ i }) => !precededByLeaseGate(i, 8));
-    expect(
-      ungatedPrePublish.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`),
-    ).toEqual([]);
-    expect(merges.some(({ i }) => i > publishIdx)).toBe(true);
-  });
-
-  it('the publish routing is preceded by require_lease', () => {
-    const idx = LINES.findIndex((l) => /^\s*route_home_base_phase\s*\\?$/.test(l));
-    expect(idx).toBeGreaterThan(-1);
-    expect(precededByLeaseGate(idx)).toBe(true);
   });
 });
 

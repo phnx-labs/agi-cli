@@ -24,15 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RELEASE_BASE="$("$SCRIPT_DIR/release-attested-base.sh" "$REPO_ROOT" "$DEFAULT_BRANCH" 2>/dev/null || true)"
-if [[ -z "$RELEASE_BASE" ]]; then
-  RELEASE_BASE="origin/$DEFAULT_BRANCH"
-elif [[ "$(git -C "$REPO_ROOT" rev-parse "$RELEASE_BASE")" != "$(git -C "$REPO_ROOT" rev-parse "origin/$DEFAULT_BRANCH")" ]]; then
-  behind="$(git -C "$REPO_ROOT" rev-list --count "$RELEASE_BASE..origin/$DEFAULT_BRANCH")"
-  printf 'note: releasing from the newest ATTESTED ancestor %s (%s commit(s) behind origin/%s); the tip is not attested yet\n' \
-    "${RELEASE_BASE:0:9}" "$behind" "$DEFAULT_BRANCH" >&2
-fi
+RELEASE_BASE="origin/$DEFAULT_BRANCH"
 
 git -C "$REPO_ROOT" worktree add --quiet --detach "$WORKTREE" "$RELEASE_BASE" \
   || { echo "error: could not create release worktree at $WORKTREE from $RELEASE_BASE" >&2; exit 1; }
@@ -42,10 +34,6 @@ if [[ -n "$missing" ]]; then
   printf 'error: release worktree %s is incomplete; missing tracked files:\n%s\n' "$WORKTREE" "$missing" >&2
   printf 'Remove only this isolated release worktree, then retry: %s\n' "$WORKTREE" >&2
   exit 1
-fi
-
-if [[ -z "${RELEASE_ATTESTATION_DIR:-}" && -d "$REPO_ROOT/.release-attestations" ]]; then
-  export RELEASE_ATTESTATION_DIR="$REPO_ROOT/.release-attestations"
 fi
 
 CLI_SUBDIR="cli"
