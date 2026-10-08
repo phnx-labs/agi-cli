@@ -6,13 +6,23 @@ import type { AddressInfo } from 'node:net';
 import { Miniflare } from 'miniflare';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { findInPath } from '../agent-spec/agents.js';
+import { ArtifactsClientError, resolveArtifactsBin } from '../artifacts-client.js';
 import { RecordingLedger } from './ledger.js';
 import { RecordingPipeline } from './pipeline.js';
 import { candidateForFile } from './settle.js';
 import { runProcess } from './process.js';
 import { transcodeRecording } from './transcode.js';
 
-const artifactsBin = process.env.RECORDINGS_ARTIFACTS_BIN;
+function installedArtifactsBin(): string | undefined {
+  try {
+    return resolveArtifactsBin();
+  } catch (error) {
+    if (error instanceof ArtifactsClientError && error.code === 'ARTIFACTS_BIN_MISSING') return undefined;
+    throw error;
+  }
+}
+
+const artifactsBin = installedArtifactsBin();
 const ffmpegBin = process.env.FFMPEG_BIN || findInPath('ffmpeg');
 const runIntegration = Boolean(artifactsBin && ffmpegBin);
 
@@ -100,7 +110,6 @@ describe.runIf(runIntegration)('recordings pipeline (real ffmpeg + artifacts CLI
       artifactsBin: artifactsBin!,
       env,
       ledger,
-      host: 'test-device',
       raiseAttention: async () => undefined,
       transcode: (file, signal) => transcodeRecording(file, signal, { ffmpegBin: ffmpegBin!, platform: 'linux' }),
     });
@@ -119,10 +128,10 @@ describe.runIf(runIntegration)('recordings pipeline (real ffmpeg + artifacts CLI
     expect(headers['x-share-visibility']).toBe('org');
     expect(JSON.parse(headers['x-share-meta'])).toEqual({
       source: 'cleanshot',
-      host: 'test-device',
-      recorded_at: candidate.recordedAt,
+      'recorded-at': candidate.recordedAt,
       stem: candidate.stem,
-      session: 'session-123',
     });
+    expect(headers['x-share-session']).toBe('session-123');
+    expect(headers['x-share-host']).toBe(os.hostname());
   }, 120_000);
 });
