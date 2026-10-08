@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Usage: scripts/release-attestation-produce.sh <commit-ish>
 #   [--dir DIR] [--repo-root DIR] [--keep] [--with-helpers]
-#   [--inherit-suite-from BASE.json]
+#   [--inherit-suite-from BASE.json] [--test-impact-from ATTESTED_COMMIT]
 #   [--test-shard N | --test-devices a,b | --test-device HOST | --test-here | --test-crabbox]
 set -euo pipefail
 
@@ -18,6 +18,7 @@ KEEP=false
 TEST_TARGET=()
 WITH_HELPERS=false
 INHERIT_BASE=""
+IMPACT_BASE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) STORE="$2"; shift 2 ;;
@@ -29,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     --test-shard) [[ -n "${2:-}" ]] || die "--test-shard needs a worker count, e.g. --test-shard 6"; TEST_TARGET=(--shard "$2"); shift 2 ;;
     --test-devices) [[ -n "${2:-}" ]] || die "--test-devices needs a comma-separated list, e.g. --test-devices m1,m2,m3"; TEST_TARGET=(--devices "$2"); shift 2 ;;
     --inherit-suite-from) [[ -n "${2:-}" ]] || die "--inherit-suite-from needs a base attestation JSON path"; INHERIT_BASE="$2"; shift 2 ;;
+    --test-impact-from) [[ -n "${2:-}" ]] || die "--test-impact-from needs an attested ancestor commit"; IMPACT_BASE="$2"; shift 2 ;;
     --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
       awk 'NR>2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "$0"
@@ -48,6 +50,11 @@ if [[ -n "$INHERIT_BASE" ]]; then
   [[ -f "$INHERIT_BASE" ]] || die "--inherit-suite-from: base attestation not found: $INHERIT_BASE"
   [[ ${#TEST_TARGET[@]} -eq 0 ]] || die "--inherit-suite-from skips the suite; do not also pass a --test-* target"
 fi
+[[ -z "$INHERIT_BASE" || -z "$IMPACT_BASE" ]] \
+  || die "--inherit-suite-from and --test-impact-from are mutually exclusive"
+if [[ -n "$IMPACT_BASE" ]]; then
+  [[ ${#TEST_TARGET[@]} -eq 0 ]] || die "--test-impact-from selects checks; do not also pass a --test-* target"
+fi
 
 SHARD_CAP=8
 resolve_default_shards() {
@@ -59,7 +66,7 @@ resolve_default_shards() {
     printf '%s\n' "$n"
   fi
 }
-if [[ -z "$INHERIT_BASE" && ${#TEST_TARGET[@]} -eq 0 ]]; then
+if [[ -z "$INHERIT_BASE" && -z "$IMPACT_BASE" && ${#TEST_TARGET[@]} -eq 0 ]]; then
   default_shards="$(resolve_default_shards)"
   if [[ -n "$default_shards" ]]; then
     TEST_TARGET=(--shard "$default_shards")
@@ -73,6 +80,12 @@ git -C "$REPO_ROOT" fetch --quiet origin
 SHA="$(git -C "$REPO_ROOT" rev-parse --verify "$COMMIT_ISH^{commit}" 2>/dev/null)" \
   || die "cannot resolve '$COMMIT_ISH' to a commit in $REPO_ROOT (fetch origin first if it's a remote ref)"
 TREE="$(git -C "$REPO_ROOT" rev-parse "$SHA^{tree}")"
+if [[ -n "$IMPACT_BASE" ]]; then
+  IMPACT_BASE="$(git -C "$REPO_ROOT" rev-parse --verify "$IMPACT_BASE^{commit}" 2>/dev/null)" \
+    || die "cannot resolve impact base to a commit: $IMPACT_BASE"
+  git -C "$REPO_ROOT" merge-base --is-ancestor "$IMPACT_BASE" "$SHA" \
+    || die "impact base $IMPACT_BASE is not an ancestor of $SHA"
+fi
 
 STORE="${STORE:-${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}}"
 mkdir -p "$STORE"
@@ -103,7 +116,11 @@ cd "$WT/$CLI_DIR"
 
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
-[[ -n "$INHERIT_BASE" ]] || bold "Running the full suite..."
+if [[ -z "$INHERIT_BASE" && -z "$IMPACT_BASE" ]]; then
+  bold "Running the full suite..."
+elif [[ -n "$IMPACT_BASE" ]]; then
+  bold "Running checks impacted since attested ${IMPACT_BASE:0:12}..."
+fi
 unset CI
 export AGENTS_ATTEST_PRODUCER=1
 suite_green_despite_worker_crash() {
@@ -121,6 +138,20 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 if [[ -n "$INHERIT_BASE" ]]; then
   green "Inheriting the suite result from $(basename "$INHERIT_BASE") (skipping the full suite)."
   rm -f "$SUITE_LOG"
+elif [[ -n "$IMPACT_BASE" ]]; then
+  IMPACT_PLAN="$WT/.agents/release-impact-plan.json"
+  mkdir -p "$(dirname "$IMPACT_PLAN")"
+  if (
+    cd "$WT"
+    bun scripts/ci-scope.ts --base "$IMPACT_BASE" --head "$SHA" \
+      --json --fail-unmapped --plan-file "$IMPACT_PLAN"
+    IMPACT_STARTED_AT="$(date +%s)" bun scripts/ci-scope.ts --run "$IMPACT_PLAN"
+  ); then
+    green "Impacted checks passed."
+    rm -f "$SUITE_LOG"
+  else
+    die "impacted checks failed for ${SHA:0:12} -- refusing to attest a red tree"
+  fi
 elif scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
   green "Suite passed."
   rm -f "$SUITE_LOG"

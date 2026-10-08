@@ -15,24 +15,32 @@ name is the package version.
 
 `.github/workflows/release.yml` is the only publisher. Its single GitHub-hosted job:
 
-1. fetches the newest attested ancestor whose CLI executable inputs, packaged
-   session-tracker, and impact policy are byte-identical to the release commit's
-   `main` parent;
-2. runs `release-attestation-produce.sh --inherit-suite-from`, whose derive gate
-   permits unrelated monorepo changes and root README packaging updates, but
-   refuses any executable CLI diff beyond package version, changelog, and generated
-   command reference;
+1. searches the full `main` ancestry for the newest retained attestation. When CLI
+   executable inputs, packaged session-tracker, and impact policy are byte-identical,
+   it inherits that suite result; otherwise it runs the current bounded impact plan
+   across every change since the newest retained tested ancestor. Before either path,
+   it rejects every diff outside `cli/**`, `apps/cli/**`,
+   `packages/session-tracker/**`, and `scripts/ci-scope.ts` between that attested
+   commit and the release head, including any `.github/**` change;
+2. runs `release-attestation-produce.sh` in inherit or impact mode, then binds the
+   passing result to the exact release tree;
 3. builds and packs the exact release tree, then creates annotated tag `v<version>`
    and a GitHub release carrying `release-attestation.json` plus that tarball;
 4. runs `release.sh --ci-publish`, which downloads those assets, verifies the tree
    and tarball digest, installs the tarball into a clean prefix, executes its version
    command, and publishes the same bytes to npm with provenance.
 
-npm authentication is trusted publishing: the workflow has `id-token: write`, requires
+npm authentication is trusted publishing: the `npm-publish` environment job alone has
+`id-token: write`, requires
 npm 11.5.1 or newer, and carries no npm token. Stable versions publish on `latest`; `-pre.n`
 versions publish on `next`, leaving CLI auto-update on the stable channel. The npm
 package's Trusted Publisher record must name canonical repository `phnx-labs/agi-cli` and
-workflow `release.yml`.
+workflow `release.yml`, scoped to environment `npm-publish`. That GitHub environment limits
+deployment branches to `release/**` and requires its owner reviewer.
+
+The job verifies that remote `release/<version>` still names the event commit before
+tag/release creation and immediately before npm publication. A later push of the same
+version branch therefore cannot publish the superseded workflow checkout.
 
 The ordinary path builds only the CLI. Native helpers remain content-addressed,
 independently released assets; no helper build, Apple signing, persistent host, or

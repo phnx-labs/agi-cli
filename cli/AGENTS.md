@@ -2095,13 +2095,15 @@ group with cancellation disabled.
 | Re-bind tests and build | `scripts/release-ci.sh` on GitHub Actions | the newest compatible proof in the `main` parent's ancestry is inherited only when CLI executable inputs, the packaged session-tracker, and impact policy are unchanged before the metadata-only release diff; the producer still builds and packs the exact release tree |
 | Tag, GitHub release, install smoke, npm publish | the same Actions job | `v<version>` points at the pushed branch head; the release holds `release-attestation.json` plus the bound tarball; `release.sh --ci-publish` downloads, digest-verifies, installs, executes, and publishes those same bytes |
 
-**npm authentication is OIDC only.** The workflow grants `id-token: write`, requires
+**npm authentication is OIDC only.** Only the job protected by GitHub environment
+`npm-publish` grants `id-token: write`; that environment limits deployment branches to
+`release/**` and requires its owner reviewer. The workflow requires
 npm 11.5.1 or newer (installing 12.2 when the runner is older), and supplies no
 `NODE_AUTH_TOKEN`, `NPM_TOKEN`, repository secret, or local secrets bundle.
 `release.sh --ci-publish` refuses a live publish outside Actions, without the OIDC
 request environment, or with either token variable present. The one-time owner
 configuration is the npm package's Trusted Publisher record for canonical repository
-`phnx-labs/agi-cli` and workflow file `release.yml` (the former
+`phnx-labs/agi-cli`, workflow file `release.yml`, and environment `npm-publish` (the former
 `phnx-labs/agents-cli` URL redirects, but npm requires the repository to match
 `package.json#repository.url`).
 
@@ -2201,14 +2203,22 @@ re-attributing the earlier version's release notes.
 **Tests are inherited only across a byte-identical CLI seam.** `attest-main.yml`
 runs the suite for CLI-affecting `main` trees and publishes each proof on
 `main-attestations`. Because that workflow intentionally ignores unrelated
-monorepo-only commits, the branch publisher selects the newest attested ancestor
+monorepo-only commits, the branch publisher searches the full ancestry (there is no
+arbitrary commit-count cutoff) and selects the newest attested ancestor
 whose `cli/**` executable inputs, `packages/session-tracker/**`, and
 `scripts/ci-scope.ts` policy still match the release
 commit's parent. It keeps the release branch on fresh `origin/main`, then asks
 `release-attestation-produce.sh --inherit-suite-from` to re-bind that proof. The
-derive command permits unrelated monorepo changes and root README packaging updates,
-then fails closed if any CLI source, dependency, packaged session-tracker, policy,
-or other non-release metadata differs. The release PR
+publisher first rejects every change from the selected attested commit through the
+release head that falls outside `cli/**`, `apps/cli/**`,
+`packages/session-tracker/**`, or `scripts/ci-scope.ts`; this includes `.github/**`
+and the publishing workflow itself. The derive command then fails closed if any CLI
+source, dependency, packaged session-tracker, policy, or other non-release metadata
+differs. When there is no byte-identical proof—for
+example, session-tracker or impact policy changed without triggering `attest-main`—
+the publisher selects the newest retained attested ancestor and runs the current
+impact plan across the complete diff with `--test-impact-from` before minting the
+exact release-tree proof. A missing producer never becomes an operator errand. The release PR
 still runs the ordinary required Tests check;
 that check is evidence for merging the bookkeeping PR, while the attestation is
 the evidence npm publication consumes. Cross-platform coverage remains nightly.
@@ -2247,18 +2257,22 @@ expensive suite run is inherited. The soundness gate is
 `release-attestation.sh derive` — it fails **closed** unless the tree diff between
 base and release touches only `package.json`, `.changelog/**`, `CHANGELOG.md`,
 `docs/command-index.{md,json}`, and `docs/command-reference.html` within `cli/**`
-(the exact set `release.sh` stages). Files outside the CLI package may differ
-because they cannot enter its tarball; the selector separately requires the impact
-policy to remain byte-identical, so a CLI code change can never ride a stale pass.
+(the exact set `release.sh` stages). `release-ci.sh` separately rejects every path
+outside the CLI release-input allowlist between the selected attested commit and
+the release head, so an untested workflow or unrelated repository change cannot
+ride a stale pass. The selector also requires the impact policy to remain
+byte-identical before suite inheritance, so a CLI code change cannot ride one either.
 The derived record inherits the base's
 lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
 identical to the release tree's, so `release.sh`'s `require()` still keys to it
 exactly. Inherit mode is incompatible with any `--test-*` flag (there is no suite
 to route). **`release-ci.sh` is the producer and consumer in one job**: it fetches
-the newest compatible proof in the parent ancestry, invokes inherit mode, stages the resulting attestation and
+the newest compatible proof in the parent ancestry and invokes inherit mode, or
+runs bounded impacted checks from the newest retained proof when relevant inputs
+changed. It stages the resulting attestation and
 tarball on `v<version>`, then calls `release.sh --ci-publish` to download and
-promote them. A missing compatible proof, a non-metadata CLI diff, a missing tarball,
-or a digest mismatch ends the run before npm.
+promote them. No retained proof, a failing impact plan, a missing tarball, or a
+digest mismatch ends the run before npm.
 
 **Idempotent re-runs preserve the tagged commit.** Re-run the canonical operator
 command for the same unpublished version. The release branch becomes immutable on
@@ -2267,6 +2281,9 @@ branch SHA; after tagging, it also verifies that the branch still names the peel
 tag commit. It asks GitHub over REST to rerun that exact SHA instead of synthesizing
 or force-pushing a new commit.
 The workflow replaces release assets with the newly verified proof and retries npm.
+It also rechecks that remote `release/<version>` still equals the event commit before
+tag creation and again immediately before npm, so a later same-version push cannot
+publish a superseded checkout.
 If npm already exposes the immutable version, its registry `dist.integrity` must equal
 the attested tarball's sha512 SRI before the run reports success.
 

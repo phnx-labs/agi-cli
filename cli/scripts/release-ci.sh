@@ -43,9 +43,13 @@ scripts/release-other-branch.sh "release/$VERSION" \
 
 HEAD_SHA="$(git rev-parse HEAD)"
 HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
+RELEASE_BRANCH="release/$VERSION"
+scripts/release-require-branch-head.sh origin "$RELEASE_BRANCH" "$HEAD_SHA" \
+  || die "$RELEASE_BRANCH moved after this workflow was triggered"
 
 if [[ -n "$LOCAL_ASSETS" ]]; then
-  args=("$VERSION" --ci-publish --artifacts-dir "$LOCAL_ASSETS")
+  args=("$VERSION" --ci-publish --artifacts-dir "$LOCAL_ASSETS" \
+    --expected-release-branch "$RELEASE_BRANCH")
   $PUBLISH_DRY_RUN && args+=(--publish-dry-run)
   exec scripts/release.sh "${args[@]}"
 fi
@@ -60,6 +64,13 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PARENT_SHA="$(git rev-parse 'HEAD^')" \
   || die "release commit must have one parent on main"
+git fetch --quiet origin main \
+  || die "could not fetch canonical origin/main"
+git merge-base --is-ancestor "$PARENT_SHA" origin/main \
+  || die "release parent $PARENT_SHA is not on canonical origin/main"
+scripts/release-attestation.sh validate-release-tree \
+  --repo-root "$REPO_ROOT" --base "$PARENT_SHA" --commit "$HEAD_SHA" >/dev/null \
+  || die "release/$VERSION changes files outside the release metadata allowlist"
 REPO="${GITHUB_REPOSITORY:-phnx-labs/agi-cli}"
 WORK="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agents-cli-branch-release.XXXXXX")"
 BASE_STORE="$WORK/base"
@@ -92,7 +103,10 @@ if [[ "$RELEASE_STATE" == "present" ]]; then
     if [[ -n "$EXISTING_ATTEST" ]]; then
       EXISTING_TGZ_JSON="$(scripts/release-attestation.sh tarball \
         --file "$EXISTING_ATTEST" --require-file 2>/dev/null || true)"
-      EXISTING_TGZ="$(jq -r '.path // empty' <<<"${EXISTING_TGZ_JSON:-{}}")"
+      EXISTING_TGZ=""
+      if [[ -n "$EXISTING_TGZ_JSON" ]]; then
+        EXISTING_TGZ="$(jq -r '.path // empty' <<<"$EXISTING_TGZ_JSON")"
+      fi
       if [[ -n "$EXISTING_TGZ" ]] \
         && scripts/release-attestation.sh promote \
           --file "$EXISTING_ATTEST" --tarball "$EXISTING_TGZ" >/dev/null 2>&1; then
@@ -101,8 +115,9 @@ if [[ "$RELEASE_STATE" == "present" ]]; then
     fi
   fi
   if $existing_valid; then
-    scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA"
-    exec scripts/release.sh "$VERSION" --ci-publish --artifacts-dir "$EXISTING_DIR"
+    scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA" "$RELEASE_BRANCH"
+    exec scripts/release.sh "$VERSION" --ci-publish --artifacts-dir "$EXISTING_DIR" \
+      --expected-release-branch "$RELEASE_BRANCH"
   fi
   REGISTRY_STATE="$(scripts/release-registry-state.sh "@phnx-labs/agents-cli" "$VERSION")" \
     || die "could not establish registry state before replacing invalid v$VERSION assets"
@@ -110,20 +125,34 @@ if [[ "$RELEASE_STATE" == "present" ]]; then
     || die "v$VERSION release assets are invalid but npm already exposes the immutable version; refusing to replace canonical evidence"
 fi
 
-PROOF_SHA="$(scripts/release-attested-base.sh "$REPO_ROOT" "$PARENT_SHA")" \
-  || die "release parent $PARENT_SHA has no safe main attestation in its recent ancestry"
+PROOF_MODE="--inherit"
+if ! PROOF_SHA="$(scripts/release-attested-base.sh "$REPO_ROOT" "$PARENT_SHA")"; then
+  PROOF_MODE="--impact"
+  PROOF_SHA="$(scripts/release-attested-base.sh \
+    "$REPO_ROOT" "$PARENT_SHA" --allow-relevant-drift)" \
+    || die "release parent $PARENT_SHA has no retained tested ancestor"
+fi
+scripts/release-attestation.sh validate-release-inputs \
+  --repo-root "$REPO_ROOT" --base "$PROOF_SHA" --commit "$HEAD_SHA" >/dev/null \
+  || die "release/$VERSION changes files outside the CLI release-input allowlist since attested base $PROOF_SHA"
 PROOF_TREE="$(git rev-parse "$PROOF_SHA^{tree}")"
 gh release download main-attestations \
   --repo "$REPO" \
   --pattern "attest-$PROOF_TREE.json" \
   --dir "$BASE_STORE" \
   || die "could not download the selected main proof for $PROOF_SHA"
+PROOF_WT="$WORK/proof-tree"
+git worktree add --quiet --detach "$PROOF_WT" "$PROOF_SHA" \
+  || die "could not inspect retained proof tree $PROOF_SHA"
 BASE_ATTEST="$(scripts/release-attestation.sh require \
-  --dir "$BASE_STORE" --tree "$PROOF_TREE" --repo-root "$REPO_ROOT")" \
-  || die "main proof $PROOF_SHA is not valid under this release policy"
+  --dir "$BASE_STORE" --tree "$PROOF_TREE" --repo-root "$PROOF_WT")" \
+  || die "main proof $PROOF_SHA is not valid for its attested tree"
+git worktree remove --force "$PROOF_WT" >/dev/null
 
-scripts/release-attestation-produce.sh "$HEAD_SHA" \
-  --inherit-suite-from "$BASE_ATTEST" --dir "$RELEASE_STORE" \
+PROOF_VALUE="$BASE_ATTEST"
+[[ "$PROOF_MODE" == "--inherit" ]] || PROOF_VALUE="$PROOF_SHA"
+scripts/release-ci-produce.sh "$HEAD_SHA" "$RELEASE_STORE" \
+  "$PROOF_MODE" "$PROOF_VALUE" \
   || die "could not build and attest release/$VERSION"
 RELEASE_ATTEST="$(scripts/release-attestation.sh require \
   --dir "$RELEASE_STORE" --tree "$HEAD_TREE" --repo-root "$REPO_ROOT")" \
@@ -134,7 +163,7 @@ scripts/release-attestation.sh promote --file "$RELEASE_ATTEST" --tarball "$TGZ"
 cp "$RELEASE_ATTEST" "$ASSET_DIR/release-attestation.json"
 cp "$TGZ" "$ASSET_DIR/$(basename "$TGZ")"
 
-scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA"
+scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA" "$RELEASE_BRANCH"
 
 release_args=("v$VERSION" "$ASSET_DIR"/* --verify-tag --title "v$VERSION")
 release_args+=(--notes-file ".changelog/$VERSION.md")
@@ -147,4 +176,4 @@ else
     --repo "$REPO"
 fi
 
-scripts/release.sh "$VERSION" --ci-publish
+scripts/release.sh "$VERSION" --ci-publish --expected-release-branch "$RELEASE_BRANCH"

@@ -266,9 +266,24 @@ promote_tarball() {
   printf '%s\n' "$TGZ"
 }
 
+release_diff_is_cli_scoped() {
+  local root="$1" base_tree="$2" rel_tree="$3" line rel
+  local changed
+  changed="$(git -C "$root" diff --name-only "$base_tree" "$rel_tree")" \
+    || die "cannot diff base tree ${base_tree:0:12} against release tree ${rel_tree:0:12}"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      cli/*|apps/cli/*|packages/session-tracker/*|scripts/ci-scope.ts) ;;
+      *) die "release diff refused: '$line' is outside the CLI release-input allowlist" ;;
+    esac
+  done <<< "$changed"
+}
+
 release_diff_is_metadata_only() {
   local root="$1" base_tree="$2" rel_tree="$3" line rel
   local changed
+  release_diff_is_cli_scoped "$root" "$base_tree" "$rel_tree"
   changed="$(git -C "$root" diff --name-only "$base_tree" "$rel_tree")" \
     || die "cannot diff base tree ${base_tree:0:12} against release tree ${rel_tree:0:12}"
   while IFS= read -r line; do
@@ -281,8 +296,7 @@ release_diff_is_metadata_only() {
       scripts/ci-scope.ts)
         die "derive refused: release policy changes '$line' -- run the full suite for this tree"
         ;;
-      README.md) continue ;;
-      *) continue ;;
+      *) die "derive refused: unexpected release path '$line' after CLI allowlist validation" ;;
     esac
     rel="$line"
     rel="${rel#apps/cli/}"
@@ -293,6 +307,30 @@ release_diff_is_metadata_only() {
       *) die "derive refused: release tree changes '$line' beyond CLI version/changelog/command-index -- run the full suite for this tree" ;;
     esac
   done <<< "$changed"
+}
+
+validate_release_inputs() {
+  [[ -n "$BASE" ]] || die "validate-release-inputs needs --base COMMIT"
+  local root base_tree rel_tree
+  root="$(resolve_repo_root)"
+  base_tree="$(git -C "$root" rev-parse "$BASE^{tree}")" \
+    || die "cannot resolve attested base $BASE"
+  rel_tree="$(git -C "$root" rev-parse "$COMMIT^{tree}")" \
+    || die "cannot resolve release commit $COMMIT"
+  release_diff_is_cli_scoped "$root" "$base_tree" "$rel_tree"
+  printf '%s\n' "$rel_tree"
+}
+
+validate_release_tree() {
+  [[ -n "$BASE" ]] || die "validate-release-tree needs --base COMMIT"
+  local root base_tree rel_tree
+  root="$(resolve_repo_root)"
+  base_tree="$(git -C "$root" rev-parse "$BASE^{tree}")" \
+    || die "cannot resolve release base $BASE"
+  rel_tree="$(git -C "$root" rev-parse "$COMMIT^{tree}")" \
+    || die "cannot resolve release commit $COMMIT"
+  release_diff_is_metadata_only "$root" "$base_tree" "$rel_tree"
+  printf '%s\n' "$rel_tree"
 }
 
 derive_release_tree() {
@@ -375,6 +413,8 @@ case "$CMD" in
   require) require_from_dir ;;
   tarball) tarball_from_file ;;
   promote) promote_tarball ;;
+  validate-release-inputs) validate_release_inputs ;;
+  validate-release-tree) validate_release_tree ;;
   derive) derive_release_tree ;;
-  *) die "unknown command: $CMD (try identity|key|write|verify|require|tarball|promote|derive)" ;;
+  *) die "unknown command: $CMD (try identity|key|write|verify|require|tarball|promote|validate-release-inputs|validate-release-tree|derive)" ;;
 esac

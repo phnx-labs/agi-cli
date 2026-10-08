@@ -108,13 +108,14 @@ describe('release-worktree.sh', () => {
     expect(result.stderr).toContain('inherits proof from attested ancestor');
   });
 
-  it('refuses an older proof when current main changed the CLI', () => {
-    const { caller } = fixture('echo must-not-run');
+  it('keeps current main and delegates relevant drift to impact retesting', () => {
+    const { caller } = fixture('printf "HEAD=%s\\n" "$(git rev-parse HEAD)"');
     const attested = git(caller, 'rev-parse', 'origin/main');
     fs.writeFileSync(path.join(caller, 'cli/release-code.sh'), 'changed\n');
     git(caller, 'add', 'cli/release-code.sh');
     git(caller, 'commit', '-m', 'change cli release code');
     git(caller, 'push', 'origin', 'main');
+    const tip = git(caller, 'rev-parse', 'origin/main');
 
     const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
       cwd: caller,
@@ -122,9 +123,9 @@ describe('release-worktree.sh', () => {
       env: withAttestation(caller, attested),
     });
 
-    expect(result.status).not.toBe(0);
-    expect(result.stdout).not.toContain('must-not-run');
-    expect(result.stderr).toContain('no attested origin/main ancestor');
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`HEAD=${tip}`);
+    expect(result.stderr).toContain('will impact-test');
   });
 
   it('fails before release preparation when main history has no attested tree', () => {

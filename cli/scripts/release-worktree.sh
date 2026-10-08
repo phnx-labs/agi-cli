@@ -26,12 +26,22 @@ trap cleanup EXIT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RELEASE_BASE="origin/$DEFAULT_BRANCH"
-PROOF_BASE="$("$SCRIPT_DIR/release-attested-base.sh" "$REPO_ROOT" "$RELEASE_BASE")" \
-  || { echo "error: no attested origin/$DEFAULT_BRANCH ancestor is available for release" >&2; exit 1; }
+PROOF_MODE="compatible"
+if ! PROOF_BASE="$("$SCRIPT_DIR/release-attested-base.sh" "$REPO_ROOT" "$RELEASE_BASE")"; then
+  PROOF_MODE="impact"
+  PROOF_BASE="$("$SCRIPT_DIR/release-attested-base.sh" \
+    "$REPO_ROOT" "$RELEASE_BASE" --allow-relevant-drift)" \
+    || { echo "error: no attested origin/$DEFAULT_BRANCH ancestor is available for release" >&2; exit 1; }
+fi
 if [[ "$(git -C "$REPO_ROOT" rev-parse "$PROOF_BASE")" != "$(git -C "$REPO_ROOT" rev-parse "$RELEASE_BASE")" ]]; then
   behind="$(git -C "$REPO_ROOT" rev-list --count "$PROOF_BASE..$RELEASE_BASE")"
-  printf 'note: current origin/%s inherits proof from attested ancestor %s across %s release-irrelevant commit(s)\n' \
-    "$DEFAULT_BRANCH" "${PROOF_BASE:0:9}" "$behind" >&2
+  if [[ "$PROOF_MODE" == "compatible" ]]; then
+    printf 'note: current origin/%s inherits proof from attested ancestor %s across %s release-irrelevant commit(s)\n' \
+      "$DEFAULT_BRANCH" "${PROOF_BASE:0:9}" "$behind" >&2
+  else
+    printf 'note: current origin/%s will impact-test %s commit(s) since attested ancestor %s in the release workflow\n' \
+      "$DEFAULT_BRANCH" "$behind" "${PROOF_BASE:0:9}" >&2
+  fi
 fi
 
 git -C "$REPO_ROOT" worktree add --quiet --detach "$WORKTREE" "$RELEASE_BASE" \

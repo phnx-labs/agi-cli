@@ -26,13 +26,14 @@ function fixture() {
   git(repo, 'add', '.');
   git(repo, 'commit', '-m', 'release 1.2.3');
   git(repo, 'remote', 'add', 'origin', remote);
+  git(repo, 'push', 'origin', 'HEAD:refs/heads/release/1.2.3');
   return { remote, repo, head: git(repo, 'rev-parse', 'HEAD') };
 }
 
 describe('release tag recovery', () => {
   it('recreates a missing annotated tag before publishing existing valid assets', () => {
     const { remote, repo, head } = fixture();
-    const result = spawnSync('bash', [SCRIPT, '1.2.3', head, ''], {
+    const result = spawnSync('bash', [SCRIPT, '1.2.3', head, '', 'release/1.2.3'], {
       cwd: repo,
       encoding: 'utf-8',
     });
