@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_60 command groups · 478 commands._
+_61 command groups · 483 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -467,6 +467,16 @@ agents ps focus [selector]      Focus sessions by id, harness/version, topic, de
 agents ps migrate [session-id]  Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
 agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
+```
+
+## recordings: Publish finished CleanShot recordings as organization-only artifacts.
+
+```
+agents recordings                Publish finished CleanShot recordings as organization-only artifacts.
+agents recordings list           List the local recording ledger with upload status and URL.
+agents recordings unwatch        Disable the recordings watcher on this device.
+agents recordings upload <file>  Transcode and publish one recording through the watcher pipeline.
+agents recordings watch          Enable the daemon-owned CleanShot watcher and persist its folder.
 ```
 
 ## registry: Manage package registries

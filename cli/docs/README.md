@@ -28,6 +28,7 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
   [version-management](version-management.md), [resource-sync](resource-sync.md),
   [self-healing](self-healing.md)
 - Tools: [browser](browser.md), [computer](computer.md)
+- Media: [recordings](recordings.md)
 - Orchestration: [teams](teams.md), [routines](routines.md),
   [cloud](cloud.md)
 - Resources: [hooks](hooks.md), [subagents](subagents.md), [plugins](plugins.md),

@@ -421,6 +421,28 @@ Sharing a session uses `agents sessions render <id> -o session.md`, not the raw 
 
 `agents sessions share <id>` goes one step further and publishes that document as a self-contained web page on your own share endpoint, printing the link. It is **unlisted** unless you pass `--public` — a transcript carries file paths, command output, and error text that a plan does not, so it stays out of your public gallery by default, and emails are masked on top of the render's own redaction. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
 
+### Publish CleanShot recordings
+
+The opt-in recordings service turns finished CleanShot exports into organization-only
+artifacts. It watches on the daemon's schedule, waits until the file size has stopped
+changing for 10 seconds, creates a temporary 1080p/30fps H.264 copy, and leaves the
+original untouched:
+
+```bash
+agents recordings watch                       # use CleanShot's macOS exportPath
+agents recordings watch --dir ~/Movies/Demos # or choose a folder
+agents recordings list                        # queued, failed, and published rows
+agents recordings upload ./demo.mov           # one file through the same pipeline
+agents recordings unwatch
+```
+
+Install `ffmpeg` and `@phnx-labs/artifacts-cli`, then sign in to `artifacts` with an
+organization email. Every publish uses `--visibility org --expire never`; public inbox
+identities are refused rather than turning a team recording into a personal artifact.
+CleanShot re-exports such as `… AM 3.mp4` replace the earlier artifact at the same slug.
+The restart-safe ledger is `~/.agents/recordings/ledger.json`. See
+[the recordings guide](cli/docs/recordings.md) for the data flow and failure behavior.
+
 ### Back up sessions off-box
 
 Signed-in Phoenix users can back sessions up without creating a Cloudflare bucket or
@@ -1410,7 +1432,7 @@ session-index service keeps current; it never starts or restarts the daemon.
 Each verb runs the same engine as its `agents sessions` spelling (`--roots`,
 `optimize`, `backfill`), which keeps working.
 
-Each hosted responsibility (browser IPC, scheduler, watchdog, device
+Each hosted responsibility (browser IPC, scheduler, watchdog, recordings, device
 probe, self-heal, self-update, account-state refresh, state-dir checks) is an
 independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
@@ -1419,9 +1441,10 @@ supervisor relaunches the daemon onto the new code — the daemon used to run
 with auto-update forced off and only picked up new code on a manual
 `agents daemon restart`.
 `agents daemon services list` shows every service; `enable|disable <id>` flips
-one. Missing keys default to enabled, so upgrades are no-ops. Most services take
+one. Missing keys default to enabled except the opt-in `recordings` service. Most services take
 effect on the next daemon start; browser IPC is registered even when boot-disabled
-so browser commands can enable it live, while the scheduler also
+so browser commands can enable it live; recordings is also registered while disabled
+so `agents recordings watch` can enable it live, while the scheduler
 re-evaluates on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
 whole process lifecycle. Browser and routines clients change their own service
 state without evicting sibling work.
