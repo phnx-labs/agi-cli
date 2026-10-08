@@ -17,7 +17,8 @@ agents recordings unwatch
 On macOS, `watch` reads `pl.maketheweb.cleanshotx exportPath` when `--dir` is not
 given. The selected folder persists in `~/.agents/recordings/config.json`.
 `watch` enables the otherwise-disabled `recordings` daemon service and signals a
-running daemon to apply it live. `unwatch` disables only this service.
+running daemon to apply it live. Its persisted enable time is the discovery baseline:
+files already in the folder are not bulk-published. `unwatch` disables only this service.
 
 Use `agents recordings upload <file>` for one existing `.mp4` or `.mov`; it uses
 the same checks, transcode, metadata, and ledger as automatic discovery.
@@ -39,7 +40,8 @@ are removed after either success or failure.
 
 The artifacts metadata records `source=cleanshot`, the device, file birth time,
 and canonical CleanShot stem. It also records a session id only when exactly one
-local agents session was active when recording began.
+local agents session was active when the export was first observed and that session
+had started by the file birth time.
 
 ## Re-exports, retries, and access
 

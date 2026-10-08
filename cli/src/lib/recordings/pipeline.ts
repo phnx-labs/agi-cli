@@ -5,7 +5,7 @@ import { RecordingIdentityError, verifyOrganizationIdentity } from './identity.j
 import { RecordingLedger } from './ledger.js';
 import { isNewerRecording, type RecordingCandidate, type RecordingLedgerRow } from './model.js';
 import { processFailure, runProcess } from './process.js';
-import { transcodeRecording, type TranscodedRecording } from './transcode.js';
+import { RecordingDependencyError, transcodeRecording, type TranscodedRecording } from './transcode.js';
 
 interface ActiveUpload {
   candidate: RecordingCandidate;
@@ -168,26 +168,37 @@ export class RecordingPipeline {
     const promise = (async (): Promise<RecordingLedgerRow | null> => {
       let transcoded: TranscodedRecording | undefined;
       try {
-        await this.ledger.update(candidate.stem, candidate.path, { status: 'transcoding', error: null, retryAt: undefined });
+        if (!await this.ledger.claim(candidate.stem, candidate.path)) return null;
         transcoded = await this.transcode(candidate.path, controller.signal);
         await this.ledger.update(candidate.stem, candidate.path, { status: 'uploading' });
         const url = await this.share(candidate, transcoded.filePath, controller.signal);
-        return await this.ledger.update(candidate.stem, candidate.path, {
+        const row = await this.ledger.update(candidate.stem, candidate.path, {
           status: 'uploaded',
           url,
           error: null,
           retryAt: undefined,
         });
+        await this.ledger.clearAttention();
+        return row;
       } catch (error) {
         if (active.superseded) return null;
         if (error instanceof RecordingIdentityError && error.code === 'AUTH_REQUIRED') {
           await this.ledger.update(candidate.stem, candidate.path, {
             status: 'queued',
             error: error.message,
-            retryAt: undefined,
+            retryAt: new Date(Date.now() + this.retryDelayMs).toISOString(),
           });
           await this.attention(error.message);
-          return null;
+          throw error;
+        }
+        if (error instanceof RecordingDependencyError) {
+          await this.ledger.update(candidate.stem, candidate.path, {
+            status: 'failed',
+            error: error.message,
+            retryAt: new Date(Date.now() + this.retryDelayMs).toISOString(),
+          });
+          await this.attention(error.message);
+          throw error;
         }
         const message = error instanceof Error ? error.message : String(error);
         await this.ledger.update(candidate.stem, candidate.path, {
@@ -216,11 +227,11 @@ export class RecordingPipeline {
     if (candidates.length === 0) return [];
     try {
       await this.verifyIdentity(options.signal);
-      await this.ledger.clearAttention();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const retryAt = new Date(Date.now() + this.retryDelayMs).toISOString();
       for (const candidate of candidates) {
-        await this.ledger.update(candidate.stem, candidate.path, { status: 'queued', error: message });
+        await this.ledger.update(candidate.stem, candidate.path, { status: 'queued', error: message, retryAt });
       }
       await this.attention(message);
       throw error;
@@ -233,9 +244,27 @@ export class RecordingPipeline {
 
   async upload(candidate: RecordingCandidate, signal?: AbortSignal): Promise<RecordingLedgerRow> {
     this.observeLatest(candidate);
-    await this.queue([candidate]);
-    const rows = await this.drain({ signal });
-    const row = rows.find((entry) => entry.stem === candidate.stem && entry.path === candidate.path);
+    const queued = await this.ledger.queue(candidate);
+    if (queued.status === 'uploaded') return queued;
+    if (queued.status === 'transcoding' || queued.status === 'uploading') {
+      throw new Error(`Recording upload is already in progress: ${candidate.path}`);
+    }
+    if (queued.status === 'failed' || queued.retryAt) {
+      await this.ledger.update(candidate.stem, candidate.path, { status: 'queued', retryAt: undefined });
+    }
+    try {
+      await this.verifyIdentity(signal);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.ledger.update(candidate.stem, candidate.path, {
+        status: 'queued',
+        error: message,
+        retryAt: new Date(Date.now() + this.retryDelayMs).toISOString(),
+      });
+      await this.attention(message);
+      throw error;
+    }
+    const row = await this.start(candidate);
     if (!row || row.status !== 'uploaded') throw new Error(`Recording did not upload: ${candidate.path}`);
     return row;
   }
