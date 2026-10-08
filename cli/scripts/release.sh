@@ -69,10 +69,6 @@ run_ci_publish() {
   command -v jq >/dev/null || die "jq not found"
 
   local npm_version checked_out_ver repo_root tree assets attest tgz_json tgz dist_tag published
-  npm_version="$(npm --version)"
-  npm_version_at_least "$npm_version" "11.5.1" \
-    || die "npm >=11.5.1 is required for trusted publishing (found $npm_version)"
-
   checked_out_ver="$(jq -r .version package.json)"
   [[ "$checked_out_ver" == "$TARGET" ]] \
     || die "checked-out package is $checked_out_ver, not $TARGET"
@@ -84,6 +80,9 @@ run_ci_publish() {
       || die "GitHub OIDC is unavailable; grant permissions: id-token: write"
     [[ -z "${NODE_AUTH_TOKEN:-}" && -z "${NPM_TOKEN:-}" ]] \
       || die "stored npm tokens are forbidden on the release publisher"
+    npm_version="$(npm --version)"
+    npm_version_at_least "$npm_version" "11.5.1" \
+      || die "npm >=11.5.1 is required for trusted publishing (found $npm_version)"
   fi
 
   repo_root="$(git rev-parse --show-toplevel)"
