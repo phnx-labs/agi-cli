@@ -1285,16 +1285,8 @@ SSH access (§7); rendering sessions that no harness produced.
   (PHNX-3411) (`lib/session/db.ts`; `lib/session/tool-store.ts`; `sessions-cli/src/lib/session/tool-calls.ts`).
 - **SES-35 (resolved).** Fleet tool search moved with the query side to the
   standalone `sessions` CLI (`--host`); see SES-33.
-- **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
-  sessions, read the current device directly, balance deterministic selection
-  across available requested machines, retain only redacted shell-call origins
-  and classifications, bound each candidate query to at most twice the requested
-  sample size, retain successful candidate classes when another class exceeds
-  its evidence envelope, retain the last successful partial pass when a later
-  pass fails, report every failed class and source as partial coverage, cap its
-  JSON artifact at 16 MiB, and record
-  `sample_byte_limit` with partial coverage instead of silently dropping evidence
-  (`scripts/sample-session-shell-commands.ts:17-25,82-136,149-256,308-402,404-479`).
+- **SES-36 (resolved).** The shell-command sampling script left with the tool
+  search it sampled (PHNX-4227); sample with `sessions --include tools`.
 - **SES-37 (MUST).** Static Bash extraction MUST retain every statically
   identifiable program site in transcript order, including repeated programs
   within one tool call. It MUST classify wrapper chains as `wrapper` and their

@@ -89,11 +89,10 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-missing-'));
     try {
       writeUpdateCache(home);
-      const cleanPath = (process.env.PATH ?? '')
-        .split(path.delimiter)
-        .filter((dir) => dir && !fs.existsSync(path.join(dir, 'sessions')))
-        .join(path.delimiter);
-      const r = runAgents(['sessions', '--json', '--no-interactive'], REPO_ROOT, home, { PATH: cleanPath, SESSIONS_BIN: '', AGENTS_NO_AUTOPULL: '1' });
+      const nodeOnly = path.join(home, 'node-only');
+      fs.mkdirSync(nodeOnly);
+      fs.symlinkSync(process.execPath, path.join(nodeOnly, 'node'));
+      const r = runAgents(['sessions', '--json', '--no-interactive'], REPO_ROOT, home, { PATH: nodeOnly, SESSIONS_BIN: '', AGENTS_NO_AUTOPULL: '1' });
       expect(r.status).toBe(1);
       expect(r.stderr).toContain('the standalone `sessions` CLI was not found');
       expect(r.stdout).toBe('');
