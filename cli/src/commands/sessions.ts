@@ -27,11 +27,11 @@ import {
   loadLocalActiveSessions,
   readActiveSessionsCache,
 } from '../lib/session/session-cache.js';
-import { gatherRemoteList, gatherRemoteToolProgramCounts, gatherRemoteToolSearch, runOnPeer } from '../lib/session/remote-list.js';
+import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
-import { discoverSessions, queryIndexedSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, scopeToManaged, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionTimelineAny } from '../lib/session/db.js';
 import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTail } from '@phnx-labs/sessions-cli/reader';
@@ -79,7 +79,6 @@ import {
   isAwaitingUser,
   liveGlyphAndPreview,
   liveStatusWord,
-  remoteHostsToDial,
   requestedLiveStatuses,
   resolveRoutineName,
   runLiveRoster,
@@ -103,7 +102,6 @@ export {
   resolveViewMode,
   type TranscriptRenderOptions,
 } from '../lib/session/presentation.js';
-import { registerSessionsTailCommand } from './sessions-tail.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsForkCommand } from './fork.js';
 import { registerSessionsBookmarkCommand } from './sessions-bookmark.js';
@@ -127,19 +125,6 @@ import { registerSessionsWatchCommand } from './sessions-watch.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 import { buildComputerSessionRows, type ComputerRunRow } from '../lib/computer/sessions-list.js';
-import {
-  countToolProgramOccurrences,
-  parseToolProgramCountClause,
-  readToolIndexCoverage,
-  searchToolCalls,
-  TOOL_QUERY_MAX_CLAUSE_BYTES,
-  TOOL_QUERY_MAX_CLAUSES,
-  TOOL_QUERY_MAX_RESULT_SESSIONS,
-  serializeToolSearchEnvelope,
-  toolSearchRemoteReceiveBudget,
-  type ToolSearchEnvelope,
-  type ToolProgramCountEnvelope,
-} from '../lib/session/tool-index.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
 
@@ -192,8 +177,6 @@ interface SessionsOptions extends SessionFilterOptions, TranscriptRenderOptions 
   local?: boolean;
   device?: string[];
   devices?: string[];
-  fleet?: boolean;
-  count?: boolean;
   claude?: boolean;
   codex?: boolean;
   kimi?: boolean;
@@ -1175,210 +1158,26 @@ export function formatLiveStatusHeadline(live: ActiveSession | undefined, bookma
   return `${star}${glyph} ${statusColor(live.status)(word)}${suffix}`;
 }
 
-export function mergeToolSearchEnvelopes(
-  local: ToolSearchEnvelope,
-  remotes: ToolSearchEnvelope[],
-): ToolSearchEnvelope {
-  const all = [local, ...remotes];
-  const sessions = new Map<string, ToolSearchEnvelope['sessions'][number]>();
-  for (const envelope of all) {
-    for (const session of envelope.sessions) {
-      sessions.set(`${session.machine ?? 'local'}\0${session.id}`, session);
-    }
-  }
-  return {
-    schemaVersion: 1,
-    generatedAt: new Date().toISOString(),
-    query: local.query,
-    coverage: {
-      indexedFiles: all.reduce((n, envelope) => n + envelope.coverage.indexedFiles, 0),
-      indexedCalls: all.reduce((n, envelope) => n + envelope.coverage.indexedCalls, 0),
-      skippedFiles: all.reduce((n, envelope) => n + envelope.coverage.skippedFiles, 0),
-      limitedFiles: all.reduce((n, envelope) => n + envelope.coverage.limitedFiles, 0),
-      remainingFiles: all.reduce((n, envelope) => n + envelope.coverage.remainingFiles, 0),
-      complete: all.every((envelope) => envelope.coverage.complete),
-    },
-    sessions: [...sessions.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
-  };
-}
-
-export function mergeToolProgramCountEnvelopes(
-  local: ToolProgramCountEnvelope,
-  remotes: ToolProgramCountEnvelope[],
-): ToolProgramCountEnvelope {
-  const all = [local, ...remotes];
-  return {
-    schemaVersion: 1,
-    kind: 'tool-program-count',
-    generatedAt: new Date().toISOString(),
-    query: local.query,
-    coverage: {
-      indexedFiles: all.reduce((sum, envelope) => sum + envelope.coverage.indexedFiles, 0),
-      indexedCalls: all.reduce((sum, envelope) => sum + envelope.coverage.indexedCalls, 0),
-      skippedFiles: all.reduce((sum, envelope) => sum + envelope.coverage.skippedFiles, 0),
-      limitedFiles: all.reduce((sum, envelope) => sum + envelope.coverage.limitedFiles, 0),
-      remainingFiles: all.reduce((sum, envelope) => sum + envelope.coverage.remainingFiles, 0),
-      complete: all.every((envelope) => envelope.coverage.complete),
-    },
-    totals: {
-      occurrences: all.reduce((sum, envelope) => sum + envelope.totals.occurrences, 0),
-      toolCalls: all.reduce((sum, envelope) => sum + envelope.totals.toolCalls, 0),
-      sessions: all.reduce((sum, envelope) => sum + envelope.totals.sessions, 0),
-    },
-    machines: all.flatMap((envelope) => envelope.machines),
-  };
-}
-
-export function toolOriginSessions(
-  sessions: SessionMeta[],
-  machine: string,
-  originOnly: boolean,
-): SessionMeta[] {
-  return originOnly
-    ? sessions.filter((session) => (session.machine ?? machine) === machine)
-    : sessions;
-}
-
-function printToolProgramCount(envelope: ToolProgramCountEnvelope): void {
-  const { totals } = envelope;
-  const qualifier = envelope.coverage.complete ? '' : 'at least ';
-  console.log(
-    `${envelope.query.program}: ${qualifier}${totals.occurrences.toLocaleString()} static occurrence${totals.occurrences === 1 ? '' : 's'} `
-    + `in ${totals.toolCalls.toLocaleString()} tool call${totals.toolCalls === 1 ? '' : 's'} `
-    + `across ${totals.sessions.toLocaleString()} session${totals.sessions === 1 ? '' : 's'}.`,
-  );
-  if (!envelope.coverage.complete) {
-    console.log(chalk.yellow(
-      `Partial tool index: ${envelope.coverage.remainingFiles.toLocaleString()} transcript${envelope.coverage.remainingFiles === 1 ? '' : 's'} still need `
-      + '`agents sessions backfill tools`.',
-    ));
-  }
-}
-
-export function toolSearchFleetSortError(sort: string | undefined, spansDevices: boolean): string | undefined {
-  if (!spansDevices || !sort || sort === 'recent') return undefined;
-  return 'Tool search across devices supports only --sort recent; cost and duration are local-only.';
-}
-
-function printToolSearch(envelope: ToolSearchEnvelope): void {
-  for (const session of envelope.sessions) {
-    const machineName = session.machine
-      ? truncate(sanitizeForTerminal(session.machine).replace(/\s+/g, ' '), 80)
-      : '';
-    const machine = machineName ? ` @ ${machineName}` : '';
-    const rawHeading = sessionHeadline(session) || session.project || session.shortId;
-    const heading = truncate(
-      sanitizeForTerminal(rawHeading).replace(/\s+/g, ' '),
-      Math.max(30, terminalWidth() - 20),
-    );
-    console.log(`${chalk.cyan(session.shortId)}${chalk.gray(machine)}  ${heading}`);
-    for (const call of session.calls) {
-      const tool = truncate(sanitizeForTerminal(call.tool).replace(/\s+/g, ' '), 80);
-      const safePrograms = call.programs.map((program) =>
-        truncate(sanitizeForTerminal(program).replace(/\s+/g, ' '), 80));
-      const programs = safePrograms.length > 0 ? ` [${safePrograms.join(', ')}]` : '';
-      const status = call.outcome === 'unknown' ? '' : ` ${call.outcome}`;
-      const input = truncate(
-        sanitizeForTerminal(call.input).replace(/\s+/g, ' '),
-        Math.max(30, terminalWidth() - 26),
-      );
-      console.log(`  ${chalk.gray(`#${call.ordinal + 1}`)} ${tool}${programs}${status}  ${input}`);
-      const snippet = call.error || call.output;
-      if (snippet) {
-        console.log(`     ${chalk.gray(truncate(
-          sanitizeForTerminal(snippet).replace(/\s+/g, ' '),
-          Math.max(30, terminalWidth() - 8),
-        ))}`);
-      }
-    }
-    console.log();
-  }
-  const count = envelope.sessions.length;
-  console.log(chalk.gray(`${count} matching session${count === 1 ? '' : 's'}.`));
-  if (!envelope.coverage.complete) {
-    const skipped = envelope.coverage.skippedFiles > 0
-      ? ` ${envelope.coverage.skippedFiles} transcript${envelope.coverage.skippedFiles === 1 ? ' was' : 's were'} skipped.`
-      : '';
-    const limited = envelope.coverage.limitedFiles > 0
-      ? ` ${envelope.coverage.limitedFiles} transcript${envelope.coverage.limitedFiles === 1 ? ' has' : 's have'} incomplete evidence because a safety limit was reached.`
-      : '';
-    const retry = envelope.coverage.remainingFiles > 0
-      ? ' Run `agents sessions backfill tools` to index historical transcripts.'
-      : '';
-    console.log(chalk.yellow(
-      `Tool index coverage is partial: ${envelope.coverage.remainingFiles} transcript${envelope.coverage.remainingFiles === 1 ? '' : 's'} remain.${skipped}${limited}${retry}`,
-    ));
-  }
-}
-
 async function sessionsAction(
   query: string | undefined,
   options: SessionsOptions,
   limitSource?: string
 ): Promise<void> {
-  const queryClauses = options.query ?? [];
   const liveStatuses = requestedLiveStatuses(options);
   const liveOnly = options.active === true || liveStatuses.length > 0;
-  const toolOnly = options.include?.split(',').map((role) => role.trim()).filter(Boolean).join(',') === 'tools';
-  const toolEvidenceMode = toolOnly;
-  if (options.count && !toolOnly) {
-    console.error(chalk.red('--count requires --include tools.'));
+  if (options.include?.split(',').map((role) => role.trim()).filter(Boolean).join(',') === 'tools') {
+    console.error(chalk.red('Tool-call search lives in the standalone sessions CLI:'));
+    console.error(chalk.gray("  sessions --include tools --query 'program:git' [--count] [--host <device>] [--json]"));
+    process.exitCode = 2;
+    return;
+  }
+  const queryClauses = options.query ?? [];
+  if (queryClauses.length > 1) {
+    console.error(chalk.red('Pass --query once.'));
     process.exitCode = 1;
     return;
   }
-  if (!toolEvidenceMode) {
-    if (queryClauses.length > 1) {
-      console.error(chalk.red('Repeated --query clauses require --include tools.'));
-      process.exitCode = 1;
-      return;
-    }
-    query = query ?? queryClauses[0];
-  }
-  if (options.fleet && !toolEvidenceMode) {
-    console.error(chalk.red('--fleet applies to tool-call queries: add --include tools.'));
-    process.exitCode = 1;
-    return;
-  }
-  if (toolEvidenceMode && (options.markdown || options.redact === false)) {
-    const incompatible = [
-      options.markdown ? '--markdown' : undefined,
-      options.redact === false ? '--no-redact' : undefined,
-    ].filter((flag): flag is string => flag !== undefined);
-    console.error(chalk.red(`${incompatible.join(' and ')} cannot be used with --include tools.`));
-    console.error(chalk.gray('Tool evidence is always redacted and byte-bounded; drop the conflicting render flag.'));
-    process.exitCode = 1;
-    return;
-  }
-  if (toolEvidenceMode && queryClauses.length > TOOL_QUERY_MAX_CLAUSES) {
-    console.error(chalk.red(`Tool search accepts at most ${TOOL_QUERY_MAX_CLAUSES} --query clauses.`));
-    process.exitCode = 1;
-    return;
-  }
-  if (toolEvidenceMode && queryClauses.some((clause) => Buffer.byteLength(clause) > TOOL_QUERY_MAX_CLAUSE_BYTES)) {
-    console.error(chalk.red(`Each tool --query clause is limited to ${TOOL_QUERY_MAX_CLAUSE_BYTES} bytes.`));
-    process.exitCode = 1;
-    return;
-  }
-  if (options.count && (queryClauses.length !== 1 || query !== undefined)) {
-    console.error(chalk.red('--count requires exactly one --query program:<name> clause and no positional query.'));
-    process.exitCode = 1;
-    return;
-  }
-  if (options.count && (limitSource === 'cli' || limitSource === 'env')) {
-    console.error(chalk.red('--count covers the complete filtered scope and cannot be combined with --limit.'));
-    process.exitCode = 1;
-    return;
-  }
-  let countProgram: string | undefined;
-  if (options.count) {
-    try {
-      countProgram = parseToolProgramCountClause(queryClauses[0]);
-    } catch (error) {
-      console.error(chalk.red(error instanceof Error ? error.message : String(error)));
-      process.exitCode = 1;
-      return;
-    }
-  }
+  query = query ?? queryClauses[0];
 
   applyAgentShorthands(options);
   try {
@@ -1447,14 +1246,7 @@ async function sessionsAction(
     return;
   }
 
-  if (toolEvidenceMode && options.local === true
-    && options.host && !shouldIncludeLocal(options.host, machineId())) {
-    console.error(chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.'));
-    console.error(chalk.gray('Drop one — `--device <box>` to read that machine, `--local` to stay on this one.'));
-    process.exit(1);
-  }
-
-  if (options.host && options.host.length > 0 && !liveOnly && !toolEvidenceMode) {
+  if (options.host && options.host.length > 0 && !liveOnly) {
     if (options.local === true && !shouldIncludeLocal(options.host, machineId())) {
       console.error(
         chalk.red('--local and --device name opposite scopes: --local skips the SSH fan-out that --device needs.')
@@ -1551,7 +1343,7 @@ async function sessionsAction(
   }
 
   const mode = resolveViewMode(options, filterOpts);
-  const wantsRender = !toolEvidenceMode && (mode === 'markdown' || hasAnyFilter(filterOpts));
+  const wantsRender = mode === 'markdown' || hasAnyFilter(filterOpts);
 
   if ((options.artifacts || options.artifact !== undefined) && searchQuery) {
     await renderArtifactsGlobal(
@@ -1563,7 +1355,7 @@ async function sessionsAction(
     return;
   }
 
-  if (!toolEvidenceMode && searchQuery && looksLikeSessionId(searchQuery)) {
+  if (searchQuery && looksLikeSessionId(searchQuery)) {
     await renderOneSession(searchQuery, mode, { agent: options.agent, project: options.project, routine: options.routine, filter: filterOpts, redact: options.redact, local: options.local, hosts: options.host });
     return;
   }
@@ -1584,22 +1376,9 @@ async function sessionsAction(
         userSetLimit ? options.limit! : wantsWholeTeam || wantsWholeRoutine ? String(WHOLE_TEAM_POOL_LIMIT) : DEFAULT_LIMIT,
         10
       );
-  if (toolEvidenceMode && (!Number.isSafeInteger(limit) || limit < 1 || limit > TOOL_QUERY_MAX_RESULT_SESSIONS)) {
-    console.error(chalk.red(`Tool search --limit must be from 1 to ${TOOL_QUERY_MAX_RESULT_SESSIONS}.`));
-    process.exitCode = 1;
-    return;
-  }
   const since = wantsOverview
     ? options.since
     : (options.since ?? (isInteractive && !options.all && !wantsWholeTeam && !wantsWholeRoutine ? '30d' : undefined));
-  const toolSpansDevices = toolEvidenceMode
-    && (options.fleet || (options.host?.length ?? 0) > 0);
-  const toolSortError = toolSearchFleetSortError(options.sort, toolSpansDevices);
-  if (toolSortError) {
-    console.error(chalk.red(toolSortError));
-    process.exitCode = 1;
-    return;
-  }
   const spinner = options.json ? null : ora().start();
   const tracker = createScanProgressTracker(LOAD_VERBS, 'sessions', spinner);
 
@@ -1610,54 +1389,27 @@ async function sessionsAction(
     const scope: DiscoverOptions = {
       agent,
       version,
-      all: pathFilter ? undefined : options.all || wantsWholeTeam || wantsWholeRoutine || toolSpansDevices,
+      all: pathFilter ? undefined : options.all || wantsWholeTeam || wantsWholeRoutine,
       cwd: process.cwd(),
-      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !wantsWholeRoutine && !toolSpansDevices ? process.cwd() : undefined),
+      cwdPrefix: pathFilter ?? (wantsOverview && !options.all && !wantsWholeTeam && !wantsWholeRoutine ? process.cwd() : undefined),
       project: options.project,
       since,
       until: options.until,
       sortBy,
       origin: options.routine ? 'routine' : undefined,
-      skipExistenceCheck: toolEvidenceMode,
-      unbounded: toolEvidenceMode,
       skill: options.skill,
       plugin: options.plugin,
     };
 
     let hiddenUnmanaged = 0;
-    const toolSelf = toolEvidenceMode ? machineId() : undefined;
-    const toolIncludesLocal = !toolEvidenceMode
-      || process.env[NO_FANOUT_ENV] === '1'
-      || shouldIncludeLocal(options.host, toolSelf!);
-    const indexedIdMatches = toolIncludesLocal && toolEvidenceMode && searchQuery && looksLikeSessionId(searchQuery)
-      ? scopeToManaged(
-          findSessionsById(searchQuery, { agent, version, project: options.project }),
-          agent ? [agent] : SESSION_AGENTS,
-          { agent, includeUnmanaged: options.unmanaged },
-        )
-      : [];
-    let sessions: SessionMeta[];
-    if (!toolIncludesLocal) {
-      sessions = [];
-    } else if (indexedIdMatches.length > 0) {
-      sessions = indexedIdMatches.map((session) => ({
-        ...session,
-        machine: session.machine ?? toolSelf,
-      }));
-    } else {
-      const readOptions: DiscoverOptions = {
-        ...scope,
-        limit,
-        excludeTeamOrigin: !shouldShowTeamSessions(options),
-        onProgress: tracker.onProgress,
-        includeUnmanaged: options.unmanaged,
-        onHiddenUnmanaged: (n) => { hiddenUnmanaged = n; },
-      };
-      sessions = toolEvidenceMode
-        ? await queryIndexedSessions(readOptions, { resolveLinear: false })
-        : await discoverSessions(readOptions);
-    }
-
+    let sessions: SessionMeta[] = await discoverSessions({
+      ...scope,
+      limit,
+      excludeTeamOrigin: !shouldShowTeamSessions(options),
+      onProgress: tracker.onProgress,
+      includeUnmanaged: options.unmanaged,
+      onHiddenUnmanaged: (n) => { hiddenUnmanaged = n; },
+    });
     tracker.stop();
     spinner?.stop();
 
@@ -1669,75 +1421,6 @@ async function sessionsAction(
     if (options.bookmarks) {
       const bookmarks = listBookmarks();
       sessions = sessions.filter((s) => bookmarks.has(s.id));
-    }
-
-    if (toolEvidenceMode) {
-      const self = toolSelf!;
-      const selectedSessions = searchQuery
-        ? filterSessionsByQuery(sessions, searchQuery, {
-            agent: options.agent,
-            project: options.project,
-            routine: options.routine,
-          })
-        : sessions;
-      const localSessions = selectedSessions;
-      const mayFanOut = options.local !== true && process.env[NO_FANOUT_ENV] !== '1';
-      const hosts = remoteHostsToDial(options.host, self);
-      const originOnly = process.env[NO_FANOUT_ENV] === '1'
-        || (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0));
-      const querySessions = toolOriginSessions(localSessions, self, originOnly);
-
-      if (countProgram) {
-        const countCoverage = readToolIndexCoverage(querySessions);
-        let countEnvelope = countToolProgramOccurrences(querySessions, countProgram, countCoverage, self);
-        if (!toolIncludesLocal) countEnvelope.machines = [];
-        if (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0)
-          && (!options.host?.length || (hosts && hosts.length > 0))) {
-          const stripped = toolSearchForwardedArgs(process.argv, options.host ?? []);
-          const remote = await gatherRemoteToolProgramCounts(
-            stripped,
-            options.host?.length ? hosts : undefined,
-            countProgram,
-          );
-          countEnvelope = mergeToolProgramCountEnvelopes(
-            countEnvelope,
-            remote.envelopes.map((item) => item.envelope),
-          );
-          if (remote.unreachable.length > 0) countEnvelope.coverage.complete = false;
-        }
-        if (options.json) process.stdout.write(JSON.stringify(countEnvelope, null, 2) + '\n');
-        else printToolProgramCount(countEnvelope);
-        return;
-      }
-
-      const coverage = readToolIndexCoverage(querySessions);
-      let envelope = searchToolCalls(querySessions, queryClauses, coverage, limit);
-
-      if (mayFanOut && (options.fleet || (options.host?.length ?? 0) > 0)) {
-        if (!options.host?.length || (hosts && hosts.length > 0)) {
-          const stripped = toolSearchForwardedArgs(process.argv, options.host ?? []);
-          const remote = await gatherRemoteToolSearch(
-            stripped,
-            options.host?.length ? hosts : undefined,
-            toolSearchRemoteReceiveBudget(envelope),
-            queryClauses,
-          );
-          envelope = mergeToolSearchEnvelopes(envelope, remote.envelopes.map((item) => item.envelope));
-          if (remote.truncated.length > 0 || remote.unreachable.length > 0) {
-            envelope.coverage.complete = false;
-          }
-        }
-      }
-
-      envelope.sessions = envelope.sessions.slice(0, limit);
-
-      const serializedEnvelope = serializeToolSearchEnvelope(envelope);
-      if (options.json) {
-        process.stdout.write(serializedEnvelope);
-      } else {
-        printToolSearch(envelope);
-      }
-      return;
     }
 
     const hiddenCount = shouldShowTeamSessions(options) || options.inTeam
@@ -3189,15 +2872,6 @@ export function metadataResolveForwardedArgs(
   return args;
 }
 
-export function toolSearchForwardedArgs(argv: string[], hosts: string[]): string[] {
-  const args = ensureWholeIndex(
-    buildForwardedArgs(argv, new Set(hosts)).filter((arg) => arg !== '--fleet'),
-  );
-  if (!args.includes('--json')) args.push('--json');
-  if (!args.includes('--local')) args.push('--local');
-  return args;
-}
-
 const SHORT_SESSION_ID_WIDTH = 8;
 
 export function isUniqueEnoughSelector(selector: string): boolean {
@@ -3450,7 +3124,7 @@ export function registerSessionsCommands(program: Command): void {
   const sessionsCmd = program
     .command('sessions')
     .argument('[query]', 'Session ID, search query, or path (., ../, /path) to filter by project')
-    .option('--query <clause>', 'Search text; repeat with --include tools to require distinct matching calls', collectQueryClause, [])
+    .option('--query <text>', 'Search text (same as the positional query)', collectQueryClause, [])
     .option('--resolve <selector>', 'Resolve one full ID, unique prefix, or keyword query to safe session metadata (requires --json; searches the fleet unless --local)')
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
     .addOption(new Option('--resolve-launch-id <id>').hideHelp())
@@ -3484,7 +3158,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--markdown', 'Render the session as markdown (user, assistant, thinking, tool calls)')
     .option('--no-redact', 'Disable default secret redaction in rendered session output (--markdown and --json)')
     .option('--json', 'Output JSON (session list when browsing, event array when rendering one session)')
-    .option('--include <roles>', 'Only include these roles (comma-separated): user, assistant, thinking, tools. "user" is genuine user turns only, not harness-injected scaffolding (bash-input, system-reminder)')
+    .option('--include <roles>', 'Only include these roles (comma-separated): user, assistant, thinking, tools. "user" is genuine user turns only, not harness-injected scaffolding (bash-input, system-reminder). Tool-call search across sessions is `sessions --include tools`')
     .option('--exclude <roles>', 'Exclude these roles (comma-separated): user, assistant, thinking, tools')
     .option('--first <n>', 'Keep only the first N turns (a turn starts at each genuine user message, not harness-injected scaffolding)')
     .option('--last <n>', 'Keep only the last N turns (a turn starts at each genuine user message, not harness-injected scaffolding)')
@@ -3509,8 +3183,6 @@ export function registerSessionsCommands(program: Command): void {
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-D, --device <target...>', 'Run this query on remote machine(s) over SSH (device alias from `agents devices`, user@host, or `all` to search the whole fleet; repeatable)')
     .addOption(new Option('--devices <target...>', 'Plural alias for --device (accepts `all`/`fleet`).').hideHelp())
-    .option('--fleet', 'With --include tools: query every registered online compute device and merge compact matches')
-    .option('--count', 'With one program:<name> tool query: count static occurrences, containing calls, and sessions')
     .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`')
     .option('--computer', 'List computer-driving history, grouped by run, instead of agent transcripts — alias of `agents computer sessions`')
     .option('--no-interactive', 'Print the listing instead of opening the interactive browser (default on a TTY for the bare listing and --active)')
@@ -3577,16 +3249,8 @@ export function registerSessionsCommands(program: Command): void {
       # Export for analysis
       agents sessions --since 30d --limit 200 --json > sessions.json
 
-      # List indexed tool calls in recent Codex sessions on one device
-      agents sessions --include tools --agent codex --device mac-mini --since 7d
-
-      # Each repeated clause must match a different call in the same session
-      agents sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --fleet --json
-
-      # Count every pre-indexed static git site without reparsing transcripts
-      agents sessions --include tools --query 'program:git' --count --fleet --json
-
-      # Explicitly populate historical tool rows once on every device
+      # Populate historical tool rows once on every device (search them with
+      # the standalone CLI: sessions --include tools --query 'program:git')
       agents sessions backfill tools --fleet
 
       # Resolve one historical selector to metadata only, across the fleet
@@ -3610,11 +3274,7 @@ export function registerSessionsCommands(program: Command): void {
       - --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
-      - With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.
-      - --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.
-      - Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.
-      - Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.
-      - Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.
+      - Tool-call search and --count run in the standalone \`sessions\` CLI (\`sessions --include tools --query <clause>\`). agents indexes the calls: run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
@@ -3707,7 +3367,6 @@ export function registerSessionsCommands(program: Command): void {
     });
   });
 
-  registerSessionsTailCommand(sessionsCmd);
   registerSessionsResumeCommand(sessionsCmd);
   registerSessionsForkCommand(sessionsCmd);
   registerSessionsBookmarkCommand(sessionsCmd);

@@ -10,16 +10,9 @@ process.env.TEST_API_TOKEN = 'literal-secret-value-789';
 const { closeDB, getDB, upsertSession } = await import('./db.js');
 const {
   ensureToolIndex,
-  countToolProgramOccurrences,
   readToolIndexCoverage,
-  searchToolCalls,
-  serializeToolSearchEnvelope,
-  toolSearchRemoteReceiveBudget,
-  TOOL_QUERY_MAX_SERIALIZED_BYTES,
-  TOOL_QUERY_MERGE_OVERHEAD_BYTES,
   BACKFILL_MAX_STREAM_SOURCE_BYTES,
 } = await import('./tool-index.js');
-const { persistToolCalls } = await import('./tool-store.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
@@ -54,45 +47,17 @@ function writeClaudeSession(name: string): SessionMeta {
 }
 
 describe('tool-call index', () => {
-  it('requires repeated clauses to match distinct calls in one session', async () => {
+  it('indexes each call once, with secrets redacted before they reach SQLite', async () => {
     const session = writeClaudeSession('two-calls');
     const first = await ensureToolIndex([session]);
     expect(first).toMatchObject({ indexedFiles: 1, indexedCalls: 2, remainingFiles: 0, complete: true });
 
-    const result = searchToolCalls(
-      [session],
-      ['program:git input:merge', 'program:gh output:CONFLICT'],
-      first,
-    );
-    expect(result.schemaVersion).toBe(1);
-    expect(result.sessions).toHaveLength(1);
-    expect(result.sessions[0].calls.map((call) => call.sourceCallId)).toEqual(['git-call', 'gh-call']);
-    expect(JSON.stringify(result)).not.toContain('literal-secret-value-789');
-
-    const substring = searchToolCalls([session], ['input:erge'], first);
-    expect(substring.sessions).toHaveLength(1);
-    expect(substring.sessions[0].calls[0].input).toContain('merge');
-
-    const impossible = searchToolCalls(
-      [session],
-      ['program:git', 'program:git'],
-      first,
-    );
-    expect(impossible.sessions).toEqual([]);
-    expect(() => searchToolCalls([session], Array.from({ length: 33 }, () => 'program:git'), first))
-      .toThrow('at most 32');
-  });
-
-  it('does not silently cap the filtered session scope at 10,000 rows', async () => {
-    const target = writeClaudeSession('beyond-ten-thousand');
-    const coverage = await ensureToolIndex([target]);
-    const filler = Array.from({ length: 10_000 }, (_, index) => ({
-      id: `filler-${index}`, shortId: `f${index}`, agent: 'claude',
-      timestamp: '2026-08-03T00:00:00Z', filePath: path.join(TEST_HOME, `absent-${index}.jsonl`),
-    } as SessionMeta));
-
-    const result = searchToolCalls([...filler, target], ['program:git'], coverage, 1_000);
-    expect(result.sessions.map((session) => session.id)).toEqual([target.id]);
+    const rows = getDB().prepare(`
+      SELECT source_call_id, tool, input, outcome FROM tool_calls WHERE session_id = ? ORDER BY ordinal
+    `).all(session.id) as Array<{ source_call_id: string; tool: string; input: string; outcome: string }>;
+    expect(rows.map((row) => [row.source_call_id, row.outcome])).toEqual([['git-call', 'ok'], ['gh-call', 'error']]);
+    expect(JSON.stringify(rows)).not.toContain('literal-secret-value-789');
+    expect(rows[0].input).toContain('git merge topic');
   });
 
   it('serves a warm index without reparsing the transcript', async () => {
@@ -102,7 +67,7 @@ describe('tool-call index', () => {
     expect(warm).toMatchObject({ indexedFiles: 0, indexedCalls: 0, remainingFiles: 0, complete: true });
   });
 
-  it('counts repeated static sites from SQLite after the transcript is unavailable', async () => {
+  it('keeps repeated static program sites and their coverage after the transcript is unavailable', async () => {
     const filePath = path.join(TEST_HOME, 'repeated-programs.jsonl');
     const session = {
       id: 'repeated-programs-session', shortId: 'repeated', agent: 'claude',
@@ -118,51 +83,14 @@ describe('tool-call index', () => {
     await ensureToolIndex([session]);
     fs.renameSync(filePath, `${filePath}.offline`);
 
-    const coverage = readToolIndexCoverage([session]);
-    expect(coverage.complete).toBe(true);
-    expect(countToolProgramOccurrences([session], 'git', coverage, 'test-box')).toMatchObject({
-      totals: { occurrences: 2, toolCalls: 1, sessions: 1 },
-    });
-    expect(searchToolCalls([session], ['program:git'], coverage).sessions[0].calls[0])
-      .toMatchObject({
-        programs: ['git'],
-        programOccurrences: [
-          { program: 'git', role: 'effective' },
-          { program: 'git', role: 'effective' },
-        ],
-      });
-  });
-
-  it('groups a direct local count by each transcript origin', async () => {
-    const sessions = [
-      { id: 'origin-local', machine: 'local-box', command: 'git status' },
-      { id: 'origin-mirror', machine: 'peer-box', command: 'git diff; git log' },
-    ].map(({ id, machine, command }) => {
-      const filePath = path.join(TEST_HOME, `${id}.jsonl`);
-      const session = {
-        id, shortId: id.slice(0, 8), agent: 'claude', machine,
-        timestamp: '2026-08-03T00:00:00Z', filePath,
-      } as SessionMeta;
-      fs.writeFileSync(filePath, JSON.stringify({
-        type: 'assistant', timestamp: session.timestamp, message: { content: [{
-          type: 'tool_use', id: `${id}-call`, name: 'Bash', input: { command },
-        }] },
-      }) + '\n');
-      upsertSession(session, id);
-      return session;
-    });
-    await ensureToolIndex(sessions);
-
-    const count = countToolProgramOccurrences(
-      sessions,
-      'git',
-      readToolIndexCoverage(sessions),
-      'local-box',
-    );
-    expect(count.totals).toEqual({ occurrences: 3, toolCalls: 2, sessions: 2 });
-    expect(count.machines).toMatchObject([
-      { machine: 'local-box', totals: { occurrences: 1, toolCalls: 1, sessions: 1 } },
-      { machine: 'peer-box', totals: { occurrences: 2, toolCalls: 1, sessions: 1 } },
+    expect(readToolIndexCoverage([session])).toMatchObject({ indexedFiles: 1, indexedCalls: 1, complete: true });
+    expect(getDB().prepare(`
+      SELECT o.program, o.role FROM tool_program_occurrences o
+      JOIN tool_calls c ON c.call_key = o.call_key
+      WHERE c.session_id = ? ORDER BY o.occurrence_ordinal
+    `).all(session.id)).toEqual([
+      { program: 'git', role: 'effective' },
+      { program: 'git', role: 'effective' },
     ]);
   });
 
@@ -289,85 +217,5 @@ describe('tool-call index', () => {
         tool: 'index_limit',
         input: 'Transcript exceeds the 16 MiB safe in-memory tool-backfill parser limit.',
       });
-  });
-
-  it('bounds the requested session count and aggregate evidence bytes', () => {
-    const coverage = { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true };
-    expect(() => searchToolCalls([writeClaudeSession('bad-limit')], [], coverage, 1_001))
-      .toThrow('from 1 to 1000');
-
-    const sessions = ['large-a', 'large-b'].map((name) => {
-      const filePath = path.join(TEST_HOME, `${name}.jsonl`);
-      fs.writeFileSync(filePath, '{}\n');
-      const session = {
-        id: `${name}-session`, shortId: name, agent: 'codex',
-        timestamp: '2026-08-03T00:00:00Z', filePath,
-      } as SessionMeta;
-      upsertSession(session, name);
-      const stat = fs.statSync(filePath);
-      persistToolCalls(getDB(), session, Array.from({ length: 280 }, (_, ordinal) => ({
-        ordinal,
-        timestamp: session.timestamp,
-        tool: 'exec_command',
-        programs: ['printf'],
-        programOccurrences: [{ program: 'printf', role: 'effective' as const }],
-        input: `printf ${'x'.repeat(15_500)}`,
-        outcome: 'unknown' as const,
-      })), { fileMtimeMs: stat.mtimeMs, fileSize: stat.size });
-      return session;
-    });
-
-    expect(() => searchToolCalls(sessions, [], coverage, 2)).toThrow('8 MiB');
-  });
-
-  it('keeps JSON encoding below the fleet stdout budget', () => {
-    const input = '"'.repeat(16_000);
-    const sessions = ['encoded-a', 'encoded-b'].map((id) => ({
-      id, shortId: id, agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-      calls: Array.from({ length: 261 }, (_, ordinal) => ({
-        id: `${id}:${ordinal}`,
-        ordinal,
-        timestamp: '2026-08-03T00:00:00Z',
-        tool: 'exec_command',
-        programs: ['printf'],
-        programOccurrences: [{ program: 'printf', role: 'effective' as const }],
-        input,
-        outcome: 'unknown' as const,
-      })),
-    }));
-    const envelope = {
-      schemaVersion: 1 as const,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: [] },
-      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions,
-    };
-    expect(() => serializeToolSearchEnvelope(envelope)).toThrow('15 MiB after JSON encoding');
-  });
-
-  it('reserves the local envelope and coordinator overhead before accepting peer bytes', () => {
-    const envelope = {
-      schemaVersion: 1 as const,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: ['program:git'] },
-      coverage: { indexedFiles: 1, indexedCalls: 20, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{
-        id: 'local', shortId: 'local', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-        calls: Array.from({ length: 20 }, (_, ordinal) => ({
-          id: `local:${ordinal}`,
-          ordinal,
-          timestamp: '2026-08-03T00:00:00Z',
-          tool: 'exec_command',
-          programs: ['git'],
-          programOccurrences: [{ program: 'git', role: 'effective' as const }],
-          input: `git status ${'x'.repeat(16_000)}`,
-          outcome: 'unknown' as const,
-        })),
-      }],
-    };
-    const localBytes = Buffer.byteLength(serializeToolSearchEnvelope(envelope));
-    expect(toolSearchRemoteReceiveBudget(envelope)).toBe(
-      TOOL_QUERY_MAX_SERIALIZED_BYTES - TOOL_QUERY_MERGE_OVERHEAD_BYTES - localBytes,
-    );
   });
 });

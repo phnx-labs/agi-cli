@@ -85,8 +85,8 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
     expect(argv).toEqual(['auth', '--json', '--limit', '5']);
   });
 
-  it('falls through to the in-repo engine when no standalone sessions binary is installed', () => {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-fallback-'));
+  it('fails loud, with no in-process read, when no standalone sessions binary resolves', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-missing-'));
     try {
       writeUpdateCache(home);
       const cleanPath = (process.env.PATH ?? '')
@@ -94,10 +94,9 @@ describe('index.ts sessions read fast-path (PHNX-4012)', () => {
         .filter((dir) => dir && !fs.existsSync(path.join(dir, 'sessions')))
         .join(path.delimiter);
       const r = runAgents(['sessions', '--json', '--no-interactive'], REPO_ROOT, home, { PATH: cleanPath, SESSIONS_BIN: '', AGENTS_NO_AUTOPULL: '1' });
-      expect(r.status, r.stderr).toBe(0);
-      expect(r.stderr).toContain('using the in-process engine');
-      expect(r.stderr).not.toContain('Install it, then re-run');
-      expect(() => JSON.parse(r.stdout)).not.toThrow();
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain('the standalone `sessions` CLI was not found');
+      expect(r.stdout).toBe('');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -5,7 +5,7 @@ import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
 import { parseAgentFilter } from './sessions.js';
 import { renderSessionLog, renderSessionLogJson } from '../lib/session/presentation.js';
-import { streamSessionTail, isTailable } from './sessions-tail.js';
+import { runSessions } from '../lib/sessions-client.js';
 import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';
 import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
@@ -56,11 +56,7 @@ async function showSession(session: SessionMeta, follow: boolean, full: boolean,
     return;
   }
   if (follow) {
-    if (!isTailable(session.agent)) {
-      console.error(chalk.red(`Tailing is supported for claude and codex sessions only (got ${session.agent}).`));
-      process.exit(2);
-    }
-    await streamSessionTail(session, { raw: full });
+    process.exitCode = await runSessions(['tail', session.id, ...(full ? ['--json'] : [])]);
     return;
   }
   await renderSessionLog(session, full ? 'markdown' : 'summary');

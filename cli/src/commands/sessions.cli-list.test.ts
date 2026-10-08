@@ -319,7 +319,7 @@ describe('agents sessions', () => {
       writeUpdateCache(tempHome);
       const openClawWorkspace = writeOpenClawSetup(tempHome);
 
-      const result = runAgents(['sessions', '--agent', 'openclaw'], openClawWorkspace, tempHome);
+      const result = runAgents(['sessions', '--agent', 'openclaw', '--no-live'], openClawWorkspace, tempHome);
       expect(result.status).toBe(0);
 
       const output = outputOf(result);

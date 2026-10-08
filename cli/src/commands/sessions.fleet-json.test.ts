@@ -76,7 +76,7 @@ describe.skipIf(process.platform === 'win32')('sessions --device all/fleet --jso
       registerPeer(path.join(tempHome, '.agents', '.history', 'devices'));
       installFakeSsh(tempHome);
 
-      const localOnly = runAgents(['sessions', '--json', '--no-interactive'], cwd, tempHome, env(tempHome));
+      const localOnly = runAgents(['sessions', '--json', '--no-interactive', '--no-live'], cwd, tempHome, env(tempHome));
       expect(localOnly.status, localOnly.stderr).toBe(0);
       const localRows = JSON.parse(localOnly.stdout) as Array<{ id: string }>;
       const localIds = localRows.map((r) => r.id);

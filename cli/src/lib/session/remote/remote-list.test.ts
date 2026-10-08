@@ -8,25 +8,17 @@ import { Server, type Connection } from 'ssh2';
 import { sessionHeadline } from '../title.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
-  REMOTE_STDOUT_MAX_BYTES,
-  REMOTE_TOOL_AGGREGATE_MAX_BYTES,
-  consumeParsedRemoteToolSearchBudget,
-  consumeRemoteToolByteBudget,
   parseRemoteList,
   parseRemoteListPayload,
   parsePeerPreviewDigest,
-  parseRemoteToolSearch,
-  parseRemoteToolProgramCount,
-  RemoteUtf8Accumulator,
   isAutomaticSessionPeer,
   remoteListCommand,
   sshCapture,
   peerHopCloseNotice,
   peerHopOutcome,
 } from './remote-list.js';
-import { SSH_CONN_FAILURE_CODE } from '../../ssh-exec.js';
+import { SSH_CONN_FAILURE_CODE, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 import type { DeviceProfile } from '../../devices/registry.js';
-import { TOOL_QUERY_MAX_CALL_ROWS } from '../tool-index.js';
 
 interface RealSshPeer {
   port: number;
@@ -104,10 +96,9 @@ describe.skipIf(process.platform === 'win32')('sshCapture direct timeout connect
         'tool-index-test@127.0.0.1',
         'tool-index-command',
         2_000,
-        undefined,
         { multiplex: false, port: peer.port, hostKeyOpts: isolatedHostKeyOpts },
       );
-      expect(result).toEqual({ code: 0, stdout: '{"ok":true}', aggregateBudgetExceeded: undefined });
+      expect(result).toEqual({ code: 0, stdout: '{"ok":true}' });
       await expect(Promise.race([
         peer.connectionClosed.then(() => 'closed'),
         new Promise<string>((resolve) => setTimeout(() => resolve('open'), 1_000)),
@@ -124,7 +115,6 @@ describe.skipIf(process.platform === 'win32')('sshCapture direct timeout connect
         'tool-index-test@127.0.0.1',
         'tool-index-command',
         500,
-        undefined,
         { multiplex: false, port: peer.port, hostKeyOpts: isolatedHostKeyOpts },
       );
       expect(result.code).toBeNull();
@@ -233,7 +223,7 @@ describe('parseRemoteList', () => {
   });
 });
 
-describe('parseRemoteToolSearch', () => {
+describe('RemoteUtf8Accumulator', () => {
   it('preserves a multibyte code point split across SSH stdout chunks', () => {
     const bytes = Buffer.from('before 界 after', 'utf8');
     const split = bytes.indexOf(Buffer.from('界')) + 1;
@@ -241,168 +231,6 @@ describe('parseRemoteToolSearch', () => {
     decoded.write(bytes.subarray(0, split));
     decoded.write(bytes.subarray(split));
     expect(decoded.end()).toBe('before 界 after');
-  });
-
-  it('accepts only the versioned envelope and stamps the peer when origin is absent', () => {
-    const credential = 'opaque-session-credential-123456';
-    const payload = JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: ['program:git'] },
-      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{
-        id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-        filePath: '/peer/one.jsonl', calls: [{
-          id: 'call', ordinal: 0, timestamp: '2026-08-03T00:00:01Z', tool: 'exec_command',
-          programs: ['git'], programOccurrences: [{ program: 'git', role: 'effective' }],
-          input: `git status\u001b]52;c;payload\u0007 -H "Cookie: sid=${credential}" --proxy-user=user:${credential}`, outcome: 'unknown',
-        }],
-      }],
-    });
-    const parsed = parseRemoteToolSearch(payload, 'mac-mini');
-    expect(parsed?.sessions[0].machine).toBe('mac-mini');
-    expect(parsed?.sessions[0].filePath).toBeUndefined();
-    expect(parsed?.sessions[0].calls[0].input).toContain('git status');
-    expect(parsed?.sessions[0].calls[0].input).not.toContain(credential);
-    expect(parsed?.sessions[0].calls[0].input).not.toContain('\u001b');
-    expect(parseRemoteToolSearch('[]', 'mac-mini')).toBeUndefined();
-    expect(parseRemoteToolSearch('{broken', 'mac-mini')).toBeUndefined();
-    expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:gh'])).toBeUndefined();
-    expect(parseRemoteToolSearch(payload, 'mac-mini', ['program:git'])?.sessions).toHaveLength(1);
-  });
-
-  it('parses an envelope a Windows peer prefixed with a CLIXML banner (RUSH-2286)', () => {
-    const payload = JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: '2026-08-06T00:00:00Z',
-      query: { clauses: ['program:git'] },
-      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{
-        id: 'w', shortId: 'w', agent: 'codex', timestamp: '2026-08-06T00:00:00Z',
-        filePath: 'C:\\peer\\w.jsonl', calls: [{
-          id: 'c', ordinal: 0, timestamp: '2026-08-06T00:00:01Z', tool: 'exec_command',
-          programs: ['git'], programOccurrences: [{ program: 'git', role: 'effective' }],
-          input: 'git status', outcome: 'unknown',
-        }],
-      }],
-    });
-    const polluted =
-      '#< CLIXML\n' +
-      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
-      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
-      payload;
-    const parsed = parseRemoteToolSearch(polluted, 'win-mini');
-    expect(parsed?.sessions).toHaveLength(1);
-    expect(parsed?.sessions[0].machine).toBe('win-mini');
-  });
-
-  it('preserves the transcript origin machine across a peer hop', () => {
-    const payload = JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: ['program:git'] },
-      coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{
-        id: 'one', shortId: 'one', agent: 'codex', machine: 'origin-one',
-        timestamp: '2026-08-03T00:00:00Z', calls: [],
-      }],
-    });
-    expect(parseRemoteToolSearch(payload, 'cache-peer')?.sessions[0].machine).toBe('origin-one');
-  });
-
-  it('rejects oversized or structurally invalid peer evidence before merging', () => {
-    expect(parseRemoteToolSearch('x'.repeat(REMOTE_STDOUT_MAX_BYTES + 1), 'peer')).toBeUndefined();
-    expect(parseRemoteToolSearch(JSON.stringify({
-      schemaVersion: 1,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: [] },
-      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{ id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', calls: [{}] }],
-    }), 'peer')).toBeUndefined();
-
-    const envelope = {
-      schemaVersion: 1,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { clauses: [] },
-      coverage: { indexedFiles: 0, indexedCalls: 0, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      sessions: [{
-        id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-        calls: Array.from({ length: TOOL_QUERY_MAX_CALL_ROWS + 1 }, () => ({})),
-      }],
-    };
-    expect(parseRemoteToolSearch(JSON.stringify(envelope), 'peer')).toBeUndefined();
-
-    const half = Math.ceil(TOOL_QUERY_MAX_CALL_ROWS / 2);
-    envelope.sessions = ['one', 'two'].map((id) => ({
-      id, shortId: id, agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-      calls: Array.from({ length: half }, () => ({})),
-    }));
-    expect(parseRemoteToolSearch(JSON.stringify(envelope), 'peer')).toBeUndefined();
-
-    envelope.sessions = [{
-      id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', calls: [],
-    }];
-    envelope.sessions[0].calls = [{
-      id: 'call', ordinal: 0, timestamp: '2026-08-03T00:00:01Z', tool: 'exec_command',
-      programs: Array.from({ length: 129 }, () => 'git'), input: 'git status', outcome: 'unknown',
-    }];
-    expect(parseRemoteToolSearch(JSON.stringify(envelope), 'peer')).toBeUndefined();
-  });
-});
-
-describe('parseRemoteToolProgramCount', () => {
-  it('accepts the versioned aggregate and replaces its machine with the dialed peer', () => {
-    const payload = JSON.stringify({
-      schemaVersion: 1,
-      kind: 'tool-program-count',
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { program: 'git', semantics: 'static-program-occurrences-v1' },
-      coverage: { indexedFiles: 4, indexedCalls: 8, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-      totals: { occurrences: 7, toolCalls: 5, sessions: 3 },
-      machines: [{ machine: 'untrusted', coverage: {}, totals: {} }],
-    });
-    const parsed = parseRemoteToolProgramCount(payload, 'peer-one', 'git');
-    expect(parsed).toMatchObject({
-      valid: true,
-      items: [{ machine: 'peer-one', envelope: {
-        totals: { occurrences: 7, toolCalls: 5, sessions: 3 },
-        machines: [{ machine: 'peer-one' }],
-      } }],
-    });
-    expect(parseRemoteToolProgramCount(payload, 'peer-one', 'gh').valid).toBe(false);
-    expect(parseRemoteToolProgramCount('{broken', 'peer-one', 'git').valid).toBe(false);
-  });
-});
-
-describe('fleet tool-result byte budget', () => {
-  it('stops retaining peer bytes at the global fleet-query ceiling', () => {
-    const budget = { remainingBytes: REMOTE_TOOL_AGGREGATE_MAX_BYTES, exhausted: false };
-    expect(consumeRemoteToolByteBudget(budget, REMOTE_TOOL_AGGREGATE_MAX_BYTES - 1)).toBe(true);
-    expect(consumeRemoteToolByteBudget(budget, 2)).toBe(false);
-    expect(budget).toEqual({ remainingBytes: 0, exhausted: true });
-  });
-
-  it('charges the sanitized envelope so redaction expansion cannot overflow the merge', () => {
-    const raw = JSON.stringify({
-        schemaVersion: 1,
-        generatedAt: '2026-08-03T00:00:00Z',
-        query: { clauses: [] },
-        coverage: { indexedFiles: 1, indexedCalls: 1, skippedFiles: 0, limitedFiles: 0, remainingFiles: 0, complete: true },
-        sessions: [{
-          id: 'one', shortId: 'one', agent: 'codex', timestamp: '2026-08-03T00:00:00Z',
-          calls: [{
-            id: 'one:0', ordinal: 0, timestamp: '2026-08-03T00:00:00Z',
-            tool: 'exec_command', programs: ['printf'],
-            programOccurrences: [{ program: 'printf', role: 'effective' }],
-            input: 'printf TOKEN=abcdef', outcome: 'unknown',
-          }],
-        }],
-      }, null, 2) + '\n';
-    const parsed = parseRemoteToolSearch(raw, 'peer');
-    expect(parsed?.sessions[0].calls[0].input).toContain('TOKEN=[REDACTED]');
-    const budget = { remainingBytes: Buffer.byteLength(raw), exhausted: false };
-    expect(consumeParsedRemoteToolSearchBudget(budget, parsed!)).toBe(false);
-    expect(budget.exhausted).toBe(true);
   });
 });
 

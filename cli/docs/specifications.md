@@ -1222,30 +1222,27 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/discover.ts:3042-3044,3270-3364,3434-3468,3568-3573`;
   `lib/session/discover.ts:3667-3669,3846-3926,3969-3992,4086-4091`;
   `lib/session/db.ts:1297-1307`; `lib/session/tool-index.ts:211-290`).
-- **SES-33 (MUST).** Repeated tool query clauses MUST be satisfied by distinct
-  call rows in the same session using polynomial bipartite matching. A request
-  MUST be bounded to 32 clauses, 4 KiB per clause, and 50,000 materialized call
-  rows. `--limit` MUST be bounded to 1–1,000 sessions and aggregate materialized
-  call evidence MUST be bounded to 8 MiB. The JSON encoding MUST be bounded to
-  15 MiB so a valid result remains below the fleet transport ceiling. Indexed
-  program/status/exit columns and FTS5 MUST prefilter candidates
-  before the exact assignment
-  (`lib/session/tool-index.ts:30-36,386-578,682-755`).
+- **SES-33 (MUST).** Tool-call queries (repeated distinct-call clauses, their
+  bounds, `--count`, and cross-host reads) are the standalone `sessions` CLI's
+  contract (PHNX-4227); it reads the index agents writes under SES-34 and SES-37.
+  `agents sessions --include tools` MUST exit 2, write nothing to stdout, and
+  name `sessions --include tools`, so no caller or older peer parses a session
+  listing as a tool envelope (`commands/sessions.ts`;
+  `commands/sessions.cli-tools.test.ts`).
 - **SES-34 (MUST).** Schema v29's session-id-keyed `tool_scan_ledger` MUST be independent of the
   normal session ledgers. Migration MUST clear only the derived tool ledger and
   MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
   through explicit `agents sessions backfill tools`, in internal batches bounded
   to 25 files or 16 MiB. Fleet backfill MUST advance devices concurrently in
   bounded rounds; a peer invocation MUST process at most one batch before
-  returning its coverage. A tool query MUST read the SQLite snapshot and coverage
-  rows without calling `ensureToolIndex`, statting a transcript, or parsing it.
+  returning its coverage.
   Oversized Claude/Codex JSONL MUST stream with a 1 MiB record
   cap up to a 64 MiB source ceiling; larger sources MUST persist an explicit
   limit row without reading the body. Other harness parsers MUST NOT materialize
   a source over 16 MiB. Append
   persistence MUST use ledger byte totals and read only changed ordinals
   (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-index.ts`;
-  `commands/sessions-backfill.ts`; `commands/sessions.ts`).
+  `commands/sessions-backfill.ts`).
 - **SES-42 (MUST).** An `ensureToolIndex` pass over a Claude/Codex transcript that
   only grew MUST read only the bytes appended since the last pass (incremental
   discovery already appends via `toolIndexMode`; this is the backfill side).
@@ -1286,29 +1283,8 @@ SSH access (§7); rendering sessions that no harness produced.
   record no event-count resume point here. This closes the O(session)-per-tick
   synchronous cost that blocked the daemon event loop and starved browser IPC
   (PHNX-3411) (`lib/session/db.ts`; `lib/session/tool-store.ts`; `sessions-cli/src/lib/session/tool-calls.ts`).
-- **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
-  query at most six peers concurrently, and subtract the exact encoded local
-  envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
-  ceiling before retaining peer bytes. Raw peer bytes and the validated,
-  re-redacted envelope MUST each be charged against that remainder, because
-  redaction may expand evidence. It MUST mark partial coverage when exhausted
-  and MUST validate every versioned envelope field, strip terminal controls, and
-  omit transcript paths before merging. A missing transcript MUST purge its call
-  rows, program rows, FTS rows, and tool ledger when the source directory changes,
-  without statting every indexed session.
-  Fleet evidence queries MUST use a direct SSH connection and have a 60-second
-  deadline. Queries MUST NOT perform remote indexing. Fleet counts MUST transfer
-  only validated aggregate totals and per-machine coverage. During fleet
-  fan-out, every peer MUST query only sessions whose recorded origin is that
-  peer, so synced mirror transcripts cannot duplicate evidence or totals.
-  Evidence MUST retain the recorded transcript origin across the SSH hop, and
-  the coordinator MUST deduplicate the same origin/session pair. Direct local
-  queries MAY include mirrored rows under their recorded origin machines.
-  An unreachable or incompatible peer MUST also mark aggregate coverage partial
-  (`lib/session/remote/remote-list.ts:50-53,78-96,193-240,337-541`;
-  `lib/devices/resolve-target.ts:120-133`;
-  `lib/session/tool-index.ts:73-97`; `lib/session/tool-store.ts:40-85`;
-  `commands/sessions.ts:1937-1984`).
+- **SES-35 (resolved).** Fleet tool search moved with the query side to the
+  standalone `sessions` CLI (`--host`); see SES-33.
 - **SES-36 (MUST).** The shell-command sampling script MUST accept 50–100
   sessions, read the current device directly, balance deterministic selection
   across available requested machines, retain only redacted shell-call origins
@@ -1326,14 +1302,10 @@ SSH access (§7); rendering sessions that no harness produced.
   Harness wrappers that carry orchestration code MUST be parsed statically to
   select literal shell-command fields and MUST NOT be evaluated; unrelated
   wrapper tokens MUST NOT become program occurrences.
-  `--count` MUST accept exactly one `program:<name>` clause and return occurrence,
-  containing-call, and distinct-session totals over the full filtered scope.
-  It MUST label incomplete coverage as a lower bound. Counting MUST query
-  `tool_program_occurrences` and MUST NOT open or reparse transcripts. The
-  implementation MUST use relational SQLite rows and literal FTS5 only; it MUST
-  NOT use embeddings, a vector database, semantic search, or model calls
+  Occurrences MUST be persisted in `tool_program_occurrences` so a count
+  (standalone `sessions --include tools --count`) never reopens a transcript
   (`sessions-cli/src/lib/session/shell-programs.ts`; `lib/session/tool-store.ts`;
-  `lib/session/tool-index.ts`; `commands/sessions.ts`).
+  `lib/session/tool-index.ts`).
 - **SES-38 (MUST).** `sessions focus` MUST use the session browser's canonical
   candidate/filter pipeline for selector-driven focus. A unique session id or
   prefix MAY focus directly; an agent/version or text selector MUST show the
@@ -1516,20 +1488,9 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   bundle files are written `0600` (`lib/session/bundle.ts:28-29,110-113,188-227`).
 - **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 9 documented
   types (`sessions-cli/src/lib/session/types.ts:17-41`); a parser MUST NOT introduce a tenth.
-- **SES-IF-4a (MUST).** Broad `sessions --include tools --json` MUST emit the
-  versioned tool-search envelope, while ordinary list JSON remains
-  `SessionMeta[]` and exact-session JSON remains `{ session, events }`. Repeated
-  `--query` clauses require distinct calls. `--fleet` MUST execute the query on
-  each device's local index under the recursion guard and transfer compact
-  evidence only. A fleet tool query MUST reject cost/duration sorting because
-  the compact peer envelope carries no global sort key. `--markdown` and
-  `--no-redact` MUST fail when combined with `--include tools` because the
-  indexed evidence schema is always bounded and redacted. `--count` MUST emit
-  the versioned `tool-program-count` aggregate with occurrence, call, session,
-  coverage, and per-machine totals; it MUST NOT replace ordinary list/detail or
-  tool-search envelopes
-  (`commands/sessions.ts:1432-1463,1551-1559,1824-1879,1937-1984,3929-3970,4006-4013`;
-  `lib/session/remote/remote-list.ts:98-115,337-541`).
+- **SES-IF-4a (resolved).** The tool-search and `tool-program-count` envelopes
+  are the standalone `sessions` CLI's interface; `agents sessions --include tools`
+  refuses per SES-33.
 - **SES-IF-4b (MUST).** `insights resources --json` and its older spelling
   `sessions stats --json` MUST run the same action and emit its own versioned
   `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
@@ -1832,23 +1793,22 @@ Given a v9 `sessions.db` with a `name` column and rows; When `getDB()` opens it;
 Then schema reaches the current version, `name` folds into `label` then drops, and every prior row
 survives searchable (`db.migrate-v10.test.ts:78-93`; `db.migrate-v14.test.ts:98-106`).
 
-**GWT-11 — Two different calls satisfy one session query.**
-Given one session where a `git merge` call ran and a later `gh` call returned
-`CONFLICT`; When two `--query` clauses name those facts; Then the versioned
-response contains that session and the two distinct call ids. Repeating the
-`program:git` clause twice with only one matching call returns no session
+**GWT-11 — The standalone CLI searches what agents indexed.**
+Given agents indexed a session where a `git merge` call ran and a later `gh` call
+returned `CONFLICT`; When `sessions --include tools` runs two `--query` clauses
+naming those facts; Then it returns that session with both calls, and
+`agents sessions --include tools` exits 2 pointing at it
+(`commands/sessions.cli-tools.test.ts`).
+
+**GWT-12 — The index survives an unavailable transcript.**
+Given a transcript was indexed and its source is then moved offline; Then the
+ledger reports complete coverage and its program occurrences remain in SQLite
 (`lib/session/tool-index.test.ts`).
 
-**GWT-12 — Tool query remains DB-only when the transcript is unavailable.**
-Given a transcript was indexed and its source is then moved offline; When a tool
-query runs; Then the ledger reports complete coverage and cached SQL/FTS evidence
-answers it without opening the source (`lib/session/tool-index.test.ts`).
-
-**GWT-13 — Repeated static sites count separately.**
-Given one Bash call contains `git status; git diff`; When
-`--query program:git --count` runs; Then it reports 2 occurrences, 1 containing
-tool call, and 1 distinct session (`lib/session/tool-index.test.ts`;
-`commands/sessions.cli-tools.test.ts`).
+**GWT-13 — Repeated static sites are stored separately.**
+Given one Bash call contains `git status; git diff`; When it is indexed; Then
+`tool_program_occurrences` holds two `git` rows for the one call
+(`lib/session/tool-index.test.ts`).
 
 **GWT-14 — A retained dead pane recovers.**
 Given a session whose tmux pane remains after the harness exited with status 0;

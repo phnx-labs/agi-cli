@@ -1855,10 +1855,16 @@ insights/tool-calls/digest/highlights/prompt/tail/share-html and the `SessionEve
 imported **in-process** (a normal node_modules import — never a subprocess) so the
 indexer warm-tick (`db.ts`), the eval loop (`lib/traces/sync.ts`), and live-state
 (`active.ts`) parse without shelling out. What remains under `src/lib/session/` is the
-CLI-owned half: the writer/indexer (`db.ts`, `tool-index.ts`, `tool-store.ts`,
-`timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`, `discover.ts`,
-`pid-registry.ts`, `recovery.ts`, `mirror.ts`, `sync/`, `presence.ts`, `watch.ts`,
-`remote*`, `projection.ts`, `session-cache.ts`), and `migrate-targets.ts`. The
+CLI-owned half: the writer/indexer (`db.ts`, `tool-index.ts` — which only WRITES the
+tool-call index; searching it is the standalone `sessions --include tools`, PHNX-4227 —
+`tool-store.ts`, `timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`,
+`discover.ts`, `pid-registry.ts`, `recovery.ts`, `mirror.ts`, `presence.ts`, `watch.ts`,
+`remote*`, `projection.ts`, `session-cache.ts`), and `migrate-targets.ts`. `sync/`
+(the off-box backup client and the managed Worker template) is still a copy of
+sessions-cli's `./backup` module and goes once that export is published.
+Read queries (`agents sessions <query> [--json]`) exec the `sessions` bin from the
+`@phnx-labs/sessions-cli` dependency (`src/index.ts`, `lib/sessions-client.ts`);
+when no bin resolves they fail loud, with no in-process read. The
 live-session **writer** is a separate package,
 [`packages/session-tracker`](../../packages/session-tracker) — different data,
 different consumer; see its AGENTS.md.

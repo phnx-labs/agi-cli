@@ -118,9 +118,3 @@ export async function ensureCloudSessionCached(
   fs.writeFileSync(finalPath, body);
   return finalPath;
 }
-
-export function isCloudSessionPath(filePath: string): boolean {
-  const root = path.resolve(CLOUD_CACHE_DIR);
-  const resolved = path.resolve(filePath);
-  return resolved.startsWith(root + path.sep);
-}
