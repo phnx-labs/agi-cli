@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RecordingLedger } from './ledger.js';
-import { buildArtifactsRecordingArgs, RecordingPipeline } from './pipeline.js';
+import { buildArtifactsRecordingArgs, buildArtifactsRecordingEnv, RecordingPipeline } from './pipeline.js';
 import type { RecordingCandidate } from './model.js';
 import { runProcess } from './process.js';
 import { RecordingDependencyError } from './transcode.js';
@@ -24,7 +24,7 @@ if (args[0] === 'auth' && args[1] === 'whoami') {
   console.error('401 Unauthorized');
   process.exitCode = 1;
 } else if (args[0] === 'share' && ${JSON.stringify(shareResult)} === 'contract') {
-  console.error('--meta host=… is reserved');
+  console.error('bad --meta recorded-at=…: unsupported metadata contract');
   process.exitCode = 1;
 } else if (args[0] === 'share') {
   console.log(JSON.stringify({ url: 'https://share.test/clip' }));
@@ -58,18 +58,37 @@ describe('recording artifacts contract', () => {
       recordedAt: '2026-10-08T11:51:47.000Z',
       sessionId: 'session-123',
     };
-    expect(buildArtifactsRecordingArgs(candidate, '/tmp/transcoded.mp4', 'device-one')).toEqual([
+    expect(buildArtifactsRecordingArgs(candidate, '/tmp/transcoded.mp4')).toEqual([
       'share', '/tmp/transcoded.mp4',
       '--visibility', 'org',
       '--expire', 'never',
       '--slug', 'cleanshot-2026-10-08-at-4-51-47-am',
       '--meta', 'source=cleanshot',
-      '--meta', 'host=device-one',
-      '--meta', 'recorded_at=2026-10-08T11:51:47.000Z',
+      '--meta', 'recorded-at=2026-10-08T11:51:47.000Z',
       '--meta', 'stem=CleanShot 2026-10-08 at 4.51.47 AM',
-      '--meta', 'session=session-123',
       '--json',
     ]);
+  });
+
+  it('passes only the candidate session to artifacts provenance', () => {
+    const item = candidate('/recordings');
+    expect(buildArtifactsRecordingEnv(item, {
+      KEEP_ME: 'yes',
+      AGENTS_SESSION_ID: 'daemon-session',
+      AGENT_SESSION_ID: 'legacy-daemon-session',
+    })).toEqual({
+      KEEP_ME: 'yes',
+      AGENTS_SESSION_ID: 'session-123',
+    });
+  });
+
+  it('clears inherited session provenance when the recording has no session', () => {
+    const item = { ...candidate('/recordings'), sessionId: undefined };
+    expect(buildArtifactsRecordingEnv(item, {
+      KEEP_ME: 'yes',
+      AGENTS_SESSION_ID: 'daemon-session',
+      AGENT_SESSION_ID: 'legacy-daemon-session',
+    })).toEqual({ KEEP_ME: 'yes' });
   });
 
   it('returns the durable URL when an explicit upload is already complete', async () => {

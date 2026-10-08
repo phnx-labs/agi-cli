@@ -18,7 +18,6 @@ export interface RecordingPipelineOptions {
   ledger?: RecordingLedger;
   artifactsBin?: string;
   env?: NodeJS.ProcessEnv;
-  host?: string;
   transcode?: (sourcePath: string, signal?: AbortSignal) => Promise<TranscodedRecording>;
   verifyIdentity?: (signal?: AbortSignal) => Promise<{ email: string }>;
   raiseAttention?: (message: string) => Promise<void>;
@@ -63,20 +62,26 @@ async function defaultAttention(message: string): Promise<void> {
   if (result.exitCode !== 0) throw processFailure(launch.command, launch.args, result);
 }
 
-export function buildArtifactsRecordingArgs(candidate: RecordingCandidate, transcodedPath: string, host: string): string[] {
+export function buildArtifactsRecordingArgs(candidate: RecordingCandidate, transcodedPath: string): string[] {
   const args = [
     'share', transcodedPath,
     '--visibility', 'org',
     '--expire', 'never',
     '--slug', candidate.slug,
     '--meta', 'source=cleanshot',
-    '--meta', `host=${host}`,
-    '--meta', `recorded_at=${candidate.recordedAt}`,
+    '--meta', `recorded-at=${candidate.recordedAt}`,
     '--meta', `stem=${candidate.stem}`,
   ];
-  if (candidate.sessionId) args.push('--meta', `session=${candidate.sessionId}`);
   args.push('--json');
   return args;
+}
+
+export function buildArtifactsRecordingEnv(candidate: RecordingCandidate, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...base };
+  delete env.AGENTS_SESSION_ID;
+  delete env.AGENT_SESSION_ID;
+  if (candidate.sessionId) env.AGENTS_SESSION_ID = candidate.sessionId;
+  return env;
 }
 
 export class RecordingPipeline {
@@ -84,7 +89,6 @@ export class RecordingPipeline {
   private readonly active = new Map<string, ActiveUpload>();
   private readonly configuredArtifactsBin?: string;
   private readonly env: NodeJS.ProcessEnv;
-  private readonly host: string;
   private readonly transcode: (sourcePath: string, signal?: AbortSignal) => Promise<TranscodedRecording>;
   private readonly verifyIdentity: (signal?: AbortSignal) => Promise<{ email: string }>;
   private readonly raiseAttention: (message: string) => Promise<void>;
@@ -96,7 +100,6 @@ export class RecordingPipeline {
     this.ledger = options.ledger ?? new RecordingLedger();
     this.configuredArtifactsBin = options.artifactsBin;
     this.env = options.env ?? process.env;
-    this.host = options.host ?? machineId();
     this.transcode = options.transcode ?? ((source, signal) => transcodeRecording(source, signal));
     this.verifyIdentity = options.verifyIdentity
       ?? ((signal) => verifyOrganizationIdentity(signal, { artifactsBin: this.artifactsBin(), env: this.env }));
@@ -145,8 +148,9 @@ export class RecordingPipeline {
 
   private async share(candidate: RecordingCandidate, filePath: string, signal: AbortSignal): Promise<string> {
     const launch = invocation(this.artifactsBin());
-    const args = [...launch.prefix, ...buildArtifactsRecordingArgs(candidate, filePath, this.host)];
-    const result = await runProcess(launch.command, args, { signal, env: this.env });
+    const args = [...launch.prefix, ...buildArtifactsRecordingArgs(candidate, filePath)];
+    const env = buildArtifactsRecordingEnv(candidate, this.env);
+    const result = await runProcess(launch.command, args, { signal, env });
     if (result.exitCode !== 0) {
       const output = `${result.stderr}\n${result.stdout}`;
       if (isUnauthorizedOutput(result.exitCode, output)) {

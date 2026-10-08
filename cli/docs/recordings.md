@@ -38,10 +38,12 @@ The source file is read-only. macOS uses `h264_videotoolbox`; other platforms us
 `libx264`. Missing `ffmpeg` is an error with an installation hint. Temporary files
 are removed after either success or failure.
 
-The artifacts metadata records `source=cleanshot`, the device, file birth time,
-and canonical CleanShot stem. It also records a session id only when exactly one
-local agents session was active when the export was first observed and that session
-had started by the file birth time.
+The explicit artifacts metadata records `source=cleanshot`, the file birth time as
+`recorded-at`, and the canonical CleanShot stem. Artifacts stamps the publishing
+device from its own hostname. The publisher passes `AGENTS_SESSION_ID` only when
+exactly one local agents session was active when the export was first observed and
+that session had started by the file birth time; otherwise it clears inherited
+session variables so artifacts does not attribute the recording to the daemon.
 
 ## Re-exports, retries, and access
 
