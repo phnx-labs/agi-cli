@@ -2142,9 +2142,14 @@ scripts/release-lease.sh clear      # drop a lease with no live holder (any chec
 ```
 
 `release.sh` claims the lease after confirmation, immediately before its one
-mutation: pushing `release/<version>`. It drops the lease from its exit trap after
-the branch and PR exist. The Actions publisher does not share this process lease;
-GitHub's non-cancelling per-version concurrency group is the publication lock.
+mutation: pushing `release/<version>`. While it holds the lease, it re-reads npm
+`latest` and target presence, release tags and exact-shape `release/x.y.z[-pre.n]`
+branches, and canonical open PRs before the push. This second live guard prevents a
+different version that finished or started during local build preparation from
+publishing an older stable version onto `latest`; legacy `release/v*` branches do
+not trigger this workflow and are ignored. It drops the lease from its exit trap
+after the branch and PR exist. The Actions publisher does not share this process
+lease; GitHub's non-cancelling per-version concurrency group is the publication lock.
 Ownership is the lease **commit sha**, recorded in `.git/release-lease.token`, so
 a third agent can never drop a lease it did not claim.
 
@@ -2179,16 +2184,18 @@ release through `scripts/release.sh <version> --apply` reruns the existing workf
 at the immutable tagged commit: the tag and release branch must still point at that
 same SHA, and a different target fails closed before either ref moves.
 
-**A stuck EARLIER bump PR blocks the changelog fold, not just a stuck tag
+**A stuck EARLIER bump branch or PR blocks the changelog fold, not just a stuck tag
 (PHNX-3084).** The stuck-*tag* guard above is registry-vs-tag; this is its
-PR-side twin. A bump PR that remains open leaves that version's
+branch/PR-side twin. A bump PR that remains open leaves that version's
 `.changelog/next/*` fragments still queued on `main` — the drain only landed
 inside the unmerged branch commit. A *later* version releasing then re-reads those
 fragments and folds an earlier version's notes under the new version. The
 same-target retry uses `release/<current-target>`, so it never sees another
-version's PR. Before folding, `release.sh` detects any other open `release/*`
-bump PR (`scripts/release-other-bump-prs.sh`, unit-tested) and
-**fails loud** with the exact `gh pr merge` to run first, rather than silently
+version's PR. Before folding and again under the lease, `release.sh` detects any
+other canonical release PR; the locked guard also detects an exact-shape release
+branch before its PR opens or after that PR closes. The PR classifier
+(`scripts/release-other-bump-prs.sh`) and the live state guard are executable-tested;
+they **fail loud** with the blocking refs rather than silently
 re-attributing the earlier version's release notes.
 
 **Tests are inherited only across a byte-identical CLI seam.** `attest-main.yml`

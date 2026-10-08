@@ -45,6 +45,11 @@ exists it additionally requires the tag and branch to match. An already-visible
 npm version counts as success only when its registry sha512 integrity equals the
 attested tarball.
 
+Immediately before the first branch push, the operator path holds the repository's
+release lease and re-checks current npm versions, tags, exact-shape release branches,
+and canonical open PRs. A release that started or completed during local preparation
+therefore invalidates the stale plan instead of racing another version onto `latest`.
+
 Build, test, install, and release scripts are the entry points. They own stamping,
 packaging, attestation, and clean-install verification; hand-rolled substitutes are
 not equivalent.
