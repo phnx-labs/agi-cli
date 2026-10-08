@@ -526,6 +526,7 @@ export async function runDaemon(): Promise<void> {
     { FeedStreamService },
     { AttentionNotifyService },
     { OwnerDeviceDeliveryService },
+    { RecordingsService },
     { WebhookReceiverService },
     { HeartbeatService },
     { TmuxReapService },
@@ -547,6 +548,7 @@ export async function runDaemon(): Promise<void> {
     import('./feed-stream-service.js'),
     import('./attention-notify-service.js'),
     import('./owner-device-delivery-service.js'),
+    import('../recordings/service.js'),
     import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
     import('./tmux-reap-service.js'),
@@ -623,6 +625,9 @@ export async function runDaemon(): Promise<void> {
 
   supervisor.register(new FeedStreamService(), { enabled: isEnabled('feed-stream') });
   if (!isEnabled('feed-stream')) log('INFO', 'Shared feed stream service disabled');
+
+  supervisor.register(new RecordingsService(), { enabled: isEnabled('recordings') });
+  if (!isEnabled('recordings')) log('INFO', 'CleanShot recordings service disabled');
 
   if (isEnabled('account-state')) supervisor.register(new AccountUsageService());
   else log('INFO', 'Account-state service disabled');

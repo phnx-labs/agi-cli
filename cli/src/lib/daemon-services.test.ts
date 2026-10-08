@@ -29,11 +29,12 @@ describe('daemon-services', () => {
     try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch {  }
   });
 
-  it('defaults every known service to enabled when config is missing', () => {
+  it('defaults the opt-in recordings service off and existing services on', () => {
     const cfg = readDaemonServicesConfig();
     for (const id of DAEMON_SERVICE_IDS) {
-      expect(cfg.services[id]).toBe(true);
-      expect(isDaemonServiceEnabled(id)).toBe(true);
+      const expected = id !== 'recordings';
+      expect(cfg.services[id]).toBe(expected);
+      expect(isDaemonServiceEnabled(id)).toBe(expected);
     }
   });
 

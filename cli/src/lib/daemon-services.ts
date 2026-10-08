@@ -27,12 +27,14 @@ export type DaemonServiceId =
   | 'session-summarizer'
   | 'attention-notify'
   | 'owner-device-delivery'
+  | 'recordings'
   | 'harness-update';
 
 interface DaemonServiceDef {
   id: DaemonServiceId;
   title: string;
   description: string;
+  defaultEnabled?: boolean;
 }
 
 export const DAEMON_SERVICES: DaemonServiceDef[] = [
@@ -127,6 +129,12 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     description: 'macOS only: every 15 s, claims the iMessage notifications your account queued for a device and sends them through Messages, then reports each result. Idle without a Phoenix session or device token (PHNX-4267).',
   },
   {
+    id: 'recordings',
+    title: 'CleanShot recording publisher',
+    description: 'Publishes settled CleanShot videos as organization-only artifacts. Off until enabled by `agents recordings watch`.',
+    defaultEnabled: false,
+  },
+  {
     id: 'session-title',
     title: 'Session titles',
     description: 'Generates the short technical title shown as each session row\'s headline, once per session, with a cheap model — so a row is named by what the user asked for, never by the agent\'s latest message.',
@@ -156,7 +164,7 @@ export interface DaemonServicesConfig {
 
 function defaultServicesConfig(): DaemonServicesConfig {
   const services = {} as Record<DaemonServiceId, boolean>;
-  for (const id of DAEMON_SERVICE_IDS) services[id] = true;
+  for (const service of DAEMON_SERVICES) services[service.id] = service.defaultEnabled !== false;
   return { services };
 }
 
@@ -194,7 +202,9 @@ export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
   }
 
   const services: Record<string, boolean> = {};
-  for (const id of DAEMON_SERVICE_IDS) services[id] = cfg.services[id] ?? true;
+  for (const service of DAEMON_SERVICES) {
+    services[service.id] = cfg.services[service.id] ?? service.defaultEnabled !== false;
+  }
 
   const out = yaml.stringify({ ...preserved, services }, { sortMapEntries: false });
   atomicWriteFileSync(filePath, out, 'utf-8');
@@ -213,7 +223,7 @@ export function setDaemonServiceEnabled(id: DaemonServiceId, enabled: boolean): 
 
 export function listDaemonServiceStates(): Array<DaemonServiceDef & { enabled: boolean }> {
   const cfg = readDaemonServicesConfig();
-  return DAEMON_SERVICES.map((s) => ({ ...s, enabled: cfg.services[s.id] !== false }));
+  return DAEMON_SERVICES.map((s) => ({ ...s, enabled: cfg.services[s.id] }));
 }
 
 function getDaemonServiceActionsPath(): string {

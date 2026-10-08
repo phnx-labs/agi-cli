@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 60,
-  "commands": 478,
+  "groups": 61,
+  "commands": 483,
   "root": {
     "name": "agents",
     "path": "",
@@ -12312,6 +12312,142 @@
           ],
           "examples": "# Stop a live session by a short id prefix\nagents ps stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents ps stop 4b2f1a9c --local",
           "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents sessions resume <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "subcommands": []
+        }
+      ]
+    },
+    {
+      "name": "recordings",
+      "path": "recordings",
+      "aliases": [],
+      "description": "Publish finished CleanShot recordings as organization-only artifacts.",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "# Detect CleanShot's export folder and start the daemon-owned watcher\nagents recordings watch\n\n# Watch another folder instead\nagents recordings watch --dir ~/Movies/CleanShot\n\n# Inspect queued, failed, and published recordings\nagents recordings list\n\n# Publish one existing recording through the same pipeline\nagents recordings upload ./demo.mov\n\n# Stop watching; already published artifacts stay published\nagents recordings unwatch",
+      "notes": "The watcher is opt-in and runs inside the agents daemon. A recording becomes\neligible after its size remains unchanged for 10 seconds. The original file is never\nmodified: ffmpeg creates a temporary 1080p/30fps upload copy, then artifacts publishes\nit with organization-only visibility and no expiry.\n\nRequires ffmpeg and the standalone artifacts CLI. Sign in to artifacts with an\norganization email before files arrive; personal inbox identities are refused.",
+      "subcommands": [
+        {
+          "name": "list",
+          "path": "recordings list",
+          "aliases": [],
+          "description": "List the local recording ledger with upload status and URL.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit ledger rows as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents recordings list\nagents recordings list --json",
+          "notes": "The ledger lives at ~/.agents/recordings/ledger.json and is reused after daemon restarts.",
+          "subcommands": []
+        },
+        {
+          "name": "unwatch",
+          "path": "recordings unwatch",
+          "aliases": [],
+          "description": "Disable the recordings watcher on this device.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents recordings unwatch",
+          "notes": "Disables future discovery and cancels an upload currently owned by the watcher.",
+          "subcommands": []
+        },
+        {
+          "name": "upload",
+          "path": "recordings upload",
+          "aliases": [],
+          "description": "Transcode and publish one recording through the watcher pipeline.",
+          "args": [
+            {
+              "name": "file",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents recordings upload ./CleanShot 2026-10-08 at 4.51.47 AM.mov",
+          "notes": "Runs the same identity check, ffmpeg transcode, metadata, ledger, and artifacts upload path as the daemon.",
+          "subcommands": []
+        },
+        {
+          "name": "watch",
+          "path": "recordings watch",
+          "aliases": [],
+          "description": "Enable the daemon-owned CleanShot watcher and persist its folder.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dir <path>",
+              "description": "Recording folder (default: CleanShot exportPath on macOS)",
+              "long": "--dir",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents recordings watch\nagents recordings watch --dir ~/Movies/CleanShot",
+          "notes": "Enables the recordings daemon service on this device. Re-running updates the watched folder.",
           "subcommands": []
         }
       ]

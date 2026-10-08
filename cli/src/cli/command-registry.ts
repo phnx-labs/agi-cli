@@ -69,6 +69,7 @@ const loadAccounts: ModuleLoader = async () => (await import('../commands/accoun
 const loadDaemon: ModuleLoader = async () => (await import('../commands/daemon.js')).registerDaemonCommand;
 const loadAuth: ModuleLoader = async () => (await import('../commands/auth.js')).registerAuthCommand;
 const loadTraces: ModuleLoader = async () => (await import('../commands/traces.js')).registerTracesCommands;
+const loadRecordings: ModuleLoader = async () => (await import('../commands/recordings.js')).registerRecordingsCommand;
 
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
@@ -152,6 +153,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   daemon: [loadDaemon],
   auth: [loadAuth],
   traces: [loadTraces],
+  recordings: [loadRecordings],
 };
 
 export async function buildFullCommandTree(): Promise<Command> {
