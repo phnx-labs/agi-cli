@@ -1130,6 +1130,12 @@ async function sessionsAction(
 ): Promise<void> {
   const liveStatuses = requestedLiveStatuses(options);
   const liveOnly = options.active === true || liveStatuses.length > 0;
+  if (query === 'tail') {
+    console.error(chalk.red('`agents sessions tail` was removed; the standalone sessions CLI follows a transcript:'));
+    console.error(chalk.gray('  sessions tail <id> [--from-start] [--json]   (or: agents logs -f <id>)'));
+    process.exitCode = 2;
+    return;
+  }
   if (options.include?.split(',').map((role) => role.trim()).filter(Boolean).join(',') === 'tools') {
     console.error(chalk.red('Tool-call search lives in the standalone sessions CLI:'));
     console.error(chalk.gray("  sessions --include tools --query 'program:git' [--count] [--host <device>] [--json]"));

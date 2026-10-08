@@ -58,6 +58,11 @@ describe('agents sessions tool calls', () => {
       expect(refused.status).toBe(2);
       expect(refused.stdout).toBe('');
       expect(refused.stderr).toContain('sessions --include tools');
+
+      const tail = runAgents(['sessions', 'tail'], repoDir, tempHome);
+      expect(tail.status).toBe(2);
+      expect(tail.stdout).toBe('');
+      expect(tail.stderr).toContain('sessions tail <id>');
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
