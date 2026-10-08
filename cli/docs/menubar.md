@@ -97,7 +97,7 @@ cli/scripts/stage-menubar-helper.sh --print-floor   # the resolved floor, nothin
 (`sourceAppPath()` in `install-menubar.ts`), so a staged bundle is what
 `agents-dev menubar setup` installs from a checkout. An agi-menu developer
 testing a local build copies it to the same path. `scripts/remote-sign-mac.sh`
-runs the stage on the release home base and pulls the result back.
+runs the stage on its selected signing Mac and pulls the result back.
 
 ## What each side must not change
 

@@ -463,12 +463,11 @@ describe('selectImpact policy', () => {
     }
   });
 
-  test('release.sh selects every scripts/*.test.ts that reads it via readFileSync at runtime, not just its companion (RUSH-3097)', () => {
+  test('release.sh selects its executable companion test without source-text readers', () => {
     const plan = selectImpact({ files: ['cli/scripts/release.sh'], repoRoot: REPO, manifest: MANIFEST });
     const byFile = new Map(plan.tests.map((t) => [t.file, t.reason]));
     expect(byFile.get('cli/scripts/release.test.ts')).toBe('companion');
-    expect(byFile.get('cli/scripts/promote-home-base-probe.test.ts')).toBe('runtime-read');
-    expect(byFile.get('cli/scripts/stuck-release.test.ts')).toBe('runtime-read');
+    expect([...byFile.values()]).not.toContain('runtime-read');
     expect(plan.unmapped).toEqual([]);
   });
 });

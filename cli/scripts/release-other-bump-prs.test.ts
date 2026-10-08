@@ -1,7 +1,6 @@
 
 import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'child_process';
-import * as fs from 'fs';
 import * as path from 'path';
 
 const SCRIPT = path.resolve(__dirname, 'release-other-bump-prs.sh');
@@ -16,32 +15,32 @@ function otherBumps(current: string, prs: Array<[number, string]>): string[] {
 describe('release-other-bump-prs: a stuck earlier bump blocks the fold', () => {
   it('reports an earlier version bump PR still open while a later version releases', () => {
     expect(
-      otherBumps('release/v1.2.4', [
-        [3200, 'release/v1.2.3'],
-        [3210, 'release/v1.2.4'],
+      otherBumps('release/1.2.4', [
+        [3200, 'release/1.2.3'],
+        [3210, 'release/1.2.4'],
       ]),
-    ).toEqual(['#3200 release/v1.2.3']);
+    ).toEqual(['#3200 release/1.2.3']);
   });
 
   it('reports every other open release bump, in input order', () => {
     expect(
-      otherBumps('release/v1.2.5', [
-        [3200, 'release/v1.2.3'],
-        [3205, 'release/v1.2.4'],
-        [3210, 'release/v1.2.5'],
+      otherBumps('release/1.2.5', [
+        [3200, 'release/1.2.3'],
+        [3205, 'release/1.2.4'],
+        [3210, 'release/1.2.5'],
       ]),
-    ).toEqual(['#3200 release/v1.2.3', '#3205 release/v1.2.4']);
+    ).toEqual(['#3200 release/1.2.3', '#3205 release/1.2.4']);
   });
 });
 
 describe('release-other-bump-prs: nothing to block on', () => {
   it('excludes the current target — that is release.sh STUCK_BUMP_PR territory', () => {
-    expect(otherBumps('release/v1.2.4', [[3210, 'release/v1.2.4']])).toEqual([]);
+    expect(otherBumps('release/1.2.4', [[3210, 'release/1.2.4']])).toEqual([]);
   });
 
   it('ignores non-release feature branches that merely start with "release"', () => {
     expect(
-      otherBumps('release/v1.2.4', [
+      otherBumps('release/1.2.4', [
         [3211, 'release-notes-doc'],
         [3212, 'releasing-guide'],
         [3213, 'fix/ci-scope-rename-aware'],
@@ -50,7 +49,12 @@ describe('release-other-bump-prs: nothing to block on', () => {
   });
 
   it('reports nothing for an empty PR list', () => {
-    expect(otherBumps('release/v1.2.4', [])).toEqual([]);
+    expect(otherBumps('release/1.2.4', [])).toEqual([]);
+  });
+
+  it('treats pre-release branches as release bumps', () => {
+    expect(otherBumps('release/1.2.4-pre.2', [[3200, 'release/1.2.4-pre.1']]))
+      .toEqual(['#3200 release/1.2.4-pre.1']);
   });
 });
 
@@ -59,33 +63,5 @@ describe('release-other-bump-prs: usage', () => {
     const r = spawnSync('bash', [SCRIPT], { input: '', encoding: 'utf-8' });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain('usage:');
-  });
-});
-
-describe('release-other-bump-prs: release.sh wires it in before the fold', () => {
-  const RELEASE_SH = fs.readFileSync(path.resolve(__dirname, 'release.sh'), 'utf-8');
-
-  it('calls the helper and refuses the fold when an earlier bump is open', () => {
-    expect(RELEASE_SH).toMatch(/scripts\/release-other-bump-prs\.sh "\$RELEASE_BRANCH"/);
-    expect(RELEASE_SH).toMatch(/Refusing to fold \.changelog\/next\/\* for \$TARGET/);
-  });
-
-  it('uses command substitution, not the fail-open process-substitution form', () => {
-    expect(RELEASE_SH).toMatch(/OTHER_BUMP_PRS="\$\(printf '%s\\n' "\$OPEN_PR_LINES" \| scripts\/release-other-bump-prs\.sh/);
-    expect(RELEASE_SH).not.toMatch(/done < <\(scripts\/release-other-bump-prs\.sh/);
-  });
-
-  it('fails CLOSED on a gh failure — no `|| true` swallowing the lookup into empty', () => {
-    expect(RELEASE_SH).toMatch(/if ! OPEN_PR_LINES="\$\(gh pr list --state open --limit 200/);
-    expect(RELEASE_SH).toMatch(/could not list open PRs \(gh pr list failed\)/);
-    expect(RELEASE_SH).not.toMatch(/gh pr list --state open --limit 200[^\n]*\|\| true/);
-  });
-
-  it('appears before the changelog fold it is guarding', () => {
-    const guardIdx = RELEASE_SH.indexOf('release-other-bump-prs.sh');
-    const foldIdx = RELEASE_SH.indexOf('bun scripts/release-changelog.ts');
-    expect(guardIdx).toBeGreaterThan(-1);
-    expect(foldIdx).toBeGreaterThan(-1);
-    expect(guardIdx).toBeLessThan(foldIdx);
   });
 });

@@ -2074,60 +2074,43 @@ Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarbal
 
 ## Releasing
 
-**Self-routing, zero-config.** Run it from ANY fleet box and ANY checkout state —
-no variables to set, no Touch ID, no hand-moved credentials, and no requirement
-that the caller be on a clean `main`:
+**One trigger, one publisher.** Run the operator entry point from any checkout.
+It creates a detached worktree at fresh `origin/main`, folds the changelog, bumps
+the version, regenerates the command reference, and pushes the release branch:
 
 ```bash
-scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
-scripts/release.sh <version> --apply              # tests on an auto-picked fleet worker -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
-scripts/release.sh <version> --apply --device <box>  # promote + publish on <box> when mac-mini is down -- <box> must already pass the promote preflight (see below)
+scripts/release.sh 1.23.0             # dry-run the metadata-only release commit
+scripts/release.sh 1.23.0 --apply     # push release/1.23.0 and open its PR
+scripts/release.sh 1.23.0-pre.1 --apply
 ```
 
-The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
-each phase labeled with the box it runs on and a ✓/✗ result:
+The branch name is the version. [`.github/workflows/release.yml`](../.github/workflows/release.yml)
+accepts only `release/x.y.z` or `release/x.y.z-pre.n`; it has one GitHub-hosted
+job, no `pull_request` or `workflow_run` trigger, and a per-version concurrency
+group with cancellation disabled.
 
-| Work | Runs on | How it's chosen |
+| Work | Owner | Proof |
 |---|---|---|
-| Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
-| CI / tests (Linux) | an **auto-picked fleet worker** | [`scripts/test.sh`](scripts/test.sh) resolves it through `agents devices pick` — the least-loaded reachable POSIX box in the same auto pool `agents run --device auto` uses, so `role=worker`/`role=personal` marks govern it. `--test-device <box>` pins one; `--crabbox` still routes to a disposable [`sandbox.sh`](scripts/sandbox.sh) workspace. **`--shard <n>` fans the suite across n workers** (minimum 2 — for one worker use `--device auto`), and `--devices a,b,c` names them explicitly instead of auto-picking. The minimum-2 floor applies to **both**: a single-name `--devices` is refused the same way, since a one-shard fan-out is `--device auto` through far more machinery. Sharding is what meets the release latency target: the suite is throughput-bound, so wall time is CPU/workers. **Dynamic either way, never a hardcoded or release-exclusive instance** |
-| Promote attested tgz + npm publish (+ computer-helper re-attach **only with `--with-helpers`**) | the **home base** (any OS — promote-only, RUSH-3026) | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
+| Prepare version/changelog/PR | `scripts/release.sh` in a release-owned worktree | the caller checkout stays untouched; only release metadata enters the synthesized commit |
+| Re-bind tests and build | `scripts/release-ci.sh` on GitHub Actions | the tested `main` parent's rolling attestation is inherited only when `release-attestation.sh derive` proves the release diff is metadata-only; the producer still builds and packs the exact release tree |
+| Tag, GitHub release, install smoke, npm publish | the same Actions job | `v<version>` points at the pushed branch head; the release holds `release-attestation.json` plus the bound tarball; `release.sh --ci-publish` downloads, digest-verifies, installs, executes, and publishes those same bytes |
 
-The home base holds the npm publish token + gh auth. It defaults to `mac-mini`
-and is overridable with **`--device <name>`**. Not an env var: a flag with a
-default. Since RUSH-3026 the home-base phase is **promote-only** (download the
-attested tarball, verify, install-smoke, `npm publish`) — nothing on it signs or
-notarizes, so **any OS works as the home base**, Linux included. Re-attaching the
-reused helper zip and verifying the helper input-digest manifest are **opt-in**
-(`--with-helpers`): an ordinary release publishes the CLI and nothing else, since
-helpers resolve from their own tags
-([`src/lib/helper-versions.ts`](src/lib/helper-versions.ts)) and a manifest check
-would otherwise abort a good CLI release whenever a helper's sources moved. `assert_promote_home_base` preflights it (tools + gh
-auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
-first mutation. Helper signing is a separate, source-change-only path and still
-needs a provisioned Mac. The test worker is **not** hardcoded.
+**npm authentication is OIDC only.** The workflow grants `id-token: write`, requires
+npm 11.5.1 or newer (installing 12.2 when the runner is older), and supplies no
+`NODE_AUTH_TOKEN`, `NPM_TOKEN`, repository secret, or local secrets bundle.
+`release.sh --ci-publish` refuses a live publish outside Actions, without the OIDC
+request environment, or with either token variable present. The one-time owner
+configuration is the npm package's Trusted Publisher record for repository
+`phnx-labs/agents-cli` and workflow file `release.yml`.
 
-**A `--device` fallback must already be able to promote — it is not turnkey.**
-Promoting needs, on that box: `npm`, `node`, `git`, `jq`, `gh` (authenticated, for
-the release-asset attach), the `agents` CLI, and a **headlessly readable**
-`npmjs.com` bundle carrying `NPM_TOKEN`. Nothing on this path signs or notarizes
-(RUSH-3026), so no keychain, Developer ID identity, or `apple.com` bundle is
-required. Passing `--device <unready>` used to run the whole flow — merge the PR,
-push the tag — and only fail at the publish step, leaving a tagged-but-**unpublished**
-release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.36` tagged). `release.sh` now
-**preflights the resolved home base BEFORE any mutation** (`assert_promote_home_base`,
-running [`scripts/promote-home-base-probe.sh`](scripts/promote-home-base-probe.sh)
-inline when this box is the home base, otherwise piped over `agents ssh <home-base>
-bash -s` so the caller's fresh probe runs even when the home base's checkout is
-older): an unready `--device` aborts there, before the test/PR/merge/tag phases,
-with the probe's own line naming the gap. Run the same probe by hand
-(`bash cli/scripts/promote-home-base-probe.sh` on the candidate box; it prints
-`promote-ready`) rather than trusting this paragraph about any particular machine.
+Stable branches publish on npm's `latest` tag. `-pre.n` branches publish with
+`--tag next`; the installed CLI's `latest`-based self-update therefore never
+adopts a pre-release.
 
 **The caller checkout is never mutated or gated.** `release.sh` immediately
 fetches origin and re-enters the release from a detached, release-owned worktree
 at fresh `origin/<default>`. Version bumps, changelog folding, release-branch
-construction, CI orchestration, merging, and tagging happen there. The worktree
+construction, and PR creation happen there; GitHub Actions alone tags and publishes. The worktree
 is removed on every exit path, so a dirty shared `main`, an agent feature branch,
 or another branch already checking out `main` cannot block or contaminate a
 release. The isolated tree installs dependencies from its pinned lockfile; it
@@ -2156,30 +2139,12 @@ scripts/release-lease.sh release    # drop the lease this checkout claimed
 scripts/release-lease.sh clear      # drop a lease with no live holder (any checkout)
 ```
 
-`release.sh` claims it right after the confirmation (before the first mutation)
-and drops it from `cleanup_all`'s trap on every exit path. Ownership is the lease
-**commit sha**, recorded in `.git/release-lease.token` — not the pid, so a release
-resumed by a second invocation can still drop its own lease, and a third agent can
-never drop one it did not claim.
-
-**The TTL is not "how long a release takes".** It is "how long since the holder
-last proved it was alive" — a distinction that matters because a healthy release
-routinely outlives any sane TTL: the CI matrix alone has run **57 minutes**, and
-release 1.20.77 took **186 minutes** wall clock. So two things hold the invariant
-together:
-
-- **Renewal.** `release.sh` runs a background renewer for the whole release
-  (`renew` every 10 minutes), so a live run's lease is never older than 10 minutes
-  and cannot be reclaimed out from under it. The renewer is killed before the
-  lease is dropped, so it can never re-push a lease that is being deleted.
-- **`verify` before every irreversible step.** `require_lease` gates the
-  squash-merge, the tag, and the publish routing. It fails **closed** — no token,
-  no ref, unreachable origin all mean "we cannot prove this is ours", so the
-  release stops rather than merging alongside whoever holds it now.
-
-A lease abandoned by a killed run stops being renewed, so it becomes reclaimable
-after `RELEASE_LEASE_TTL` minutes (default 30); reclaiming names the dead holder
-rather than silently overwriting it.
+`release.sh` claims the lease after confirmation, immediately before its one
+mutation: pushing `release/<version>`. It drops the lease from its exit trap after
+the branch and PR exist. The Actions publisher does not share this process lease;
+GitHub's non-cancelling per-version concurrency group is the publication lock.
+Ownership is the lease **commit sha**, recorded in `.git/release-lease.token`, so
+a third agent can never drop a lease it did not claim.
 
 **An externally killed run is detected, not just waited out (RUSH-2274).** The TTL
 alone made a killed release indistinguishable from a healthy long one: for up to 30
@@ -2194,8 +2159,7 @@ minutes `status` read `held` while nothing was releasing. So the lease also reco
 | `unknown` | the holder is another box, or the lease predates these fields | the TTL, exactly as before |
 
 `release.sh` exports `RELEASE_LEASE_HOLDER_PID=$$` so the recorded pid is the
-orchestrating release, not the 10-minutely `renew` shell (whose `$$` is dead a
-second later — recording that would make every renewed lease read as abandoned).
+orchestrating release.
 A lease with no recorded pid stays `unknown`, so a missing export degrades to the
 old TTL behaviour rather than to "instantly reclaimable". The start time is what
 makes `dead` safe to act on: a recycled pid would otherwise read as a live release
@@ -2207,68 +2171,32 @@ the operator's unwedge path, since `release` only drops a lease *this checkout*
 claimed. It shares one predicate with `claim`, so it can never take a live holder's
 lease either.
 
-**Finish a stuck release before cutting a new one — with one exemption.** `release.sh`
-refuses to start when an older `v*` tag exists that npm never received, and prints
-the re-run that finishes it. The single carve-out is a **`patch-from-main` bump
-stepping over main's own version**, because that stuck release cannot be finished
-at all: `release.sh`'s catch-up guard rejects it and points at "cut the next patch",
-so without the exemption the two guards deadlock and *nothing* publishes (2026-08-10,
-npm at 1.22.35 with `v1.22.36` tagged — its CI-tested tree predated the prepack
-version-gate fix, so its own `npm publish` rejected a correct binary). Only main's
-own version is dropped from the candidate set, and `stuck-release.sh` says so on
-stderr; any other stuck tag still blocks, under every bump kind. Without the guard,
-a release that died between tag and publish left the
-next run validating its bump against a registry that was behind, so it cut the
-*next* version and the gap widened by one every time — that is how npm sat at
-1.20.78 while `main` carried 1.20.81.
-
-**Catch-up publishes the attested release PR head, not a rebased merge tree.** If
-the deferred bump PR merged but npm publication failed, a retry validates that
-`main` and the recorded PR head both carry the target version, re-fetches that
-exact recorded head, requires its exact-tree attestation, and tags/promotes it.
-A rebase or squash merge may have a different tree; that merged commit proves the
-version landed on `main`, while the recorded PR head is the artifact CI proved.
+**Finish a stuck release before cutting a new one.** `release.sh` refuses a later
+stable version while an older `v*` tag is missing from npm. Re-pushing the matching
+`release/<version>` branch reruns the idempotent workflow: an existing tag must
+still point at that exact branch head, release assets are replaced with the exact
+proof, and npm publication retries. A different tag target fails closed.
 
 **A stuck EARLIER bump PR blocks the changelog fold, not just a stuck tag
 (PHNX-3084).** The stuck-*tag* guard above is registry-vs-tag; this is its
-PR-side twin. The version-bump PR merges async/best-effort after publish
-(RUSH-2395), so a bump PR wedged on a CHANGELOG conflict leaves that version's
+PR-side twin. A bump PR that remains open leaves that version's
 `.changelog/next/*` fragments still queued on `main` — the drain only landed
 inside the unmerged branch commit. A *later* version releasing then re-reads those
 fragments and folds an earlier version's notes under the new version. The
-same-target `STUCK_BUMP_PR` retry only lands `release/v<current-target>`, so it
-never sees an OTHER version's PR. Before folding, `release.sh` detects any other
-open `release/v*` bump PR (`scripts/release-other-bump-prs.sh`, unit-tested) and
+same-target retry uses `release/<current-target>`, so it never sees another
+version's PR. Before folding, `release.sh` detects any other open `release/*`
+bump PR (`scripts/release-other-bump-prs.sh`, unit-tested) and
 **fails loud** with the exact `gh pr merge` to run first, rather than silently
 re-attributing the earlier version's release notes.
 
-**The privileged phase runs on the home base, always — from the TAGGED script.**
-After the invoking box merges + tags (git + gh, which need that box's auth),
-`release.sh` routes build + sign + notarize + `npm publish` + computer-helper to
-`mac-mini`. Whether inline (you invoked it there) or over ssh, it first checks out
-`v<version>` into a throwaway worktree under `.agents/worktrees/`, then runs **that
-worktree's** `cli/scripts/release.sh <version> --home-base-phase` — so the
-script that publishes is the one carried by the release tag (with
-`--home-base-phase` + `headless-sign-context.sh`), never the home base's possibly-
-stale on-disk checkout. The worktree is removed on exit whether the phase succeeds
-or fails. `--home-base-phase` runs inside that worktree: it verifies the checked-
-out version == `<version>`, enters the headless context
-([`scripts/headless-sign-context.sh`](scripts/headless-sign-context.sh) — unlocks
-`rush-signing.keychain-db` + exports `AGENTS_SECRETS_PASSPHRASE` from the on-disk
-pass files, so codesign/notarytool and every `agents secrets exec` run with **no
-Touch ID**), builds + signs the artifacts, resolves the **npm token on the home
-base** (never borrowed to the trigger box), publishes, and pushes the computer-
-helper release asset. `bun run build` copies the signed helpers into `dist/` on a
-presence gate (`[ -d bin/… ]`); `prepack`'s sha gate is sha-tool-portable.
-
-**Tests: an auto-picked fleet worker for Linux; cross-platform runs nightly.** The
-`--apply` flow runs the full suite on a worker before opening the PR; a failure prints the failing tests +
-the captured log path and **halts before any PR/publish**. That covers the Linux
-suite, and the exact-tree attestation is the functional proof the publish gates
-on. The cross-platform (macOS/Windows) matrix (`ci.yml`) is **not** on the release
-path — it runs nightly, not on the release PR, so a release no longer waits on it.
-Run it on demand via `workflow_dispatch` before a risky release. `--skip-tests`
-skips only the Linux suite run.
+**Tests are inherited only across the metadata-only seam.** `attest-main.yml`
+runs the suite for the exact `main` tree and publishes its proof on
+`main-attestations`. The branch workflow fetches the release commit's parent proof
+and asks `release-attestation-produce.sh --inherit-suite-from` to re-bind it. The
+derive command fails closed if any source, dependency, policy, or other non-release
+metadata differs. The release PR still runs the ordinary required Tests check;
+that check is evidence for merging the bookkeeping PR, while the attestation is
+the evidence npm publication consumes. Cross-platform coverage remains nightly.
 
 **Release attestations package the complete CLI build.** The producer calls
 `scripts/build.sh --clean --skip-tests` after its suite gate. This includes the
@@ -2309,34 +2237,23 @@ change can never ride a stale pass. The derived record inherits the base's
 lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
 identical to the release tree's, so `release.sh`'s `require()` still keys to it
 exactly. Inherit mode is incompatible with any `--test-*` flag (there is no suite
-to route). **`release.sh` now calls this itself** (`derive_release_attestation`,
-PHNX-3696): before the release-tree gate it mints the record from the attested
-default-branch base, so an ordinary release needs no operator step. Before that, the
-gate landed in RUSH-2666 with NO producer of any kind, and every `release.sh --apply`
-from 2026-08-15 onward stopped at `missing exact attestation key` waiting for a human
-to hand-run `release-attestation-produce.sh`. The derive is best-effort by contract —
-any failure returns non-zero and the call site guards it with `|| true` (load-bearing:
-`release.sh` runs under `set -euo pipefail`, where a BARE call to a function returning
-non-zero aborts the whole release before the fallback poll can run), so it falls
-through to the previous poll-then-`require`, which still fails loud — and `derive`'s allowlist remains the
-soundness gate, so a code change can never inherit a stale pass. Run the producer by
-hand only to mint a record out of band (a backfill, or a box with no attested base).
+to route). **`release-ci.sh` is the producer and consumer in one job**: it fetches
+the exact parent proof, invokes inherit mode, stages the resulting attestation and
+tarball on `v<version>`, then calls `release.sh --ci-publish` to download and
+promote them. A missing parent proof, a non-metadata diff, a missing tarball, or a
+digest mismatch ends the run before npm.
 
-**Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
-(not root) since the package moved under `cli`. If a publish fails after the PR
-merges, rerun the same command: registry-truth short-circuits skip an
-already-published version, tag creation is idempotent against the verified release
-commit, and the catch-up guards (CI-tested-head match + merged-tree match + version
-match) refuse an unverified publish so later commits on `main` cannot leak into the
-already-versioned package.
+**Idempotent re-runs.** Re-push the same release branch. An existing remote tag is
+accepted only when its peeled commit is the branch head; assets are clobber-uploaded
+from the newly verified proof, and npm receives the same attested tarball. A tag on
+another commit fails closed instead of moving.
 
-**`scripts/remote-sign-mac.sh` is no longer on the release path.** The privileged
-phase builds signed artifacts directly on the home base. The script remains only
+**`scripts/remote-sign-mac.sh` is not on the release path.** The script remains only
 for the narrow case of producing + pulling back JUST the macOS artifacts from
 another Mac (no publish): it signs the standalone CLI binary there and **stages the
 published menu-bar helper** (`scripts/stage-menubar-helper.sh`, no build — see
-below); it takes the same `--device <name>` flag as `release.sh` (default
-`mac-mini`), with no other env knobs or fleet discovery.
+below); its `--device <name>` selects the signing Mac independently of the npm
+release workflow.
 
 **Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
 release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
@@ -2409,7 +2326,7 @@ split (RUSH-3189). The cross-repo contract is short and lives in
   (**designated-requirement pin** + universal binary + stapled ticket).
   `--fetch-only` downloads + sha-verifies on any OS (what the producer uses);
   `--json` reports `{floor, tag, assetUrl, zip, sha256, source, app}`.
-  `remote-sign-mac.sh` runs it on the home base. `bin/MenubarHelper.app` is the
+  `remote-sign-mac.sh` runs it on its selected signing Mac. `bin/MenubarHelper.app` is the
   installer's working-tree source (`sourceAppPath()` in `install-menubar.ts`);
   an agi-menu developer copies a local build there to test it with this CLI.
 - **The DR pin is what keeps the Accessibility grant alive across upgrades.**
