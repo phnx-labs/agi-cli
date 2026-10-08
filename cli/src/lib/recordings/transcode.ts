@@ -8,10 +8,17 @@ export const FFMPEG_INSTALL_HINT = process.platform === 'darwin'
   ? 'Install it with `brew install ffmpeg`.'
   : 'Install it with your system package manager (for example `apt install ffmpeg`).';
 
+export class RecordingDependencyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RecordingDependencyError';
+  }
+}
+
 export function resolveFfmpegBin(): string {
   const explicit = process.env.FFMPEG_BIN?.trim();
   const resolved = explicit || findInPath('ffmpeg');
-  if (!resolved) throw new Error(`ffmpeg is required to publish recordings. ${FFMPEG_INSTALL_HINT}`);
+  if (!resolved) throw new RecordingDependencyError(`ffmpeg is required to publish recordings. ${FFMPEG_INSTALL_HINT}`);
   return resolved;
 }
 

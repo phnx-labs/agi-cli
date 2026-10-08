@@ -428,7 +428,8 @@ Sharing a session uses `agents sessions render <id> -o session.md`, not the raw 
 The opt-in recordings service turns finished CleanShot exports into organization-only
 artifacts. It watches on the daemon's schedule, waits until the file size has stopped
 changing for 10 seconds, creates a temporary 1080p/30fps H.264 copy, and leaves the
-original untouched:
+original untouched. Enabling the watcher establishes a fresh baseline, so existing
+files are not bulk-published; use `upload` to publish an older file explicitly:
 
 ```bash
 agents recordings watch                       # use CleanShot's macOS exportPath

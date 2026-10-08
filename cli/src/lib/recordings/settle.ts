@@ -12,6 +12,7 @@ import {
 interface Observation {
   candidate: RecordingCandidate;
   unchangedSinceMs: number;
+  readyEmitted: boolean;
 }
 
 export interface RecordingScan {
@@ -45,7 +46,7 @@ export class RecordingSettler {
     this.sessionsAt = options.sessionsAt ?? sessionAtRecordingTime;
   }
 
-  async scan(directory: string): Promise<RecordingScan> {
+  async scan(directory: string, options: { notBeforeMs?: number } = {}): Promise<RecordingScan> {
     const names = await fs.readdir(directory);
     const now = this.now();
     const seen = new Set<string>();
@@ -59,6 +60,7 @@ export class RecordingSettler {
       seen.add(filePath);
       const previous = this.observations.get(filePath);
       const recordedAtMs = stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
+      if (options.notBeforeMs !== undefined && recordedAtMs < options.notBeforeMs) return;
       const candidate: RecordingCandidate = {
         path: filePath,
         stem: cleanShotStem(filePath),
@@ -71,7 +73,8 @@ export class RecordingSettler {
       const unchangedSinceMs = previous && previous.candidate.size === candidate.size
         ? previous.unchangedSinceMs
         : now;
-      this.observations.set(filePath, { candidate, unchangedSinceMs });
+      const readyEmitted = previous?.candidate.size === candidate.size && previous.readyEmitted;
+      this.observations.set(filePath, { candidate, unchangedSinceMs, readyEmitted: readyEmitted === true });
       candidates.push(candidate);
     }));
 
@@ -87,7 +90,9 @@ export class RecordingSettler {
     const latest = [...latestByStem.values()];
     const ready = latest.filter((candidate) => {
       const observation = this.observations.get(candidate.path);
-      return observation !== undefined && now - observation.unchangedSinceMs >= this.settleMs;
+      if (!observation || observation.readyEmitted || now - observation.unchangedSinceMs < this.settleMs) return false;
+      observation.readyEmitted = true;
+      return true;
     });
     return { latest, ready };
   }
