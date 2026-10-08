@@ -5,9 +5,13 @@ import path from 'node:path';
 const SCRIPT = path.resolve(__dirname, 'release.sh');
 const describeUnix = process.platform === 'win32' ? describe.skip : describe;
 
-function run(...args: string[]) {
-  const result = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8' });
+function runWithEnv(env: NodeJS.ProcessEnv, ...args: string[]) {
+  const result = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', env });
   return { status: result.status, out: `${result.stdout}${result.stderr}` };
+}
+
+function run(...args: string[]) {
+  return runWithEnv(process.env, ...args);
 }
 
 describeUnix('release.sh operator boundary', () => {
@@ -31,7 +35,12 @@ describeUnix('release.sh operator boundary', () => {
   });
 
   it('refuses a CI publish outside GitHub Actions', () => {
-    const result = run('1.22.122', '--ci-publish');
+    const env = { ...process.env };
+    delete env.GITHUB_ACTIONS;
+    delete env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete env.NODE_AUTH_TOKEN;
+    delete env.NPM_TOKEN;
+    const result = runWithEnv(env, '1.22.122', '--ci-publish');
     expect(result.status).not.toBe(0);
     expect(result.out).toContain('restricted to GitHub Actions');
   });

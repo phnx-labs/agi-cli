@@ -25,6 +25,7 @@ function fixture(stubBody: string): { root: string; remote: string; caller: stri
   fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
   fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
   fs.copyFileSync(SCRIPT, path.join(caller, 'cli/scripts/release-worktree.sh'));
+  fs.copyFileSync(path.resolve(__dirname, 'release-attested-base.sh'), path.join(caller, 'cli/scripts/release-attested-base.sh'));
   fs.writeFileSync(path.join(caller, 'cli/scripts/release.sh'), `#!/usr/bin/env bash\nset -euo pipefail\n${stubBody}\n`, { mode: 0o755 });
   git(caller, 'add', '.');
   git(caller, 'commit', '-m', 'initial');
@@ -33,6 +34,11 @@ function fixture(stubBody: string): { root: string; remote: string; caller: stri
   git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
   git(caller, 'remote', 'set-head', 'origin', '--auto');
   return { root, remote, caller };
+}
+
+function withAttestation(caller: string, commit = 'origin/main'): NodeJS.ProcessEnv {
+  const tree = git(caller, 'rev-parse', `${commit}^{tree}`);
+  return { ...process.env, RELEASE_ATTEST_ASSETS: `attest-${tree}.json` };
 }
 
 afterEach(() => {
@@ -54,6 +60,7 @@ describe('release-worktree.sh', () => {
     const result = spawnSync('bash', [path.join(feature, 'cli/scripts/release-worktree.sh'), caller, '9.8.7', '--apply', '--yes'], {
       cwd: feature,
       encoding: 'utf-8',
+      env: withAttestation(caller),
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -63,7 +70,7 @@ describe('release-worktree.sh', () => {
     expect(fs.readdirSync(path.join(caller, '.agents/worktrees'))).toEqual([]);
   });
 
-  it('always uses the current origin/main so the release branch contains the current workflow', () => {
+  it('uses current origin/main when its exact tree is attested', () => {
     const { caller } = fixture('printf "HEAD=%s\\n" "$(git rev-parse HEAD)"');
     fs.writeFileSync(path.join(caller, 'new-workflow.txt'), 'branch publisher\n');
     git(caller, 'add', 'new-workflow.txt');
@@ -74,10 +81,63 @@ describe('release-worktree.sh', () => {
     const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
       cwd: os.tmpdir(),
       encoding: 'utf-8',
+      env: withAttestation(caller),
     });
 
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain(`HEAD=${tip}`);
+  });
+
+  it('keeps current main while inheriting proof across release-irrelevant commits', () => {
+    const { caller } = fixture('printf "HEAD=%s\\n" "$(git rev-parse HEAD)"');
+    const attested = git(caller, 'rev-parse', 'origin/main');
+    fs.writeFileSync(path.join(caller, 'unattested.txt'), 'not release input\n');
+    git(caller, 'add', 'unattested.txt');
+    git(caller, 'commit', '-m', 'unattested main change');
+    git(caller, 'push', 'origin', 'main');
+    const tip = git(caller, 'rev-parse', 'origin/main');
+
+    const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
+      cwd: caller,
+      encoding: 'utf-8',
+      env: withAttestation(caller, attested),
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain(`HEAD=${tip}`);
+    expect(result.stderr).toContain('inherits proof from attested ancestor');
+  });
+
+  it('refuses an older proof when current main changed the CLI', () => {
+    const { caller } = fixture('echo must-not-run');
+    const attested = git(caller, 'rev-parse', 'origin/main');
+    fs.writeFileSync(path.join(caller, 'cli/release-code.sh'), 'changed\n');
+    git(caller, 'add', 'cli/release-code.sh');
+    git(caller, 'commit', '-m', 'change cli release code');
+    git(caller, 'push', 'origin', 'main');
+
+    const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
+      cwd: caller,
+      encoding: 'utf-8',
+      env: withAttestation(caller, attested),
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain('must-not-run');
+    expect(result.stderr).toContain('no attested origin/main ancestor');
+  });
+
+  it('fails before release preparation when main history has no attested tree', () => {
+    const { caller } = fixture('echo must-not-run');
+    const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
+      cwd: caller,
+      encoding: 'utf-8',
+      env: { ...process.env, RELEASE_ATTEST_ASSETS: 'attest-deadbeef.json' },
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).not.toContain('must-not-run');
+    expect(result.stderr).toContain('no attested origin/main ancestor');
   });
 
   it('retains a release worktree when the release process leaves evidence behind', () => {
@@ -85,6 +145,7 @@ describe('release-worktree.sh', () => {
     const result = spawnSync('bash', [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '9.8.7'], {
       cwd: caller,
       encoding: 'utf-8',
+      env: withAttestation(caller),
     });
 
     expect(result.status, result.stderr).toBe(0);

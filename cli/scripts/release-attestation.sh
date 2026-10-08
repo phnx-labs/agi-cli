@@ -273,13 +273,24 @@ release_diff_is_metadata_only() {
     || die "cannot diff base tree ${base_tree:0:12} against release tree ${rel_tree:0:12}"
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
+    case "$line" in
+      cli/*|apps/cli/*) ;;
+      packages/session-tracker/*)
+        die "derive refused: packaged session-tracker input changes '$line' -- run the full suite for this tree"
+        ;;
+      scripts/ci-scope.ts)
+        die "derive refused: release policy changes '$line' -- run the full suite for this tree"
+        ;;
+      README.md) continue ;;
+      *) continue ;;
+    esac
     rel="$line"
     rel="${rel#apps/cli/}"
     rel="${rel#cli/}"
     case "$rel" in
       package.json|CHANGELOG.md|docs/command-index.md|docs/command-index.json|docs/command-reference.html) ;;
       .changelog/*) ;;
-      *) die "derive refused: release tree changes '$line' beyond version/changelog/command-index -- run the full suite for this tree" ;;
+      *) die "derive refused: release tree changes '$line' beyond CLI version/changelog/command-index -- run the full suite for this tree" ;;
     esac
   done <<< "$changed"
 }

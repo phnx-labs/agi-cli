@@ -15,9 +15,13 @@ name is the package version.
 
 `.github/workflows/release.yml` is the only publisher. Its single GitHub-hosted job:
 
-1. fetches the exact-tree test attestation for the release commit's `main` parent;
+1. fetches the newest attested ancestor whose CLI executable inputs, packaged
+   session-tracker, and impact policy are byte-identical to the release commit's
+   `main` parent;
 2. runs `release-attestation-produce.sh --inherit-suite-from`, whose derive gate
-   refuses any diff beyond package version, changelog, and generated command reference;
+   permits unrelated monorepo changes and root README packaging updates, but
+   refuses any executable CLI diff beyond package version, changelog, and generated
+   command reference;
 3. builds and packs the exact release tree, then creates annotated tag `v<version>`
    and a GitHub release carrying `release-attestation.json` plus that tarball;
 4. runs `release.sh --ci-publish`, which downloads those assets, verifies the tree
@@ -27,12 +31,19 @@ name is the package version.
 npm authentication is trusted publishing: the workflow has `id-token: write`, requires
 npm 11.5.1 or newer, and carries no npm token. Stable versions publish on `latest`; `-pre.n`
 versions publish on `next`, leaving CLI auto-update on the stable channel. The npm
-package's Trusted Publisher record must name repository `phnx-labs/agents-cli` and
+package's Trusted Publisher record must name canonical repository `phnx-labs/agi-cli` and
 workflow `release.yml`.
 
 The ordinary path builds only the CLI. Native helpers remain content-addressed,
 independently released assets; no helper build, Apple signing, persistent host, or
 second publisher participates.
+
+Retry the canonical `scripts/release.sh <version> --apply` command after a partial
+release. The release branch is immutable from its first push; the operator path
+reruns the existing GitHub Actions job for that exact commit, and once `v<version>`
+exists it additionally requires the tag and branch to match. An already-visible
+npm version counts as success only when its registry sha512 integrity equals the
+attested tarball.
 
 Build, test, install, and release scripts are the entry points. They own stamping,
 packaging, attestation, and clean-install verification; hand-rolled substitutes are

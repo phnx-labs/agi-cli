@@ -93,7 +93,7 @@ run_ci_publish() {
     command -v gh >/dev/null || die "gh not found"
     assets="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/agents-cli-release-assets.XXXXXX")"
     gh release download "v$TARGET" \
-      --repo "${GITHUB_REPOSITORY:-phnx-labs/agents-cli}" \
+      --repo "${GITHUB_REPOSITORY:-phnx-labs/agi-cli}" \
       --pattern release-attestation.json \
       --pattern 'phnx-labs-agents-cli-*.tgz' \
       --dir "$assets" \
@@ -114,6 +114,8 @@ run_ci_publish() {
 
   if ! $PUBLISH_DRY_RUN \
     && [[ "$(npm view "$PHNX_PKG@$TARGET" version 2>/dev/null || true)" == "$TARGET" ]]; then
+    scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
+      || die "$PHNX_PKG@$TARGET exists with bytes that differ from the attested tarball"
     green "$PHNX_PKG@$TARGET is already visible on npm; the attested install smoke passed."
     printf 'BRANCH_RELEASE_PUBLISH version=%s tag=existing tarball=%s dry_run=false\n' \
       "$TARGET" "$(basename "$tgz")"
@@ -142,6 +144,8 @@ run_ci_publish() {
     done
     [[ "$published" == "$TARGET" ]] \
       || die "npm publish returned success but $PHNX_PKG@$TARGET is not registry-visible"
+    scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
+      || die "npm serves bytes that differ from the attested tarball for $PHNX_PKG@$TARGET"
   fi
   printf 'BRANCH_RELEASE_PUBLISH version=%s tag=%s tarball=%s dry_run=%s\n' \
     "$TARGET" "$dist_tag" "$(basename "$tgz")" "$PUBLISH_DRY_RUN"
@@ -170,6 +174,8 @@ command -v git >/dev/null || die "git not found"
 command -v jq >/dev/null || die "jq not found"
 command -v gh >/dev/null || die "gh not found"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated"
+GITHUB_REPO="$(gh api 'repos/{owner}/{repo}' --jq .full_name)" \
+  || die "could not resolve the GitHub repository over REST"
 
 git fetch --quiet origin
 DEFAULT_BRANCH="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
@@ -205,6 +211,15 @@ remote_version_tags() {
   printf '%s\n' "$out" | grep -v '\^{}$' || true
 }
 
+remote_target_tag_commit() {
+  local refs peeled direct
+  refs="$(git ls-remote --tags origin "refs/tags/v$TARGET" "refs/tags/v$TARGET^{}")" \
+    || die "could not read remote tag v$TARGET"
+  peeled="$(awk '$2 ~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
+  printf '%s' "${peeled:-$direct}"
+}
+
 if ! version_is_prerelease "$TARGET"; then
   TAG_FACTS=""
   REMOTE_TAG_LINES="$(remote_version_tags)"
@@ -226,13 +241,60 @@ if ! version_is_prerelease "$TARGET"; then
 fi
 
 RELEASE_BRANCH="release/$TARGET"
-OPEN_PR_LINES="$(gh pr list --state open --limit 200 --json number,headRefName \
-  --jq '.[] | "\(.number) \(.headRefName)"')" \
+OPEN_PR_LINES="$(gh api --paginate "repos/$GITHUB_REPO/pulls?state=open&per_page=100" \
+  --jq '.[] | "\(.number) \(.head.ref)"')" \
   || die "could not list open release PRs"
 OTHER_BUMP_PRS="$(printf '%s\n' "$OPEN_PR_LINES" \
   | scripts/release-other-bump-prs.sh "$RELEASE_BRANCH")"
 [[ -z "$OTHER_BUMP_PRS" ]] \
   || die "another release PR still owns the changelog queue: $OTHER_BUMP_PRS"
+PR_NUMBER="$(awk -v branch="$RELEASE_BRANCH" '$2 == branch { print $1; exit }' <<<"$OPEN_PR_LINES")"
+
+open_release_pr() {
+  local body="$1"
+  [[ -z "$PR_NUMBER" ]] || return 0
+  PR_NUMBER="$(gh api -X POST "repos/$GITHUB_REPO/pulls" \
+    -f base="$DEFAULT_BRANCH" -f head="$RELEASE_BRANCH" \
+    -f title="chore(release): $TARGET" -f body="$body" --jq .number)" \
+    || die "release branch exists but its pull request could not be opened"
+}
+
+TARGET_TAG_SHA="$(remote_target_tag_commit)"
+EXISTING_REMOTE="$(scripts/release-branch-head.sh origin "$RELEASE_BRANCH" "$TARGET")" \
+  || die "existing $RELEASE_BRANCH failed immutable-branch validation"
+if [[ -n "$TARGET_TAG_SHA" ]]; then
+  [[ -n "$EXISTING_REMOTE" ]] \
+    || die "v$TARGET is tagged at $TARGET_TAG_SHA but $RELEASE_BRANCH is missing"
+  [[ "$EXISTING_REMOTE" == "$TARGET_TAG_SHA" ]] \
+    || die "v$TARGET points at $TARGET_TAG_SHA but $RELEASE_BRANCH points at $EXISTING_REMOTE"
+  if ! $APPLY; then
+    green "Dry run would rerun the existing Release workflow for v$TARGET at $TARGET_TAG_SHA."
+    exit 0
+  fi
+  if ! $YES; then
+    read -r -p "Rerun the Release workflow for immutable v$TARGET at $TARGET_TAG_SHA? [y/N] " answer
+    [[ "$answer" =~ ^[Yy]$ ]] || die "aborted"
+  fi
+  open_release_pr "$(printf '## %s\n\nRetry the immutable tagged release from its exact branch commit.' "$TARGET")"
+  scripts/release-rerun.sh rerun "$GITHUB_REPO" "$RELEASE_BRANCH" "$TARGET_TAG_SHA"
+  green "Release PR #$PR_NUMBER remains bound to immutable v$TARGET."
+  exit 0
+fi
+
+if [[ -n "$EXISTING_REMOTE" ]]; then
+  if ! $APPLY; then
+    green "Dry run would resume the existing Release workflow for $RELEASE_BRANCH at $EXISTING_REMOTE."
+    exit 0
+  fi
+  if ! $YES; then
+    read -r -p "Resume the Release workflow for immutable $RELEASE_BRANCH at $EXISTING_REMOTE? [y/N] " answer
+    [[ "$answer" =~ ^[Yy]$ ]] || die "aborted"
+  fi
+  open_release_pr "$(printf '## %s\n\nResume the existing release branch at its exact commit.' "$TARGET")"
+  scripts/release-rerun.sh rerun "$GITHUB_REPO" "$RELEASE_BRANCH" "$EXISTING_REMOTE"
+  green "Release PR #$PR_NUMBER remains bound to immutable $RELEASE_BRANCH."
+  exit 0
+fi
 
 cleanup_release_tree() {
   git restore --source=HEAD --staged --worktree -- \
@@ -291,25 +353,15 @@ release_lease() {
 }
 trap release_lease EXIT
 
-EXISTING_REMOTE="$(git ls-remote origin "refs/heads/$RELEASE_BRANCH" | awk '{print $1; exit}')"
-if [[ -n "$EXISTING_REMOTE" ]]; then
-  git push --force-with-lease="refs/heads/$RELEASE_BRANCH:$EXISTING_REMOTE" \
-    origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
-else
-  git push --force-with-lease="refs/heads/$RELEASE_BRANCH:" \
-    origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
-fi
+git push --force-with-lease="refs/heads/$RELEASE_BRANCH:" \
+  origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"
 
-PR_NUMBER="$(gh pr list --head "$RELEASE_BRANCH" --base "$DEFAULT_BRANCH" \
-  --state open --json number --jq '.[0].number // empty')"
 if [[ -z "$PR_NUMBER" ]]; then
   PR_BODY="$(printf '## %s\n\n%s\n\nThe branch-push Release workflow is the sole npm publisher.' "$TARGET" "$NOTES")"
-  gh pr create --base "$DEFAULT_BRANCH" --head "$RELEASE_BRANCH" \
-    --title "chore(release): $TARGET" --body "$PR_BODY" >/dev/null
-  PR_NUMBER="$(gh pr view "$RELEASE_BRANCH" --json number --jq .number)"
+  open_release_pr "$PR_BODY"
 fi
 
 green "Opened release PR #$PR_NUMBER from $RELEASE_BRANCH."
 green "GitHub Actions now owns attestation, tag, GitHub release, install smoke, and npm publish."
 printf 'https://github.com/%s/actions/workflows/release.yml\n' \
-  "${GITHUB_REPOSITORY:-phnx-labs/agents-cli}"
+  "$GITHUB_REPO"
