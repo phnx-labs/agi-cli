@@ -12,7 +12,12 @@
   output keeps the rows already on the stream instead of removing them. The
   `computer` floor in `agents setup tools` is now 0.1.7, the first release whose
   `computer sessions --json` honors `--limit`. A computer row's `agent` now comes
-  from the linked session only, since the engine records no harness name. Source:
+  from the linked session only, since the engine records no harness name.
+  agents-cli no longer writes `browser_sessions` / `computer_sessions` rows (the
+  engines keep their own history and adopted those tables once) and no longer
+  opens the browser events pipe; the tables and migrations stay. `agents computer
+  sessions` also runs off macOS, since listing history drives nothing. Source:
   `cli/src/lib/feed/tool-activity.ts`, `cli/src/lib/feed/tools.ts`,
   `cli/src/commands/browser.ts`, `cli/src/commands/computer.ts`,
-  `cli/src/commands/sessions.ts`, `cli/src/lib/standalone-tools.ts`.
+  `cli/src/commands/sessions.ts`, `cli/src/lib/standalone-tools.ts`,
+  `cli/src/lib/browser-client.ts`, `cli/src/lib/computer/record.ts`, `cli/src/lib/session/db.ts`.

@@ -1618,7 +1618,7 @@ sessions --include tools --query 'program:git' --json   # standalone sessions CL
 agents sessions backfill tools --fleet
 ```
 
-The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). A local query stays on the machine; an explicit `--fleet` tool query sends only redacted, bounded match evidence or aggregate counts over SSH. Historical tool parsing is explicit via `sessions backfill tools`; queries never parse transcripts. See [Sessions](#sessions-across-agents) for full usage.
+The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Tool-call evidence is stored redacted and bounded; the standalone `sessions --include tools` searches it, reading another box over SSH with `--host`. Historical tool parsing is explicit via `agents sessions backfill tools`; searches never parse transcripts. See [Sessions](#sessions-across-agents) for full usage.
 
 ### Secrets
 

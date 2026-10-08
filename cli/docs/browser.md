@@ -47,7 +47,6 @@ agent process
      │
      │  spawn, env + stdio 0/1/2 INHERITED
      │    fd 3  BROWSER_CONTEXT_FD  →  one JSON context object, then EOF
-     │    fd 4  BROWSER_EVENTS_FD   ←  NDJSON action events, one per line
      ▼
   browser  (@phnx-labs/browser-cli)
      │
@@ -59,8 +58,8 @@ agent process
      └── Profile B  chrome-data/B/  →  Task bold-phoenix-c3d4
 ```
 
-The action events on fd 4 come back to agents-cli, which records them in the
-durable `browser_sessions` row. The engine keeps its own task history in
+agents-cli opens no events pipe (PHNX-4227): the engine records every action in
+its own task history, and `BROWSER_EVENTS_FD` stays unset. The engine keeps that history in
 `~/.agents/.history/browser/history.db` and adopts those legacy rows itself, so
 the history agents-cli shows is the engine's: `agents browser sessions` runs the
 engine's own picker, and the feed's browser rows come from
@@ -101,18 +100,6 @@ directly. `--device <alias>` is forwarded on the engine's argv verbatim; the
 engine matches the alias against `context.target`, then `~/.ssh/config` — it has
 no fleet registry of its own. The device is bound once at `start`; page verbs run
 against the task's bound device, so `--device` is only valid there.
-
-### The action events (fd 4)
-
-One JSON object per line, each an action the engine actually performed. A line
-carries `event: "browser.action"` and needs at least a string `command` — the
-verb that ran. `invocationId`, `pid`, `task`, `profile`, `url`, `host` (the
-driven device), `sessionId`, `launchId`, `actor`, and free-form detail are
-optional. agents-cli upserts the durable `browser_sessions` row from an event
-that names a `task` AND a `profile` — a lifecycle verb (`status`, `profiles`)
-carries neither and is skipped. An unreadable line is dropped rather than failing
-the command; the engine must never block on this pipe, and emitting nothing is
-valid.
 
 ## Profiles and endpoints
 

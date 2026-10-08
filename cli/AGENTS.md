@@ -1820,11 +1820,11 @@ src/
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
     browser/           # `agents browser` CONSUMER of the standalone `browser` engine (@phnx-labs/browser-cli, PHNX-4101):
                        #   context.ts (the fd-3 JSON handed to the engine — the --device target resolved against the fleet,
-                       #   session identity, remote-control consent), record.ts (fd-4 action events → the durable browser_sessions
-                       #   row). `agents browser sessions` is the engine's own picker, and the feed reads its `--json` (PHNX-4227).
+                       #   session identity, remote-control consent). The engine keeps its own action history, so agents-cli
+                       #   opens no events pipe. `agents browser sessions` is the engine's own picker, and the feed reads its `--json` (PHNX-4227).
                        #   The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
                        #   store, the task index AND the whole remote SSH path live in the engine. The subprocess client is
-                       #   `lib/browser-client.ts` (fd-3/fd-4, no fallback), mirroring `computer-client.ts`.
+                       #   `lib/browser-client.ts` (fd-3 context only, no fallback), mirroring `computer-client.ts`.
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
     project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents insights resources` (also `agents sessions stats`) + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias) — including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by `bash-command.ts`'s `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
@@ -1835,7 +1835,7 @@ src/
     computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
                        #   policy.ts (permissions → the allow-list file), context.ts (the fd-3 JSON handed to
                        #   the engine, incl. the --device target resolved against the fleet), record.ts (fd-4
-                       #   action events → feed + session history). `agents computer sessions` is the engine's own picker. The
+                       #   action events → `computer.action` feed events). `agents computer sessions` is the engine's own picker. The
                        #   daemons, RPC, RFB/VNC, the model loop AND the whole remote path — Windows
                        #   provisioning, the helper token, the ssh -L tunnel — live in the engine.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
@@ -2051,7 +2051,7 @@ browser-drive suite (tunnel + remote launch/stop) left with the CDP/BiDi/Arc
 drivers into the standalone `@phnx-labs/browser-cli` repo, the same way the
 computer half of it moved to the `computer` engine's repo (PHNX-4075). agents-cli
 now tests only its consumer seam — `browser-client.ts` fd resolution/framing,
-the fd-3 context shape, the fd-4 → `browser_sessions` recorder, and the verb
+the fd-3 context shape, and the verb
 catalog — none of which needs a live browser or a Windows runner.
 
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,

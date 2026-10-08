@@ -7,7 +7,6 @@ import { findInPath } from './agent-spec/agents.js';
 const INSTALL_HINT = 'npm i -g @phnx-labs/browser-cli';
 
 export const BROWSER_CONTEXT_FD = 3;
-export const BROWSER_EVENTS_FD = 4;
 
 export class BrowserClientError extends Error {
   code: string;
@@ -66,46 +65,9 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-export interface BrowserActionEvent {
-  event?: string;
-  ts?: string;
-  command: string;
-  invocationId?: string;
-  pid?: number;
-  task?: string;
-  profile?: string;
-  url?: string;
-  host?: string;
-  sessionId?: string;
-  launchId?: string;
-  actor?: string;
-  [key: string]: unknown;
-}
-
-export function parseEventLines(
-  buffer: string,
-): { events: BrowserActionEvent[]; rest: string } {
-  const events: BrowserActionEvent[] = [];
-  const parts = buffer.split('\n');
-  const rest = parts.pop() ?? '';
-  for (const line of parts) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (parsed && typeof parsed === 'object' && typeof (parsed as BrowserActionEvent).command === 'string') {
-        events.push(parsed as BrowserActionEvent);
-      }
-    } catch {
-    }
-  }
-  return { events, rest };
-}
-
 interface RunBrowserOptions {
   argv: string[];
   context: unknown;
-  onEvent?: (event: BrowserActionEvent) => void;
   capture?: boolean;
 }
 
@@ -119,16 +81,14 @@ export async function runBrowser(opts: RunBrowserOptions): Promise<RunBrowserRes
   const { command, prefix } = invocation(bin);
 
   const child = spawn(command, [...prefix, ...opts.argv], {
-    stdio: ['inherit', opts.capture ? 'pipe' : 'inherit', 'inherit', 'pipe', 'pipe'],
+    stdio: ['inherit', opts.capture ? 'pipe' : 'inherit', 'inherit', 'pipe'],
     env: {
       ...process.env,
       BROWSER_CONTEXT_FD: String(BROWSER_CONTEXT_FD),
-      BROWSER_EVENTS_FD: String(BROWSER_EVENTS_FD),
     },
   });
 
   const contextPipe = child.stdio[BROWSER_CONTEXT_FD] as NodeJS.WritableStream | null;
-  const eventsPipe = child.stdio[BROWSER_EVENTS_FD] as NodeJS.ReadableStream | null;
 
   if (contextPipe) {
     contextPipe.on('error', () => {});
@@ -143,24 +103,6 @@ export async function runBrowser(opts: RunBrowserOptions): Promise<RunBrowserRes
     });
   }
 
-  let pending = '';
-  const drained = new Promise<void>((resolve) => {
-    if (!eventsPipe) return resolve();
-    eventsPipe.setEncoding('utf-8');
-    eventsPipe.on('data', (chunk: string) => {
-      const { events, rest } = parseEventLines(pending + chunk);
-      pending = rest;
-      for (const event of events) opts.onEvent?.(event);
-    });
-    eventsPipe.on('error', () => resolve());
-    eventsPipe.on('end', () => {
-      const { events } = parseEventLines(pending.endsWith('\n') ? pending : pending + '\n');
-      pending = '';
-      for (const event of events) opts.onEvent?.(event);
-      resolve();
-    });
-  });
-
   const exitCode = await new Promise<number>((resolve, reject) => {
     child.on('error', (err) => {
       reject(new BrowserClientError('BROWSER_SPAWN_FAILED', `Could not run \`${bin}\`: ${err.message}`));
@@ -171,7 +113,6 @@ export async function runBrowser(opts: RunBrowserOptions): Promise<RunBrowserRes
     });
   });
 
-  await drained;
   return { exitCode, stdout };
 }
 

@@ -1225,9 +1225,12 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-33 (MUST).** Tool-call queries (repeated distinct-call clauses, their
   bounds, `--count`, and cross-host reads) are the standalone `sessions` CLI's
   contract (PHNX-4227); it reads the index agents writes under SES-34 and SES-37.
-  `agents sessions --include tools` MUST exit 2, write nothing to stdout, and
-  name `sessions --include tools`, so no caller or older peer parses a session
-  listing as a tool envelope (`commands/sessions.ts`;
+  A tool-search shape of `agents sessions --include tools` (no session id, a
+  search query instead of an id, or a `--query` clause) MUST exit 2, write
+  nothing to stdout, and name `sessions --include tools`, so no caller or older
+  peer parses a session listing as a tool envelope. A single-session read,
+  `agents sessions <id> --include tools [--json|--markdown]`, MUST keep rendering
+  that session's tool events like any other role filter (`commands/sessions.ts`;
   `commands/sessions.cli-tools.test.ts`).
 - **SES-34 (MUST).** Schema v29's session-id-keyed `tool_scan_ledger` MUST be independent of the
   normal session ledgers. Migration MUST clear only the derived tool ledger and
@@ -1428,8 +1431,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   so the array shape is load-bearing across the fleet.
 - **SES-IF-2 (MUST).** `sessions --active --json` MUST emit `ActiveSession[]` with
   `ticketId`/`project`/`prLink` always present as keys (test
-  `sessions.serialize.test.ts:76-115`); `tail --json` MUST pass raw JSONL through
-  one event per line (`commands/sessions-tail.ts:229-232`); `inject --json` and
+  `sessions.serialize.test.ts:76-115`); `inject --json` and
   `migrations --json` emit their documented shapes.
 - **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
@@ -1568,13 +1570,12 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
 
 #### 4.3 stdout / stderr / exit discipline
 
-- **SES-IF-5 (MUST).** Machine-readable output (`--json`, `--markdown`, `tail`
-  stream, bundle NDJSON) goes to **stdout**; human/diagnostic/skip notes go to
+- **SES-IF-5 (MUST).** Machine-readable output (`--json`, `--markdown`, bundle
+  NDJSON) goes to **stdout**; human/diagnostic/skip notes go to
   **stderr**, so piping a session is never polluted.
 - **SES-IF-6 (MUST).** Exit codes are a contract: `sessions --waiting` sets exit **1**
   to signal matching (waiting-on-you) sessions exist
-  (`commands/sessions.ts:905,942`); `tail` uses **2** for usage/unsupported-agent
-  vs **1** for no-match (`commands/sessions-tail.ts:185,192,196`); remote
+  (`commands/sessions.ts:905,942`); remote
   partial-failure sets exit **1** without throwing (SES-23).
 
 ---
@@ -1788,9 +1789,10 @@ survives searchable (`db.migrate-v10.test.ts:78-93`; `db.migrate-v14.test.ts:98-
 **GWT-11 — The standalone CLI searches what agents indexed.**
 Given agents indexed a session where a `git merge` call ran and a later `gh` call
 returned `CONFLICT`; When `sessions --include tools` runs two `--query` clauses
-naming those facts; Then it returns that session with both calls, and
-`agents sessions --include tools` exits 2 pointing at it
-(`commands/sessions.cli-tools.test.ts`).
+naming those facts; Then it returns that session with both calls,
+`agents sessions --include tools --query …` exits 2 pointing at it, and
+`agents sessions <id> --include tools --json` still returns that session's two
+tool calls as `{ session, events }` (`commands/sessions.cli-tools.test.ts`).
 
 **GWT-12 — The index survives an unavailable transcript.**
 Given a transcript was indexed and its source is then moved offline; Then the

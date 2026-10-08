@@ -12,7 +12,7 @@ function writeExecutable(file: string, body: string): void {
 
 describe('standalone tool floors', () => {
   it('pins the published releases R1 of PHNX-4227 depends on', () => {
-    expect(pinnedSpec('sessions')).toBe('@phnx-labs/sessions-cli@0.5.0');
+    expect(pinnedSpec('sessions')).toBe('@phnx-labs/sessions-cli@0.6.0');
     expect(pinnedSpec('browser')).toBe('@phnx-labs/browser-cli@0.1.16');
     expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.1.8');
     expect(pinnedSpec('computer')).toBe('@phnx-labs/computer-cli@0.1.7');
@@ -55,10 +55,10 @@ describePosix('ensureToolPins — real executables on PATH', () => {
     writeExecutable(path.join(bin, 'sessions'), 'echo "0.4.2"');
     writeExecutable(
       path.join(bin, 'npm'),
-      `echo "$@" >> "${bin}/npm.log"\nprintf '#!/bin/sh\\necho 0.5.0\\n' > "${bin}/sessions"\nchmod 755 "${bin}/sessions"`,
+      `echo "$@" >> "${bin}/npm.log"\nprintf '#!/bin/sh\\necho 0.6.0\\n' > "${bin}/sessions"\nchmod 755 "${bin}/sessions"`,
     );
     const rows = await ensureToolPins({ tools: ['sessions'], logToStderr: true });
-    expect(rows).toEqual([expect.objectContaining({ tool: 'sessions', installed: '0.5.0', state: 'upgraded' })]);
+    expect(rows).toEqual([expect.objectContaining({ tool: 'sessions', installed: '0.6.0', state: 'upgraded' })]);
     expect(fs.readFileSync(path.join(bin, 'npm.log'), 'utf8').trim()).toBe(`install -g ${pinnedSpec('sessions')}`);
   });
 

@@ -180,7 +180,9 @@ always wins over `--device`.
 Tool-call search is the standalone CLI's: `sessions --include tools --query
 'program:git input:merge' [--count] [--host <target>] --json` reads the tool
 index agents writes (`agents sessions backfill tools` fills it for historical
-transcripts). `agents sessions --include tools` exits 2 and names that command.
+transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
+clause) exits 2 and names that command; reading one session's tool calls,
+`agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
 Following a live transcript is `sessions tail <id>` (`agents logs -f <id>` runs
 it for a session).
 

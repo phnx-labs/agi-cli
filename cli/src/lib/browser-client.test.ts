@@ -4,12 +4,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import {
   BROWSER_CONTEXT_FD,
-  BROWSER_EVENTS_FD,
   BrowserClientError,
   browserInstalled,
   _resetBrowserClientForTest,
   invocation,
-  parseEventLines,
   resolveBrowserBin,
 } from './browser-client.js';
 
@@ -82,51 +80,8 @@ describe('invocation', () => {
   });
 });
 
-describe('the fd numbers the engine is told to use', () => {
-  it('are 3 for the context and 4 for the events', () => {
+describe('the fd the engine is told to read its context from', () => {
+  it('is 3', () => {
     expect(BROWSER_CONTEXT_FD).toBe(3);
-    expect(BROWSER_EVENTS_FD).toBe(4);
-  });
-});
-
-describe('parseEventLines — NDJSON framing', () => {
-  it('carries a trailing partial line forward instead of losing or corrupting it', () => {
-    const first = parseEventLines('{"command":"navigate"}\n{"command":"scre');
-    expect(first.events).toEqual([{ command: 'navigate' }]);
-    expect(first.rest).toBe('{"command":"scre');
-
-    const second = parseEventLines(first.rest + 'enshot"}\n');
-    expect(second.events).toEqual([{ command: 'screenshot' }]);
-    expect(second.rest).toBe('');
-  });
-
-  it('drops an unreadable line rather than throwing — the action it describes already happened', () => {
-    const { events } = parseEventLines('garbage\n\n{"command":"click"}\n');
-    expect(events).toEqual([{ command: 'click' }]);
-  });
-
-  it('ignores a JSON object with no command — it is not an action event', () => {
-    const { events } = parseEventLines('{"hello":"world"}\n{"command":"type"}\n');
-    expect(events).toEqual([{ command: 'type' }]);
-  });
-
-  it("keeps the engine's full record, including task/profile/url", () => {
-    const line = JSON.stringify({
-      event: 'browser.action',
-      command: 'navigate',
-      invocationId: 'run-1',
-      pid: 900,
-      task: 'swift-crab-a1b2',
-      profile: 'work',
-      url: 'https://example.com',
-      host: 'zion',
-      actor: 'claude',
-    });
-    const { events } = parseEventLines(line + '\n');
-    expect(events[0].invocationId).toBe('run-1');
-    expect(events[0].task).toBe('swift-crab-a1b2');
-    expect(events[0].profile).toBe('work');
-    expect(events[0].url).toBe('https://example.com');
-    expect(events[0].host).toBe('zion');
   });
 });

@@ -2,7 +2,6 @@
 import { Command } from 'commander';
 import { forwardsHelp, registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildBrowserContext } from '../lib/browser/context.js';
-import { recordBrowserAction } from '../lib/browser/record.js';
 import {
   isBrowserClientError,
   resolveBrowserBin,
@@ -89,7 +88,6 @@ async function forwardToBrowser(opts: {
     argv: opts.argv,
     context,
     capture: opts.capture,
-    onEvent: (event) => recordBrowserAction(event, { device: opts.device }),
   });
 }
 

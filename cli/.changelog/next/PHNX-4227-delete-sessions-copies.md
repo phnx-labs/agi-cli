@@ -5,8 +5,10 @@
 - Tool-call search moved to the standalone CLI: `sessions --include tools
   --query <clause> [--count] [--host <target>] --json`. It reads the same index
   agents writes (`agents sessions backfill tools` still fills it).
-  `agents sessions --include tools` now exits 2 and names that command, and
-  `--fleet` / `--count` are no longer `agents sessions` flags. `--query` is a
+  A tool search through `agents sessions --include tools` (no session id, or a
+  `--query` clause) now exits 2 and names that command; reading one session's
+  tool calls, `agents sessions <id> --include tools [--json|--markdown]`, is
+  unchanged. `--fleet` / `--count` are no longer `agents sessions` flags. `--query` is a
   single search-text flag.
 
 ### Changed

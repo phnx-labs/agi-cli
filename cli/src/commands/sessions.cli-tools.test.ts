@@ -19,7 +19,7 @@ function dependencySessions(): { command: string; prefix: string[] } {
 }
 
 describe('agents sessions tool calls', () => {
-  it('indexes tool calls that the standalone sessions CLI searches, and refuses to search them itself', () => {
+  it('indexes tool calls the standalone sessions CLI searches, refuses tool search itself, and still reads one session\'s tool calls', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-sessions-tools-'));
     try {
       writeUpdateCache(tempHome);
@@ -52,17 +52,27 @@ describe('agents sessions tool calls', () => {
       expect(found.sessions).toEqual([expect.objectContaining({ id: sessionId })]);
       expect(found.sessions[0].calls).toHaveLength(2);
 
-      const refused = runAgents([
-        'sessions', '--include', 'tools', '--query', 'program:git', '--json', '--no-interactive',
-      ], repoDir, tempHome);
-      expect(refused.status).toBe(2);
-      expect(refused.stdout).toBe('');
-      expect(refused.stderr).toContain('sessions --include tools');
+      for (const searchShape of [
+        ['sessions', '--include', 'tools', '--query', 'program:git', '--json', '--no-interactive'],
+        ['sessions', 'merge conflicts', '--include', 'tools', '--json', '--no-interactive'],
+        ['sessions', sessionId, '--include', 'tools', '--query', 'program:git', '--json'],
+      ]) {
+        const refused = runAgents(searchShape, repoDir, tempHome);
+        expect(refused.status, searchShape.join(' ')).toBe(2);
+        expect(refused.stdout).toBe('');
+        expect(refused.stderr).toContain('sessions --include tools');
+      }
 
-      const tail = runAgents(['sessions', 'tail'], repoDir, tempHome);
-      expect(tail.status).toBe(2);
-      expect(tail.stdout).toBe('');
-      expect(tail.stderr).toContain('sessions tail <id>');
+      const oneSessionJson = runAgents(['sessions', sessionId, '--include', 'tools', '--json'], repoDir, tempHome);
+      expect(oneSessionJson.status, oneSessionJson.stderr).toBe(0);
+      const rendered = JSON.parse(oneSessionJson.stdout) as { session: { id: string }; events: Array<{ type: string; tool?: string }> };
+      expect(rendered.session.id).toBe(sessionId);
+      expect(rendered.events.filter((event) => event.type === 'tool_use')).toHaveLength(2);
+      expect(rendered.events.some((event) => event.type === 'message')).toBe(false);
+
+      const oneSessionMarkdown = runAgents(['sessions', sessionId, '--markdown', '--include', 'tools'], repoDir, tempHome);
+      expect(oneSessionMarkdown.status, oneSessionMarkdown.stderr).toBe(0);
+      expect(oneSessionMarkdown.stdout).toContain('git merge topic');
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

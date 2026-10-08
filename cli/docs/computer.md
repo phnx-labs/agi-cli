@@ -56,8 +56,9 @@ agent process
   helper daemon  →  the app
 ```
 
-The action events on fd 4 come back to agents-cli, which records them in the
-feed and the session ledger. Run history itself is the engine's:
+The action events on fd 4 come back to agents-cli, which appends each one to the
+feed as a `computer.action` event (that is how a session is marked as having driven
+the desktop). Run history itself is the engine's:
 `agents computer sessions` runs the engine's own picker, and the feed's computer
 rows come from `computer sessions --json`.
 
@@ -326,12 +327,6 @@ The feed stream (`agents feed watch --json`) reads `computer sessions --json
 **linked** when its session id (or launch id) resolves in this machine's session
 index, **unresolved** when it carries an id nothing here indexes, and **unlinked**
 when it carries none.
-
-Each invocation's identity is also written to a durable `computer_sessions` row
-in the local session DB, metadata only (identity, timing, an action count and the
-200-character `--task` preview). Nothing in agents-cli lists it any more; the
-engine adopts it once as legacy history, and the writer prunes rows older than
-365 days.
 
 ## Remote Windows (`--device`)
 
