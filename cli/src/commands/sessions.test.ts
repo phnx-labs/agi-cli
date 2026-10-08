@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, fleetNotFoundMessage, resolveSessionAgentName, parseInstalledAgentVersionQuery, executionKind, printRoutineDrilldown, parseRemoteComputerSessionRows, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
+import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, fleetNotFoundMessage, resolveSessionAgentName, parseInstalledAgentVersionQuery, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
 import { buildSessionDescription } from './ps-roster.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
@@ -185,18 +185,6 @@ describe('positional installed agent version filters', () => {
     expect(parseInstalledAgentVersionQuery('cladue@2.1.181', installed)).toBeUndefined();
     expect(parseInstalledAgentVersionQuery('project@2026', installed)).toBeUndefined();
     expect(parseInstalledAgentVersionQuery('claude@2.1.181 notes', installed)).toBeUndefined();
-  });
-});
-describe('parseRemoteComputerSessionRows', () => {
-  it('accepts a clean peer array and supplies its machine name', () => {
-    const parsed = parseRemoteComputerSessionRows('[{"pid":7,"endMs":9}]', 'yosemite-m0');
-    expect(parsed.valid).toBe(true);
-    expect(parsed.items).toEqual([{ pid: 7, endMs: 9, machine: 'yosemite-m0' }]);
-  });
-
-  it('rejects banner-prefixed multi-host output instead of corrupting JSON', () => {
-    const parsed = parseRemoteComputerSessionRows('── host ──\n[{"pid":7}]', 'yosemite-m0');
-    expect(parsed).toEqual({ items: [], valid: false });
   });
 });
 describe('buildResumeCommand version-pinned resume', () => {

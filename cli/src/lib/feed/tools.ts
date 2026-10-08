@@ -3,15 +3,16 @@
  * projected into one row contract, alongside the agent and attention rows.
  *
  * WHY A PROJECTION AND NOT A NEW STORE. Both sources already exist and already
- * have an owner: `agents browser sessions` groups a profile's captures into
- * task-first rows (`browser/sessions-list.ts`), and `agents computer sessions`
- * groups `computer.action` ledger entries into run rows
- * (`computer/sessions-list.ts`). A menu-bar or Fleet view that wanted the same
- * information had only one way to get it: shell out to those two commands, per
- * tool, per device, on a timer. That is the per-tool polling this module
- * removes — the rows ride the ONE stream `agents feed watch --json` already
- * holds open, so a consumer switching its All/Agents/Browser/Computer filter
- * spawns zero commands.
+ * have an owner: the standalone `browser sessions --tasks --json` groups a
+ * profile's captures into task-first rows, and the standalone
+ * `computer sessions --json` groups its action ledger into run rows. A menu-bar
+ * or Fleet view that wanted the same information had only one way to get it:
+ * shell out to those two commands, per tool, per device, on a timer. That is the
+ * per-tool polling this module removes — the rows ride the ONE stream
+ * `agents feed watch --json` already holds open, so a consumer switching its
+ * All/Agents/Browser/Computer filter spawns zero commands. {@link BrowserSessionRow}
+ * and {@link ComputerRunRow} are those commands' JSON rows, plus the agent session
+ * agents-cli resolved for them from its own index.
  *
  * WHAT IS DELIBERATELY DIFFERENT BETWEEN THE TWO KINDS. A browser task is a
  * LIVE resource: it is bound in the task index while it exists, it can be
@@ -31,8 +32,60 @@ import { createHash } from 'node:crypto';
 import { normalizeHost } from '../machine-id.js';
 import { sessionHeadline } from '../session/title.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import type { BrowserSessionRow, ArtifactKind } from '../browser/sessions-list.js';
-import type { ComputerRunRow } from '../computer/sessions-list.js';
+
+export type ArtifactKind = 'screenshot' | 'pdf' | 'recording' | 'download';
+
+export interface BrowserArtifact {
+  kind: ArtifactKind;
+  task?: string;
+  name: string;
+  path: string;
+  bytes: number;
+  mtimeMs: number;
+}
+
+export interface BrowserSessionRow {
+  kind: 'task' | 'downloads';
+  profile: string;
+  task?: string;
+  launchId?: string;
+  sessionId?: string;
+  linkedSession?: SessionMeta;
+  artifacts: BrowserArtifact[];
+  counts: Record<ArtifactKind, number>;
+  latestMtimeMs: number;
+  startedAt?: number;
+  machine?: string;
+  captureDir?: string;
+  capturesRemote?: string;
+}
+
+export interface ComputerAction {
+  verb: string;
+  tsMs: number;
+  host?: string;
+  bundle?: string;
+  capture?: { kind: 'screenshot'; path: string; name: string; bytes?: number };
+}
+
+export interface ComputerRunRow {
+  pid?: number;
+  invocationId?: string;
+  task?: string;
+  machine: string;
+  remoteHost?: string;
+  bundle?: string;
+  sessionId?: string;
+  launchId?: string;
+  linkedSession?: SessionMeta;
+  actions: ComputerAction[];
+  counts: Record<string, number>;
+  recoveredActionCount?: number;
+  captures?: ComputerAction[];
+  captureCount?: number;
+  startMs: number;
+  endMs: number;
+}
 
 export const TOOL_CAPTURE_LIMIT = 20;
 export const TOOL_ACTION_LIMIT = 50;
@@ -156,14 +209,14 @@ function ownerOf(sessionId: string | undefined, linkedSession: SessionMeta | nul
   };
 }
 
-function knownMachine(machine: string | undefined): string | undefined {
-  return machine && machine !== 'unknown' ? machine : undefined;
+function knownMachine(machine: string): string | undefined {
+  return machine !== 'local' ? machine : undefined;
 }
 
 export function boundBrowserRow(task: string, binding: { profile?: string }): BrowserSessionRow {
   return {
     kind: 'task', task, profile: binding.profile ?? '',
-    linkStatus: 'unlinked', artifacts: [],
+    artifacts: [],
     counts: { screenshot: 0, pdf: 0, recording: 0, download: 0 },
     latestMtimeMs: 0,
   };
@@ -220,20 +273,15 @@ export function projectBrowserToolRow(
 export function projectComputerToolRow(scope: string, row: ComputerRunRow): ComputerToolRow {
   const host = normalizeHost(scope);
   const owner = ownerOf(row.sessionId, row.linkedSession, host);
-  const agent = row.agent ?? row.linkedSession?.agent;
-  const captures: ToolCapture[] = [];
-  const captureCounts: Record<string, number> = {};
-  for (const action of row.actions) {
-    if (!action.capture) continue;
-    captureCounts[action.capture.kind] = (captureCounts[action.capture.kind] ?? 0) + 1;
-    if (captures.length >= TOOL_CAPTURE_LIMIT) continue;
-    captures.push({
-      kind: action.capture.kind, name: action.capture.name, path: action.capture.path,
-      host,
-      ...(action.capture.bytes !== undefined ? { bytes: action.capture.bytes } : {}),
-      atMs: action.tsMs,
-    });
-  }
+  const agent = row.linkedSession?.agent;
+  const captured = (row.captures ?? row.actions).flatMap((action) => action.capture ? [{ ...action.capture, atMs: action.tsMs }] : []);
+  const captures: ToolCapture[] = captured.slice(0, TOOL_CAPTURE_LIMIT).map((capture) => ({
+    kind: capture.kind, name: capture.name, path: capture.path, host,
+    ...(capture.bytes !== undefined ? { bytes: capture.bytes } : {}),
+    atMs: capture.atMs,
+  }));
+  const captureTotal = row.captureCount ?? captured.length;
+  const captureCounts: Record<string, number> = captureTotal > 0 ? { screenshot: captureTotal } : {};
   const actions = row.actions.slice(0, TOOL_ACTION_LIMIT).map((action) => ({
     verb: action.verb, atMs: action.tsMs,
     ...(action.host ? { host: action.host } : {}),
@@ -250,7 +298,7 @@ export function projectComputerToolRow(scope: string, row: ComputerRunRow): Comp
     ...(row.launchId ? { launchId: row.launchId } : {}),
     ...(agent ? { agent } : {}),
     ...(owner ? { owner } : {}),
-    linkStatus: row.linkStatus,
+    linkStatus: row.linkedSession ? 'linked' : (row.sessionId || row.launchId) ? 'unresolved' : 'unlinked',
     startedAtMs: row.startMs,
     updatedAtMs: row.endMs,
     captures,

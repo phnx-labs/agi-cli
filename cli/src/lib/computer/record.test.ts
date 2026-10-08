@@ -2,10 +2,8 @@ import { describe, expect, it, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { recordComputerAction, COMPUTER_INVOCATION_ID } from './record.js';
+import { recordComputerAction, COMPUTER_INVOCATION_ID, TASK_PREVIEW_MAX_CHARS } from './record.js';
 import { query, _resetForTest } from '../feed/events.js';
-import { listComputerActions } from './sessions-list.js';
-import { TASK_PREVIEW_MAX_CHARS } from './sessions-list.js';
 
 const tempDirs: string[] = [];
 
@@ -59,16 +57,6 @@ describe('recordComputerAction', () => {
     useFreshLedger();
     recordComputerAction({ command: 'apps' }, { device: 'win-mini' });
     expect(query({ eventTypes: ['computer.action'] })[0].host).toBe('win-mini');
-  });
-
-  it('lands in the shape the sessions reader parses, not merely in the log', () => {
-    useFreshLedger();
-    recordComputerAction({ command: 'screenshot', invocationId: 'engine-run-3', host: 'win-mini' });
-    const actions = listComputerActions();
-    expect(actions).toHaveLength(1);
-    expect(actions[0].verb).toBe('screenshot');
-    expect(actions[0].invocationId).toBe('engine-run-3');
-    expect(actions[0].host).toBe('win-mini');
   });
 
   it('bounds the task preview HERE, even when the engine reports an unbounded one', () => {

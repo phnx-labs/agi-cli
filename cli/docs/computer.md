@@ -57,8 +57,9 @@ agent process
 ```
 
 The action events on fd 4 come back to agents-cli, which records them in the
-feed and the session ledger — that is what `agents computer sessions` and
-`agents sessions --computer` read.
+feed and the session ledger. Run history itself is the engine's:
+`agents computer sessions` runs the engine's own picker, and the feed's computer
+rows come from `computer sessions --json`.
 
 ### What lives where
 
@@ -309,57 +310,28 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 
 | Command | Description |
 |---------|-------------|
-| `agents computer sessions` | Browse computer-driving history, grouped by run. `agents sessions --computer` is the same view. |
+| `agents computer sessions` | Browse computer-driving history, grouped by run — forwards to the engine's own `computer sessions`. |
 
-`agents computer sessions` flags: `--machine <name>` (only rows on/driving a
-matching hostname, machineId, or `--device` name), `--limit <n>` (cap the flat
-table at this many rows — default 50; the interactive picker and `--json` are
-unbounded), `--json`, `--no-interactive`.
+`agents computer sessions` forwards its arguments verbatim to the engine, so its
+flags are the engine's (`agents computer sessions --help` asks it): among them
+`--machine <name>`, `--since`/`--until`, `--limit <n>`, `--search <text>`,
+`--open <selector>`, `--json` and `--no-interactive`. The engine keeps its own
+run history (`~/.agents/.history/computer/history.db` summaries plus its 30-day
+action ledger under `~/.agents/.cache/computer/actions/`); agents-cli keeps no
+second reader of it. `agents sessions --computer` was removed (PHNX-4227); run
+`computer sessions` or `agents computer sessions` instead.
 
-There is no capture directory the way `agents browser sessions` has one per
-task — a computer action drives a live GUI in place and leaves no file behind.
-The durable source is the `computer.action` event every verb already writes
-(`~/.agents/.history/events/`, 7-day/50 MiB default retention, same as any
-other audit event), and each row is every action sharing one CLI process's
-pid: a single explicit verb (e.g. `agents computer click ...`) is a one-action
-row, and a whole `agents computer run --task "..."` loop collapses to one row
-holding every verb the model drove, labeled with the (truncated) task text.
-
-On a real terminal (no `--json`/`--no-interactive`), `sessions` opens an
-interactive, **task-first** browser: one row per run, newest first, showing
-machine, target app/window bundle when known, action counts by verb, and —
-when the run's session identity resolves — the owning agent session. A run
-whose CLI process carried a real `AGENT_SESSION_ID`/`AGENT_LAUNCH_ID` links
-directly to that session's canonical digest (prompt, changes, tests, last
-response); one that carried an identity nothing on this machine can index
-shows **unresolved**; a bare terminal invocation with no agent session env at
-all shows **unlinked** — its actions are still listed, there's just no session
-to attribute them to.
+The feed stream (`agents feed watch --json`) reads `computer sessions --json
+--no-interactive --limit 500` and adds the agent session behind each run: a row is
+**linked** when its session id (or launch id) resolves in this machine's session
+index, **unresolved** when it carries an id nothing here indexes, and **unlinked**
+when it carries none.
 
 Each invocation's identity is also written to a durable `computer_sessions` row
-in the local session DB. The event ledger is deliberately bounded (7 days /
-50 MiB by default), so once it prunes, a run's individual actions are gone —
-before this, the whole run vanished from the listing with them. It now stays
-listed from that row, carrying identity, timing and a total action count, with
-an empty per-verb breakdown: those actions really are gone, and are never
-reconstructed. The row is metadata only, and the bounded `--task` preview is the
-same text the ledger already stored — no new content is captured.
-
-Search matches task text, machine, target bundle, the
-linked session's agent/topic, or a driven verb; `enter` prints the
-highlighted run's full action list (there's nothing to open — no artifact
-exists per action) and the picker keeps browsing. `--no-interactive` prints
-the flat per-run table instead — the stable, scriptable surface `--json` also
-uses.
-
-**Retention and privacy.** Nothing here adds a second retention policy —
-`agents computer sessions` reads the same bounded, auto-pruned event ledger
-every other `agents <cmd>` audit event already lands in. Nothing sensitive is
-persisted: `type`/`type-text` actions already record only the typed length,
-never the text; a `run --task` description is the agent's own instruction
-(the same class of content `agents sessions` already stores as a session
-prompt), kept but bounded to 200 characters before it is ever written — never
-the full text.
+in the local session DB, metadata only (identity, timing, an action count and the
+200-character `--task` preview). Nothing in agents-cli lists it any more; the
+engine adopts it once as legacy history, and the writer prunes rows older than
+365 days.
 
 ## Remote Windows (`--device`)
 

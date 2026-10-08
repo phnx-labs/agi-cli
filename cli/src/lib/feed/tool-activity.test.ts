@@ -2,13 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { collectToolRows, readLiveBrowserTasks, toolWatchRoots, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
-import type { BrowserSessionRow } from '../browser/sessions-list.js';
-import type { ComputerRunRow } from '../computer/sessions-list.js';
-import type { ToolRow } from './tools.js';
-import { nativeBrowserHistoryPath, readBrowserSessionRows } from '../browser/sessions-list.js';
-import { NativeHistoryWriter } from '../browser/native-history.test-fixture.js';
-import { getBrowserRuntimeDir } from '../state.js';
+import { collectToolRows, linkToolSessions, readLiveBrowserTasks, readStandaloneComputerRows, readToolJson, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
+import type { BrowserSessionRow, ComputerRunRow, ToolRow } from './tools.js';
+import { _resetBrowserClientForTest } from '../browser-client.js';
+import { _resetComputerClientForTest } from '../computer-client.js';
+import { getSessionsDir } from '../state.js';
+import { upsertSession } from '../session/db.js';
 
 const roots: string[] = [];
 function tempRoot(): string {
@@ -20,7 +19,7 @@ afterEach(() => { for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive:
 
 function browserRow(task: string, mtimeMs: number, captures = 1): BrowserSessionRow {
   return {
-    kind: 'task', profile: 'work', task, linkStatus: 'unlinked',
+    kind: 'task', profile: 'work', task,
     artifacts: Array.from({ length: captures }, (_, i) => (
       { kind: 'screenshot' as const, task, name: `c${i}.png`, path: `/caps/${task}/c${i}.png`, bytes: 1, mtimeMs: mtimeMs - i }
     )),
@@ -31,8 +30,8 @@ function browserRow(task: string, mtimeMs: number, captures = 1): BrowserSession
 
 function computerRow(invocationId: string, endMs: number): ComputerRunRow {
   return {
-    invocationId, machine: 'm1', linkStatus: 'unlinked',
-    actions: [{ verb: 'click', ts: '2026-09-13T00:00:00Z', tsMs: endMs, pid: 1 }],
+    invocationId, machine: 'm1',
+    actions: [{ verb: 'click', tsMs: endMs }],
     counts: { click: 1 }, startMs: endMs - 10, endMs,
   };
 }
@@ -47,14 +46,14 @@ async function until(what: string, predicate: () => boolean, timeoutMs = 4_000):
 }
 
 describe('tool activity collection over real directories', () => {
-  it('collects both kinds and binds liveness from the task index', () => {
-    const { rows, complete } = collectToolRows('m1', {
+  it('collects both kinds and binds liveness from the task index', async () => {
+    const { rows, incomplete } = await collectToolRows('m1', {
       browserRows: () => [browserRow('post', 3_000), browserRow('stale', 1_000)],
       computerRows: () => [computerRow('inv-1', 2_000)],
       bindings: () => [{ name: 'post', device: 'm1', url: 'https://example.com/', createdAt: 100 }],
       liveTasks: () => [],
     });
-    expect(complete).toBe(true);
+    expect(incomplete).toEqual([]);
     expect(rows.map((row) => [row.kind, row.task, row.live])).toEqual([
       ['browser', 'post', true],
       ['computer', undefined, false],
@@ -62,8 +61,8 @@ describe('tool activity collection over real directories', () => {
     ]);
   });
 
-  it('survives a source that throws, keeps the other kind, and reports INCOMPLETE', () => {
-    const { rows, complete } = collectToolRows('m1', {
+  it('survives a source that throws, keeps the other kind, and names the incomplete kind', async () => {
+    const { rows, incomplete, retry } = await collectToolRows('m1', {
       browserRows: () => { throw new Error('no browser runtime dir'); },
       computerRows: () => [computerRow('inv-1', 2_000)],
       bindings: () => { throw new Error('no task index'); },
@@ -71,17 +70,18 @@ describe('tool activity collection over real directories', () => {
     });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.kind).toBe('computer');
-    expect(complete).toBe(false);
+    expect(incomplete).toEqual(['browser']);
+    expect(retry).toBe(true);
   });
 
-  it('emits only changed rows and the keys that vanished', () => {
+  it('emits only changed rows and the keys that vanished', async () => {
     const set = new ToolRowSet();
     const scope = 'm1';
-    const only = (browserRows: () => BrowserSessionRow[]) => collectToolRows(scope, { browserRows, computerRows: () => [], bindings: () => [], liveTasks: () => [] }).rows;
-    const first = only(() => [browserRow('post', 1_000)]);
+    const only = async (browserRows: () => BrowserSessionRow[]) => (await collectToolRows(scope, { browserRows, computerRows: () => [], bindings: () => [], liveTasks: () => [] })).rows;
+    const first = await only(() => [browserRow('post', 1_000)]);
     expect(set.diff(first).upserts).toHaveLength(1);
-    expect(set.diff(only(() => [browserRow('post', 1_000)]))).toEqual({ upserts: [], removes: [] });
-    const grown = set.diff(only(() => [browserRow('post', 2_000, 2)]));
+    expect(set.diff(await only(() => [browserRow('post', 1_000)]))).toEqual({ upserts: [], removes: [] });
+    const grown = set.diff(await only(() => [browserRow('post', 2_000, 2)]));
     expect(grown.upserts).toHaveLength(1);
     expect(grown.upserts[0]!.rowKey).toBe(first[0]!.rowKey);
     expect(grown.removes).toEqual([]);
@@ -103,7 +103,7 @@ describe('tool activity collection over real directories', () => {
       bindings: () => tasks.map((task) => ({ name: task, device: 'm1', createdAt: 1 })),
       liveTasks: () => [],
     };
-    const initial = collectToolRows('m1', sources).rows;
+    const initial = (await collectToolRows('m1', sources)).rows;
     const watch = watchToolActivity({
       scope: 'm1', signal: controller.signal, roots: [browserDir, eventsDir],
       sweepMs: 30, sources, initial, onDiff: (diff) => diffs.push(diff),
@@ -235,25 +235,26 @@ describe('live browser tasks read from real tasks.json files', () => {
     } finally { fs.chmodSync(file, 0o600); }
   });
 
-  it('a failed live-task read marks the projection incomplete and keeps rows', () => {
+  it('a failed live-task read marks the projection incomplete and keeps rows', async () => {
     const set = new ToolRowSet();
-    const good = collectToolRows('m1', {
+    const good = await collectToolRows('m1', {
       browserRows: () => [], computerRows: () => [], bindings: () => [],
       liveTasks: () => [{ task: 'post', tabs: [] }],
     });
-    expect(good.complete).toBe(true);
+    expect(good.incomplete).toEqual([]);
     expect(set.diff(good.rows).upserts).toHaveLength(1);
 
-    const failed = collectToolRows('m1', {
+    const failed = await collectToolRows('m1', {
       browserRows: () => [], computerRows: () => [], bindings: () => [],
       liveTasks: () => { throw new Error('EACCES'); },
     });
-    expect(failed.complete).toBe(false);
+    expect(failed.incomplete).toEqual(['browser']);
     expect(failed.rows).toEqual([]);
+    expect(set.diff(failed.rows, failed.incomplete)).toEqual({ upserts: [], removes: [] });
   });
 
-  it('surfaces a live task that has produced no capture at all', () => {
-    const { rows } = collectToolRows('m1', {
+  it('surfaces a live task that has produced no capture at all', async () => {
+    const { rows } = await collectToolRows('m1', {
       browserRows: () => [],
       computerRows: () => [],
       bindings: () => [],
@@ -267,8 +268,8 @@ describe('live browser tasks read from real tasks.json files', () => {
     expect(row.kind === 'browser' && row.showCommand?.args).toEqual(['tab', 'focus', 'a', '--task', 'fresh']);
   });
 
-  it('does not duplicate a task that has BOTH a live record and captures', () => {
-    const { rows } = collectToolRows('m1', {
+  it('does not duplicate a task that has BOTH a live record and captures', async () => {
+    const { rows } = await collectToolRows('m1', {
       browserRows: () => [browserRow('post', 5_000)],
       computerRows: () => [],
       bindings: () => [{ name: 'post', device: 'm1', createdAt: 1 }],
@@ -339,130 +340,93 @@ describe('a failed read never removes live rows', () => {
   });
 });
 
-describe('native browser history on the feed (real history.db in WAL mode)', () => {
-  const realSources = { computerRows: () => [], bindings: () => [] };
-  let writer: NativeHistoryWriter;
-  let profile: string;
-  const runtimeDirs: string[] = [];
+describe('rows read from the standalone tools (real processes printing fixture JSON)', () => {
+  const testdata = path.join(path.dirname(new URL(import.meta.url).pathname), 'testdata');
+  const saved = { ...process.env };
+  let argvLog: string;
 
   beforeEach(() => {
-    profile = `feed-${Math.random().toString(36).slice(2, 10)}`;
-    writer = new NativeHistoryWriter(nativeBrowserHistoryPath());
+    argvLog = path.join(tempRoot(), 'argv.log');
+    process.env.BROWSER_BIN = path.join(testdata, 'bin', 'browser');
+    process.env.COMPUTER_BIN = path.join(testdata, 'bin', 'computer');
+    process.env.BROWSER_SESSIONS_FIXTURE = path.join(testdata, 'browser-sessions.json');
+    process.env.COMPUTER_SESSIONS_FIXTURE = path.join(testdata, 'computer-sessions.json');
+    process.env.TOOL_FIXTURE_ARGV_LOG = argvLog;
+    _resetBrowserClientForTest();
+    _resetComputerClientForTest();
   });
   afterEach(() => {
-    writer.close();
-    for (const dir of runtimeDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  const historyRoots = () => {
-    const historyDir = path.dirname(nativeBrowserHistoryPath());
-    return toolWatchRoots().filter((root) => !historyDir.startsWith(root + path.sep));
-  };
-  const rowFor = (rows: ToolRow[], task: string) => rows.filter((row) => row.kind === 'browser' && row.task === task);
-
-  it('a write that lands only in the WAL reaches the stream as exactly one upsert', async () => {
-    const controller = new AbortController();
-    const diffs: ToolDiff[] = [];
-    const watch = watchToolActivity({
-      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
-      sources: realSources, initial: collectToolRows('m1', realSources).rows, onDiff: (diff) => diffs.push(diff),
-    });
-    try {
-      await until('the history dir to be watched', () => watch.armed());
-      writer.put({ profile, task: 'wal-task', sessionId: 'sess-wal', startedAt: 1_000, lastActivity: 2_000 });
-      expect(fs.statSync(`${nativeBrowserHistoryPath()}-wal`).size).toBeGreaterThan(0);
-      await until('the WAL write to be projected', () => diffs.length > 0);
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(diffs).toHaveLength(1);
-      expect(diffs[0]!.removes).toEqual([]);
-      expect(diffs[0]!.upserts.map((row) => row.task)).toEqual(['wal-task']);
-      expect(diffs[0]!.upserts[0]).toMatchObject({ live: false, sessionId: 'sess-wal', startedAtMs: 1_000, updatedAtMs: 2_000 });
-    } finally { controller.abort(); }
-  });
-
-  it('settles after each write: reading the history never re-triggers the watcher', async () => {
-    writer.close();
-    const writeOnce = (task: string, at: number) => {
-      const once = new NativeHistoryWriter(nativeBrowserHistoryPath());
-      once.put({ profile, task, startedAt: at, lastActivity: at });
-      once.close();
-    };
-    let reads = 0;
-    const sources = { ...realSources, browserRows: () => { reads++; return readBrowserSessionRows(); } };
-    const diffs: ToolDiff[] = [];
-    const controller = new AbortController();
-    const watch = watchToolActivity({
-      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
-      sources, initial: collectToolRows('m1', sources).rows, onDiff: (diff) => diffs.push(diff),
-    });
-    try {
-      await until('the history dir to be watched', () => watch.armed());
-      for (const [task, at] of [['closed-1', 10], ['closed-2', 20]] as const) {
-        const before = diffs.length;
-        writeOnce(task, at);
-        await until(`${task} to be projected`, () => diffs.length > before);
-        await new Promise((resolve) => setTimeout(resolve, 200));
-        const settled = reads;
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        expect(reads - settled, `reads after ${task} settled`).toBe(0);
-      }
-      expect(diffs.flatMap((diff) => diff.upserts).map((row) => row.task)).toEqual(['closed-1', 'closed-2']);
-    } finally {
-      controller.abort();
-      writer = new NativeHistoryWriter(nativeBrowserHistoryPath());
+    for (const key of ['BROWSER_BIN', 'COMPUTER_BIN', 'BROWSER_SESSIONS_FIXTURE', 'COMPUTER_SESSIONS_FIXTURE', 'TOOL_FIXTURE_ARGV_LOG', 'PATH']) {
+      if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
     }
+    _resetBrowserClientForTest();
+    _resetComputerClientForTest();
   });
 
-  it('an unreadable history record keeps every healthy row and reports the snapshot incomplete', async () => {
-    writer.put({ profile, task: 'healthy', startedAt: 1, lastActivity: 2 });
-    const first = collectToolRows('m1', realSources);
-    expect(first.complete).toBe(true);
-    expect(rowFor(first.rows, 'healthy')).toHaveLength(1);
+  const live = { bindings: () => [], liveTasks: () => [] };
 
-    const controller = new AbortController();
-    const diffs: ToolDiff[] = [];
-    const watch = watchToolActivity({
-      scope: 'm1', signal: controller.signal, roots: historyRoots(), sweepMs: 25,
-      sources: realSources, initial: first.rows, onDiff: (diff) => diffs.push(diff),
+  it('projects `browser sessions` and `computer sessions` JSON onto the stream, asking each for its bounded listing', async () => {
+    const { rows, incomplete } = await collectToolRows('m1', live);
+    expect(incomplete).toEqual([]);
+    expect(fs.readFileSync(argvLog, 'utf8').trim().split('\n').sort()).toEqual([
+      'browser sessions --tasks --json --no-interactive',
+      'computer sessions --json --no-interactive --limit 500',
+    ]);
+
+    const post = rows.find((row) => row.kind === 'browser' && row.task === 'post')!;
+    expect(post).toMatchObject({
+      profile: 'work@zion', machine: 'zion', sessionId: 'sess-post', launchId: 'launch-post',
+      linkStatus: 'unresolved', live: false, startedAtMs: 1791464700000,
+      captureCounts: { screenshot: 1, pdf: 1 },
     });
-    try {
-      await until('the history dir to be watched', () => watch.armed());
-      writer.rawRecord(profile, 'torn', '{"profile":', 3);
-      expect(collectToolRows('m1', realSources).complete).toBe(false);
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      expect(diffs).toEqual([]);
+    expect(post.captures.map((capture) => capture.name)).toEqual(['2.png', '1.pdf']);
+    expect(rows.filter((row) => row.kind === 'browser').map((row) => row.task ?? 'downloads').sort()).toEqual(['downloads', 'post']);
 
-      writer.rawRecord(profile, 'torn', JSON.stringify({ profile, task: 'torn', startedAt: 3, lastActivity: 3 }), 3);
-      await until('the repaired record to be projected', () => diffs.length > 0);
-      expect(diffs.flatMap((diff) => diff.removes)).toEqual([]);
-      expect(diffs.flatMap((diff) => diff.upserts).map((row) => row.task)).toEqual(['torn']);
-    } finally { controller.abort(); }
+    const run = rows.find((row) => row.kind === 'computer')!;
+    expect(run).toMatchObject({
+      device: 'win-mini', task: 'open the dashboard', sessionId: 'sess-computer', linkStatus: 'unresolved',
+      bundle: 'com.apple.Safari', actionCounts: { click: 1, screenshot: 1 }, captureCounts: { screenshot: 1 },
+      updatedAtMs: 1791464910000,
+    });
+    expect(run.captures).toEqual([{ kind: 'screenshot', name: 'shot.png', path: '/caps/shot.png', host: 'm1', bytes: 12, atMs: 1791464910000 }]);
   });
 
-  it('a live task that finishes stays one row, keeps its owner and loses only its controls', () => {
-    const runtime = path.join(getBrowserRuntimeDir(), profile);
-    runtimeDirs.push(runtime);
-    fs.mkdirSync(runtime, { recursive: true });
-    fs.writeFileSync(path.join(runtime, 'tasks.json'), JSON.stringify({
-      fin: { name: 'fin', profile, sessionId: 'sess-fin', createdAt: 1_000, lastActionAt: 1_500, currentTabId: 't1', tabs: { t1: {} } },
-    }));
-    writer.put({ profile, task: 'fin', sessionId: 'sess-fin', machine: 'origin-box', startedAt: 1_000, lastActivity: 1_500 });
+  it('links a row to the agent session agents-cli has indexed for its session id', async () => {
+    fs.mkdirSync(getSessionsDir(), { recursive: true });
+    const transcript = path.join(tempRoot(), 'sess-post.jsonl');
+    fs.writeFileSync(transcript, '');
+    upsertSession({
+      id: 'sess-post', shortId: 'sess-pos', agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic: 'post the release notes',
+    } as unknown as Parameters<typeof upsertSession>[0], 'post the release notes');
 
-    const live = rowFor(collectToolRows('peer-a', realSources).rows, 'fin');
-    expect(live).toHaveLength(1);
-    expect(live[0]).toMatchObject({
-      live: true, owner: { sessionId: 'sess-fin' }, machine: 'origin-box',
-      closeCommand: { command: 'browser', args: ['done', '--task', 'fin'], runOn: 'peer-a' },
-      showCommand: { command: 'browser', args: ['tab', 'focus', 't1', '--task', 'fin'], runOn: 'peer-a' },
-    });
+    const [row] = linkToolSessions([{ sessionId: 'sess-post' }, { sessionId: 'never-indexed' }]);
+    expect(row!.linkedSession?.id).toBe('sess-post');
 
-    fs.writeFileSync(path.join(runtime, 'tasks.json'), '{}');
-    writer.put({ profile, task: 'fin', sessionId: 'sess-fin', startedAt: 1_000, lastActivity: 4_000 });
-    const finished = rowFor(collectToolRows('peer-a', realSources).rows, 'fin');
-    expect(finished).toHaveLength(1);
-    expect(finished[0]!.rowKey).toBe(live[0]!.rowKey);
-    expect(finished[0]).toMatchObject({ live: false, owner: { sessionId: 'sess-fin' }, updatedAtMs: 4_000, startedAtMs: 1_000 });
-    expect('closeCommand' in finished[0]!).toBe(false);
-    expect('showCommand' in finished[0]!).toBe(false);
+    const { rows } = await collectToolRows('m1', live);
+    const post = rows.find((r) => r.kind === 'browser' && r.task === 'post')!;
+    expect(post.linkStatus).toBe('linked');
+    expect(post.owner).toMatchObject({ sessionId: 'sess-post', agent: 'claude', label: 'post the release notes' });
+    expect(rows.find((r) => r.kind === 'computer')!.linkStatus).toBe('unresolved');
+  });
+
+  it('a tool that exits non-zero makes the snapshot incomplete and keeps the other tool\'s rows', async () => {
+    process.env.BROWSER_SESSIONS_FIXTURE = path.join(testdata, 'absent.json');
+    await expect(readToolJson('browser', ['sessions'])).rejects.toThrow(/`browser sessions` exited 1/);
+    const { rows, incomplete } = await collectToolRows('m1', live);
+    expect(incomplete).toEqual(['browser']);
+    expect(rows.map((row) => row.kind)).toEqual(['computer']);
+  });
+
+  it('unparseable output is a failure, never an empty listing', async () => {
+    process.env.COMPUTER_SESSIONS_FIXTURE = path.join(testdata, 'not-json.txt');
+    await expect(readStandaloneComputerRows()).rejects.toThrow(/printed unparseable JSON/);
+    expect(await collectToolRows('m1', live)).toMatchObject({ incomplete: ['computer'], retry: true });
+  });
+
+  it('names `agents setup tools` when the tool is not installed', async () => {
+    delete process.env.COMPUTER_BIN;
+    process.env.PATH = tempRoot();
+    await expect(readStandaloneComputerRows()).rejects.toThrow(/agents setup tools/);
+    expect(await collectToolRows('m1', { ...live, browserRows: () => [] })).toMatchObject({ incomplete: ['computer'], retry: false });
   });
 });

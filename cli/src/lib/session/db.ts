@@ -26,7 +26,6 @@ import { machineId } from '../machine-id.js';
 import type { DiscoveredPlugin } from '../types.js';
 import { firstUserMessageFromEvents, lastUserMessageFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } from '@phnx-labs/sessions-cli/reader';
-import { profileScopeSql } from '../browser/paths.js';
 
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
@@ -4190,7 +4189,26 @@ interface ComputerSessionRecord {
   taskPreview?: string;
 }
 
+const TOOL_SESSION_MAX_AGE_DAYS = 365;
+
+// Nothing in agents-cli lists these tables any more (the standalone tools adopt
+// them), so the writers are the only place left to keep them bounded.
+function pruneToolSessions(): void {
+  const db = getDB();
+  const cutoff = Date.now() - TOOL_SESSION_MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+  const stale = db.prepare(`
+    SELECT 1 FROM computer_sessions WHERE started_at < ?
+    UNION ALL
+    SELECT 1 FROM browser_sessions WHERE started_at < ?
+    LIMIT 1
+  `).get(cutoff, cutoff);
+  if (!stale) return;
+  db.prepare(`DELETE FROM computer_sessions WHERE started_at < ?`).run(cutoff);
+  db.prepare(`DELETE FROM browser_sessions WHERE started_at < ?`).run(cutoff);
+}
+
 export function recordBrowserSession(record: BrowserSessionRecord): void {
+  pruneToolSessions();
   const db = getDB();
   const now = Date.now();
   db.prepare(`
@@ -4230,6 +4248,7 @@ export function recordBrowserSession(record: BrowserSessionRecord): void {
 }
 
 export function recordComputerSession(record: ComputerSessionRecord): void {
+  pruneToolSessions();
   const db = getDB();
   const now = Date.now();
   db.prepare(`
@@ -4255,145 +4274,4 @@ export function recordComputerSession(record: ComputerSessionRecord): void {
     record.actionCount ?? 1,
     record.taskPreview ?? null,
   );
-}
-
-interface StoredBrowserSession extends Required<Pick<BrowserSessionRecord, 'task' | 'profile'>> {
-  sessionId?: string;
-  launchId?: string;
-  actor?: string;
-  machine: string;
-  startedAt: number;
-  lastActivity?: number;
-  counts: BrowserCaptureCounts;
-  captureDir?: string;
-  capturesRemote?: string;
-}
-
-interface BrowserSessionRow {
-  task: string;
-  profile: string;
-  session_id: string | null;
-  launch_id: string | null;
-  actor: string | null;
-  machine: string;
-  started_at: number;
-  last_activity: number | null;
-  screenshot_count: number;
-  pdf_count: number;
-  recording_count: number;
-  download_count: number;
-  capture_dir: string | null;
-  captures_remote: string | null;
-}
-
-function toStoredBrowserSession(row: BrowserSessionRow): StoredBrowserSession {
-  return {
-    task: row.task,
-    profile: row.profile,
-    sessionId: row.session_id ?? undefined,
-    launchId: row.launch_id ?? undefined,
-    actor: row.actor ?? undefined,
-    machine: row.machine,
-    startedAt: row.started_at,
-    lastActivity: row.last_activity ?? undefined,
-    counts: {
-      screenshot: row.screenshot_count,
-      pdf: row.pdf_count,
-      recording: row.recording_count,
-      download: row.download_count,
-    },
-    captureDir: row.capture_dir ?? undefined,
-    capturesRemote: row.captures_remote ?? undefined,
-  };
-}
-
-export function listBrowserSessionRecords(
-  profile?: string,
-  opts: { limit?: number; deviceKeys?: boolean } = {},
-): StoredBrowserSession[] {
-  const db = getDB();
-  const where = !profile ? undefined
-    : opts.deviceKeys ? profileScopeSql('profile', profile) : { sql: 'profile = ?', params: [profile] };
-  const limit = profile ? opts.limit : opts.limit ?? TOOL_SESSION_LIST_LIMIT;
-  const rows = db.prepare(
-    `SELECT * FROM browser_sessions${where ? ` WHERE ${where.sql}` : ''} ORDER BY started_at DESC${limit === undefined ? '' : ' LIMIT ?'}`,
-  ).all(...(where?.params ?? []), ...(limit === undefined ? [] : [limit])) as BrowserSessionRow[];
-  return rows.map(toStoredBrowserSession);
-}
-
-export function getBrowserSessionRecord(profile: string, task: string): StoredBrowserSession | null {
-  const db = getDB();
-  const row = db
-    .prepare(`SELECT * FROM browser_sessions WHERE profile = ? AND task = ?`)
-    .get(profile, task) as BrowserSessionRow | undefined;
-  return row ? toStoredBrowserSession(row) : null;
-}
-
-interface StoredComputerSession {
-  invocationId: string;
-  sessionId?: string;
-  launchId?: string;
-  actor?: string;
-  machine: string;
-  startedAt: number;
-  lastActivity?: number;
-  actionCount: number;
-  taskPreview?: string;
-}
-
-interface ComputerSessionRow {
-  invocation_id: string;
-  session_id: string | null;
-  launch_id: string | null;
-  actor: string | null;
-  machine: string;
-  started_at: number;
-  last_activity: number | null;
-  action_count: number;
-  task_preview: string | null;
-}
-
-const TOOL_SESSION_MAX_AGE_DAYS = 365;
-const TOOL_SESSION_LIST_LIMIT = 2000;
-
-export function pruneToolSessions(maxAgeDays: number = TOOL_SESSION_MAX_AGE_DAYS): number {
-  const db = getDB();
-  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
-
-  const stale = db.prepare(`
-    SELECT 1 FROM computer_sessions WHERE started_at < ?
-    UNION ALL
-    SELECT 1 FROM browser_sessions WHERE started_at < ?
-    LIMIT 1
-  `).get(cutoff, cutoff);
-  if (!stale) return 0;
-
-  const computer = db.prepare(`DELETE FROM computer_sessions WHERE started_at < ?`).run(cutoff);
-  const browser = db.prepare(`DELETE FROM browser_sessions WHERE started_at < ?`).run(cutoff);
-  return Number(computer.changes ?? 0) + Number(browser.changes ?? 0);
-}
-
-export function listComputerSessionRecords(
-  opts: { limit?: number; startedBeforeMs?: number } = {},
-): StoredComputerSession[] {
-  const db = getDB();
-  const limit = opts.limit ?? TOOL_SESSION_LIST_LIMIT;
-  const rows = (opts.startedBeforeMs === undefined
-    ? db
-      .prepare(`SELECT * FROM computer_sessions ORDER BY started_at DESC LIMIT ?`)
-      .all(limit)
-    : db
-      .prepare(`SELECT * FROM computer_sessions WHERE started_at < ? ORDER BY started_at DESC LIMIT ?`)
-      .all(opts.startedBeforeMs, limit)) as ComputerSessionRow[];
-  return rows.map((row) => ({
-    invocationId: row.invocation_id,
-    sessionId: row.session_id ?? undefined,
-    launchId: row.launch_id ?? undefined,
-    actor: row.actor ?? undefined,
-    machine: row.machine,
-    startedAt: row.started_at,
-    lastActivity: row.last_activity ?? undefined,
-    actionCount: row.action_count,
-    taskPreview: row.task_preview ?? undefined,
-  }));
 }

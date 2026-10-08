@@ -9,8 +9,11 @@ let testHome = '';
 async function fresh() {
   vi.resetModules();
   const record = await import('./record.js');
-  const db = await import('../session/db.js');
-  return { ...record, ...db };
+  const { getDB } = await import('../session/db.js');
+  const listBrowserSessionRows = (profile?: string) => getDB()
+    .prepare(`SELECT task, profile, session_id AS sessionId, actor, machine FROM browser_sessions${profile ? ' WHERE profile = ?' : ''}`)
+    .all(...(profile ? [profile] : [])) as Array<{ task: string; profile: string; sessionId: string | null; actor: string | null; machine: string }>;
+  return { ...record, listBrowserSessionRows };
 }
 
 beforeEach(() => {
@@ -26,7 +29,7 @@ afterEach(() => {
 
 describe('recordBrowserAction', () => {
   it('upserts a durable browser_sessions row from a task+profile action event', async () => {
-    const { recordBrowserAction, listBrowserSessionRecords } = await fresh();
+    const { recordBrowserAction, listBrowserSessionRows } = await fresh();
     recordBrowserAction({
       event: 'browser.action',
       command: 'navigate',
@@ -38,7 +41,7 @@ describe('recordBrowserAction', () => {
       launchId: 'launch-1',
       actor: 'claude',
     });
-    const rows = listBrowserSessionRecords('work');
+    const rows = listBrowserSessionRows('work');
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       task: 'swift-crab-a1b2',
@@ -49,19 +52,19 @@ describe('recordBrowserAction', () => {
   });
 
   it('records the driven host from a --device event so a remote task is attributed', async () => {
-    const { recordBrowserAction, listBrowserSessionRecords } = await fresh();
+    const { recordBrowserAction, listBrowserSessionRows } = await fresh();
     recordBrowserAction(
       { event: 'browser.action', command: 'screenshot', task: 't', profile: 'work', host: 'zion' },
       { device: 'zion' },
     );
-    expect(listBrowserSessionRecords('work')[0].machine).toBe('zion');
+    expect(listBrowserSessionRows('work')[0].machine).toBe('zion');
   });
 
   it('skips an event with no task/profile — a lifecycle verb is not a task row', async () => {
-    const { recordBrowserAction, listBrowserSessionRecords } = await fresh();
+    const { recordBrowserAction, listBrowserSessionRows } = await fresh();
     recordBrowserAction({ event: 'browser.action', command: 'status' });
     recordBrowserAction({ event: 'browser.action', command: 'profiles', profile: 'work' });
-    expect(listBrowserSessionRecords()).toHaveLength(0);
+    expect(listBrowserSessionRows()).toHaveLength(0);
   });
 
   it('never throws — a bookkeeping failure must not fail a completed action', async () => {

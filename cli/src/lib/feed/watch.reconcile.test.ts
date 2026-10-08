@@ -43,6 +43,7 @@ function start(options: {
     activityPollMs: 25,
     reconcileMs: options.reconcileMs,
     gh: options.gh,
+    tools: { sources: { browserRows: () => [], computerRows: () => [] } },
     sessions: {
       journalPath,
       journalPollMs: 10,

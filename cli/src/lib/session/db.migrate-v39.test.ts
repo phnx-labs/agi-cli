@@ -16,7 +16,6 @@ const {
   SCHEMA_VERSION,
   upsertSession,
   recordBrowserSession,
-  listBrowserSessionRecords,
 } = await import('./db.js');
 
 const TOOL_TABLES = ['browser_sessions', 'computer_sessions'] as const;
@@ -75,7 +74,9 @@ describe('db migration v38 -> v39 (durable tool sessions, RUSH-2549)', () => {
 
   it('the migrated tables accept a write and read it back', () => {
     recordBrowserSession({ task: 'post-migration', profile: 'p@endpoint-0', sessionId: 'sess-after-migrate' });
-    const rows = listBrowserSessionRecords('p@endpoint-0');
-    expect(rows.find((r) => r.task === 'post-migration')?.sessionId).toBe('sess-after-migrate');
+    const row = getDB()
+      .prepare(`SELECT session_id FROM browser_sessions WHERE profile = ? AND task = ?`)
+      .get('p@endpoint-0', 'post-migration') as { session_id: string } | undefined;
+    expect(row?.session_id).toBe('sess-after-migrate');
   });
 });

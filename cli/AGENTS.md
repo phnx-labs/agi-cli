@@ -202,8 +202,9 @@ fan-out down.
 
 Browser tasks and computer runs are the third row kind on the stream, projected by
 [`feed/tools.ts`](src/lib/feed/tools.ts) from the sources that already own them —
-`browser sessions`' task-first rows, `computer sessions`' ledger rows, and — for a
-task's tabs — the live `tasks.json`. The rows ride the one open stream, so a
+the standalone `browser sessions --tasks --json` task rows, the standalone
+`computer sessions --json` run rows, and — for a task's tabs — the live
+`tasks.json`. The rows ride the one open stream, so a
 consumer switching its All/Agents/Browser/Computer filter **launches no commands**:
 every row for every tab is already there, and the filter is applied client-side on
 `row.kind`. A surface built on per-tool, per-device polling would be the wrong shape
@@ -223,33 +224,43 @@ and three independent upserts would let a pane render a mix of two readings.
 collector. It watches three roots recursively — the browser runtime tree, the
 event ledger dir, and the standalone computer engine's own action ledger — and
 re-projects ONLY on a reported change, emitting the diff rather than a snapshot,
-so a warm idle does no directory read, no projection, and no subprocess.
+so a warm idle does no directory read, no projection, and no subprocess. It does
+NOT watch the tools' history databases (`.history/browser`, `.history/computer`):
+the listings it runs write those (WAL frames, retention, legacy adoption), so
+watching them would make every projection trigger the next.
 `armed()` is a FUNCTION over live watchers, not a flag captured at setup: a
 watcher can die later, and a frozen `armed: true` left the tick short-circuiting
 on one that would never report again, missing changes permanently. Each tick
 re-arms what is missing and sweeps until everything is watched.
 
-**An incomplete read preserves rows; it never removes them.** `collectToolRows`
-returns `{ rows, complete }`, and the readers it depends on THROW rather than
+**An incomplete read preserves rows; it never removes them, and it is judged per
+kind.** `collectToolRows` returns `{ rows, incomplete, retry }`: `incomplete`
+names the kinds (`browser`, `computer`) whose read failed, and `ToolRowSet.diff`
+keeps that kind's published rows while the other kind keeps updating, so a Linux
+box with `browser` but no `computer` still streams browser changes. `retry` is
+set only for a failed read of an INSTALLED tool; a tool that is not installed is
+a stable state and does not re-spawn the other listing every sweep. The readers
+it depends on THROW rather than
 returning empty for a failure they cannot trust — an absent `tasks.json` is "no
 live browser", but EACCES, EMFILE or malformed JSON (usually a write in progress)
 are failures. An empty list was indistinguishable from "every task closed", so the
 differ published a remove for every live row and the operator watched their tasks
 flicker out.
 
-**Both producers are read at their real source, and rows are attributed to a real
-machine.** The standalone computer engine ALWAYS appends to
-`<cache>/computer/actions/<day>.jsonl`, which never reaches
-`recordComputerAction` — so a `computer` command an operator ran directly reached
-neither the feed ledger nor `computer_sessions`, and was invisible to every
-agents-cli surface. `buildComputerSessionRows` merges that ledger, deduped on
-`invocationId` because forwarding through `agents computer` rewrites `ts` and
-`pid` (so a timestamp dedupe double-counts). The installed producer emits no
-`hostname`/`machineId`, which made `groupIntoComputerRuns` fall back to the
-`'unknown'` sentinel and every local action vanish under a device filter, so the
-observing scope is threaded down as the default at the ledger source — that ledger
-is per-machine by construction, and an explicit `host` (a genuinely driven remote)
-still wins.
+**The rows come from the standalone tools, never from a copy of their readers
+(PHNX-4227).** `readStandaloneBrowserRows` / `readStandaloneComputerRows` spawn
+`browser sessions --tasks --json --no-interactive` and `computer sessions --json
+--no-interactive --limit 500` (argv array, no shell, stdout capped at 64 MiB,
+30 s timeout, asynchronous so a slow tool never stalls the hub) through the
+`browser-client.ts` / `computer-client.ts` resolvers. A missing binary, a non-zero
+exit, unparseable JSON, or a row without its required fields THROWS — the error
+names `agents setup tools` when the binary is absent — so that kind is
+incomplete and its rows already on the stream are kept. The tools record a
+session or launch id but cannot resolve it; `linkToolSessions` joins it against
+agents-cli's own session index (session id first, then the launch-id join over
+recent activity, hook sessions and the pid registry), which is what makes a row
+`linked` rather than `unresolved`. The engine names a run's machine `local` when
+it recorded no hostname; that placeholder is never published as a device.
 
 Live browser tasks come from `tasks.json` via `readLiveBrowserTasks`, which is the
 only authority on a task's tabs and the reason a task with zero captures appears
@@ -259,22 +270,6 @@ carries). A row's session identity is resolved ONCE, durable history → live re
 → device binding, before the owner link is projected, so one task cannot have an
 owner on one assembly path and not another; nothing is invented when no source
 recorded one.
-
-Finished browser tasks come from the engine's native task history,
-`.history/browser/history.db` (`readNativeBrowserHistory` in
-[`browser/sessions-list.ts`](src/lib/browser/sessions-list.ts)), merged per
-profile and task with the legacy `browser_sessions` rows, with native fields winning.
-Which history-only tasks get a row is capped (`BROWSER_HISTORY_LIMIT`, newest
-first) after the profile scope is applied in SQL; a row's identity is always read
-per exact profile key with no cap, so another profile's newer history can never
-strip an older captured task of its session link.
-It is opened **read-only** so a read never checkpoints the engine's WAL, and the
-feed calls `readBrowserSessionRows`, which never prunes `sessions.db`. The watcher
-covers `.history/browser` and ignores `-shm` events: every reader of a WAL
-database updates its `-shm` index, so counting those would make each read
-re-trigger the next, while writes always touch `-wal` or the database itself. An
-unreadable record throws rather than being skipped, so the snapshot is
-incomplete and the rows already on the stream are kept.
 
 Two rules are not negotiable in a consumer or a future change:
 
@@ -1826,8 +1821,8 @@ src/
     browser/           # `agents browser` CONSUMER of the standalone `browser` engine (@phnx-labs/browser-cli, PHNX-4101):
                        #   context.ts (the fd-3 JSON handed to the engine — the --device target resolved against the fleet,
                        #   session identity, remote-control consent), record.ts (fd-4 action events → the durable browser_sessions
-                       #   row), sessions-list.ts (the on-disk capture reader behind `agents browser sessions`), paths.ts (the
-                       #   preserved on-disk layout it reads). The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
+                       #   row). `agents browser sessions` is the engine's own picker, and the feed reads its `--json` (PHNX-4227).
+                       #   The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
                        #   store, the task index AND the whole remote SSH path live in the engine. The subprocess client is
                        #   `lib/browser-client.ts` (fd-3/fd-4, no fallback), mirroring `computer-client.ts`.
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
@@ -1840,7 +1835,7 @@ src/
     computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
                        #   policy.ts (permissions → the allow-list file), context.ts (the fd-3 JSON handed to
                        #   the engine, incl. the --device target resolved against the fleet), record.ts (fd-4
-                       #   action events → feed + session history), sessions-list.ts (the ledger reader). The
+                       #   action events → feed + session history). `agents computer sessions` is the engine's own picker. The
                        #   daemons, RPC, RFB/VNC, the model loop AND the whole remote path — Windows
                        #   provisioning, the helper token, the ssh -L tunnel — live in the engine.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)

@@ -42,10 +42,6 @@ describe('COMPUTER_PASSTHROUGH_VERBS', () => {
     }
   });
 
-  it('does NOT include `sessions` — it reads agents-cli\'s own ledger and never reaches the engine', () => {
-    expect(names).not.toContain('sessions');
-  });
-
   it('gives every verb a description, since that is the only help agents-cli owns', () => {
     for (const verb of COMPUTER_PASSTHROUGH_VERBS) {
       expect(verb.description.length).toBeGreaterThan(10);

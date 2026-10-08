@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, redactToolUrl, sortToolRows, toolRowKey, TOOL_CAPTURE_LIMIT, TOOL_ACTION_LIMIT } from './tools.js';
-import type { BrowserSessionRow } from '../browser/sessions-list.js';
-import type { ComputerRunRow } from '../computer/sessions-list.js';
+import type { BrowserSessionRow, ComputerRunRow } from './tools.js';
 
 function browserRow(extra: Partial<BrowserSessionRow> = {}): BrowserSessionRow {
   return {
-    kind: 'task', profile: 'work', task: 'post', linkStatus: 'linked',
+    kind: 'task', profile: 'work', task: 'post',
     sessionId: 'sess-1', launchId: 'launch-1',
     linkedSession: { id: 'sess-1', shortId: 'sess-1', agent: 'claude', machine: 'Zion', timestamp: '2026-09-13T00:00:00Z', label: 'ship the feed' } as BrowserSessionRow['linkedSession'],
     artifacts: [
@@ -21,10 +20,10 @@ function browserRow(extra: Partial<BrowserSessionRow> = {}): BrowserSessionRow {
 function computerRow(extra: Partial<ComputerRunRow> = {}): ComputerRunRow {
   return {
     pid: 4242, invocationId: 'inv-1', task: 'fill the form', machine: 'yosemite-m1',
-    bundle: 'com.apple.Safari', linkStatus: 'unlinked',
+    bundle: 'com.apple.Safari',
     actions: [
-      { verb: 'click', ts: '2026-09-13T00:00:02Z', tsMs: 2_000, pid: 4242, bundle: 'com.apple.Safari' },
-      { verb: 'type', ts: '2026-09-13T00:00:01Z', tsMs: 1_000, pid: 4242 },
+      { verb: 'click', tsMs: 2_000, bundle: 'com.apple.Safari' },
+      { verb: 'type', tsMs: 1_000 },
     ],
     counts: { click: 1, type: 1 }, startMs: 1_000, endMs: 2_000,
     ...extra,
@@ -97,7 +96,7 @@ describe('canonical tool rows', () => {
     expect(browser.captureCounts.screenshot).toBe(many.length);
 
     const actions = Array.from({ length: TOOL_ACTION_LIMIT + 10 }, (_, i) => (
-      { verb: 'click', ts: '2026-09-13T00:00:00Z', tsMs: 9_000 - i, pid: 1 }
+      { verb: 'click', tsMs: 9_000 - i }
     ));
     expect(projectComputerToolRow('m1', computerRow({ actions })).actions).toHaveLength(TOOL_ACTION_LIMIT);
   });
@@ -180,8 +179,8 @@ describe('computer captures come only from real producer records', () => {
   it('projects a recorded screenshot capture with the action\'s own timestamp', () => {
     const row = projectComputerToolRow('m1', computerRow({
       actions: [
-        { verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: '/caps/window.jpg', kind: 'screenshot', name: 'window.jpg', bytes: 7082 } },
-        { verb: 'click', ts: '2026-09-13T00:00:01Z', tsMs: 1_000, pid: 1 },
+        { verb: 'screenshot', tsMs: 3_000, capture: { path: '/caps/window.jpg', kind: 'screenshot', name: 'window.jpg', bytes: 7082 } },
+        { verb: 'click', tsMs: 1_000 },
       ],
       counts: { screenshot: 1, click: 1 },
     }));
@@ -193,7 +192,7 @@ describe('computer captures come only from real producer records', () => {
 
   it('reports no capture for a screenshot action that recorded no path', () => {
     const row = projectComputerToolRow('m1', computerRow({
-      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1 }],
+      actions: [{ verb: 'screenshot', tsMs: 3_000 }],
       counts: { screenshot: 1 },
     }));
     expect(row.captures).toEqual([]);
@@ -201,10 +200,20 @@ describe('computer captures come only from real producer records', () => {
     expect(row.actionCounts).toEqual({ screenshot: 1 });
   });
 
+  it('reads a summary run\'s retained captures and total when its action detail has aged out', () => {
+    const row = projectComputerToolRow('m1', computerRow({
+      actions: [],
+      captures: [{ verb: 'screenshot', tsMs: 3_000, capture: { path: '/caps/old.jpg', kind: 'screenshot', name: 'old.jpg', bytes: 9 } }],
+      captureCount: 4,
+    }));
+    expect(row.captures).toEqual([{ kind: 'screenshot', name: 'old.jpg', path: '/caps/old.jpg', host: 'm1', bytes: 9, atMs: 3_000 }]);
+    expect(row.captureCounts).toEqual({ screenshot: 4 });
+  });
+
   it('keeps a remote run\'s capture host on the INVOKING machine, not the driven one', () => {
     const row = projectComputerToolRow('m1', computerRow({
       remoteHost: 'win-mini',
-      actions: [{ verb: 'screenshot', ts: '2026-09-13T00:00:03Z', tsMs: 3_000, pid: 1, capture: { path: '/caps/w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
+      actions: [{ verb: 'screenshot', tsMs: 3_000, capture: { path: '/caps/w.jpg', kind: 'screenshot', name: 'w.jpg' } }],
     }));
     expect(row.captures[0]!.host).toBe('m1');
     expect(row.device).toBe('win-mini');
@@ -212,14 +221,14 @@ describe('computer captures come only from real producer records', () => {
 });
 
 describe('device and owner resolve from effective identity', () => {
-  it('never publishes the `unknown` machine sentinel as a device', () => {
-    const row = projectComputerToolRow('zion', computerRow({ machine: 'unknown' }));
+  it('never publishes the engine\'s `local` machine placeholder as a device', () => {
+    const row = projectComputerToolRow('zion', computerRow({ machine: 'local' }));
     expect(row.device).toBe('zion');
   });
 
   it('prefers a real machine, and a driven remote host over both', () => {
     expect(projectComputerToolRow('zion', computerRow({ machine: 'mark-1' })).device).toBe('mark-1');
-    expect(projectComputerToolRow('zion', computerRow({ machine: 'unknown', remoteHost: 'win-mini' })).device).toBe('win-mini');
+    expect(projectComputerToolRow('zion', computerRow({ machine: 'local', remoteHost: 'win-mini' })).device).toBe('win-mini');
   });
 
   it('links the owner from the live record when the capture history has none', () => {
@@ -243,8 +252,15 @@ describe('device and owner resolve from effective identity', () => {
     expect(row.owner?.sessionId).toBe('sess-durable');
   });
 
+  it('reads a recorded id that agents-cli could not resolve as unresolved, never linked', () => {
+    const row = projectComputerToolRow('m1', computerRow({ sessionId: 'sess-elsewhere' }));
+    expect(row.linkStatus).toBe('unresolved');
+    expect(row.owner).toEqual({ sessionId: 'sess-elsewhere', device: 'm1' });
+    expect(row.agent).toBeUndefined();
+  });
+
   it('invents no owner when nothing recorded one', () => {
-    const row = projectBrowserToolRow('m1', browserRow({ sessionId: undefined, launchId: undefined, linkedSession: undefined, linkStatus: 'unlinked' }));
+    const row = projectBrowserToolRow('m1', browserRow({ sessionId: undefined, launchId: undefined, linkedSession: undefined }));
     expect(row.owner).toBeUndefined();
     expect(row.sessionId).toBeUndefined();
   });

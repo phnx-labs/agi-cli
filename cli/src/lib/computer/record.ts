@@ -5,7 +5,8 @@ import { emit as emitEvent } from '../feed/events.js';
 import { recordComputerSession } from '../session/db.js';
 import { resolveActor } from '../actor.js';
 import { truncate } from '../feed/events.js';
-import { TASK_PREVIEW_MAX_CHARS } from './sessions-list.js';
+
+export const TASK_PREVIEW_MAX_CHARS = 200;
 
 export const COMPUTER_INVOCATION_ID = randomUUID();
 

@@ -42,15 +42,15 @@ describe('buildForwardedArgs', () => {
   it('drops plural --devices values so a peer cannot re-fan-out', () => {
     expect(
       buildForwardedArgs(
-        argv('sessions', '--computer', '--devices', 'box1', 'box2', '--json'),
+        argv('sessions', '--active', '--devices', 'box1', 'box2', '--json'),
         new Set(['box1', 'box2']),
       ),
-    ).toEqual(['sessions', '--computer', '--json']);
+    ).toEqual(['sessions', '--active', '--json']);
   });
 
   it('drops the --devices=value form', () => {
-    expect(buildForwardedArgs(argv('sessions', '--devices=all', '--computer')))
-      .toEqual(['sessions', '--computer']);
+    expect(buildForwardedArgs(argv('sessions', '--devices=all', '--active')))
+      .toEqual(['sessions', '--active']);
   });
 
   it('stops consuming at the first token that is not a known host', () => {

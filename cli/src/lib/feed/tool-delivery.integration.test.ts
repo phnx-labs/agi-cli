@@ -3,12 +3,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import type { BrowserSessionRow, BrowserArtifact } from '../browser/sessions-list.js';
-import type { ComputerRunRow } from '../computer/sessions-list.js';
 import type { DeviceProfile } from '../devices/registry.js';
 import { streamFromPeer } from '../session/remote/peer-stream.js';
 import { watchToolActivity, type ToolDiff } from './tool-activity.js';
-import { projectBrowserToolRow, projectComputerToolRow, redactToolUrl, TOOL_ACTION_LIMIT } from './tools.js';
+import { projectBrowserToolRow, projectComputerToolRow, redactToolUrl, TOOL_ACTION_LIMIT, type BrowserArtifact, type BrowserSessionRow, type ComputerRunRow } from './tools.js';
 import { FeedHubState, FeedHub } from './hub.js';
 import { FeedHubServer, streamFeedFromHub } from './hub-server.js';
 import { FeedWatchState, watchFleetFeed, watchLocalFeed, type FeedWatchEnvelope } from './watch.js';
@@ -34,6 +32,7 @@ interface FakeTool {
   binDir: string;
   executable: string;
   probeLog: string;
+  sessionsFile: string;
 }
 
 function makeFakeTool(root: string, tool: string, statusBody: string, opts: { probeLog: string; statusDelayMs?: number }): FakeTool {
@@ -42,8 +41,11 @@ function makeFakeTool(root: string, tool: string, statusBody: string, opts: { pr
   fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
   const executable = path.join(pkg, 'bin', tool);
+  const sessionsFile = path.join(root, `${tool}-sessions.json`);
+  if (!fs.existsSync(sessionsFile)) fs.writeFileSync(sessionsFile, '[]');
   const script = [
     '#!/bin/sh',
+    `if [ "$1" = sessions ]; then exec cat "${sessionsFile}"; fi`,
     `echo "$$" >> "${opts.probeLog}"`,
     ...(opts.statusDelayMs ? [`sleep ${Math.ceil(opts.statusDelayMs / 1000)}`] : []),
     `printf '%s' '${statusBody.replace(/'/g, `'\\''`)}'`,
@@ -54,7 +56,7 @@ function makeFakeTool(root: string, tool: string, statusBody: string, opts: { pr
   const link = path.join(binDir, tool);
   fs.rmSync(link, { force: true });
   fs.symlinkSync(executable, link);
-  return { binDir, executable, probeLog: opts.probeLog };
+  return { binDir, executable, probeLog: opts.probeLog, sessionsFile };
 }
 
 function toolPath(fake: FakeTool | FakeTool[]): string {
@@ -245,8 +247,7 @@ function runRow(invocationId: string, verbs: string[], scope = 'dev-a'): Compute
     pid: 4242,
     invocationId,
     machine: scope,
-    linkStatus: 'unlinked',
-    actions: verbs.map((verb, i) => ({ verb, ts: new Date(now - i * 1000).toISOString(), tsMs: now - i * 1000, pid: 4242, invocationId })),
+    actions: verbs.map((verb, i) => ({ verb, tsMs: now - i * 1000 })),
     counts: verbs.reduce<Record<string, number>>((acc, v) => ({ ...acc, [v]: (acc[v] ?? 0) + 1 }), {}),
     startMs: now - (verbs.length - 1) * 1000,
     endMs: now,
@@ -257,8 +258,8 @@ function browserTaskRow(task: string): BrowserSessionRow {
   const now = Date.now();
   const artifact: BrowserArtifact = { kind: 'screenshot', name: `${task}-0.png`, path: `/tmp/${task}/${task}-0.png`, bytes: 10, mtimeMs: now };
   return {
-    kind: 'task', profile: 'work', task, linkStatus: 'unlinked',
-    artifacts: [artifact], counts: { screenshot: 1 }, latestMtimeMs: now,
+    kind: 'task', profile: 'work', task,
+    artifacts: [artifact], counts: { screenshot: 1, pdf: 0, recording: 0, download: 0 }, latestMtimeMs: now,
   };
 }
 
@@ -576,8 +577,14 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
   try {
     const probeLog = path.join(root, 'browser-probes.log');
     const fake = makeFakeTool(root, 'browser', '{"running":true}', { probeLog, statusDelayMs: 30_000 });
+    const computer = makeFakeTool(root, 'computer', '{}', { probeLog: path.join(root, 'computer-probes.log') });
     delete process.env.BROWSER_BIN;
-    process.env.PATH = toolPath(fake);
+    delete process.env.COMPUTER_BIN;
+    process.env.PATH = toolPath([fake, computer]);
+    const { _resetBrowserClientForTest } = await import('../browser-client.js');
+    const { _resetComputerClientForTest } = await import('../computer-client.js');
+    _resetBrowserClientForTest();
+    _resetComputerClientForTest();
 
     const socketPath = path.join(root, 'feed.sock');
     const devicesDir = path.join(root, 'devices');
@@ -599,8 +606,13 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
       const refresh = refreshToolSetup('browser', { cacheDir }).then((rows) => { probeSettled = true; return rows; });
       await sleep(800);
 
+      const now = Date.now();
+      fs.writeFileSync(computer.sessionsFile, JSON.stringify([{
+        invocationId: 'inv-cross-track', machine: 'dev-x', actions: [{ verb: 'click', tsMs: now }],
+        counts: { click: 1 }, startMs: now, endMs: now,
+      }]));
       const line = JSON.stringify({
-        v: 1, event: 'computer.action', command: 'click', ts: new Date().toISOString(),
+        v: 1, event: 'computer.action', command: 'click', ts: new Date(now).toISOString(),
         pid: 7777, invocationId: 'inv-cross-track', host: 'dev-x', runtime: 'headless',
       });
       fs.appendFileSync(EVENTS_FILE, `${line}\n`);
@@ -618,6 +630,10 @@ it('cross-track: a slow setup health probe never blocks the shared hub — tool 
     }
   } finally {
     process.env.PATH = savedPath;
+    const { _resetBrowserClientForTest } = await import('../browser-client.js');
+    const { _resetComputerClientForTest } = await import('../computer-client.js');
+    _resetBrowserClientForTest();
+    _resetComputerClientForTest();
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

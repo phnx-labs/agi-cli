@@ -1,0 +1,35 @@
+[
+  {
+    "pid": 10,
+    "invocationId": "inv-1",
+    "task": "open the dashboard",
+    "machine": "boxa",
+    "actor": "claude",
+    "sessionId": "sess-computer",
+    "linkStatus": "linked",
+    "actions": [
+      {
+        "verb": "screenshot", "ts": "2026-10-08T13:08:30.000Z", "tsMs": 1791464910000, "pid": 10, "invocationId": "inv-1",
+        "sessionId": "sess-computer", "hostname": "boxa",
+        "capture": { "kind": "screenshot", "path": "/caps/shot.png", "name": "shot.png", "bytes": 12 }
+      },
+      {
+        "verb": "click", "ts": "2026-10-08T13:08:29.000Z", "tsMs": 1791464909000, "pid": 10, "invocationId": "inv-1",
+        "bundle": "com.apple.Safari", "host": "win-mini", "sessionId": "sess-computer", "actor": "claude", "hostname": "boxa"
+      }
+    ],
+    "counts": { "click": 1, "screenshot": 1 },
+    "startMs": 1791464909000,
+    "endMs": 1791464910000,
+    "bundle": "com.apple.Safari",
+    "remoteHost": "win-mini",
+    "captureCount": 1,
+    "captures": [
+      {
+        "verb": "screenshot", "ts": "2026-10-08T13:08:30.000Z", "tsMs": 1791464910000, "pid": 10, "invocationId": "inv-1",
+        "sessionId": "sess-computer", "hostname": "boxa",
+        "capture": { "kind": "screenshot", "path": "/caps/shot.png", "name": "shot.png", "bytes": 12 }
+      }
+    ]
+  }
+]

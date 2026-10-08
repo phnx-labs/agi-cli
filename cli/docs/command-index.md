@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_61 command groups · 483 commands._
+_61 command groups · 482 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -79,7 +79,7 @@ agents browser requests        Read captured network requests; --format har emit
 agents browser responsebody    Wait for and read a response body by URL pattern
 agents browser screenshot      Take a screenshot — auto-saved per task; --output only to pick a specific path
 agents browser scroll          Scroll the page by a pixel amount (negatives scroll up/left)
-agents browser sessions        Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task
+agents browser sessions        Browse captured screenshots, PDFs, recordings and downloads, grouped by task
 agents browser set             Set browser emulation options (set viewport / set device / set devices)
 agents browser show            Open a URL for a human to read (goes to browser.viewer; binds no task)
 agents browser start           Start a browser task — --profile/--url/--record/--title, and --device <name> to bind a remote box
@@ -136,7 +136,7 @@ agents computer right-click  Right-click an element by id, or a coordinate pair
 agents computer run          Autonomously drive an app from a natural-language task (model loop over the computer verbs)
 agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
 agents computer scroll       Scroll an element or the window under a coordinate
-agents computer sessions     Browse computer-driving history, grouped by run — one row per `agents computer` invocation
+agents computer sessions     Browse computer-driving history, grouped by run — the engine's own picker
 agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
 agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
 agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
@@ -613,7 +613,6 @@ agents sessions resume [query] [prompt]    Resume a session by id (strict), or m
 agents sessions share <session>            Publish one session as a redacted, self-contained web page and print the link.
 agents sessions stats                      Which skills/commands you actually invoke, and which installed ones are dead weight.
 agents sessions stop <id>                  Stop a live agent outright — end its process and tear down its tmux/mux session
-agents sessions tail [sessionId]           Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions trace <selectors...>       Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
 agents sessions watch                      Stream canonical live and recoverable session row changes as NDJSON
 ```

@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "task",
+    "profile": "work@zion",
+    "task": "post",
+    "owner": "claude",
+    "launchId": "launch-post",
+    "sessionId": "sess-post",
+    "linkStatus": "unresolved",
+    "artifacts": [
+      { "kind": "screenshot", "task": "post", "name": "2.png", "path": "/caps/work/sessions/post/2.png", "bytes": 20, "mtimeMs": 1791464869188.976 },
+      { "kind": "pdf", "task": "post", "name": "1.pdf", "path": "/caps/work/sessions/post/1.pdf", "bytes": 10, "mtimeMs": 1791464800000 }
+    ],
+    "counts": { "screenshot": 1, "pdf": 1, "recording": 0, "download": 0 },
+    "latestMtimeMs": 1791464869188.976,
+    "startedAt": 1791464700000,
+    "machine": "zion"
+  },
+  {
+    "kind": "downloads",
+    "profile": "work@zion",
+    "linkStatus": "unlinked",
+    "artifacts": [
+      { "kind": "download", "name": "report.csv", "path": "/caps/work/downloads/report.csv", "bytes": 5, "mtimeMs": 1791464000000 }
+    ],
+    "counts": { "screenshot": 0, "pdf": 0, "recording": 0, "download": 1 },
+    "latestMtimeMs": 1791464000000
+  }
+]

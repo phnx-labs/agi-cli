@@ -28,7 +28,6 @@ import {
   readActiveSessionsCache,
 } from '../lib/session/session-cache.js';
 import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
-import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../lib/remote-agents-json.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
@@ -122,9 +121,6 @@ import { registerSessionsStatsCommand } from './sessions-stats.js';
 import { registerSessionsInsightsCommand } from './insights.js';
 import { registerSessionsOptimizeCommand } from './sessions-optimize.js';
 import { registerSessionsWatchCommand } from './sessions-watch.js';
-import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
-import { runComputerSessionsCommand } from './computer-sessions-picker.js';
-import { buildComputerSessionRows, type ComputerRunRow } from '../lib/computer/sessions-list.js';
 
 const SESSION_AGENT_FILTER_HELP = `Filter by agent, e.g. claude, codex, claude@2.0.65`;
 
@@ -512,37 +508,6 @@ async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
   const { sessions } = await gatherRemoteList(forwarded, hosts);
   process.stdout.write(serializeSessionsJson(sessions));
 }
-
-export function parseRemoteComputerSessionRows(
-  stdout: string,
-  machine: string,
-): RemoteAgentsJsonParseResult<ComputerRunRow> {
-  try {
-    const value: unknown = JSON.parse(stdout);
-    if (!Array.isArray(value)) return { items: [], valid: false };
-    const items = value
-      .filter((row): row is ComputerRunRow => Boolean(row && typeof row === 'object' && !Array.isArray(row)))
-      .map((row) => ({ ...row, machine: row.machine || machine }));
-    return { items, valid: true };
-  } catch {
-    return { items: [], valid: false };
-  }
-}
-
-async function gatherRemoteComputerSessionRows(hosts?: string[]): Promise<ComputerRunRow[]> {
-  const hostSet = new Set(hosts ?? []);
-  const forwarded = buildForwardedArgs(process.argv, hostSet);
-  if (!forwarded.includes('--json')) forwarded.push('--json');
-  if (!forwarded.includes('--no-interactive')) forwarded.push('--no-interactive');
-  const result = await gatherRemoteAgentsJson<ComputerRunRow>({
-    args: forwarded,
-    noFanoutEnv: NO_FANOUT_ENV,
-    hosts,
-    parse: parseRemoteComputerSessionRows,
-  });
-  return result.items;
-}
-
 
 function useInteractiveBrowser(options: SessionsOptions): boolean {
   return options.interactive !== false && !options.json && isInteractiveTerminal();
@@ -3183,8 +3148,6 @@ export function registerSessionsCommands(program: Command): void {
     .option('--cloud', 'Source sessions from Rush Cloud (captured runs) instead of local disk')
     .option('-D, --device <target...>', 'Run this query on remote machine(s) over SSH (device alias from `agents devices`, user@host, or `all` to search the whole fleet; repeatable)')
     .addOption(new Option('--devices <target...>', 'Plural alias for --device (accepts `all`/`fleet`).').hideHelp())
-    .option('--browser', 'List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`')
-    .option('--computer', 'List computer-driving history, grouped by run, instead of agent transcripts — alias of `agents computer sessions`')
     .option('--no-interactive', 'Print the listing instead of opening the interactive browser (default on a TTY for the bare listing and --active)')
     .option('--print-cmd', 'Print the canonical `ag sessions …` command for the given flags and exit (the twin of the browser’s `y` hotkey)')
     .option('--preview', 'With a session id/query: print a compact preview and exit (no pager)');
@@ -3284,28 +3247,6 @@ export function registerSessionsCommands(program: Command): void {
   });
 
   sessionsCmd.action(async (query: string | undefined, options: SessionsOptions, command: Command) => {
-    if ((options as { browser?: boolean }).browser) {
-      await runBrowserSessionsCommand({ profile: query, json: options.json, interactive: options.interactive });
-      return;
-    }
-    if ((options as { computer?: boolean }).computer) {
-      const limit = options.limit === undefined ? undefined : Number.parseInt(options.limit, 10);
-      const deviceArgs = [...(options.device ?? []), ...(options.devices ?? [])];
-      const allFleet = deviceArgs.some((host) => ['all', 'fleet'].includes(host.toLowerCase()));
-      const hosts = [...(options.host ?? []), ...deviceArgs]
-        .filter((host) => !['all', 'fleet'].includes(host.toLowerCase()));
-      if (hosts.length > 0 || allFleet) {
-        const remoteRows = await gatherRemoteComputerSessionRows(allFleet ? undefined : hosts);
-        const rows = allFleet
-          ? [...buildComputerSessionRows({ machine: query }), ...remoteRows]
-          : remoteRows;
-        rows.sort((a, b) => b.endMs - a.endMs);
-        await runComputerSessionsCommand({ rows, machine: query, limit, json: options.json, interactive: options.interactive });
-        return;
-      }
-      await runComputerSessionsCommand({ machine: query, limit, json: options.json, interactive: options.interactive });
-      return;
-    }
     await sessionsAction(query, options, command.getOptionValueSource('limit'));
   });
 

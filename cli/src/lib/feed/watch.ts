@@ -190,7 +190,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   const state = new FeedWatchState();
   const activity = new ActivityStream();
   let activityCursor = Date.now();
-  let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources).rows;
+  let toolRows: ToolRow[] = (await collectToolRows(options.scope, options.tools?.sources)).rows;
   const readSetup = options.setup?.read ?? getCachedToolSetup;
   let setupRows: ToolSetupRow[] = (() => {
     try { return readSetup(); } catch { return []; }

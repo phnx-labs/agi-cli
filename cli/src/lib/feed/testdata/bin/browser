@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for the standalone browser CLI: logs its argv, prints the named fixture.
+printf 'browser %s\n' "$*" >> "$TOOL_FIXTURE_ARGV_LOG"
+exec cat "$BROWSER_SESSIONS_FIXTURE"
