@@ -94,6 +94,19 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
       'if [[ "$1" == "--version" ]]; then echo "1.2.3"; exit 0; fi',
       'if [[ "$1" == "-e" ]]; then echo "1.0.0"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
+      'if [[ "$1" == "scripts/ci-scope.ts" ]]; then',
+      '  if [[ "$2" == "--run" ]]; then',
+      '    echo "impact checks passed"',
+      '    [[ "${IMPACT_TEST_FAIL:-}" != "1" ]]',
+      '    exit',
+      '  fi',
+      '  while [[ $# -gt 0 ]]; do',
+      '    if [[ "$1" == "--plan-file" ]]; then shift; printf "%s\\n" "{}" > "$1"; fi',
+      '    shift',
+      '  done',
+      '  echo "impact plan selected"',
+      '  exit 0',
+      'fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
       '  echo "RUSH-3007-ENV: producer=${AGENTS_ATTEST_PRODUCER:-<unset>} ci=${CI:-<unset>}"',
       fakeSuiteBody(opts),
@@ -151,6 +164,98 @@ function runProduce(
       env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}`, ...envOverride },
     },
   );
+}
+
+function copyTrackedPrefix(sourceRoot: string, destRoot: string, prefix: string) {
+  const listed = spawnSync('git', ['ls-files', '-z', prefix], { cwd: sourceRoot, encoding: 'buffer' });
+  if (listed.status !== 0) throw new Error(listed.stderr.toString());
+  for (const rel of listed.stdout.toString().split('\0').filter(Boolean)) {
+    const src = path.join(sourceRoot, rel);
+    const dest = path.join(destRoot, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    const stat = fs.lstatSync(src);
+    if (stat.isSymbolicLink()) fs.symlinkSync(fs.readlinkSync(src), dest);
+    else {
+      fs.copyFileSync(src, dest);
+      fs.chmodSync(dest, stat.mode);
+    }
+  }
+}
+
+function buildRealImpactFixture(root: string) {
+  const sourceRoot = path.resolve(__dirname, '../..');
+  const caller = path.join(root, 'caller');
+  const remote = path.join(root, 'remote.git');
+  const store = path.join(root, 'store');
+  fs.mkdirSync(caller, { recursive: true });
+  copyTrackedPrefix(sourceRoot, caller, 'packages/session-tracker');
+  for (const rel of ['scripts/ci-scope.ts', 'scripts/comment-budget.json', 'scripts/comment-lines.ts',
+    'cli/ci/test-ownership.yaml', 'cli/vitest.config.ts']) {
+    const src = path.join(sourceRoot, rel);
+    const dest = path.join(caller, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+  }
+  fs.mkdirSync(path.join(caller, 'cli/scripts/lib'), { recursive: true });
+  for (const rel of ['release-attestation-produce.sh', 'release-attestation.sh', 'lib/common.sh']) {
+    const src = path.join(sourceRoot, 'cli/scripts', rel);
+    const dest = path.join(caller, 'cli/scripts', rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    fs.chmodSync(dest, fs.statSync(src).mode);
+  }
+  fs.writeFileSync(path.join(caller, 'cli/package.json'), JSON.stringify({
+    name: '@phnx-labs/agents-cli',
+    version: '9.9.9',
+    bin: { agents: 'dist/index.js' },
+    files: ['dist'],
+    dependencies: { yaml: '^2.9.0' },
+  }, null, 2));
+  fs.writeFileSync(path.join(caller, 'scripts/bun-yaml-polyfill.ts'), `import { parse } from '../cli/node_modules/yaml/dist/index.js';
+(Bun as any).YAML ??= { parse };
+`);
+  fs.writeFileSync(path.join(caller, 'cli/scripts/build.sh'), `#!/usr/bin/env bash
+set -euo pipefail
+rm -rf dist
+mkdir -p dist
+printf '%s\n' '#!/usr/bin/env node' 'console.log("9.9.9")' > dist/index.js
+chmod 755 dist/index.js
+`, { mode: 0o755 });
+  const install = spawnSync('bun', ['install'], { cwd: path.join(caller, 'cli'), encoding: 'utf-8' });
+  if (install.status !== 0) throw new Error(`fixture bun install failed: ${install.stdout}${install.stderr}`);
+
+  git(caller, 'init', '-q', '-b', 'main');
+  git(caller, 'config', 'user.email', 'impact-test@example.com');
+  git(caller, 'config', 'user.name', 'impact-test');
+  git(caller, 'add', '-A');
+  git(caller, 'commit', '-q', '-m', 'attested base');
+  const base = git(caller, 'rev-parse', 'HEAD');
+
+  const markerTest = path.join(caller, 'packages/session-tracker/tests/release-impact.integration.test.ts');
+  fs.writeFileSync(markerTest, `import { expect, test } from 'vitest';
+import fs from 'node:fs';
+test('real impact-selected session-tracker check ran', () => {
+  expect(process.env.RELEASE_IMPACT_MARKER).toBeTruthy();
+  fs.writeFileSync(process.env.RELEASE_IMPACT_MARKER!, 'ran\\n');
+});
+`);
+  fs.appendFileSync(path.join(caller, 'packages/session-tracker/src/state-file.ts'), '\n// impact integration fixture\n');
+  git(caller, 'add', '-A');
+  git(caller, 'commit', '-q', '-m', 'change packaged session tracker');
+  const head = git(caller, 'rev-parse', 'HEAD');
+  git(root, 'init', '-q', '--bare', '-b', 'main', remote);
+  git(caller, 'remote', 'add', 'origin', remote);
+  git(caller, 'push', '-q', '-u', 'origin', 'main');
+  const fakebin = path.join(root, 'fakebin');
+  fs.mkdirSync(fakebin);
+  const realBun = spawnSync('sh', ['-c', 'command -v bun'], { encoding: 'utf-8' }).stdout.trim();
+  fs.writeFileSync(path.join(fakebin, 'bun'), `#!/usr/bin/env bash
+if [[ "\${1-}" == scripts/ci-scope.ts ]]; then
+  exec "$REAL_BUN" --preload ./scripts/bun-yaml-polyfill.ts "$@"
+fi
+exec "$REAL_BUN" "$@"
+`, { mode: 0o755 });
+  return { caller, store, base, head, marker: path.join(root, 'impact-ran'), fakebin, realBun };
 }
 
 
@@ -344,6 +449,74 @@ describe('release-attestation-produce.sh', () => {
     );
     expect(required.status, required.stdout + required.stderr).toBe(0);
   });
+
+  it('runs bounded impacted checks from an attested ancestor and writes the exact-tree proof', () => {
+    const root = tmp('attest-produce-impact-');
+    const fx = buildFixture(root);
+    const base = fx.headCommit;
+    fs.writeFileSync(path.join(fx.caller, 'packages/session-tracker/src/change.ts'), 'export const changed = true;\n');
+    git(fx.caller, 'add', '.');
+    git(fx.caller, 'commit', '-m', 'change packaged tracker');
+    git(fx.caller, 'push', 'origin', 'main');
+    const head = git(fx.caller, 'rev-parse', 'HEAD');
+
+    const result = spawnSync('bash', [
+      path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
+      head,
+      '--test-impact-from', base,
+      '--repo-root', fx.caller,
+      '--dir', fx.store,
+    ], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}` },
+    });
+    const out = `${result.stdout}${result.stderr}`;
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('impact checks passed');
+    expect(out).toContain('Impacted checks passed');
+    expect(out).not.toContain('tests passed');
+    const recordFile = fs.readdirSync(fx.store).find((f) => f.endsWith('.json'))!;
+    const record = JSON.parse(fs.readFileSync(path.join(fx.store, recordFile), 'utf-8'));
+    expect(record.candidateTree).toBe(git(fx.caller, 'rev-parse', `${head}^{tree}`));
+    expect(record.conclusion).toBe('pass');
+  });
+
+  it('runs the real impact planner and session-tracker checks before emitting an exact-tree artifact', () => {
+    const root = tmp('attest-produce-real-impact-');
+    const fx = buildRealImpactFixture(root);
+    const result = spawnSync('bash', [
+      path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
+      fx.head,
+      '--test-impact-from', fx.base,
+      '--repo-root', fx.caller,
+      '--dir', fx.store,
+    ], {
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        PATH: `${fx.fakebin}:${process.env.PATH}`,
+        REAL_BUN: fx.realBun,
+        RELEASE_IMPACT_MARKER: fx.marker,
+      },
+      timeout: 120_000,
+    });
+    const out = `${result.stdout}${result.stderr}`;
+    expect(result.status, out).toBe(0);
+    expect(fs.readFileSync(fx.marker, 'utf-8')).toBe('ran\n');
+    expect(out).toContain('release-impact.integration.test.ts');
+    expect(out).toContain('tests/state-file.test.ts');
+    expect(out).toContain('Impacted checks passed');
+    const recordFile = fs.readdirSync(fx.store).find((file) => file.endsWith('.json'))!;
+    const record = JSON.parse(fs.readFileSync(path.join(fx.store, recordFile), 'utf-8'));
+    expect(record.candidateTree).toBe(git(fx.caller, 'rev-parse', `${fx.head}^{tree}`));
+    const tarball = path.join(fx.store, record.tarball.filename);
+    expect(fs.existsSync(tarball)).toBe(true);
+    const required = spawnSync('bash', [
+      path.join(fx.caller, 'cli/scripts/release-attestation.sh'),
+      'require', '--dir', fx.store, '--tree', record.candidateTree, '--repo-root', fx.caller,
+    ], { encoding: 'utf-8' });
+    expect(required.status, `${required.stdout}${required.stderr}`).toBe(0);
+  }, 120_000);
 
   it('survives a relative --dir: the attestation lands outside the throwaway worktree, not inside it', () => {
     const root = tmp('attest-produce-relative-dir-');

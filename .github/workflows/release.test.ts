@@ -14,7 +14,9 @@ describe('release workflow security boundary', () => {
   });
 
   test('grants only the permissions needed for GitHub assets and npm OIDC', () => {
-    expect(workflow.permissions).toEqual({ contents: 'write', 'id-token': 'write' });
+    expect(workflow.permissions).toBeUndefined();
+    expect(workflow.jobs.release.permissions).toEqual({ contents: 'write', 'id-token': 'write' });
+    expect(workflow.jobs.release.environment).toBe('npm-publish');
     expect(workflow.jobs.release['runs-on']).toBe('ubuntu-latest');
   });
 

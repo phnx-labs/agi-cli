@@ -34,8 +34,15 @@ function repoWithHistory(n: number): { root: string; shas: string[]; trees: stri
   return { root, shas, trees };
 }
 
-function resolve(root: string, assets: string[], lookback = '40') {
-  return spawnSync('bash', [SCRIPT, root, 'main', lookback], {
+function resolve(root: string, assets: string[]) {
+  return spawnSync('bash', [SCRIPT, root, 'main'], {
+    encoding: 'utf-8',
+    env: { ...process.env, RELEASE_ATTEST_ASSETS: assets.join('\n') },
+  });
+}
+
+function resolveAnyAttested(root: string, assets: string[]) {
+  return spawnSync('bash', [SCRIPT, root, 'main', '--allow-relevant-drift'], {
     encoding: 'utf-8',
     env: { ...process.env, RELEASE_ATTEST_ASSETS: assets.join('\n') },
   });
@@ -86,6 +93,20 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
+  it('can select the newest retained attested ancestor for bounded impact retesting', () => {
+    const { root, shas, trees } = repoWithHistory(3);
+    fs.mkdirSync(path.join(root, 'packages/session-tracker/src'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'packages/session-tracker/src/index.ts'), 'export const changed = true;\n');
+    git(root, 'add', 'packages/session-tracker/src/index.ts');
+    git(root, 'commit', '-m', 'change packaged helper');
+
+    const compatible = resolve(root, [`attest-${trees[2]}.json`]);
+    expect(compatible.status).not.toBe(0);
+    const retained = resolveAnyAttested(root, [`attest-${trees[0]}.json`, `attest-${trees[2]}.json`]);
+    expect(retained.status, retained.stderr).toBe(0);
+    expect(retained.stdout.trim()).toBe(shas[2]);
+  });
+
   it('fails loud (non-zero, no sha) when nothing in history is attested', () => {
     const { root } = repoWithHistory(3);
     const r = resolve(root, ['attest-deadbeef.json']);
@@ -108,10 +129,11 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
-  it('respects the lookback bound rather than walking all of history', () => {
-    const { root, trees } = repoWithHistory(6);
-    const r = resolve(root, [`attest-${trees[0]}.json`], '2');
-    expect(r.status).not.toBe(0);
+  it('finds a compatible retained proof beyond 40 unrelated commits', () => {
+    const { root, shas, trees } = repoWithHistory(45);
+    const r = resolve(root, [`attest-${trees[0]}.json`]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe(shas[0]);
   });
 
   it('fails closed on a blank asset list instead of returning the tip', () => {

@@ -16,6 +16,7 @@ ORCHESTRATION_PHASE=false
 CI_PUBLISH=false
 PUBLISH_DRY_RUN=false
 ARTIFACTS_DIR=""
+EXPECTED_RELEASE_BRANCH=""
 TARGET=""
 
 while [[ $# -gt 0 ]]; do
@@ -28,6 +29,11 @@ while [[ $# -gt 0 ]]; do
     --artifacts-dir)
       [[ -n "${2:-}" ]] || die "--artifacts-dir needs a directory"
       ARTIFACTS_DIR="$2"
+      shift 2
+      ;;
+    --expected-release-branch)
+      [[ -n "${2:-}" ]] || die "--expected-release-branch needs a branch"
+      EXPECTED_RELEASE_BRANCH="$2"
       shift 2
       ;;
     -h|--help)
@@ -111,6 +117,11 @@ run_ci_publish() {
   bold "Install-smoke of the exact attested tarball..."
   scripts/release-install-smoke.sh "$tgz" "$TARGET" \
     || die "install smoke failed for $(basename "$tgz")"
+
+  if [[ -n "$EXPECTED_RELEASE_BRANCH" ]]; then
+    scripts/release-require-branch-head.sh origin "$EXPECTED_RELEASE_BRANCH" HEAD \
+      || die "$EXPECTED_RELEASE_BRANCH moved after this publish job was triggered"
+  fi
 
   if ! $PUBLISH_DRY_RUN; then
     registry_state="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET")" \
