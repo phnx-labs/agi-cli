@@ -317,6 +317,7 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
     dirty = false;
     void reproject();
   }, options.sweepMs ?? TOOL_SWEEP_MS);
+  if (!options.initial) void reproject();
   const stop = () => {
     stopped = true;
     clearInterval(timer);

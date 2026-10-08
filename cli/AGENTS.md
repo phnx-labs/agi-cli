@@ -251,7 +251,7 @@ flicker out.
 (PHNX-4227).** `readStandaloneBrowserRows` / `readStandaloneComputerRows` spawn
 `browser sessions --tasks --json --no-interactive` and `computer sessions --json
 --no-interactive --limit 500` (argv array, no shell, stdout capped at 64 MiB,
-30 s timeout, asynchronous so a slow tool never stalls the hub) through the
+30 s timeout, asynchronous so a slow tool never stalls the hub; `watchLocalFeed` starts with no tool rows and the watcher's first projection arrives as `tool.upsert` events, so sessions and attention never wait on a tool listing) through the
 `browser-client.ts` / `computer-client.ts` resolvers. A missing binary, a non-zero
 exit, unparseable JSON, or a row without its required fields THROWS — the error
 names `agents setup tools` when the binary is absent — so that kind is
