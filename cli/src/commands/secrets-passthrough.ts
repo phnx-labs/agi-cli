@@ -6,6 +6,7 @@ import { flagValue } from '../lib/hosts/routing-flag.js';
 import { stripRoutingFlags } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteDevice } from '../lib/ssh-tunnel.js';
 import { SECRETS_CLI_INSTALL_HINT } from '../lib/secrets-cli.js';
+import { forwardsHelp } from '../lib/help.js';
 
 export async function rewriteDeviceToHost(argv: string[]): Promise<string[]> {
   if (flagValue(argv, 'host', 'H') !== undefined) return argv;
@@ -17,12 +18,11 @@ export async function rewriteDeviceToHost(argv: string[]): Promise<string[]> {
 }
 
 export function registerSecretsCommands(program: Command): void {
-  program
+  forwardsHelp(program
     .command('secrets')
     .description('Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.')
     .allowUnknownOption()
     .allowExcessArguments()
-    .helpOption(false)
     .action(async () => {
       let bin: string;
       try {
@@ -48,5 +48,5 @@ export function registerSecretsCommands(program: Command): void {
         process.exit(1);
       }
       process.exit(res.status ?? 1);
-    });
+    }));
 }

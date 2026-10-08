@@ -180,7 +180,16 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   return output.join('\n');
 }
 
+const FORWARDS_HELP = new WeakSet<Command>();
+
+export function forwardsHelp(cmd: Command): Command {
+  cmd.helpOption(false);
+  FORWARDS_HELP.add(cmd);
+  return cmd;
+}
+
 function applyHelpConventionsRecursive(cmd: Command): void {
+  if (FORWARDS_HELP.has(cmd)) return;
   cmd
     .helpOption('-h, --help', 'Show help')
     .addHelpCommand(false)

@@ -40,7 +40,7 @@
  */
 
 import { Command } from 'commander';
-import { registerCommandGroups, setHelpSections } from '../lib/help.js';
+import { forwardsHelp, registerCommandGroups, setHelpSections } from '../lib/help.js';
 import {
   loadComputerAllowList,
   loadDefaultPeers,
@@ -175,80 +175,74 @@ function registerComputerSubcommands(program: Command): void {
 
 function registerPassthroughVerbs(program: Command): void {
   for (const verb of COMPUTER_PASSTHROUGH_VERBS) {
-    program
+    forwardsHelp(program
       .command(verb.name)
       .description(verb.description)
       .option('--device <name>', 'Drive a remote Windows device registered with `agents devices` (the engine connects or provisions it on demand)')
       .allowUnknownOption(true)
       .allowExcessArguments(true)
-      .helpOption(false)
       .action(async (opts: { device?: string }, cmd: Command) => {
         await forwardAndExit({ argv: [verb.name, ...cmd.args], device: opts.device });
-      });
+      }));
   }
 }
 
 function registerSetupCommand(program: Command): void {
-  program
+  forwardsHelp(program
     .command('setup')
     .alias('install-helper')
     .description('Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device')
     .option('--device <name>', 'Provision a remote Windows device (push the exe + register a LOGON task) instead of installing locally')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       await forwardAndExit({ argv: ['setup', ...cmd.args], device: opts.device, record: false });
-    });
+    }));
 }
 
 function registerStartCommand(program: Command): void {
-  program
+  forwardsHelp(program
     .command('start')
     .description('Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
     .option('--device <name>', 'Start the remote Windows daemon and its tunnel instead of the local launchd service')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       await forwardAndExit({ argv: ['start', ...cmd.args], device: opts.device, record: false });
-    });
+    }));
 }
 
 function registerStopCommand(program: Command): void {
-  program
+  forwardsHelp(program
     .command('stop')
     .description('Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device')
     .option('--device <name>', 'Tear down the remote tunnel and unregister the scheduled task')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       await forwardAndExit({ argv: ['stop', ...cmd.args], device: opts.device, record: false });
-    });
+    }));
 }
 
 function registerReloadCommand(program: Command): void {
-  program
+  forwardsHelp(program
     .command('reload')
     .description('Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device')
     .option('--device <name>', 'Restart the remote Windows daemon (its scheduled task) instead of SIGHUPing the local one')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       await forwardAndExit({ argv: ['reload', ...cmd.args], device: opts.device, record: false });
-    });
+    }));
 }
 
 function registerStatusCommand(program: Command): void {
-  program
+  forwardsHelp(program
     .command('status')
     .description('Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device')
     .option('--device <name>', 'Report the remote Windows daemon (tunnel + liveness) instead of the local helper')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
-    .helpOption(false)
     .action(async (opts: { device?: string }, cmd: Command) => {
       const json = cmd.args.includes('--json');
       if (!json && !opts.device) {
@@ -259,7 +253,7 @@ function registerStatusCommand(program: Command): void {
         console.log(`peers:     ${loadDefaultPeers().length} caller(s) (peer-auth on socket)`);
       }
       await forwardAndExit({ argv: ['status', ...cmd.args], device: opts.device, record: false });
-    });
+    }));
 }
 
 function registerSessionsCommand(program: Command): void {

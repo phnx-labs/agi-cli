@@ -1,6 +1,6 @@
 
 import { Command } from 'commander';
-import { registerCommandGroups, setHelpSections } from '../lib/help.js';
+import { forwardsHelp, registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildBrowserContext } from '../lib/browser/context.js';
 import { recordBrowserAction } from '../lib/browser/record.js';
 import {
@@ -100,17 +100,16 @@ async function forwardAndExit(opts: Parameters<typeof forwardToBrowser>[0]): Pro
 
 function registerPassthroughVerbs(program: Command): void {
   for (const verb of BROWSER_PASSTHROUGH_VERBS) {
-    program
+    forwardsHelp(program
       .command(verb.name)
       .description(verb.description)
       .allowUnknownOption(true)
       .allowExcessArguments(true)
-      .helpOption(false)
       .action(async (_opts: unknown, cmd: Command) => {
         const argv = [verb.name, ...cmd.args];
         const device = verb.name === 'start' ? peekDevice(cmd.args) : undefined;
         await forwardAndExit({ argv, device });
-      });
+      }));
   }
 }
 

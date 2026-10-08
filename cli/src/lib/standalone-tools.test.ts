@@ -13,7 +13,7 @@ function writeExecutable(file: string, body: string): void {
 describe('standalone tool floors', () => {
   it('pins the published releases R1 of PHNX-4227 depends on', () => {
     expect(pinnedSpec('sessions')).toBe('@phnx-labs/sessions-cli@0.5.0');
-    expect(pinnedSpec('browser')).toBe('@phnx-labs/browser-cli@0.1.15');
+    expect(pinnedSpec('browser')).toBe('@phnx-labs/browser-cli@0.1.16');
     expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.1.8');
     expect(pinnedSpec('computer')).toBe('@phnx-labs/computer-cli@0.1.5');
   });
