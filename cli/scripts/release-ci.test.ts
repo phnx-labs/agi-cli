@@ -27,7 +27,7 @@ function fixture(version: string) {
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
   fs.mkdirSync(assets);
 
-  for (const name of ['release-ci.sh', 'release.sh', 'release-attestation.sh', 'release-install-smoke.sh']) {
+  for (const name of ['release-ci.sh', 'release.sh', 'release-attestation.sh', 'release-install-smoke.sh', 'release-other-branch.sh']) {
     fs.copyFileSync(path.join(SOURCE_DIR, name), path.join(scripts, name));
     fs.chmodSync(path.join(scripts, name), 0o755);
   }
@@ -53,6 +53,10 @@ function fixture(version: string) {
   git(root, 'config', 'user.email', 'release-test@example.com');
   git(root, 'add', '-A');
   git(root, 'commit', '-q', '-m', `release ${version}`);
+  const remote = path.join(root, 'origin.git');
+  git(root, 'init', '--bare', remote);
+  git(root, 'remote', 'add', 'origin', remote);
+  git(root, 'push', 'origin', `HEAD:refs/heads/release/${version}`);
 
   const pack = spawnSync('npm', ['pack', '--silent', '--pack-destination', assets], {
     cwd: cli,
@@ -128,6 +132,15 @@ describeUnix('release branch push path', () => {
     const result = run('9.9.9', 'release/9.9.9', fx.assets, fx.cli);
     expect(result.status).not.toBe(0);
     expect(result.out).toContain('does not match its exact-tree attestation');
+    expect(result.out).not.toContain('BRANCH_RELEASE_PUBLISH');
+  });
+
+  it('fails before publish when another exact-shape release branch exists', () => {
+    const fx = fixture('9.9.9');
+    git(fx.root, 'push', 'origin', 'HEAD:refs/heads/release/9.9.10');
+    const result = run('9.9.9', 'release/9.9.9', fx.assets, fx.cli);
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain('release/9.9.10');
     expect(result.out).not.toContain('BRANCH_RELEASE_PUBLISH');
   });
 });

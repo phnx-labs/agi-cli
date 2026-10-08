@@ -68,7 +68,7 @@ run_ci_publish() {
   command -v git >/dev/null || die "git not found"
   command -v jq >/dev/null || die "jq not found"
 
-  local npm_version checked_out_ver repo_root tree assets attest tgz_json tgz dist_tag published
+  local npm_version checked_out_ver repo_root tree assets attest tgz_json tgz dist_tag published registry_state
   checked_out_ver="$(jq -r .version package.json)"
   [[ "$checked_out_ver" == "$TARGET" ]] \
     || die "checked-out package is $checked_out_ver, not $TARGET"
@@ -112,14 +112,17 @@ run_ci_publish() {
   scripts/release-install-smoke.sh "$tgz" "$TARGET" \
     || die "install smoke failed for $(basename "$tgz")"
 
-  if ! $PUBLISH_DRY_RUN \
-    && [[ "$(npm view "$PHNX_PKG@$TARGET" version 2>/dev/null || true)" == "$TARGET" ]]; then
-    scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
-      || die "$PHNX_PKG@$TARGET exists with bytes that differ from the attested tarball"
-    green "$PHNX_PKG@$TARGET is already visible on npm; the attested install smoke passed."
-    printf 'BRANCH_RELEASE_PUBLISH version=%s tag=existing tarball=%s dry_run=false\n' \
-      "$TARGET" "$(basename "$tgz")"
-    return 0
+  if ! $PUBLISH_DRY_RUN; then
+    registry_state="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET")" \
+      || die "could not establish registry state for $PHNX_PKG@$TARGET"
+    if [[ "$registry_state" == "present" ]]; then
+      scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
+        || die "$PHNX_PKG@$TARGET exists with bytes that differ from the attested tarball"
+      green "$PHNX_PKG@$TARGET is already visible on npm; the attested install smoke passed."
+      printf 'BRANCH_RELEASE_PUBLISH version=%s tag=existing tarball=%s dry_run=false\n' \
+        "$TARGET" "$(basename "$tgz")"
+      return 0
+    fi
   fi
 
   dist_tag="latest"
@@ -136,13 +139,13 @@ run_ci_publish() {
   npm publish "${publish_args[@]}" \
     || die "npm publish failed for $PHNX_PKG@$TARGET"
   if ! $PUBLISH_DRY_RUN; then
-    published=""
+    published="absent"
     for _attempt in 1 2 3 4 5; do
-      published="$(npm view "$PHNX_PKG@$TARGET" version 2>/dev/null || true)"
-      [[ "$published" == "$TARGET" ]] && break
+      published="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET" 2>/dev/null || true)"
+      [[ "$published" == "present" ]] && break
       sleep 2
     done
-    [[ "$published" == "$TARGET" ]] \
+    [[ "$published" == "present" ]] \
       || die "npm publish returned success but $PHNX_PKG@$TARGET is not registry-visible"
     scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
       || die "npm serves bytes that differ from the attested tarball for $PHNX_PKG@$TARGET"
@@ -189,19 +192,12 @@ REMOTE_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
 bun install --frozen-lockfile >/dev/null \
   || die "dependency install failed in the isolated release worktree"
 
-PHNX_LATEST="$(npm view "$PHNX_PKG@latest" version 2>/dev/null || true)"
-[[ -n "$PHNX_LATEST" ]] || die "could not read the latest $PHNX_PKG version from npm"
 PKG_JSON_VERSION="$(jq -r .version package.json)"
 
+TARGET_STATE="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET")" \
+  || die "could not establish registry state for $PHNX_PKG@$TARGET"
 TARGET_PUBLISHED=false
-npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1 && TARGET_PUBLISHED=true
-
-remote_version_tags() {
-  local out
-  out="$(git ls-remote --tags origin 'refs/tags/v*' 2>&1)" \
-    || die "could not read remote tags from origin: $out"
-  printf '%s\n' "$out" | grep -v '\^{}$' || true
-}
+[[ "$TARGET_STATE" == "present" ]] && TARGET_PUBLISHED=true
 
 remote_target_tag_commit() {
   local refs peeled direct
@@ -213,8 +209,10 @@ remote_target_tag_commit() {
 }
 
 RELEASE_BRANCH="release/$TARGET"
+scripts/release-other-branch.sh "$RELEASE_BRANCH" \
+  || die "another branch-push release must finish before release/$TARGET"
 OPEN_PR_LINES="$(gh api --paginate "repos/$GITHUB_REPO/pulls?state=open&per_page=100" \
-  --jq '.[] | "\(.number) \(.head.ref)"')" \
+  | scripts/release-pr-lines.sh "$GITHUB_REPO" "$DEFAULT_BRANCH")" \
   || die "could not list open release PRs"
 OTHER_BUMP_PRS="$(printf '%s\n' "$OPEN_PR_LINES" \
   | scripts/release-other-bump-prs.sh "$RELEASE_BRANCH")"
@@ -260,29 +258,11 @@ if [[ "$RECOVERY_STATE" != "new" ]]; then
   exit 0
 fi
 
-if version_is_prerelease "$TARGET"; then
-  BUMP="pre-release"
-else
-  BUMP="$(scripts/validate-bump.sh "$PHNX_LATEST" "$PKG_JSON_VERSION" "0.0.0" "$TARGET")" \
-    || exit 1
-  TAG_FACTS=""
-  REMOTE_TAG_LINES="$(remote_version_tags)"
-  while read -r _sha ref; do
-    version="${ref#refs/tags/v}"
-    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-    [[ "$version" != "$PHNX_LATEST" ]] || continue
-    [[ "$(printf '%s\n%s\n' "$PHNX_LATEST" "$version" | sort -V | tail -1)" == "$version" ]] || continue
-    if npm view "$PHNX_PKG@$version" version >/dev/null 2>&1; then
-      TAG_FACTS+="$version yes"$'\n'
-    else
-      TAG_FACTS+="$version no"$'\n'
-    fi
-  done <<<"$REMOTE_TAG_LINES"
-  UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" \
-    | scripts/stuck-release.sh "$PHNX_LATEST" "$BUMP" "$PKG_JSON_VERSION" || true)"
-  [[ -z "$UNPUBLISHED_TAG" || "$UNPUBLISHED_TAG" == "$TARGET" ]] \
-    || die "v$UNPUBLISHED_TAG is tagged but unpublished; release it before $TARGET"
-fi
+NEW_STATE="$(scripts/release-new-state-guard.sh \
+  "$PHNX_PKG" "$TARGET" "$PKG_JSON_VERSION" \
+  "$GITHUB_REPO" "$DEFAULT_BRANCH" "$RELEASE_BRANCH")" \
+  || die "release state changed before preparation; retry from current main"
+read -r BUMP PHNX_LATEST <<<"$NEW_STATE"
 
 cleanup_release_tree() {
   git restore --source=HEAD --staged --worktree -- \
@@ -340,6 +320,12 @@ release_lease() {
   fi
 }
 trap release_lease EXIT
+
+LOCKED_STATE="$(scripts/release-new-state-guard.sh \
+  "$PHNX_PKG" "$TARGET" "$PKG_JSON_VERSION" \
+  "$GITHUB_REPO" "$DEFAULT_BRANCH" "$RELEASE_BRANCH")" \
+  || die "release state changed while preparing; retry from current main"
+read -r BUMP PHNX_LATEST <<<"$LOCKED_STATE"
 
 git push --force-with-lease="refs/heads/$RELEASE_BRANCH:" \
   origin "$RELEASE_COMMIT:refs/heads/$RELEASE_BRANCH"

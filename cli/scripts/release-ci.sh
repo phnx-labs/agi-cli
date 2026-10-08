@@ -38,6 +38,9 @@ PACKAGE_VERSION="$(jq -r .version package.json)"
 [[ "$PACKAGE_VERSION" == "$VERSION" ]] \
   || die "release/$VERSION carries package version $PACKAGE_VERSION"
 
+scripts/release-other-branch.sh "release/$VERSION" \
+  || die "another branch-push release must finish before release/$VERSION"
+
 HEAD_SHA="$(git rev-parse HEAD)"
 HEAD_TREE="$(git rev-parse 'HEAD^{tree}')"
 
@@ -77,7 +80,9 @@ REMOTE_TAG_SHA="$(remote_tag_commit)"
 [[ -z "$REMOTE_TAG_SHA" || "$REMOTE_TAG_SHA" == "$HEAD_SHA" ]] \
   || die "v$VERSION already points at $REMOTE_TAG_SHA, not release branch head $HEAD_SHA"
 
-if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+RELEASE_STATE="$(scripts/release-github-state.sh "$REPO" "v$VERSION")" \
+  || die "could not establish GitHub release state for v$VERSION"
+if [[ "$RELEASE_STATE" == "present" ]]; then
   existing_valid=false
   if gh release download "v$VERSION" --repo "$REPO" \
       --pattern release-attestation.json --pattern 'phnx-labs-agents-cli-*.tgz' \
@@ -96,9 +101,12 @@ if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
     fi
   fi
   if $existing_valid; then
+    scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA"
     exec scripts/release.sh "$VERSION" --ci-publish --artifacts-dir "$EXISTING_DIR"
   fi
-  [[ "$(npm view "@phnx-labs/agents-cli@$VERSION" version 2>/dev/null || true)" != "$VERSION" ]] \
+  REGISTRY_STATE="$(scripts/release-registry-state.sh "@phnx-labs/agents-cli" "$VERSION")" \
+    || die "could not establish registry state before replacing invalid v$VERSION assets"
+  [[ "$REGISTRY_STATE" == "absent" ]] \
     || die "v$VERSION release assets are invalid but npm already exposes the immutable version; refusing to replace canonical evidence"
 fi
 
@@ -126,17 +134,12 @@ scripts/release-attestation.sh promote --file "$RELEASE_ATTEST" --tarball "$TGZ"
 cp "$RELEASE_ATTEST" "$ASSET_DIR/release-attestation.json"
 cp "$TGZ" "$ASSET_DIR/$(basename "$TGZ")"
 
-if [[ -z "$REMOTE_TAG_SHA" ]]; then
-  git config user.name "agents-cli release"
-  git config user.email "release@phnx-labs.invalid"
-  scripts/create-annotated-release-tag.sh "$VERSION" "$HEAD_SHA"
-  git push origin "refs/tags/v$VERSION"
-fi
+scripts/release-ensure-tag.sh "$VERSION" "$HEAD_SHA" "$REMOTE_TAG_SHA"
 
 release_args=("v$VERSION" "$ASSET_DIR"/* --verify-tag --title "v$VERSION")
 release_args+=(--notes-file ".changelog/$VERSION.md")
 [[ "$VERSION" =~ -pre\.[0-9]+$ ]] && release_args+=(--prerelease)
-if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
+if [[ "$RELEASE_STATE" == "present" ]]; then
   gh release upload "v$VERSION" "$ASSET_DIR"/* \
     --repo "$REPO" --clobber
 else
