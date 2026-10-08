@@ -105,7 +105,7 @@ export function registerComputerCommand(program: Command): void {
         if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
       }
       const device = globals.device;
-      if (shouldBlockOffPlatform({
+      if (actionCommand.name() !== 'sessions' && shouldBlockOffPlatform({
         platform: process.platform,
         tcpConfigured: resolveTcpEndpoint() != null,
         vncConfigured: resolveVncEndpoint() != null,

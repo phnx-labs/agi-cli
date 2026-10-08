@@ -48,3 +48,29 @@ describe('COMPUTER_PASSTHROUGH_VERBS', () => {
     }
   });
 });
+
+describe.skipIf(process.platform === 'darwin' || process.platform === 'win32')('agents computer sessions off macOS', () => {
+  it('lists the engine history without the local-driving gate', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { runAgents, writeUpdateCache } = await import('./sessions.test-fixture.js');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-computer-sessions-'));
+    try {
+      writeUpdateCache(home);
+      const testdata = path.resolve(import.meta.dirname, '../lib/feed/testdata');
+      const argvLog = path.join(home, 'argv.log');
+      const result = runAgents(['computer', 'sessions', '--json', '--no-interactive'], home, home, {
+        COMPUTER_BIN: path.join(testdata, 'bin', 'computer'),
+        COMPUTER_SESSIONS_FIXTURE: path.join(testdata, 'computer-sessions.json'),
+        TOOL_FIXTURE_ARGV_LOG: argvLog,
+      });
+      expect(result.stderr).not.toContain('macOS only for local driving');
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual(JSON.parse(fs.readFileSync(path.join(testdata, 'computer-sessions.json'), 'utf8')));
+      expect(fs.readFileSync(argvLog, 'utf8').trim()).toBe('computer sessions --json --no-interactive');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
