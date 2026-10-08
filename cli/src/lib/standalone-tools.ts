@@ -13,7 +13,7 @@ export interface StandaloneToolPin {
 
 export const STANDALONE_TOOL_PINS: Readonly<Record<StandaloneTool, StandaloneToolPin>> = {
   sessions: { tool: 'sessions', pkg: '@phnx-labs/sessions-cli', floor: '0.5.0' },
-  browser: { tool: 'browser', pkg: '@phnx-labs/browser-cli', floor: '0.1.15' },
+  browser: { tool: 'browser', pkg: '@phnx-labs/browser-cli', floor: '0.1.16' },
   secrets: { tool: 'secrets', pkg: SECRETS_CLI_PACKAGE, floor: SECRETS_CLI_VERSION },
   computer: { tool: 'computer', pkg: '@phnx-labs/computer-cli', floor: '0.1.5' },
   term: { tool: 'term', pkg: '@phnx-labs/term-cli', floor: '0.1.0' },

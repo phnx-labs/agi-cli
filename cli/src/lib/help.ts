@@ -180,7 +180,22 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   return output.join('\n');
 }
 
+const FORWARDS_HELP = new WeakSet<Command>();
+
+/**
+ * Mark a command that forwards its argv to a standalone CLI (browser, computer,
+ * secrets): `--help` must reach that CLI, whose help lists the real options, so
+ * agents-cli adds no help option of its own and the global conventions below
+ * leave it alone. Returns the command for chaining.
+ */
+export function forwardsHelp(cmd: Command): Command {
+  cmd.helpOption(false);
+  FORWARDS_HELP.add(cmd);
+  return cmd;
+}
+
 function applyHelpConventionsRecursive(cmd: Command): void {
+  if (FORWARDS_HELP.has(cmd)) return;
   cmd
     .helpOption('-h, --help', 'Show help')
     .addHelpCommand(false)
