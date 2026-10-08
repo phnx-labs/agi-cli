@@ -101,6 +101,7 @@ describe.runIf(runIntegration)('recordings pipeline (real ffmpeg + artifacts CLI
       env,
       ledger,
       host: 'test-device',
+      raiseAttention: async () => undefined,
       transcode: (file, signal) => transcodeRecording(file, signal, { ffmpegBin: ffmpegBin!, platform: 'linux' }),
     });
     const candidate = await candidateForFile(source);

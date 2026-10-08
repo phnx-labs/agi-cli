@@ -14,7 +14,7 @@ afterEach(async () => {
   await Promise.all(directories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-async function fakeArtifacts(directory: string, shareResult: 'ok' | '401' = 'ok'): Promise<string> {
+async function fakeArtifacts(directory: string, shareResult: 'ok' | '401' | 'contract' = 'ok'): Promise<string> {
   const script = path.join(directory, 'artifacts.mjs');
   await fs.writeFile(script, `
 const args = process.argv.slice(2);
@@ -22,6 +22,9 @@ if (args[0] === 'auth' && args[1] === 'whoami') {
   console.log(JSON.stringify({ signedIn: true, email: 'recorder@example.com' }));
 } else if (args[0] === 'share' && ${JSON.stringify(shareResult)} === '401') {
   console.error('401 Unauthorized');
+  process.exitCode = 1;
+} else if (args[0] === 'share' && ${JSON.stringify(shareResult)} === 'contract') {
+  console.error('--meta host=… is reserved');
   process.exitCode = 1;
 } else if (args[0] === 'share') {
   console.log(JSON.stringify({ url: 'https://share.test/clip' }));
@@ -121,6 +124,7 @@ describe('recording artifacts contract', () => {
       artifactsBin: await fakeArtifacts(directory, '401'),
       ledger,
       retryDelayMs: 60_000,
+      dependencyRetryDelayMs: 60_000,
       raiseAttention: async (message) => { attention.push(message); },
       transcode: async (filePath) => ({ filePath, cleanup: async () => undefined }),
     });
@@ -170,6 +174,31 @@ describe('recording artifacts contract', () => {
       expect.objectContaining({ path: replacement.path, stem: original.stem, status: 'queued' }),
     ]);
     await pipeline.stop();
+  });
+
+  it('raises blocked attention and backs off an incompatible artifacts metadata contract', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'recording-pipeline-'));
+    directories.push(directory);
+    const item = candidate(directory);
+    await fs.writeFile(item.path, 'video');
+    const attention: string[] = [];
+    const ledger = new RecordingLedger(path.join(directory, 'ledger.json'));
+    const pipeline = new RecordingPipeline({
+      artifactsBin: await fakeArtifacts(directory, 'contract'),
+      ledger,
+      dependencyRetryDelayMs: 60_000,
+      raiseAttention: async (message) => { attention.push(message); },
+      transcode: async (filePath) => ({ filePath, cleanup: async () => undefined }),
+    });
+    await pipeline.queue([item]);
+
+    await expect(pipeline.drain()).rejects.toThrow(/cannot accept the recordings publish contract/i);
+
+    expect(await ledger.list()).toEqual([
+      expect.objectContaining({ path: item.path, status: 'failed', error: expect.stringMatching(/cannot accept/) }),
+    ]);
+    expect(await ledger.pending()).toHaveLength(0);
+    expect(attention).toHaveLength(1);
   });
 
   it('raises blocked attention and backs off when ffmpeg disappears after watch was enabled', async () => {

@@ -1,5 +1,5 @@
 import { getCliLaunch } from '../cli-entry.js';
-import { invocation, resolveArtifactsBin } from '../artifacts-client.js';
+import { ArtifactsClientError, invocation, resolveArtifactsBin } from '../artifacts-client.js';
 import { machineId } from '../machine-id.js';
 import { RecordingIdentityError, verifyOrganizationIdentity } from './identity.js';
 import { RecordingLedger } from './ledger.js';
@@ -24,6 +24,7 @@ export interface RecordingPipelineOptions {
   raiseAttention?: (message: string) => Promise<void>;
   reportError?: (message: string) => void;
   retryDelayMs?: number;
+  dependencyRetryDelayMs?: number;
 }
 
 function rowCandidate(row: RecordingLedgerRow): RecordingCandidate {
@@ -89,6 +90,7 @@ export class RecordingPipeline {
   private readonly raiseAttention: (message: string) => Promise<void>;
   private readonly reportError: (message: string) => void;
   private readonly retryDelayMs: number;
+  private readonly dependencyRetryDelayMs: number;
 
   constructor(options: RecordingPipelineOptions = {}) {
     this.ledger = options.ledger ?? new RecordingLedger();
@@ -101,6 +103,7 @@ export class RecordingPipeline {
     this.raiseAttention = options.raiseAttention ?? defaultAttention;
     this.reportError = options.reportError ?? (() => undefined);
     this.retryDelayMs = options.retryDelayMs ?? 60_000;
+    this.dependencyRetryDelayMs = options.dependencyRetryDelayMs ?? 15 * 60_000;
   }
 
   private artifactsBin(): string {
@@ -152,6 +155,11 @@ export class RecordingPipeline {
           'Artifacts authentication expired during upload. Run `artifacts auth login`; recordings remain queued.',
         );
       }
+      if (/bad --meta|--meta .+ is reserved|unknown option|invalid choice/i.test(output)) {
+        throw new RecordingDependencyError(
+          `The installed artifacts CLI cannot accept the recordings publish contract. ${output.trim()}`,
+        );
+      }
       throw processFailure('artifacts', args, result);
     }
     return resultUrl(result.stdout);
@@ -195,7 +203,7 @@ export class RecordingPipeline {
           await this.ledger.update(candidate.stem, candidate.path, {
             status: 'failed',
             error: error.message,
-            retryAt: new Date(Date.now() + this.retryDelayMs).toISOString(),
+            retryAt: new Date(Date.now() + this.dependencyRetryDelayMs).toISOString(),
           });
           await this.attention(error.message);
           throw error;
@@ -229,7 +237,8 @@ export class RecordingPipeline {
       await this.verifyIdentity(options.signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const retryAt = new Date(Date.now() + this.retryDelayMs).toISOString();
+      const delay = error instanceof ArtifactsClientError ? this.dependencyRetryDelayMs : this.retryDelayMs;
+      const retryAt = new Date(Date.now() + delay).toISOString();
       for (const candidate of candidates) {
         await this.ledger.update(candidate.stem, candidate.path, { status: 'queued', error: message, retryAt });
       }
@@ -256,10 +265,11 @@ export class RecordingPipeline {
       await this.verifyIdentity(signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const delay = error instanceof ArtifactsClientError ? this.dependencyRetryDelayMs : this.retryDelayMs;
       await this.ledger.update(candidate.stem, candidate.path, {
         status: 'queued',
         error: message,
-        retryAt: new Date(Date.now() + this.retryDelayMs).toISOString(),
+        retryAt: new Date(Date.now() + delay).toISOString(),
       });
       await this.attention(message);
       throw error;
