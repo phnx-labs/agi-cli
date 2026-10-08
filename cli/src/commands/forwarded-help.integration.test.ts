@@ -4,12 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-/**
- * `agents browser <verb> --help` and `agents secrets --help` must reach the
- * standalone CLI, whose help lists the real options. The global help
- * conventions used to re-add agents-cli's own `-h, --help` to these forwarding
- * commands, so agents saw a help page with no options and guessed flags.
- */
 describe.skipIf(process.platform === 'win32')('forwarded --help', () => {
   let home: string;
 
