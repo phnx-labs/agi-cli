@@ -29,4 +29,3 @@ while read -r sha; do
 done < <(git -C "$REPO_ROOT" rev-list -n "$LOOKBACK" "$TARGET_SHA" 2>/dev/null)
 
 exit 1
-
