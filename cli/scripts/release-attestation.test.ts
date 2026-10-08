@@ -428,6 +428,20 @@ describeUnix('release-attestation.sh', () => {
       expect(req.status, req.out).toBe(0);
     });
 
+    it('inherits across monorepo changes outside the CLI package', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-unrelated-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'README.md'), '# unrelated monorepo docs\n');
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
+    });
+
     it('refuses when the release tree changes code beyond version/changelog/command-index', () => {
       const { root, tree: baseTree } = initRepo();
       const store = tmp('rel-attest-derive-neg-');
@@ -453,6 +467,20 @@ describeUnix('release-attestation.sh', () => {
       const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
       expect(d.status).not.toBe(0);
       expect(d.out).toMatch(/bun\.lock|beyond/);
+    });
+
+    it('refuses a packaged session-tracker change', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-session-tracker-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.mkdirSync(path.join(root, 'packages/session-tracker/src'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'packages/session-tracker/src/index.ts'), 'export const changed = true;\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'x');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status).not.toBe(0);
+      expect(d.out).toMatch(/session-tracker/);
     });
 
     it('refuses a base that is not a passing tarball proof', () => {
