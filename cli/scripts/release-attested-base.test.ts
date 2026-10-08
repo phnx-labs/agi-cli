@@ -124,4 +124,3 @@ describe('release-attested-base.sh (PHNX-3705)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 });
-

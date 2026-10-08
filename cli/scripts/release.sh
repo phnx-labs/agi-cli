@@ -193,16 +193,8 @@ PHNX_LATEST="$(npm view "$PHNX_PKG@latest" version 2>/dev/null || true)"
 [[ -n "$PHNX_LATEST" ]] || die "could not read the latest $PHNX_PKG version from npm"
 PKG_JSON_VERSION="$(jq -r .version package.json)"
 
-if npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1; then
-  die "$PHNX_PKG@$TARGET is already published"
-fi
-
-if version_is_prerelease "$TARGET"; then
-  BUMP="pre-release"
-else
-  BUMP="$(scripts/validate-bump.sh "$PHNX_LATEST" "$PKG_JSON_VERSION" "0.0.0" "$TARGET")" \
-    || exit 1
-fi
+TARGET_PUBLISHED=false
+npm view "$PHNX_PKG@$TARGET" version >/dev/null 2>&1 && TARGET_PUBLISHED=true
 
 remote_version_tags() {
   local out
@@ -219,26 +211,6 @@ remote_target_tag_commit() {
   direct="$(awk '$2 !~ /\^\{\}$/ { print $1; exit }' <<<"$refs")"
   printf '%s' "${peeled:-$direct}"
 }
-
-if ! version_is_prerelease "$TARGET"; then
-  TAG_FACTS=""
-  REMOTE_TAG_LINES="$(remote_version_tags)"
-  while read -r _sha ref; do
-    version="${ref#refs/tags/v}"
-    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
-    [[ "$version" != "$PHNX_LATEST" ]] || continue
-    [[ "$(printf '%s\n%s\n' "$PHNX_LATEST" "$version" | sort -V | tail -1)" == "$version" ]] || continue
-    if npm view "$PHNX_PKG@$version" version >/dev/null 2>&1; then
-      TAG_FACTS+="$version yes"$'\n'
-    else
-      TAG_FACTS+="$version no"$'\n'
-    fi
-  done <<<"$REMOTE_TAG_LINES"
-  UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" \
-    | scripts/stuck-release.sh "$PHNX_LATEST" "$BUMP" "$PKG_JSON_VERSION" || true)"
-  [[ -z "$UNPUBLISHED_TAG" || "$UNPUBLISHED_TAG" == "$TARGET" ]] \
-    || die "v$UNPUBLISHED_TAG is tagged but unpublished; release it before $TARGET"
-fi
 
 RELEASE_BRANCH="release/$TARGET"
 OPEN_PR_LINES="$(gh api --paginate "repos/$GITHUB_REPO/pulls?state=open&per_page=100" \
@@ -262,38 +234,54 @@ open_release_pr() {
 TARGET_TAG_SHA="$(remote_target_tag_commit)"
 EXISTING_REMOTE="$(scripts/release-branch-head.sh origin "$RELEASE_BRANCH" "$TARGET")" \
   || die "existing $RELEASE_BRANCH failed immutable-branch validation"
-if [[ -n "$TARGET_TAG_SHA" ]]; then
-  [[ -n "$EXISTING_REMOTE" ]] \
-    || die "v$TARGET is tagged at $TARGET_TAG_SHA but $RELEASE_BRANCH is missing"
-  [[ "$EXISTING_REMOTE" == "$TARGET_TAG_SHA" ]] \
-    || die "v$TARGET points at $TARGET_TAG_SHA but $RELEASE_BRANCH points at $EXISTING_REMOTE"
+RECOVERY_STATE="$(scripts/release-recovery-state.sh \
+  "$TARGET_PUBLISHED" "$TARGET_TAG_SHA" "$EXISTING_REMOTE")" \
+  || die "release/$TARGET cannot be recovered safely"
+if [[ "$RECOVERY_STATE" != "new" ]]; then
+  RECOVERY_SHA="${RECOVERY_STATE#*:}"
+  if [[ "$RECOVERY_STATE" == retry-tag:* ]]; then
+    recovery_label="immutable v$TARGET"
+    recovery_body="Retry the immutable tagged release from its exact branch commit."
+  else
+    recovery_label="immutable $RELEASE_BRANCH"
+    recovery_body="Resume the existing release branch at its exact commit."
+  fi
   if ! $APPLY; then
-    green "Dry run would rerun the existing Release workflow for v$TARGET at $TARGET_TAG_SHA."
+    green "Dry run would resume the Release workflow for $recovery_label at $RECOVERY_SHA."
     exit 0
   fi
   if ! $YES; then
-    read -r -p "Rerun the Release workflow for immutable v$TARGET at $TARGET_TAG_SHA? [y/N] " answer
+    read -r -p "Resume the Release workflow for $recovery_label at $RECOVERY_SHA? [y/N] " answer
     [[ "$answer" =~ ^[Yy]$ ]] || die "aborted"
   fi
-  open_release_pr "$(printf '## %s\n\nRetry the immutable tagged release from its exact branch commit.' "$TARGET")"
-  scripts/release-rerun.sh rerun "$GITHUB_REPO" "$RELEASE_BRANCH" "$TARGET_TAG_SHA"
-  green "Release PR #$PR_NUMBER remains bound to immutable v$TARGET."
+  open_release_pr "$(printf '## %s\n\n%s' "$TARGET" "$recovery_body")"
+  scripts/release-rerun.sh rerun "$GITHUB_REPO" "$RELEASE_BRANCH" "$RECOVERY_SHA"
+  green "Release PR #$PR_NUMBER remains bound to $recovery_label."
   exit 0
 fi
 
-if [[ -n "$EXISTING_REMOTE" ]]; then
-  if ! $APPLY; then
-    green "Dry run would resume the existing Release workflow for $RELEASE_BRANCH at $EXISTING_REMOTE."
-    exit 0
-  fi
-  if ! $YES; then
-    read -r -p "Resume the Release workflow for immutable $RELEASE_BRANCH at $EXISTING_REMOTE? [y/N] " answer
-    [[ "$answer" =~ ^[Yy]$ ]] || die "aborted"
-  fi
-  open_release_pr "$(printf '## %s\n\nResume the existing release branch at its exact commit.' "$TARGET")"
-  scripts/release-rerun.sh rerun "$GITHUB_REPO" "$RELEASE_BRANCH" "$EXISTING_REMOTE"
-  green "Release PR #$PR_NUMBER remains bound to immutable $RELEASE_BRANCH."
-  exit 0
+if version_is_prerelease "$TARGET"; then
+  BUMP="pre-release"
+else
+  BUMP="$(scripts/validate-bump.sh "$PHNX_LATEST" "$PKG_JSON_VERSION" "0.0.0" "$TARGET")" \
+    || exit 1
+  TAG_FACTS=""
+  REMOTE_TAG_LINES="$(remote_version_tags)"
+  while read -r _sha ref; do
+    version="${ref#refs/tags/v}"
+    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    [[ "$version" != "$PHNX_LATEST" ]] || continue
+    [[ "$(printf '%s\n%s\n' "$PHNX_LATEST" "$version" | sort -V | tail -1)" == "$version" ]] || continue
+    if npm view "$PHNX_PKG@$version" version >/dev/null 2>&1; then
+      TAG_FACTS+="$version yes"$'\n'
+    else
+      TAG_FACTS+="$version no"$'\n'
+    fi
+  done <<<"$REMOTE_TAG_LINES"
+  UNPUBLISHED_TAG="$(printf '%s' "$TAG_FACTS" \
+    | scripts/stuck-release.sh "$PHNX_LATEST" "$BUMP" "$PKG_JSON_VERSION" || true)"
+  [[ -z "$UNPUBLISHED_TAG" || "$UNPUBLISHED_TAG" == "$TARGET" ]] \
+    || die "v$UNPUBLISHED_TAG is tagged but unpublished; release it before $TARGET"
 fi
 
 cleanup_release_tree() {
