@@ -44,6 +44,8 @@
 
 <p align="center"><a href="https://agi-cli.sh/demo.mp4">Watch the full 56-second demo</a></p>
 
+<p align="center"><b>Command reference:</b> <a href="cli/docs/command-index.md">every <code>agents</code> command</a> · <a href="cli/docs/command-reference.html">searchable HTML page</a></p>
+
 ## Quickstart
 
 ```bash
