@@ -1,9 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it } from 'vitest';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { Command } from 'commander';
 import { registerSendCommand } from './send.js';
+import { clearSession, writeSession } from '../lib/identity/client.js';
 
 describe('agents send --to owner routes through the feed composer (PHNX-3698)', () => {
   const SESSION = 'a1b2c3d4-1111-4222-8333-444455556666';
@@ -34,12 +32,11 @@ describe('agents send --to owner routes through the feed composer (PHNX-3698)', 
     stash('AGENTS_AGENT_NAME', 'claude');
     stash('AGENTS_MACHINE_ID', 'zion');
 
-    const home = process.env.HOME ?? os.homedir();
-    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
-    fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'notify:\n  owner:\n    channel: desktop\n    to: local\n');
+    writeSession({ access_token: 'phx-dry-run' });
   });
 
   afterEach(async () => {
+    clearSession();
     console.log = originalLog;
     console.error = originalErr;
     for (const [k, v] of Object.entries(saved)) {
@@ -67,6 +64,20 @@ describe('agents send --to owner routes through the feed composer (PHNX-3698)', 
     expect(payload.text).not.toContain('https://linear.app/getrush/issue/PHNX-3689');
     expect(payload.text).not.toContain(`https://prix.dev/console/sessions/${SESSION}`);
     expect(payload.text).not.toContain('http');
+  });
+
+  it('--dry-run on a signed-out box fails loud instead of pretending to reach the owner', async () => {
+    clearSession();
+    const exit = process.exit;
+    let code: number | undefined;
+    process.exit = ((c?: number) => { code = c; throw new Error('exit'); }) as typeof process.exit;
+    try {
+      await dryRunJson(['--to', 'owner', '--text', 'probe']).catch(() => undefined);
+    } finally {
+      process.exit = exit;
+    }
+    expect(code).toBe(1);
+    expect(stdout.join('\n')).toContain('agents auth login');
   });
 
   async function dryRunJson(args: string[]): Promise<Record<string, unknown>> {

@@ -535,37 +535,4 @@ describe('runMigration', () => {
       expect(fs.readFileSync(path.join(cachedPlugin, 'OLD.md'), 'utf-8')).toBe('cached-only');
     });
   });
-
-  describe('migrateHumans', () => {
-    it('migrates owner.md with metadata-only fields (no name, no notify.owner) into humans.yaml', () => {
-      const ownerMd = [
-        '---',
-        'timezone: America/New_York',
-        'quiet_hours: "22:00-08:00"',
-        'default_severity: low',
-        '---',
-        '',
-        'Some prose that is not frontmatter.',
-      ].join('\n');
-      fs.writeFileSync(path.join(userDir, 'owner.md'), ownerMd);
-
-      runRealMigration();
-
-      const humansPath = path.join(userDir, 'humans.yaml');
-      expect(fs.existsSync(humansPath)).toBe(true);
-
-      const raw = fs.readFileSync(humansPath, 'utf-8');
-      expect(raw).toContain('America/New_York');
-      expect(raw).toContain('22:00-08:00');
-      expect(raw).toContain('low');
-    });
-
-    it('does not write humans.yaml when owner.md has no owner fields', () => {
-      fs.writeFileSync(path.join(userDir, 'owner.md'), 'no frontmatter here\n');
-
-      runRealMigration();
-
-      expect(fs.existsSync(path.join(userDir, 'humans.yaml'))).toBe(false);
-    });
-  });
 });

@@ -891,6 +891,12 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest && !isR
         fs.mkdirSync(path.dirname(sentinel), { recursive: true });
         fs.writeFileSync(sentinel, sentinelValue);
       } catch {  }
+    } else if (
+      fs.existsSync(path.join(getUserAgentsDir(), 'humans.yaml')) &&
+      (await import('./lib/identity/client.js')).readSession()
+    ) {
+      const { migrateHumansToAccount } = await import('./lib/installations/migrate.js');
+      await migrateHumansToAccount();
     }
   } catch {  }
 }

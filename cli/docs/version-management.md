@@ -338,7 +338,8 @@ removal and is restored intact. Two consequences follow from the marker:
   NOT an isolated install, and its picker only lists isolated versions — so a
   normal/default install (and the real `~/.<agent>`) can never be removed by
   accident. Removal is still a soft-delete to trash, recoverable via
-  `agents trash restore`.
+  `agents trash restore` until `agents trash empty` deletes it for good
+  (`--older-than 30d` keeps anything trashed more recently).
 
 `--isolated` cannot be combined with `--project` (an isolated copy is
 global-but-separate; a project pin selects a shared install for one directory).

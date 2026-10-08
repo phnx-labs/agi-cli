@@ -1,13 +1,13 @@
 import { spawnSync } from 'child_process';
 import type { Meta } from './types.js';
-import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';
+import { isOwnerAlias, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
 import { linearIssueUrl, linearIssueKeys } from '@phnx-labs/sessions-cli/reader';
 import { isValidMailboxId } from './mailbox.js';
-import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import { sinkMessageFormat, type SinkMessageFormat } from './sink-format.js';
+import type { OwnerEvent, OwnerNotification } from './owner-notify.js';
 
 export type FeedPostLevel = 'milestone' | 'important';
 
@@ -48,6 +48,7 @@ export interface FeedBroadcastContext {
   options?: string[];
   safeDefault?: string;
   timeoutMinutes?: number;
+  eventKey?: string;
 }
 
 export function blockBroadcastContext(
@@ -114,8 +115,7 @@ interface PlannedSink {
   channel?: string;
   to?: string;
   text?: string;
-  ctx?: FeedBroadcastContext;
-  messageTemplate?: string;
+  owner?: OwnerNotification;
 }
 
 export interface SinkOutcome {
@@ -258,6 +258,38 @@ export function composeBroadcastMessage(
   return parts.join('\n').trim();
 }
 
+const OWNER_DEFAULT_TITLES: Record<OwnerEvent, string> = {
+  needs_you: 'Agent needs input',
+  completed: 'Run completed',
+  failed: 'Run failed',
+  spend_threshold: 'Spend threshold reached',
+  message: 'Message from your agent',
+};
+
+export function ownerNotificationFromContext(
+  ctx: FeedBroadcastContext,
+  event: OwnerEvent,
+  dedupKey: string,
+  template = '{message}',
+): OwnerNotification | undefined {
+  const untitled: FeedBroadcastContext = { ...ctx, title: undefined };
+  const body = renderSinkMessage(template, untitled, 'plain');
+  if (!body) return undefined;
+  const url = ctx.links?.[0] ?? sessionConsoleUrl(ctx.session);
+  const device = shortHost(ctx.host);
+  const agent = ctx.agent?.trim();
+  return {
+    event,
+    title: scrubOutboundDashes(ctx.title ?? '') || OWNER_DEFAULT_TITLES[event],
+    body,
+    ...(url ? { url } : {}),
+    ...(ctx.session ? { sessionId: ctx.session } : {}),
+    ...(ctx.ticket ? { ticket: ctx.ticket } : {}),
+    dedupKey,
+    ...(device || agent ? { source: { ...(device ? { device } : {}), ...(agent ? { agent } : {}) } } : {}),
+  };
+}
+
 function templateVars(
   ctx: FeedBroadcastContext,
   format: SinkMessageFormat = 'plain',
@@ -350,19 +382,19 @@ export function planFeedBroadcast(
 
     const channel = sink.channel?.trim();
     if (channel) {
-      if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
-      const owner = isOwnerAlias(channel);
       const template = sink.message ?? '{message}';
-      const provider = owner ? channel : resolveSinkProvider(channel, meta);
-      const text = renderSinkMessage(template, ctx, sinkMessageFormat(provider));
+      if (isOwnerAlias(channel)) {
+        const blocked = Boolean(ctx.blockId);
+        const dedupKey = blocked ? `block:${ctx.blockId}` : `feed:${ctx.eventKey}`;
+        if (!blocked && !ctx.eventKey) throw new Error(`feed sink '${name}': an owner notification needs the post's event key`);
+        const owner = ownerNotificationFromContext(ctx, blocked ? 'needs_you' : 'message', dedupKey, template);
+        if (owner) planned.push({ name, channel, owner });
+        continue;
+      }
+      if (!sink.to?.trim()) continue;
+      const text = renderSinkMessage(template, ctx, sinkMessageFormat(resolveSinkProvider(channel, meta)));
       if (!text) continue;
-      planned.push({
-        name,
-        channel,
-        to: owner ? undefined : sink.to!.trim(),
-        text,
-        ...(owner ? { ctx, messageTemplate: template } : {}),
-      });
+      planned.push({ name, channel, to: sink.to.trim(), text });
       continue;
     }
 
@@ -377,11 +409,9 @@ export function planFeedBroadcast(
 export function effectiveBroadcastConfig(
   config: FeedBroadcastConfig | undefined,
   level: FeedPostLevel,
-  meta: Meta,
 ): FeedBroadcastConfig | undefined {
   if (config && Object.keys(config).length > 0) return config;
   if (level !== 'important') return undefined;
-  if (!readOwnerDest(meta)) return undefined;
   return { owner: { channel: 'owner' } };
 }
 
@@ -416,42 +446,19 @@ function runCommandSink(name: string, argv: string[], timeoutMs: number): SinkOu
 
 async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcome> {
   const name = sink.name;
-  registerBuiltinProviders();
-  const owner = isOwnerAlias(sink.channel);
-  if (owner) {
-    const composeForFormat = sink.ctx
-      ? (format: SinkMessageFormat): string =>
-          renderSinkMessage(sink.messageTemplate ?? '{message}', sink.ctx!, format) ?? sink.text ?? ''
-      : undefined;
-    const result = await sendToOwner(sink.text ?? '', { meta, composeForFormat });
+  if (sink.owner) {
+    const result = await sendToOwner(sink.owner);
     return { name, ok: result.ok, ...(result.error ? { error: result.error } : {}) };
   }
-  const resolved = resolveSendEnvelope(
-    {
-      text: sink.text ?? '',
-      channel: owner ? undefined : sink.channel,
-      to: owner ? 'owner' : sink.to,
-      ownerMode: owner,
-    },
-    meta,
-  );
+  registerBuiltinProviders();
+  const resolved = resolveSendEnvelope({ text: sink.text ?? '', channel: sink.channel, to: sink.to }, meta);
   if (!resolved.ok) return { name, ok: false, error: resolved.error };
 
   const { provider, error } = lookupTransport(resolved.envelope.channel, meta);
   if (!provider) return { name, ok: false, error };
 
   const result = await deliverEnvelope(resolved.envelope, meta);
-  if (result.ok) return { name, ok: true };
-
-  const forwarded = await forwardOwnerNotifyToPeer(
-    resolved.envelope.text,
-    resolved.envelope.channel,
-    resolved.envelope.to,
-    meta,
-  );
-  if (forwarded?.ok) return { name, ok: true };
-
-  return { name, ok: false, error: result.error };
+  return result.ok ? { name, ok: true } : { name, ok: false, error: result.error };
 }
 
 export async function runFeedBroadcast(

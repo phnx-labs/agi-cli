@@ -1470,9 +1470,9 @@ export function printTrashFooter(moved: Array<{ agent: AgentId; version: string 
   console.log(chalk.gray('Sessions remain accessible via `agents sessions`.'));
   if (moved.length === 1) {
     const { agent, version } = moved[0];
-    console.log(chalk.gray(`Restore with: agents restore ${agent}@${version}`));
+    console.log(chalk.gray(`Restore with: agents trash restore ${agent}@${version}`));
   } else {
-    console.log(chalk.gray('Restore with: agents restore <agent>@<version>  (run `agents trash list` to see)'));
+    console.log(chalk.gray('Restore with: agents trash restore <agent>@<version>  (run `agents trash list` to see)'));
   }
 }
 

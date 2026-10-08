@@ -1,7 +1,7 @@
 
 import type { AgentId, Mode } from './types.js';
 import { ALL_MODES } from './types.js';
-import { AGENTS } from './agents.js';
+import { AGENTS, ALL_AGENT_IDS } from './agents.js';
 import { AGENT_COMMANDS, defaultModeFor } from './exec.js';
 import { resolveRunDefaults } from './run-defaults.js';
 
@@ -95,7 +95,14 @@ export function getAgentModesCatalog(
   };
 }
 
-export function formatModeFlags(flags: string[]): string {
-  if (flags.length === 0) return '(harness default)';
-  return flags.join(' ');
+export function formatModeSupportTable(): string {
+  const agents = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
+  const width = Math.max(...agents.map((id) => id.length));
+  return agents
+    .map((agent) => {
+      const defaultMode = defaultModeFor(agent);
+      const modes = AGENTS[agent].capabilities.modes.map((mode) => (mode === defaultMode ? `${mode}*` : mode));
+      return `${agent.padEnd(width)}  ${modes.join(' ')}`;
+    })
+    .join('\n');
 }

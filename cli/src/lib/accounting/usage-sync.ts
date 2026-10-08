@@ -175,6 +175,12 @@ export async function publishOwnFleetState(
     auth = { status: 'unknown', error: (err as Error).message };
   }
   if (auth.error) errors.push(`auth: ${auth.error}`);
+  try {
+    const { publishOwnerNotifyState } = await import('../owner-notify-tokens.js');
+    await publishOwnerNotifyState({ userAgentsDir: options.userAgentsDir, device: options.device });
+  } catch (err) {
+    errors.push(`owner-notify: ${(err as Error).message}`);
+  }
   return { usage, mirror, auth, errors };
 }
 

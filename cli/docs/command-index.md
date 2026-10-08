@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_65 command groups · 483 commands._
+_60 command groups · 478 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -41,7 +41,7 @@ agents add <specs...>  Download and install agent CLI versions. Enables subsidiz
 ```
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
-agents auth logout                     Clear this machine's session (no other device is affected)
+agents auth logout                     Clear this machine's session and revoke the worker owner-notify tokens it minted
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space
@@ -260,12 +260,6 @@ agents feed post <text...>          Post a status update to the fleet activity s
 agents feed watch                   Stream the canonical agent, attention, tool, and activity projection as NDJSON
 ```
 
-## feedback: Open a pre-filled feedback Discussion or bug report
-
-```
-agents feedback [summary...]  Open a pre-filled feedback Discussion or bug report
-```
-
 ## harness: Custom harnesses — name a (host CLI + model) combo and run it like a native agent type.
 _aliases: harnesses_
 
@@ -289,14 +283,6 @@ agents hooks list [agent]   Show which hooks are installed and which events they
 agents hooks profile        Per-hook timing + cache stats from recent invocations
 agents hooks remove [name]  Delete a hook from agents (interactive picker if no name given)
 agents hooks view [name]    Read the shell script content for a hook
-```
-
-## humans: Inspect owner identity and notification channel config (humans.yaml)
-
-```
-agents humans             Inspect owner identity and notification channel config (humans.yaml)
-agents humans show        Show config from humans.yaml
-agents humans show owner  Show the configured owner identity and notification channels
 ```
 
 ## import: Import an existing unmanaged agent install into agents-cli
@@ -400,12 +386,6 @@ agents models tier list                           List all configured tier overr
 agents models tier set <selector> <tier> <model>  Pin a tier to a model. selector: <agent> or <agent>@<version> (e.g. kimi, kimi@0.19.2).
 ```
 
-## modes: Show which permission modes (--mode plan|edit|auto|skip) a harness supports for agents run / teams add
-
-```
-agents modes [agentSpec]  Show which permission modes (--mode plan|edit|auto|skip) a harness supports for agents run / teams add
-```
-
 ## packages: Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
 
 ```
@@ -501,12 +481,6 @@ agents registry list                     List configured registries
 agents registry remove <type> [name]     Remove a registry
 ```
 
-## reminders: Personal operating reminders shown in the Claude statusline
-
-```
-agents reminders  Personal operating reminders shown in the Claude statusline
-```
-
 ## repos: Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).
 _aliases: repo_
 
@@ -522,12 +496,6 @@ agents repos push [alias]        Commit and push the user repo or a user-owned e
 agents repos remove <alias>      Unregister an extra repo. Managed clones are deleted; external paths are kept.
 agents repos sync <alias>        Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.
 agents repos view [name]         Show one repo's contents: git state and per-kind resource counts. Omit the name for an interactive picker.
-```
-
-## restore: Restore a soft-deleted agent version (e.g. "codex@0.141.0") removed via prune/remove
-
-```
-agents restore <target>  Restore a soft-deleted agent version (e.g. "codex@0.141.0") removed via prune/remove
 ```
 
 ## route: Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
@@ -758,11 +726,13 @@ agents traces status  Show last sync time for this device
 agents traces sync    Push derived, redacted trajectories (incremental)
 ```
 
-## trash: Inspect and restore soft-deleted agent version directories
+## trash: Inspect, restore, and empty soft-deleted agent versions and resources
 
 ```
-agents trash               Inspect and restore soft-deleted agent version directories
-agents trash list [agent]  List soft-deleted version directories (optionally filtered to one agent)
+agents trash                   Inspect, restore, and empty soft-deleted agent versions and resources
+agents trash empty             Permanently delete trashed items, optionally only those trashed before a cutoff
+agents trash list [agent]      List soft-deleted version directories (optionally filtered to one agent)
+agents trash restore <target>  Restore the newest soft-deleted copy of an agent version (e.g. "codex@0.141.0")
 ```
 
 ## uninstall: Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.

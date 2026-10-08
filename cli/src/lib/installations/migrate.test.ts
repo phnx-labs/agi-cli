@@ -883,8 +883,8 @@ browser:
     endpoints:
       - cdp://127.0.0.1:9227
 notify:
-  owner:
-    channel: imessage
+  transports:
+    alerts: slack
 `;
 
   it('moves the machine-local default profile to the device file and out of central', () => {
@@ -895,7 +895,7 @@ notify:
     const central = yaml.parse(fs.readFileSync(path.join(dir, 'agents.yaml'), 'utf-8'));
     expect(central.browser.default).toBeUndefined();
     expect(central.browser['comet-local'].browser).toBe('comet');
-    expect(central.notify.owner.channel).toBe('imessage');
+    expect(central.notify.transports.alerts).toBe('slack');
 
     const device = yaml.parse(fs.readFileSync(path.join(dir, 'devices', 'zion', 'agents.yaml'), 'utf-8'));
     expect(device.browser.default.browser).toBe('chrome');

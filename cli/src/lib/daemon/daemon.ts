@@ -16,6 +16,7 @@ import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
+import { describeOwnerResult } from '../owner-notify.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
@@ -524,6 +525,7 @@ export async function runDaemon(): Promise<void> {
     { SessionStateService },
     { FeedStreamService },
     { AttentionNotifyService },
+    { OwnerDeviceDeliveryService },
     { WebhookReceiverService },
     { HeartbeatService },
     { TmuxReapService },
@@ -544,6 +546,7 @@ export async function runDaemon(): Promise<void> {
     import('./session-state-service.js'),
     import('./feed-stream-service.js'),
     import('./attention-notify-service.js'),
+    import('./owner-device-delivery-service.js'),
     import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
     import('./tmux-reap-service.js'),
@@ -648,6 +651,11 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('attention-notify')) supervisor.register(new AttentionNotifyService());
   else log('INFO', 'Attention-notify service disabled');
 
+  if (process.platform === 'darwin') {
+    if (isEnabled('owner-device-delivery')) supervisor.register(new OwnerDeviceDeliveryService());
+    else log('INFO', 'Owner device-delivery service disabled');
+  }
+
   if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
   else log('INFO', 'Session-title service disabled');
 
@@ -716,10 +724,10 @@ export async function runDaemon(): Promise<void> {
           try { notifyRoutineFinish(final); } catch {  }
           void notifyOwnerRoutineFinish(final)
             .then((r) => {
-              if (r.attempts.length && !r.delivered)
-                log('WARN', `Owner failure-notify for '${config.name}' reached no channel (tried: ${r.attempts.map((a) => a.channel).join(', ')})`);
+              if (r && r.suppressed === null && r.delivered.length + r.queued.length === 0)
+                log('WARN', `Owner failure-notify for '${config.name}' reached no channel: ${describeOwnerResult(r)}`);
             })
-            .catch(() => {  });
+            .catch((err: Error) => log('WARN', `Owner failure-notify for '${config.name}' failed: ${err.message}`));
         },
       }, { kind: 'schedule', scheduledFor: ctx?.scheduledFor });
       log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
@@ -732,12 +740,12 @@ export async function runDaemon(): Promise<void> {
         detail: redactSecrets(message).slice(0, 500),
       });
       try { notifyRoutineStartFailed(config, message); } catch {  }
-      void notifyOwnerRoutineStartFailed(config, message)
+      void notifyOwnerRoutineStartFailed(config, message, ctx?.scheduledFor)
         .then((r) => {
-          if (r.attempts.length && !r.delivered)
-            log('WARN', `Owner start-failure notify for '${config.name}' reached no channel (tried: ${r.attempts.map((a) => a.channel).join(', ')})`);
+          if (r.suppressed === null && r.delivered.length + r.queued.length === 0)
+            log('WARN', `Owner start-failure notify for '${config.name}' reached no channel: ${describeOwnerResult(r)}`);
         })
-        .catch(() => {  });
+        .catch((err: Error) => log('WARN', `Owner start-failure notify for '${config.name}' failed: ${err.message}`));
     }
   };
 

@@ -983,7 +983,7 @@ export function registerRoutinesCommands(program: Command): void {
     .option('--workflow <name>', 'Run an installed workflow (~/.agents/workflows/<name>) via `agents run`. Mutually exclusive with --agent.')
     .option('--command <sh>', 'Run a plain shell command directly (no agent, no auth, no sandbox) — for deterministic housekeeping routines. Mutually exclusive with --agent and --workflow; --prompt is not used.')
     .option('-p, --prompt <prompt>', 'Task instruction for the agent')
-    .option('-m, --mode <mode>', "Execution mode: plan (read-only), edit (can write files), auto (the default; more autonomous than edit, mechanism per-harness — see `agents modes <agent>`), or skip (bypass all permission prompts). 'full' accepted as alias for skip.", 'auto')
+    .option('-m, --mode <mode>', "Execution mode: plan (read-only), edit (can write files), auto (the default; more autonomous than edit, mechanism per-harness — see `agents run --help`), or skip (bypass all permission prompts). 'full' accepted as alias for skip.", 'auto')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto', 'auto')
     .option('-t, --timeout <timeout>', 'Kill the agent if it runs longer than this (e.g., 10m, 2h, 3d, 1w; max 1w)', '10m')
     .option('--timezone <tz>', 'Interpret schedule in this timezone (e.g., America/Los_Angeles)')

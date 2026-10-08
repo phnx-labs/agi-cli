@@ -124,10 +124,12 @@ time. No em-dashes in title/body - they are scrubbed on the way out.
 
 Configure where a post is mirrored under feed.broadcast in agents.yaml - see
 docs/observability.md. A channel sink may set message: with placeholders such
-as {message} and {ticket}; a missing placeholder skips that sink. A milestone is always recorded, but it does not text
+as {message} and {ticket}; a missing placeholder skips that sink. A milestone is always recorded, but it does not reach
 the owner when the sink has minLevel: important. Add --level important for a
 phone-worthy successful update. Use --blocked only when work cannot continue.
-The owner destination comes from humans.yaml; do not duplicate it in agents.yaml.
+With no sinks configured, an important post or a block reaches the owner through
+your account (agents auth login); a block is a needs_you event and bypasses
+quiet hours. The account's preferences pick email, Slack or iMessage.
 `;
 
 const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';
@@ -787,7 +789,7 @@ async function broadcastPostedEvent(
   meta: Meta,
   notify = false,
 ): Promise<SinkOutcome[]> {
-  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level, meta), notify);
+  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, level), notify);
   if (!config) return [];
   const session = resolveFullSessionId(event.sessionId) ?? event.sessionId;
   const ticket = getSessionById(session)?.ticketId;
@@ -804,6 +806,7 @@ async function broadcastPostedEvent(
     links: (event.attachments ?? [])
       .map((a) => a.href)
       .filter((href) => /^https?:\/\//i.test(href)),
+    eventKey: `${session}:${event.ts}`,
   }, meta);
   if (level === 'important') fireTraceSyncInBackground();
   return runFeedBroadcast(planned, meta);
@@ -815,7 +818,7 @@ async function broadcastBlock(
   meta: Meta,
   notify = false,
 ): Promise<SinkOutcome[]> {
-  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, 'important', meta), notify);
+  const config = withDesktopNotify(effectiveBroadcastConfig(meta.feed?.broadcast, 'important'), notify);
   if (!config) return [];
   const sessionId = resolveFullSessionId(block.sessionId) ?? block.sessionId;
   const ticket = getSessionById(sessionId)?.ticketId;

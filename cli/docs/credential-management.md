@@ -174,6 +174,38 @@ RUSH-1958 class: a refresh-bearing session reused on two devices logs the owner
 out). The legacy `auth` bundle remains a readable alias for `__claude__`; this
 track does not migrate data.
 
+### Owner-notify device tokens (PHNX-4267)
+
+A worker has to reach the owner (a blocked agent, a failed routine) without
+holding the owner's Phoenix session, which is an interactive login that never
+leaves the box that minted it (invariant 2). A signed-in **headed** box mints a
+**device token** per `role=worker` peer from Phoenix ID (`POST
+/api/v1/auth/tokens {device, scopes: ["notify"]}`): durable, non-rotating,
+revocable per device, and usable only for `GET /auth/me` and the three rush/api
+owner-notify routes, so a leaked worker exposes nothing else (invariant 3). It is
+stored in that worker's own reserved store `__notify-<worker>__` and pushed by the
+ordinary bundle push to that one worker. One bundle per worker because the push
+moves a whole bundle; a shared store would give every worker every other
+worker's token. It never reaches a headed peer (invariant 7): a headed box reaches
+the owner with its own session.
+
+Minting for a device replaces that device's previous token server-side, so the
+`auth-sync` tick (`syncOwnerNotifyTokens`, `lib/owner-notify-tokens.ts`) has a
+single executor: the first signed-in headed box by name, from the
+`ownerNotify.signedIn` each box publishes in its daemon-state envelope. A headed
+peer counts only while its report is fresh (`receivedAt` within
+`OWNER_NOTIFY_PEER_FRESH_MS`, three 15-minute exchange intervals), so a dead box
+cannot stay elected. The worker's own `ownerNotify.deviceToken` verdict is what
+decides: `true` means it holds a token rush/api has not rejected (a 401 on that
+token marks it rejected on the worker). On `false` the minter re-pushes the token
+only when it holds the live one (its memo names the server's token id and its
+store still has the value); otherwise it revokes the server's token and mints a
+replacement, so a lost memo or a replaced minting box never strands a worker. The
+minter also revokes every `notify` token whose device is no longer a `role=worker`
+peer (left the fleet, or turned headed), and `agents auth logout` revokes the
+tokens that box minted before clearing its session. A peer on an older CLI
+publishes no `ownerNotify` and is skipped, fail closed.
+
 ## Provisioning model — the canonical, non-reversible flow (owner requirement)
 
 This is how every harness account is set up across the fleet. It is a standing
@@ -415,6 +447,7 @@ credential transport is owned by the credential-transport track.
 | Interactive OAuth login | the box that minted it, in that account's slot / the harness's own keychain item | **No — never touched by us** | rotates/revokes on cross-use; leaving it alone is the fix |
 | Setup-token / API key (durable worker credential) | reserved store `__<harness>__`, key `<ENV>_<accountId>` (legacy `auth` alias for `__claude__`) | **Yes — daemon, per key, workers only** | non-rotating, revoke-only; reuse never invalidates another holder |
 | Named provider account (API key / setup-token / bearer) | a user-named `agents secrets` bundle, policy `never` | **Yes — explicit `accounts sync`** | same safety property; a different namespace from reserved stores |
+| Owner-notify device token (PHNX-4267) | reserved store `__notify-<worker>__`, key `PHOENIX_DEVICE_TOKEN`, one bundle per worker | **Yes — daemon, that worker only** | minted by Phoenix ID with scope `notify`; can call only the three owner-notify routes; revoke-only, re-minting for a device replaces it |
 | daemon / CLI | — | — | hold nothing |
 
 Nothing rotating is ever copied. A native account's worker credential crosses

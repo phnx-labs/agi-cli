@@ -39,14 +39,13 @@ them, and as plain text — never a dumped URL — on one that doesn't. `{messag
 one logical post; the *format* is decided **per destination**, keyed on the
 destination's **resolved provider** (`sinkMessageFormat` in `sink-format.ts`, the
 same `notify.transports` remap delivery uses), and the body is re-rendered in that
-format. This is a per-destination decision, not a per-sink one: the owner policy
-fan-out (`sendToOwner`) resolves each channel in `owner.policy.normal`
-independently, so a policy listing both iMessage and Slack sends plain to iMessage
-and the labeled-link variant to Slack from the one post.
+format. The owner sink is not a channel: it sends one notification to your
+account (`POST /me/notifications`, PHNX-4267) with the plain body plus the title,
+link, session and ticket as fields, and the account renders it for each channel it
+reaches (email, Slack DM, iMessage).
 
-- **Any destination that resolves to the Slack provider gets mrkdwn labeled
-  links** — a direct Slack `channel:` sink, *and* a Slack channel in the owner
-  policy. Slack renders `<url|label>` as blue tappable text, so the composer turns
+- **Any `channel:` sink that resolves to the Slack provider gets mrkdwn labeled
+  links.** Slack renders `<url|label>` as blue tappable text, so the composer turns
   each reference into a labeled link **in place**:
   - The `Sent from claude/6fc1db18 on zion` footer keeps its human sentence, but
     the crumb `claude/6fc1db18` becomes
@@ -59,7 +58,7 @@ and the labeled-link variant to Slack from the one post.
     `session.ticketId` on the row, is still tappable.
   - There is **never a trailing URL line** — every link is inline (footer crumb,
     prose key).
-- **iMessage, owner-scoped rush, `command:`, desktop, and every other channel stay
+- **iMessage, `command:`, desktop, the owner sink, and every other channel stay
   plain.** They cannot render a labeled link, and a dumped naked URL reads as
   noise, so the message is the human sentence with **no URLs** — the crumb and
   ticket keys stay as text. An 8-char footer crumb whose full id can't resolve
@@ -87,12 +86,22 @@ opts out) and never blocks or fails the post.
 
 `agents send --to owner` delivers through this **same** composer, so an owner ping is identical to an important `feed post` of the same
 event — short-shaped body with a `Sent from …` footer — instead of the raw body
-dump they sent before. The owner fan-out re-renders that body **per destination**
-(`ownerMessageComposer` → `sendToOwner`, PHNX-3698): an iMessage/rush owner channel
-keeps its keys and crumb as plain text, while a Slack owner channel gets the same
-mrkdwn labeled links a direct Slack sink does — the two destinations of one policy
-get two different bodies from the one ping. A non-owner `agents send` (explicit
-`--channel`/`--to`) is delivered verbatim.
+dump they sent before (`ownerMessageNotification` → `sendToOwner` →
+`postOwnerNotification`). A non-owner `agents send` (explicit `--channel`/`--to`)
+is delivered verbatim.
+
+**Reaching the owner needs a sign-in.** The owner sink, `send --to owner`, urgent
+feed blocks and failed routines all post to your account; your notification
+preferences, quiet hours and iMessage handle live in the console Settings page. A
+block posts `needs_you` (it bypasses quiet hours), a failed routine `failed`, and
+everything else `message`. A box with no Phoenix session (`agents auth login`) and,
+on a worker, no device token cannot reach the owner: the sink reports a failure and
+`agents doctor` shows `owner-not-signed-in`. Workers receive a `notify`-scoped
+device token from a signed-in personal or desktop box automatically; iMessage is
+sent by a signed-in Mac's daemon (`owner-device-delivery`), at least once: if the
+send succeeds but its result report fails, the row is re-claimed after 5 minutes
+and sent again. See
+[`../AGENTS.md`](../AGENTS.md) for the mechanism.
 
 Channel sinks may set `message:` to customize their outbound body. It supports
 the same placeholders as command sinks. If any referenced value is absent, the
@@ -183,7 +192,7 @@ single source of truth; this prose copy is pinned to it by a test, so the two ca
 drift.
 
 **CRITICAL** — needs you now: `logged-out`, `missing-hook`, `missing-plugin`,
-`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `owner-sink-unreachable`,
+`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `owner-not-signed-in`,
 `ssh-key-enrollment`.
 
 **WARNING** — worth fixing, not urgent: `logout-unprovable`,

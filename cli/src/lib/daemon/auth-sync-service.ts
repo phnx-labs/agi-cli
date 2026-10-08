@@ -59,5 +59,15 @@ export class AuthSyncService extends BasePeriodicService {
     } catch (err) {
       ctx.log('WARN', `auth-sync: reserved-store sync: ${(err as Error).message}`);
     }
+
+    try {
+      const { syncOwnerNotifyTokens } = await import('../owner-notify-tokens.js');
+      const notify = await syncOwnerNotifyTokens();
+      if (notify.minted.length > 0) ctx.log('INFO', `auth-sync: minted owner-notify device token(s) for ${notify.minted.join(', ')}`);
+      if (notify.pushed.length > 0) ctx.log('INFO', `auth-sync: pushed owner-notify device token(s) to ${notify.pushed.join(', ')}`);
+      for (const err of notify.errors) ctx.log('WARN', `auth-sync: owner-notify ${err.device}: ${err.message}`);
+    } catch (err) {
+      ctx.log('WARN', `auth-sync: owner-notify token sync: ${(err as Error).message}`);
+    }
   }
 }

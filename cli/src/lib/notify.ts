@@ -1,23 +1,12 @@
 import type { OpenBlock } from './feed/feed.js';
-import type { Meta } from './types.js';
-import { readMeta } from './state.js';
-import { getOwnerNotifyDestinationsFromHumans } from './humans.js';
-import { registerBuiltinProviders } from './channels/providers/index.js';
-import { lookupTransport } from './channels/resolve.js';
-import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import type { SendResult } from './channels/registry.js';
-import { sinkMessageFormat, type SinkMessageFormat } from './sink-format.js';
-
-export interface OwnerNotifyOptions {
-  meta?: Meta;
-  channel?: string;
-  target?: string;
-  dryRun?: boolean;
-  thread?: string;
-  attachments?: string[];
-  from?: string;
-  composeForFormat?: (format: SinkMessageFormat) => string;
-}
+import {
+  describeOwnerResult,
+  postOwnerNotification,
+  resolveOwnerCredential,
+  OwnerNotSignedInError,
+  type OwnerNotification,
+} from './owner-notify.js';
 
 export interface NotifyResult {
   ok: boolean;
@@ -55,80 +44,34 @@ export function buildOpenClawNotifyArgs(
   ];
 }
 
-export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
-  const meta = options.meta ?? readMeta();
-  const canonical = getOwnerNotifyDestinationsFromHumans();
-  const legacy = meta.notify?.owner ? [meta.notify.owner] : [];
-  const configured = canonical.length > 0 ? canonical : legacy;
-  const destinations = options.target
-    ? [{ channel: options.channel ?? configured[0]?.channel, to: options.target }]
-    : options.channel
-      ? [configured.find((dest) => dest.channel === options.channel) ?? {
-          channel: options.channel,
-          to: configured[0]?.to,
-        }]
-      : configured;
-  const addressable = destinations.filter((dest): dest is { channel: string; to: string } => Boolean(dest.channel && dest.to));
-  if (addressable.length === 0) {
+export async function sendToOwner(
+  notification: OwnerNotification,
+  options: { dryRun?: boolean } = {},
+): Promise<SendResult> {
+  try {
+    if (options.dryRun) {
+      if (!resolveOwnerCredential()) throw new OwnerNotSignedInError();
+      return { ok: true, channel: 'owner', id: notification.dedupKey, body: notification.body };
+    }
+    const result = await postOwnerNotification(notification);
+    const partial = result.skipped.length > 0 && result.delivered.length + result.queued.length > 0;
+    const reachedNobody = result.suppressed === null && result.delivered.length + result.queued.length === 0;
     return {
-      ok: false,
-      channel: options.channel ?? 'unknown',
-      id: options.target ?? '',
-      error: 'No addressable owner channel configured in humans.yaml or legacy notify.owner',
+      ok: !reachedNobody,
+      channel: 'owner',
+      id: result.dispatchId ?? notification.dedupKey,
+      body: notification.body,
+      msgId: describeOwnerResult(result),
+      ...(partial || reachedNobody ? { error: describeOwnerResult(result) } : {}),
     };
+  } catch (err) {
+    return { ok: false, channel: 'owner', id: notification.dedupKey, error: (err as Error).message };
   }
-  registerBuiltinProviders();
-  const deliveries: SendResult[] = [];
-  for (const { channel, to: target } of addressable) {
-    const { provider, providerName, error } = lookupTransport(channel, meta);
-    const body = options.composeForFormat
-      ? options.composeForFormat(sinkMessageFormat(providerName))
-      : text;
-    let result: SendResult;
-    try {
-      result = provider
-        ? await provider.send(body, {
-            target,
-            ownerScoped: options.target === undefined,
-            dryRun: options.dryRun,
-            thread: options.thread,
-            attachments: options.attachments,
-            from: options.from,
-          })
-        : { ok: false, channel, id: target, error };
-    } catch (err) {
-      result = { ok: false, channel, id: target, error: (err as Error).message };
-    }
-    if (!result.ok && !options.dryRun && options.target === undefined) {
-      if (options.attachments?.length) {
-        result = {
-          ...result,
-          error: `${result.error ?? 'local delivery failed'}; owner attachments cannot be forwarded to another device`,
-        };
-      } else {
-        result = await forwardOwnerNotifyToPeer(body, channel, target, meta, {
-          envelope: { thread: options.thread, from: options.from },
-        }) ?? result;
-      }
-    }
-    deliveries.push({ ...result, body });
-  }
-  if (deliveries.length === 1) return deliveries[0];
-  const failures = deliveries.filter((result) => !result.ok);
-  return {
-    ok: deliveries.some((result) => result.ok),
-    channel: 'owner',
-    id: deliveries.map((result) => `${result.channel}:${result.id}`).join(','),
-    ...(failures.length > 0
-      ? { error: failures.map((result) => `${result.channel}: ${result.error ?? 'failed'}`).join('; ') }
-      : {}),
-    deliveries,
-  };
 }
 
 export async function notifyUrgentBlock(
   block: OpenBlock,
-  options: OwnerNotifyOptions = {},
+  options: { dryRun?: boolean } = {},
 ): Promise<NotifyResult> {
   if (block.notifiedAt) {
     return { ok: true, skipped: true };
@@ -138,6 +81,15 @@ export async function notifyUrgentBlock(
     return { ok: true, skipped: true };
   }
 
-  const result = await sendToOwner(formatUrgentBlockMessage(block), options);
+  const q = block.questions[0];
+  const result = await sendToOwner({
+    event: 'needs_you',
+    title: q?.header?.trim() || 'Agent needs input',
+    body: formatUrgentBlockMessage(block),
+    sessionId: block.sessionId,
+    ...(block.ticket ? { ticket: block.ticket } : {}),
+    dedupKey: `block:${block.blockId}`,
+    source: { device: block.host },
+  });
   return result.ok ? { ok: true } : { ok: false, error: result.error };
 }

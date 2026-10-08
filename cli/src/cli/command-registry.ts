@@ -11,7 +11,6 @@ export type ModuleLoader = () => Promise<Registrar>;
 
 const loadView: ModuleLoader = async () => (await import('../commands/view.js')).registerViewCommand;
 const loadInspect: ModuleLoader = async () => (await import('../commands/inspect.js')).registerInspectCommand;
-const loadFeedback: ModuleLoader = async () => (await import('../commands/feedback.js')).registerFeedbackCommand;
 const loadCommands: ModuleLoader = async () => (await import('../commands/commands.js')).registerCommandsCommands;
 const loadHooks: ModuleLoader = async () => (await import('../commands/hooks.js')).registerHooksCommands;
 const loadSkills: ModuleLoader = async () => (await import('../commands/skills.js')).registerSkillsCommands;
@@ -34,10 +33,8 @@ const loadOpen: ModuleLoader = async () => (await import('../commands/open.js'))
 const loadFork: ModuleLoader = async () => (await import('../commands/fork.js')).registerForkCommand;
 const loadConfig: ModuleLoader = async () => (await import('../commands/config.js')).registerConfigCommand;
 const loadModels: ModuleLoader = async () => (await import('../commands/models.js')).registerModelsCommand;
-const loadModes: ModuleLoader = async () => (await import('../commands/modes.js')).registerModesCommand;
 export const loadPrune: ModuleLoader = async () => (await import('../commands/prune.js')).registerPruneCommand;
 const loadTrash: ModuleLoader = async () => (await import('../commands/trash.js')).registerTrashCommands;
-const loadRestore: ModuleLoader = async () => (await import('../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
@@ -68,12 +65,10 @@ const loadSend: ModuleLoader = async () => (await import('../commands/send.js'))
 const loadFeed: ModuleLoader = async () => (await import('../commands/feed.js')).registerFeedCommand;
 const loadMailboxes: ModuleLoader = async () => (await import('../commands/mailboxes.js')).registerMailboxesCommand;
 const loadWebhooks: ModuleLoader = async () => (await import('../commands/webhook.js')).registerWebhooksCommand;
-const loadHumans: ModuleLoader = async () => (await import('../commands/humans.js')).registerHumansCommands;
 const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
 const loadDaemon: ModuleLoader = async () => (await import('../commands/daemon.js')).registerDaemonCommand;
 const loadAuth: ModuleLoader = async () => (await import('../commands/auth.js')).registerAuthCommand;
 const loadTraces: ModuleLoader = async () => (await import('../commands/traces.js')).registerTracesCommands;
-export const loadReminders: ModuleLoader = async () => (await import('../commands/reminders.js')).registerRemindersCommand;
 
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'sessions',
@@ -86,8 +81,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   accounts: [loadAccounts],
   view: [loadView],
   inspect: [loadInspect],
-  feedback: [loadFeedback],
-  reminders: [loadReminders],
   commands: [loadCommands],
   hooks: [loadHooks],
   skills: [loadSkills],
@@ -119,9 +112,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   fork: [loadFork],
   config: [loadConfig],
   models: [loadModels],
-  modes: [loadModes],
   trash: [loadTrash],
-  restore: [loadRestore],
   doctor: [loadDoctor],
   route: [loadRoute],
   routes: [loadRoute],
@@ -158,7 +149,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailboxes: [loadMailboxes],
   mailbox: [loadMailboxes],
   webhooks: [loadWebhooks],
-  humans: [loadHumans],
   daemon: [loadDaemon],
   auth: [loadAuth],
   traces: [loadTraces],

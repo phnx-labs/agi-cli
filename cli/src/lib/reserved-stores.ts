@@ -63,9 +63,24 @@ export function reservedStoreName(harness: AgentId): string {
   return name;
 }
 
+const OWNER_NOTIFY_STORE_PREFIX = '__notify-';
+const OWNER_NOTIFY_STORE_PATTERN = /^__notify-[a-z0-9._-]{1,37}__$/;
+
+export const OWNER_NOTIFY_TOKEN_KEY = 'PHOENIX_DEVICE_TOKEN';
+
+export function canHoldOwnerNotifyToken(device: string): boolean {
+  return OWNER_NOTIFY_STORE_PATTERN.test(`${OWNER_NOTIFY_STORE_PREFIX}${device.trim().toLowerCase()}__`);
+}
+
+export function ownerNotifyStoreName(device: string): string {
+  if (!canHoldOwnerNotifyToken(device)) throw new Error(`Device name '${device}' is too long or malformed to key an owner-notify token store (37 characters max).`);
+  return `${OWNER_NOTIFY_STORE_PREFIX}${device.trim().toLowerCase()}__`;
+}
+
 export function isReservedStoreName(name: string): boolean {
   const n = name.trim().toLowerCase();
   if (n === AUTH_STORE_ALIAS) return true;
+  if (OWNER_NOTIFY_STORE_PATTERN.test(n)) return true;
   return AGENT_IDS.some((id) => RESERVED_STORES[id].toLowerCase() === n);
 }
 

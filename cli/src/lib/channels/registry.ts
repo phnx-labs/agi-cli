@@ -10,7 +10,6 @@ export interface SendOptions {
   thread?: string;
   attachments?: string[];
   from?: string;
-  ownerScoped?: boolean;
   dryRun?: boolean;
   terminal?: TerminalSendOptions;
 }
@@ -23,7 +22,6 @@ export interface SendResult {
   attachments?: string[];
   msgId?: string;
   body?: string;
-  deliveries?: SendResult[];
   backend?: InjectResult['backend'];
   writes?: number;
   confirmed?: boolean;

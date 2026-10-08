@@ -20,8 +20,8 @@ import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';
+import { RUSH_API_BASE } from '../rush-api.js';
 
-const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
 const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
 
 
@@ -103,7 +103,7 @@ function readEmail(): string | undefined {
 }
 
 async function api(method: string, endpoint: string, token: string, body?: unknown): Promise<Response> {
-  const url = endpoint.startsWith('http') ? endpoint : `${PROXY_BASE}${endpoint}`;
+  const url = endpoint.startsWith('http') ? endpoint : `${RUSH_API_BASE}${endpoint}`;
   const headers: Record<string, string> = {
     'Authorization': `Bearer ${token}`,
     'Content-Type': 'application/json',
@@ -414,7 +414,7 @@ export class RushCloudProvider implements CloudProvider {
 
   async *stream(taskId: string): AsyncIterable<CloudEvent> {
     const token = readToken();
-    const res = await fetch(`${PROXY_BASE}/api/v1/cloud-runs/${encodeURIComponent(taskId)}/stream`, {
+    const res = await fetch(`${RUSH_API_BASE}/api/v1/cloud-runs/${encodeURIComponent(taskId)}/stream`, {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!res.ok) {

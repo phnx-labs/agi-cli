@@ -528,11 +528,12 @@ agents feed answer <key> --choice 0 # first answer wins; route over the recorded
 agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
 ```
 
-Important posts can reach every owner channel named in
-`~/.agents/humans.yaml` under `owner.policy.normal` (for example iMessage and
-Slack). Owner delivery attempts every selected channel, reports partial
-failures, and safely forwards Rush-backed channels from headless workers to a
-capable Mac; ordinary milestone posts remain record-only unless configured.
+Important posts, blocks and `agents send --to owner` reach you through your
+account once you run `agents auth login`: email, Slack and iMessage per the
+preferences in the console Settings page, with quiet hours and dedup applied
+there. Workers get a scoped device token from your signed-in laptop
+automatically, and a signed-in Mac sends the iMessages. Ordinary milestone posts
+remain record-only unless configured.
 
 An optional **per-session summarizer** (off by default) adds a daemon-computed
 `goal`, progress `checkpoints`, and a detailed `summaryChecklist` to each session
@@ -1498,7 +1499,7 @@ Two repos with the same shape, different roles:
 
 See [docs/concepts.md](cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists, restores (`agents trash restore <agent>@<version>`) and empties (`agents trash empty --older-than 30d`) soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 

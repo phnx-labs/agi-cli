@@ -27,6 +27,9 @@ export interface WhoAmI {
   valid: true;
   avatar_url?: string;
   name?: string;
+  tokenKind?: 'session' | 'device';
+  scopes?: string[];
+  device?: string | null;
 }
 
 export type DevicePoll =
@@ -79,6 +82,34 @@ export async function pollDeviceToken(deviceCode: string): Promise<DevicePoll> {
 export function fetchWhoAmI(token?: string): Promise<WhoAmI> {
   return phoenixRequest<WhoAmI>('GET', '/api/v1/auth/me', { token });
 }
+
+export type DeviceTokenScope = 'notify';
+
+export interface MintedDeviceToken {
+  id: string;
+  token: string;
+  kind: 'device';
+  device: string;
+  scopes: DeviceTokenScope[];
+  createdAt: string;
+}
+
+export interface ApiTokenSummary {
+  id: string;
+  kind: 'session' | 'device';
+  device: string | null;
+  scopes: string[];
+  createdAt: string;
+}
+
+export const mintDeviceToken = (device: string, scopes: DeviceTokenScope[]): Promise<MintedDeviceToken> =>
+  phoenixRequest<MintedDeviceToken>('POST', '/api/v1/auth/tokens', { body: { device, scopes } });
+
+export const listApiTokens = (): Promise<ApiTokenSummary[]> =>
+  phoenixRequest<ApiTokenSummary[]>('GET', '/api/v1/auth/tokens');
+
+export const revokeApiToken = (id: string): Promise<void> =>
+  phoenixRequest<void>('DELETE', `/api/v1/auth/tokens/${encodeURIComponent(id)}`);
 
 export async function refreshSessionProfile(known?: WhoAmI): Promise<void> {
   const session = readSession();

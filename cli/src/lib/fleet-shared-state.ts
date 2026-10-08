@@ -52,6 +52,10 @@ export interface FleetSharedDeviceState {
   accounts?: {
     rows: unknown[];
   };
+  ownerNotify?: {
+    signedIn: boolean;
+    deviceToken: boolean;
+  };
   receivedAt?: number;
 }
 
@@ -60,6 +64,7 @@ interface FleetSharedStatePatch {
   auth?: FleetSharedDeviceState['auth'];
   sessions?: FleetSharedDeviceState['sessions'];
   accounts?: FleetSharedDeviceState['accounts'];
+  ownerNotify?: FleetSharedDeviceState['ownerNotify'];
   receivedAt?: number;
 }
 
@@ -105,6 +110,13 @@ export function parseFleetSharedDeviceStateEnvelope(parsed: unknown, owner?: str
   if (accounts !== undefined && (!isRecord(accounts) || !Array.isArray(accounts.rows))) {
     throw new Error('unrecognized account verdict rows');
   }
+  const ownerNotify = parsed.ownerNotify;
+  if (
+    ownerNotify !== undefined &&
+    (!isRecord(ownerNotify) || typeof ownerNotify.signedIn !== 'boolean' || typeof ownerNotify.deviceToken !== 'boolean')
+  ) {
+    throw new Error('unrecognized owner-notify state');
+  }
   if (parsed.receivedAt !== undefined && (typeof parsed.receivedAt !== 'number' || !Number.isFinite(parsed.receivedAt))) {
     throw new Error('unrecognized receivedAt');
   }
@@ -129,6 +141,7 @@ function mergeFleetState(currentRaw: string, device: string, patch: FleetSharedS
     ...(patch.auth !== undefined ? { auth: patch.auth } : {}),
     ...(patch.sessions !== undefined ? { sessions: patch.sessions } : {}),
     ...(patch.accounts !== undefined ? { accounts: patch.accounts } : {}),
+    ...(patch.ownerNotify !== undefined ? { ownerNotify: patch.ownerNotify } : {}),
     ...(patch.receivedAt !== undefined ? { receivedAt: patch.receivedAt } : {}),
     version: FLEET_SHARED_STATE_VERSION,
     device,
@@ -228,5 +241,6 @@ export async function storePeerFleetSharedDeviceState(
   if (state.auth !== undefined) patch.auth = state.auth;
   if (state.sessions !== undefined) patch.sessions = state.sessions;
   if (state.accounts !== undefined) patch.accounts = state.accounts;
+  if (state.ownerNotify !== undefined) patch.ownerNotify = state.ownerNotify;
   return updateFleetSharedDeviceStateAsync(state.device, patch, userAgentsDir);
 }

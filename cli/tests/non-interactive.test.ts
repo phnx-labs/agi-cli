@@ -263,7 +263,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(result.status).toBe(0);
     expect(combined).toContain(`Moved Claude@${version} to trash`);
     expect(combined).toContain('Sessions remain accessible via `agents sessions`.');
-    expect(combined).toContain(`Restore with: agents restore claude@${version}`);
+    expect(combined).toContain(`Restore with: agents trash restore claude@${version}`);
     expect(fs.existsSync(versionDir)).toBe(false);
 
     const trashAgentDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'claude', version);
@@ -281,6 +281,37 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(
       fs.readFileSync(path.join(home, '.agents', '.history', 'version-resources.json'), 'utf-8'),
     ).toContain(version);
+  });
+
+  it('trash restore brings a pruned version back, and trash empty deletes only what is due', () => {
+    const home = makeTempHome();
+    tempHomes.push(home);
+    writeFakeManagedVersion(home, 'codex', '0.130.0', 'codex');
+    writeFakeManagedVersion(home, 'codex', '0.131.0', 'codex');
+    const versions = path.join(home, '.agents', '.history', 'versions', 'codex');
+    const trashed = path.join(home, '.agents', '.history', 'trash', 'versions', 'codex');
+
+    expect(runAgents(home, ['prune', 'codex@0.130.0']).status).toBe(0);
+    const restored = runAgents(home, ['trash', 'restore', 'codex@0.130.0']);
+    expect(restored.status).toBe(0);
+    expect(fs.existsSync(path.join(versions, '0.130.0', 'node_modules', '.bin', 'codex'))).toBe(true);
+    expect(fs.existsSync(path.join(trashed, '0.130.0'))).toBe(false);
+
+    expect(runAgents(home, ['prune', 'codex@0.131.0']).status).toBe(0);
+    const unconfirmed = runAgents(home, ['trash', 'empty']);
+    expect(unconfirmed.status).toBe(1);
+    expect(unconfirmed.stderr).toContain('Pass --yes to confirm');
+    expect(fs.existsSync(path.join(trashed, '0.131.0'))).toBe(true);
+
+    const notYet = runAgents(home, ['trash', 'empty', '--older-than', '30d', '--yes']);
+    expect(notYet.status).toBe(0);
+    expect(notYet.stdout).toContain('Nothing in trash is older than 30d');
+    expect(fs.existsSync(path.join(trashed, '0.131.0'))).toBe(true);
+
+    const emptied = runAgents(home, ['trash', 'empty', '--yes']);
+    expect(emptied.status).toBe(0);
+    expect(emptied.stdout).toContain('Deleted 1 trashed item(s)');
+    expect(fs.existsSync(path.join(home, '.agents', '.history', 'trash', 'versions'))).toBe(false);
   });
 
   it('keeps remove as an alias for version prune', () => {
@@ -315,53 +346,15 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version))).toBe(true);
   });
 
-  it('restores a soft-deleted version via the top-level restore command', () => {
-    const home = makeTempHome();
-    tempHomes.push(home);
-    const version = '0.132.0';
-    writeFakeManagedVersion(home, 'codex', version, 'codex');
-
-    const versionDir = path.join(home, '.agents', '.history', 'versions', 'codex', version);
-    expect(runAgents(home, ['remove', `codex@${version}`]).status).toBe(0);
-    expect(fs.existsSync(versionDir)).toBe(false);
-
-    const result = runAgents(home, ['restore', `codex@${version}`]);
-    const combined = `${result.stdout}\n${result.stderr}`;
-
-    expect(result.status).toBe(0);
-    expect(combined).toContain(`Restored Codex@${version}`);
-    expect(fs.existsSync(versionDir)).toBe(true);
-    expect(fs.existsSync(path.join(versionDir, 'node_modules', '.bin', 'codex'))).toBe(true);
-    const trashVersionDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'codex', version);
-    expect(fs.existsSync(trashVersionDir)).toBe(false);
-  });
-
   it('exits non-zero when restoring a version that is not in trash', () => {
     const home = makeTempHome();
     tempHomes.push(home);
 
-    const result = runAgents(home, ['restore', 'codex@9.9.9']);
+    const result = runAgents(home, ['trash', 'restore', 'codex@9.9.9']);
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status).toBe(1);
     expect(combined).toContain('No trashed copy found for codex@9.9.9');
-  });
-
-  it('does not hard-delete trash entries through cleanup', () => {
-    const home = makeTempHome();
-    tempHomes.push(home);
-    const trashEntry = path.join(home, '.agents', '.history', 'trash', 'versions', 'grok', '1.0.0', 'old-stamp');
-    const homeFile = path.join(trashEntry, 'home', '.grok', 'session.jsonl');
-    fs.mkdirSync(path.dirname(homeFile), { recursive: true });
-    fs.writeFileSync(homeFile, '{"type":"user"}\n');
-    fs.utimesSync(trashEntry, new Date('2024-01-01T00:00:00.000Z'), new Date('2024-01-01T00:00:00.000Z'));
-
-    const result = runAgents(home, ['prune', 'cleanup', 'trash', '--older-than', '0', '-y']);
-    const combined = `${result.stdout}\n${result.stderr}`;
-
-    expect(result.status).toBe(0);
-    expect(combined).toContain('Trash is durable');
-    expect(fs.existsSync(homeFile)).toBe(true);
   });
 
   it('does not hard-delete session rows through cleanup', () => {
