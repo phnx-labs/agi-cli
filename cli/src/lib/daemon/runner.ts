@@ -705,12 +705,13 @@ export function claudeVersionIsAuthenticated(version: string): boolean {
   if (!isVersionInstalled('claude', version)) return true;
   const binary = getBinaryPath('claude', version);
   if (!binary) return false;
-  const home = getVersionHomePath('claude', version);
+  const env = buildRoutineSpawnEnv(process.env as Record<string, string>, 'claude', version);
+  env.HOME = process.env.AGENTS_REAL_HOME || os.homedir();
   try {
     const raw = execFileSync(binary, ['auth', 'status', '--json'], {
       encoding: 'utf8',
       timeout: 5_000,
-      env: { ...process.env, HOME: process.env.AGENTS_REAL_HOME || os.homedir(), CLAUDE_CONFIG_DIR: path.join(home, '.claude') },
+      env,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return JSON.parse(raw).loggedIn === true;
