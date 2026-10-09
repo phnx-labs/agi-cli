@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 
 const helper = fileURLToPath(new URL('./stdout.ts', import.meta.url));
 
-/** Run a child that writes `bytes` to a piped stdout through the helper, then exits at once. */
 function readChildStdout(bytes: number): Promise<number> {
   const script = `
     const { writeStdoutFlushed } = await import(${JSON.stringify(helper)});
@@ -23,8 +22,7 @@ function readChildStdout(bytes: number): Promise<number> {
 }
 
 describe('writeStdoutFlushed', () => {
-  it('delivers a reply larger than one pipe buffer before the process exits', async () => {
-    // A fleet-state reply is ~200 KB; an unflushed write was cut at 65,536 bytes over ssh.
+  it('delivers a 300 KB reply through a pipe when the process exits right after writing', async () => {
     expect(await readChildStdout(300_000)).toBe(300_000);
   }, 30_000);
 });
