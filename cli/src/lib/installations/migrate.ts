@@ -1504,7 +1504,7 @@ export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreference
   for (const entry of channels) {
     if (typeof entry.id !== 'string') continue;
     const transport = typeof entry.transport === 'string' ? entry.transport : entry.id;
-    const channel = accountChannelFor(transport);
+    const channel = accountChannelFor(entry.id);
     if (!channel) { dropped.push(`${entry.id} (${transport})`); continue; }
     byId.set(entry.id, channel);
     if (channel === 'imessage' && typeof entry.to === 'string' && entry.to.trim()) imessageAddress ??= entry.to.trim();
@@ -1529,13 +1529,14 @@ export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreference
   if (preferences.length > 0) patch.preferences = preferences;
   const settings: NonNullable<OwnerPreferencesPatch['settings']> = {};
   if (typeof owner?.timezone === 'string' && owner.timezone.trim()) settings.timezone = owner.timezone.trim();
-  const quiet = typeof owner?.quiet_hours === 'string' ? owner.quiet_hours.match(/^\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*$/) : null;
+  const quiet = typeof owner?.quietHours === 'string' ? owner.quietHours.match(/^\s*(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*$/) : null;
   if (quiet) {
     settings.quietStart = quiet[1].padStart(5, '0');
     settings.quietEnd = quiet[2].padStart(5, '0');
-  } else if (typeof owner?.quiet_hours === 'string' && owner.quiet_hours.trim()) {
-    dropped.push(`quiet_hours '${owner.quiet_hours}' (expected HH:MM-HH:MM)`);
+  } else if (typeof owner?.quietHours === 'string' && owner.quietHours.trim()) {
+    dropped.push(`quietHours '${owner.quietHours}' (expected HH:MM-HH:MM)`);
   }
+  if (owner?.quiet_hours !== undefined) dropped.push(`quiet_hours (older key; set quietHours or use console Settings)`);
   if (Object.keys(settings).length > 0) patch.settings = settings;
   if (imessageAddress) patch.destinations = { imessage: { address: imessageAddress } };
   return { patch, dropped };

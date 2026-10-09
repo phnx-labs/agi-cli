@@ -9,20 +9,20 @@ import { startOwnerNotifyApi, type OwnerNotifyApi } from '../testdata/owner-noti
 const HUMANS = `version: 1
 owner:
   timezone: America/Los_Angeles
-  quiet_hours: "22:00-7:30"
+  quietHours: "22:00-7:30"
   channels:
-    - id: phone
-      transport: imessage
+    - id: imessage
+      transport: rush
       to: "+15555550123"
-    - id: work
-      transport: slack
+    - id: slack
+      transport: rush
       to: U123
-    - id: tg
+    - id: telegram
       transport: openclaw-telegram
       to: chat-1
   policy:
-    critical: [phone, work]
-    normal: [work]
+    critical: [imessage, slack]
+    normal: [slack]
     low: []
 `;
 
@@ -52,7 +52,13 @@ describe('humansToPreferencesPatch', () => {
     expect(enabled('completed')).toEqual([]);
     expect(patch.settings).toEqual({ timezone: 'America/Los_Angeles', quietStart: '22:00', quietEnd: '07:30' });
     expect(patch.destinations).toEqual({ imessage: { address: '+15555550123' } });
-    expect(dropped).toEqual(['tg (openclaw-telegram)']);
+    expect(dropped).toEqual(['telegram (openclaw-telegram)']);
+  });
+
+  it('reports a quiet_hours key written by an older CLI instead of silently dropping it', () => {
+    const { patch, dropped } = migrate.humansToPreferencesPatch(yaml.parse(HUMANS.replace('quietHours:', 'quiet_hours:')));
+    expect(patch.settings).toEqual({ timezone: 'America/Los_Angeles' });
+    expect(dropped).toContain('quiet_hours (older key; set quietHours or use console Settings)');
   });
 });
 
