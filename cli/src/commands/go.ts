@@ -280,6 +280,13 @@ export async function focusEditorTab(tab: ActiveSession): Promise<void> {
   console.log(chalk.gray(`Focused ${shortId(tab)} → ${tab.label || tab.topic || tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
 }
 
+export async function focusEditorTabOf(s: ActiveSession, self: string): Promise<boolean> {
+  const tab = matchEditorTab(s, self, await listTerminalsActive());
+  if (!tab) return false;
+  await focusEditorTab(tab);
+  return true;
+}
+
 export async function focusLocalEditorTab(selector: string): Promise<boolean> {
   const matches = editorTabsForSelector(selector, await listTerminalsActive());
   if (matches.length !== 1) return false;
@@ -288,11 +295,7 @@ export async function focusLocalEditorTab(selector: string): Promise<boolean> {
 }
 
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback, fallbackId?: string): Promise<void> {
-  const tab = matchEditorTab(s, self, await listTerminalsActive());
-  if (tab) {
-    await focusEditorTab(tab);
-    return;
-  }
+  if (await focusEditorTabOf(s, self)) return;
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
 
