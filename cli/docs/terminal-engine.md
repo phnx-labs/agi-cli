@@ -265,6 +265,28 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 - **No `zsh -ilc` wrap** — the command runs in an editor terminal that is already
   an interactive login shell (see [above](#interactive-login-shell)).
 
+**Focusing a tab that is already open.** `agents ps focus <id>` (and the
+`agents://session/<id>` link an artifact header opens) checks this machine's
+editor tabs before anything else: the rows `listTerminalsActive` builds from the
+extension's `live-terminals.json`, matched on the session id, or on the tab a
+`--device` run was launched from (`originTerminal`, so a session running on a
+worker through a local tab is found too). A hit runs two commands:
+
+```
+codium <window folder>                                  # brings the owning window forward
+codium --open-url 'vscodium://swarmify.swarm-ext/focus?terminalId=<id>'
+```
+
+The extension's `/focus` only searches the window that receives the URL, and the
+editor routes a URL to its frontmost window, so the first command is required:
+without it the URL lands in the wrong window and is dropped with no error. The
+window folder is the extension's `AGENT_WORKSPACE_DIR` (`ActiveSession.workspaceDir`),
+not the agent's `cwd`, which is often a worktree and would open a new window.
+The first `/focus` or `/spawn` on a machine shows VSCodium's "Allow 'Agents'
+extension to open this URI?" prompt and drops the request until it is accepted;
+`extensions.confirmedUriHandlerExtensionIds: ["swarmify.swarm-ext"]` in the user
+settings pre-approves it.
+
 **Layout:** Every backend defaults to **one full-width tab per session**. `--splits`
 opts into two-per-tab split packing for side-by-side sessions.
 
