@@ -1,13 +1,15 @@
 <!-- guide -->
 # SSH transport — one multiplexed engine (design decision)
 
-> Status: **accepted** · Related: [hosts.md](hosts.md), optimizations.md, [concepts.md](concepts.md#devices--hosts)
+> Status: **accepted** · Related: [hosts.md](hosts.md), optimizations.md, [concepts.md](concepts.md#devices-placement-and-projects)
 
 A design record for *how `agents` talks to remote machines over SSH*. Every
-remote surface — `run --device`, `view/usage/cost/doctor/inspect/list/sync --device`,
-`sessions -D`, `teams … --device`, remote `secrets`, the browser CDP tunnel — moves
+remote surface — `run --device`, `view/doctor/inspect/sync --device`,
+`ps -D`, `teams … --device`, `agents ssh`, the daemon's fleet exchanges — moves
 bytes over the system `ssh`. This doc pins down the one transport they all share,
-and why it is a set of shared primitives rather than a daemon.
+and why it is a set of shared primitives rather than a daemon. (Remote `secrets`
+pushes and the browser CDP tunnel now live in the standalone `secrets` and
+`browser` CLIs, which run their own SSH.)
 
 ## Context
 
@@ -103,7 +105,9 @@ replaced a Git exchange of the user repo that had bloated the shared store to
 connection only for a peer whose received verdict says the reserved bundle is
 missing, with the same async 20-second deadline and hard-kill grace. Flipping this one default is what fixes P1's poll,
 P2's probes, and P4's fan-out at once — they already routed through the engine and
-simply started reusing sockets. It degrades safely: if the socket can't be opened
+simply started reusing sockets. Two exceptions came later: `readyProbe` now
+passes `multiplex: false`, and `sshExecAsync` skips the master whenever a
+`timeoutMs` is set, so both open fresh connections. It degrades safely: if the socket can't be opened
 ssh falls back to a fresh connection, and on Windows (no `ControlMaster`) the
 helper returns `[]`.
 
@@ -131,7 +135,7 @@ to already be present in the managed store and uses a fresh, non-multiplexed SSH
 connection. A registered device earns its pin by connecting once with
 `agents ssh <device>` and verifying the host before syncing an account.
 **Remaining:** the broad `accept-new` baseline still governs
-non-credential fan-outs (`sessions --device`, the browser driver, `fleet run`),
+non-credential fan-outs (`sessions --device`, `fleet run`),
 which still use OpenSSH default `~/.ssh/known_hosts`, not the managed store, so
 they neither pin into it nor verify against it. Wiring those call sites onto the
 managed store (so they verify strictly too) is follow-up.
@@ -460,9 +464,8 @@ is that remote commands are faster and dead connections self-terminate.
 
 Follow-ups (non-blocking):
 
-- Remove the now-unused `sshReachable` export.
 - Keep specialized direct-`ssh` sites (for example `-L`/`-N` tunnels,
-  `ProxyCommand` relays, and browser CDP) composed from
+  `ProxyCommand` relays) composed from
   `sshConnectOpts(...)` so they inherit the shared baseline while preserving
   their required extra flags.
 - Consider moving cloud task streaming from bounded polling to the same

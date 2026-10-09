@@ -19,7 +19,7 @@ For the sync model that governs how subagents reach version homes, see [resource
 Central storage (project > user > system):
   ~/.agents/subagents/<name>/          User-scoped
   .agents/subagents/<name>/            Project-scoped
-  ~/.agents-system/subagents/<name>/   System-shipped
+  ~/.agents/.system/subagents/<name>/  System-shipped
 
   <name>/
     AGENT.md                           Required: frontmatter + instruction body
@@ -84,13 +84,14 @@ flag and the registry entry ever disagree.
 
 | Command | Flag | Effect |
 |---------|------|--------|
-| `add` | `-a, --agents <agents...>` | Target specific agents: `claude`, `openclaw`, `cursor` (defaults to all capable) |
+| `add` | `-a, --agents <list>` | Target specific agents or versions, comma-separated: `claude`, `openclaw`, `claude@2.1.141`, `claude@all` (omitted: prompts, or takes the defaults with `--yes`) |
+| `add` | `--names <list>` | Install only these subagents from the source (comma-separated) |
 | `add` | `-y, --yes` | Skip all prompts and confirmation |
 | `remove` | `-y, --yes` | Skip confirmation prompt |
 
 ## AGENT.md Schema
 
-The `AGENT.md` file uses YAML frontmatter followed by the instruction body. The frontmatter maps to `SubagentFrontmatter` in `src/lib/types.ts:416`.
+The `AGENT.md` file uses YAML frontmatter followed by the instruction body. The frontmatter maps to `SubagentFrontmatter` in `src/lib/types.ts`.
 
 ```markdown
 ---
@@ -155,13 +156,8 @@ agents subagents remove code-reviewer
 agents subagents remove code-reviewer --yes
 ```
 
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/subagents.mp4"></video>
-
 ## See Also
 
 - [resource-sync.md](resource-sync.md) — resource resolution and sync to version homes
-- docs/workflows.md — workflows that declare `allowedAgents` to orchestrate subagents
 - [docs/plugins.md](plugins.md) — plugins that bundle subagent definitions alongside skills and hooks
 - [docs/hooks.md](hooks.md) — hooks that fire on subagent lifecycle events

@@ -4,9 +4,9 @@
 # paste this, then install it to your workspace. Replace <box>.<tailnet>.ts.net with
 # your Tailscale Funnel host (from `agents daemon webhooks add --funnel-port 443`).
 #
-# After install:
-#   agents secrets add slack SLACK_SIGNING_SECRET <Basic Information → Signing Secret>
-#   agents secrets add slack SLACK_BOT_TOKEN      <OAuth & Permissions → Bot User OAuth Token, xoxb-…>
+# After install (each command prompts for the value):
+#   secrets add slack SLACK_SIGNING_SECRET   # Basic Information → Signing Secret
+#   secrets add slack SLACK_BOT_TOKEN        # OAuth & Permissions → Bot User OAuth Token, xoxb-…
 
 display_information:
   name: agents

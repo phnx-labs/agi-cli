@@ -6,7 +6,7 @@ Comet, Firefox, or Arc you use by hand, with their profiles and cookies.
 
 ## Overview
 
-`agents browser` gives agents a real browser over the Chrome DevTools Protocol
+`browser` gives agents a real browser over the Chrome DevTools Protocol
 (Chromium family), WebDriver BiDi (Firefox), or Apple Events (Arc) — with your
 existing cookies, fingerprint, and IP. There is no Playwright subprocess, no
 automation flags, no relay extension. Sites that block Puppeteer and Playwright
@@ -33,7 +33,7 @@ release trains the split exists to separate.
 ## Architecture
 
 agents-cli contributes what only the fleet CLI can know; the engine does the
-driving. The two meet over two inherited file descriptors on one spawn.
+driving. The two meet over one extra file descriptor (fd 3) on one spawn.
 
 ```
 agent process
@@ -61,8 +61,8 @@ agent process
 agents-cli opens no events pipe (PHNX-4227): the engine records every action in
 its own task history, and `BROWSER_EVENTS_FD` stays unset. The engine keeps that history in
 `~/.agents/.history/browser/history.db` and adopts those legacy rows itself, so
-the history agents-cli shows is the engine's: `agents browser sessions` runs the
-engine's own picker, and the feed's browser rows come from
+the history agents-cli shows is the engine's: `browser sessions` is the engine's
+own picker (`agents browser sessions` forwards to it), and the feed's browser rows come from
 `browser sessions --tasks --json`. A finished task with no capture still has a
 row, and it keeps its session link, start time, capture counts and source
 machine after the live task is gone. agents-cli adds only the session link: it
@@ -110,10 +110,10 @@ both `agents browser` and the standalone `browser` read and write — a
 forwards to the engine:
 
 ```bash
-agents browser profiles create work --browser chromium   # local Chromium
-agents browser profiles seed                              # one profile per installed browser
-agents browser profiles list
-agents browser use work                                   # this machine's default
+browser profiles create work --browser chromium   # local Chromium
+browser profiles seed                              # one profile per installed browser
+browser profiles list
+browser use work                                   # this machine's default
 ```
 
 Each profile resolves to an endpoint the engine drives:
@@ -124,15 +124,14 @@ Each profile resolves to an endpoint the engine drives:
 
 ## Sessions and captures
 
-`agents browser sessions` forwards to the engine's own `browser sessions`, which
-groups a profile's captures (screenshots, PDFs, recordings, downloads under
-`~/.agents/.cache/browser/<profile>/sessions/<task>/`) by task, newest first.
-Its flags are the engine's (`agents browser sessions --help` asks it): among them
-`--profile <name>`, `--open [selector]`, `--tasks`, `--search <text>`,
-`--since`/`--until`, `--limit <n>`, `--json` and `--no-interactive`. On a TTY it
-opens the engine's interactive task browser; `enter` browses a task's captures.
-`agents sessions --browser` was removed (PHNX-4227); run `browser sessions`
-or `agents browser sessions` instead.
+`browser sessions` groups a profile's captures (screenshots, PDFs, recordings,
+downloads under `~/.agents/.cache/browser/<profile>/sessions/<task>/`) by task,
+newest first; `agents browser sessions` forwards to it. Its flags
+(`browser sessions --help`): `--profile <name>`, `--open [selector]`, `--tasks`,
+`--search <text>`, `--since`/`--until`, `--limit <n>`, `--json` and
+`--no-interactive`. On a TTY it opens the engine's interactive task browser;
+`enter` browses a task's captures. `agents sessions --browser` was removed
+(PHNX-4227); run `browser sessions` instead.
 
 The feed stream (`agents feed watch --json`) reads `browser sessions --tasks
 --json` and adds the one thing the engine cannot know — the agent session behind
@@ -146,27 +145,30 @@ Another fleet machine may drive THIS machine's browser only after its owner opts
 in:
 
 ```bash
-agents browser remote-control on     # device-local, never synced; default off
+browser remote-control on     # device-local, never synced; default off
 ```
 
 agents-cli reads that flag into the fd-3 context (`remoteControl.allowed`); the
-engine enforces it. `agents browser remote-control` forwards to the engine, which
-reads and writes the same `browser.remote-control` config key.
+engine enforces it. `browser remote-control` (and `agents browser remote-control`,
+which forwards to it) reads and writes the same `browser.remote-control` config key.
 
 ## Remote browsers (`--device`)
 
 Bind a task to a browser on another machine at `start`:
 
 ```bash
-agents browser start --device box --profile work
-agents browser navigate https://example.com     # runs against the bound device
-agents browser screenshot -o shot.png
-agents browser done
+browser start --device box --profile work
+browser navigate https://example.com     # runs against the bound device
+browser screenshot -o shot.png
+browser done
 ```
 
-agents-cli resolves `--device <name>` against the fleet — registry, ssh identity,
-platform — and hands the target on fd 3; the engine opens the SSH tunnel and
-drives the remote browser over it. `--device local` forces this machine. Because
+The engine opens the SSH tunnel and drives the remote browser over it. Called
+directly, `browser` resolves the alias from `~/.ssh/config` (fleet devices are
+there once `agents devices render --write` has written its include). Through
+`agents browser start --device <name>`, agents-cli first resolves the name
+against the fleet (registry, ssh identity, platform) and hands the target on
+fd 3. `--device local` forces this machine. Because
 the device is bound at `start`, page verbs reject `--device` — they run against
 the task's bound device.
 
@@ -195,15 +197,15 @@ recognizes an already-configured default — it never mints one on a headless bo
 ### 2. Finish the first-run + sign in
 
 ```bash
-agents browser start --profile <name>   # complete the browser first-run, sign in to sites
-agents browser profiles doctor <name>   # confirm it is ready
+browser start --profile <name>   # complete the browser first-run, sign in to sites
+browser profiles doctor <name>   # confirm it is ready
 ```
 
 ## Command reference
 
-Verbs are grouped the way `agents browser --help` groups them. Every verb except
-`sessions` forwards to the engine; **per-verb flags are the engine's** — ask it
-directly with `agents browser <verb> --help`.
+Verbs are grouped the way `agents browser --help` groups them. Every
+`agents browser` verb forwards to the engine; **per-verb flags are the engine's**,
+so ask it directly with `browser <verb> --help`.
 
 ### Session lifecycle
 
@@ -245,7 +247,7 @@ directly with `agents browser <verb> --help`.
 
 | Command | Description |
 |---------|-------------|
-| `sessions` | Browse captures grouped by task (agents-cli's own reader — see above) |
+| `sessions` | Browse captures grouped by task (the engine's own picker — see above) |
 | `history` | Recent browser task history |
 | `refs` | DOM refs for interactive elements |
 
@@ -253,7 +255,7 @@ directly with `agents browser <verb> --help`.
 
 | Command | Description |
 |---------|-------------|
-| `profiles` | Manage profiles (`create`/`list`/`edit`/`rename`/`show`/`remove`/`use`/`seed`/`claim`/`prune`/`doctor`) |
+| `profiles` | Manage profiles (`create`/`list`/`edit`/`rename`/`show`/`remove`/`use`/`seed`/`claim`/`logins`/`prune`/`doctor`) |
 | `remote-control` | Allow or deny other fleet machines driving this machine's browser |
 | `stop` | Stop a task; `--profile` detaches a profile; `--service` stops the IPC service |
 | `ps` / `tasks` | List tracked browser processes / all browser tasks |
@@ -278,22 +280,22 @@ browser-cli keeps every path the in-repo subsystem used:
 
 ```bash
 npm i -g @phnx-labs/browser-cli
-agents browser profiles create work --browser chromium
-agents browser use work
+browser profiles create work --browser chromium
+browser use work
 
-agents browser start --profile work
-agents browser navigate https://example.com
-agents browser screenshot -o /tmp/shot.png
-agents browser done
+browser start --profile work
+browser navigate https://example.com
+browser screenshot -o /tmp/shot.png
+browser done
 ```
 
 ### Drive a remote box over the fleet
 
 ```bash
-agents browser start --device box --profile work
-agents browser navigate https://example.com
-agents browser screenshot -o /tmp/remote.png
-agents browser done
+browser start --device box --profile work
+browser navigate https://example.com
+browser screenshot -o /tmp/remote.png
+browser done
 ```
 
 ## See also

@@ -5,7 +5,7 @@
 # agent scoped to the project named in the message, on this machine. The agent then
 # replies to the same Slack conversation.
 #
-# See `agents webhooks --help` and docs/automation.md for the
+# See `agents webhooks --help` and docs/routines.md for the
 # one-time setup (secrets bundle, Funnel, the Slack app manifest in this directory).
 
 name: slack-agent
@@ -35,7 +35,7 @@ run:
     Request: {{slack.prompt}}
 
     You are running on the machine that holds this project's context. If prior
-    conversation would help, read it first: `agents sessions -p {{slack.project}}`.
+    conversation would help, read it first: `sessions -p {{slack.project}}`.
     Do the work, then reply.
 
     REPLY — a slash command carries `{{slack.response_url}}`. Slack accepts a POST
@@ -50,7 +50,7 @@ run:
     thread with the Web API instead — this needs the bot in that channel and a
     SLACK_BOT_TOKEN in the receiver's secrets bundle:
 
-      agents secrets exec <bundle> -- sh -c 'curl -s -X POST https://slack.com/api/chat.postMessage \
+      secrets exec <bundle> -- sh -c 'curl -s -X POST https://slack.com/api/chat.postMessage \
         -H "Authorization: Bearer $SLACK_BOT_TOKEN" -H "Content-type: application/json" \
         -d "{\"channel\":\"{{slack.channel}}\",\"thread_ts\":\"{{slack.thread_ts}}\",\"text\":\"<result>\"}"'
 

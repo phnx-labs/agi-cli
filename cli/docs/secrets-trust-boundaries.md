@@ -10,26 +10,26 @@
 > engine enforces both now (its own `MAT-1`/`EXEC-1`), reached only through
 > the bounded process client (`secrets-client.ts`). The file:line citations
 > below describing the old engine's implementation are historical. The
-> `secrets.md#security-model` section this doc cross-references was folded
+> `secrets.md#security-model` section this doc used to cross-reference was folded
 > into the rewritten [secrets.md](secrets.md), which now scopes to what
 > agents-cli itself still owns.
 
 > Status: **accepted** (mental model still current; enforcement moved, see
 > above) · Related: [secrets.md](secrets.md) (reference),
-> [secrets-agent-process-model.md](secrets-agent-process-model.md) (broker process model, superseded)
+> [secrets-agent-process-model.md](secrets-agent-process-model.md) (broker process model)
 
 A design record for the **one question every operator eventually asks**: when an
-AI coding agent runs a release (or any task) with `agents secrets`, *does the agent
+AI coding agent runs a release (or any task) with `secrets`, *does the agent
 ever see the plaintext key?* The answer is "only if a command materializes it" —
 and this doc pins down exactly which commands do, why, and where the boundary is
-enforced. It complements the reference doc's [Security model](secrets.md#security-model)
+enforced. It complements the reference doc's security model
 (which covers the *keychain ACL* threat model) by tracing the **plaintext data-flow**
 past a second boundary the ACL section doesn't name: the agent's own context and
 its session transcript.
 
 ## The two boundaries
 
-`agents secrets` defends against **on-disk plaintext** (`.env` files, shell history,
+`secrets` defends against **on-disk plaintext** (`.env` files, shell history,
 accidental commits). That is the reference doc's threat model. This doc adds the
 boundary that matters when the *reader* is an agent, not a human:
 
@@ -67,15 +67,15 @@ to typed refs (`REF_PATTERN`, `src/lib/secrets/index.ts:51`):
 
 ### Path A — injection (the agent never sees the value)
 
-This is the release path. `agents secrets exec <bundle> -- <cmd>` and
+This is the release path. `secrets exec <bundle> -- <cmd>` and
 `agents run --secrets <bundle>` resolve the bundle in memory and hand it to the child
-as **environment**, not output. The env is built by `buildSecretsExecEnv`
-(`src/lib/secrets/exec` → `src/commands/secrets.ts:353-360`):
+as **environment**, not output. For `secrets exec` the standalone builds the env
+(its `buildSecretsExecEnv`; the in-repo copy this doc first cited is deleted):
 
 ```ts
 export function buildSecretsExecEnv(parentEnv, secretEnv) {
   const env = { ...sanitizeProcessEnv(parentEnv), ...secretEnv };
-  delete env.AGENTS_SECRETS_PASSPHRASE;   // the master key must not reach the child
+  delete env.SECRETS_PASSPHRASE;   // the master key must not reach the child
   return env;
 }
 ```
@@ -91,54 +91,55 @@ agent sees only whatever the *child* chooses to print (`npm publish` → `+ pkg@
                                               agent does NOT see: the values
 ```
 
-`buildSecretsExecEnv` also **strips `AGENTS_SECRETS_PASSPHRASE`** — the file-store
+`buildSecretsExecEnv` also **strips `SECRETS_PASSPHRASE`** (the extraction's rename of `AGENTS_SECRETS_PASSPHRASE`) — the file-store
 master key is used to decrypt, then removed before the child (and thus the agent)
 runs, so the one key that unlocks everything never reaches the executed command.
 
 ### Path B — materialization (the value is printed → agent + transcript)
 
-Two commands exist to put plaintext *on stdout* on purpose, and both are gated to
-a **human at a real interactive terminal, outside any agent session** (RUSH-2774):
+Two commands exist to put plaintext *on stdout* on purpose (RUSH-2774):
 
-- `agents secrets view <bundle> --reveal` — unmasks values.
-- `agents secrets get <item>` — prints one raw keychain item
-  (`src/commands/secrets.ts:1648`).
+- `secrets view <bundle> --reveal` — unmasks values.
+- `secrets get <item>` — prints one raw keychain item.
 
-Both refuse outright — before resolving anything — when `isAgentInvocationContext()`
-sees an agent marker (`AGENTS_RUNTIME`, `AGENT_SESSION_ID`, `AGENTS_SESSION_ID`,
-`CLAUDECODE`) or when there is no TTY. `view --reveal` additionally has no
+`view --reveal` refuses outright — before resolving anything — when
+`isAgentInvocationContext()` sees an agent marker (`SECRETS_CONTEXT=agent`,
+`AGENTS_RUNTIME`, `AGENT_SESSION_ID`, `AGENTS_SESSION_ID`, `CLAUDECODE`) or when
+there is no TTY. `get <item>` applies the same refusal only when the item is a
+bundle secret's keychain item; any other raw item prints ungated, by design, for
+shell hooks. `view --reveal` additionally has no
 non-interactive escape hatch left: the old `--plaintext` flag that allowed a
-piped/non-TTY reveal is gone. And the bundle-key form, `agents secrets get
+piped/non-TTY reveal is gone. And the bundle-key form, `secrets get
 <bundle> <KEY>`, is removed unconditionally — it always refuses and names
-`agents secrets exec <bundle> -- printenv <KEY>` instead. `export`'s old
+`secrets exec <bundle> -- printenv <KEY>` instead. `export`'s old
 shell-eval mode (`eval "$(agents secrets export <bundle> --plaintext)"`) is
-removed the same way: `export` without a destination flag (`--device` /
+removed the same way: `export` without a destination flag (`--host` /
 `--to-1password` / `--to-file`) refuses and names `secrets exec` / `view
 --reveal`.
 
 When a human runs `view --reveal` or `get <item>` at a terminal, the plaintext is
-legitimate one-off output. When anything tries to run either from *inside* an
-agent session, the refusal is the point: an agent's shell tool output lands in
+legitimate one-off output. When anything tries to run `view --reveal` or a
+bundle-item `get` from *inside* an agent session, the refusal is the point: an agent's shell tool output lands in
 the model's context **and** is written verbatim to the session `.jsonl`, so
-letting either command through would cross boundary #2 by construction. The one
+letting it through would cross boundary #2 by construction. The one
 surviving stdout emitter beyond those two is a machine-to-machine transport, not
 a human- or agent-facing command: the SSH remote-resolve path
 (`export <bundle> --plaintext --format json`) that `remoteResolveEnv` /
 `verifyRemoteKeychainPush` build internally, gated on the hidden
-`AGENTS_SECRETS_REMOTE_TRANSPORT=1` marker AND the same agent-context refusal —
+`SECRETS_REMOTE_TRANSPORT=1` marker AND the same agent-context refusal —
 nobody types this form by hand.
 
 ## Seen-vs-not-seen, by command
 
 | Command | Plaintext destination | Agent sees it? | In transcript? |
 |---|---|:--:|:--:|
-| `agents secrets exec <b> -- <cmd>` | child process env | **No** | **No** |
+| `secrets exec <b> -- <cmd>` | child process env | **No** | **No** |
 | `agents run --secrets <b>` | agent run's env | **No** | **No** |
-| `agents secrets list` / `view <b>` | masked (`••••`) | No (masked) | No |
-| `agents secrets view <b> --reveal` | **stdout** (human terminal only; refuses in an agent session) | **No** — refuses | **No** — refuses |
-| `agents secrets get <item>` | **stdout** (ungated scripting primitive — a single raw item, not a bundle) | Yes, if the agent runs it | Yes |
+| `secrets list` / `view <b>` | masked (`••••`) | No (masked) | No |
+| `secrets view <b> --reveal` | **stdout** (human terminal only; refuses in an agent session) | **No** — refuses | **No** — refuses |
+| `secrets get <item>` | **stdout** (ungated scripting primitive for a raw non-bundle item; a bundle secret's item refuses in an agent session) | Yes, if the agent runs it | Yes |
 | `agents secrets export <b> --plaintext` (shell-eval mode) | *removed* (RUSH-2774) | n/a | n/a |
-| `agents secrets get <bundle> <KEY>` (bundle-key form) | *removed* (RUSH-2774) | n/a | n/a |
+| `secrets get <bundle> <KEY>` (bundle-key form) | *removed* (RUSH-2774) | n/a | n/a |
 
 **Rule of thumb for agent-driven flows:** use `exec` / `--secrets`. `view
 --reveal` now refuses to run at all inside an agent session, so a
@@ -159,8 +160,8 @@ boundary seen from two sides.
 ## How the boundary is enforced (not just documented)
 
 - **Agent-context refusal on every materializing command.** `isAgentInvocationContext()`
-  (`src/lib/secrets/headless.ts`) checks for `AGENTS_RUNTIME`, `AGENT_SESSION_ID`,
-  `AGENTS_SESSION_ID`, or `CLAUDECODE` — present regardless of TTY, since an agent
+  (secrets-cli `src/lib/secrets/headless.ts`) checks for `SECRETS_CONTEXT=agent`,
+  `AGENTS_RUNTIME`, `AGENT_SESSION_ID`, `AGENTS_SESSION_ID`, or `CLAUDECODE` — present regardless of TTY, since an agent
   running inside tmux still has one. `view --reveal` consults
   it before resolving anything and refuse outright when it is set. This is what
   makes Path B a human-only path rather than an advisory one.
@@ -173,7 +174,7 @@ boundary seen from two sides.
   (`AGENTS_RUNTIME=terminal` or `teams`, or a harness tool shell) — is not
   headless: its read raises one Touch ID sheet on the user's screen,
   and the hold policy keeps the bundle silent afterwards.
-- **The broker holds resolved env in memory only.** `agents secrets unlock` caches the
+- **The broker holds resolved env in memory only.** `secrets unlock` caches the
   resolved bundle behind a Unix socket in a `0700` directory, with the socket file
   itself chmod'd `0600` (`src/lib/secrets/agent.ts:145`, `:445`; `session-store.ts`) so
   Path A stays promptless across concurrent runs — still no
@@ -184,7 +185,7 @@ boundary seen from two sides.
 
 ## What this boundary does NOT do
 
-Inherited from the reference doc's [Security model](secrets.md#security-model),
+Inherited from the reference doc's security model,
 restated here because they bound *this* boundary too:
 
 - **Path A env is inherited by the whole subprocess tree.** A value injected into a
@@ -203,8 +204,8 @@ restated here because they bound *this* boundary too:
 Keep the two paths **structurally separate and named**: Path A (`exec` / `--secrets`)
 is the default for every agent-driven flow and never materializes; Path B
 (`view --reveal`, plus the deliberately-ungated raw-item `get <item>` that fleet shell hooks capture into their own variables) exists for deliberate use, and
-that restriction is now **enforced, not just advisory** — both refuse outright
-under an agent invocation context, and the two commands that used to materialize
+that restriction is now **enforced, not just advisory** — `view --reveal` and a
+bundle-item `get` refuse outright under an agent invocation context, and the two commands that used to materialize
 with no such gate (`export --plaintext` shell-eval, `get <bundle> <KEY>`) are
 removed outright (RUSH-2774). The design guarantee is that *reaching for a normal
 secrets-injecting command cannot accidentally print a secret into an agent's
@@ -213,5 +214,5 @@ all, only a refusal-gated command a human can run at a real terminal.
 
 ## See also
 
-- [secrets.md](secrets.md) — full reference (commands, backends, recipes, ACL threat model)
+- [secrets.md](secrets.md) — what agents-cli owns on top of the standalone engine (run scoping, accounts, fleet sync)
 - [secrets-agent-process-model.md](secrets-agent-process-model.md) — where the broker lives as a process

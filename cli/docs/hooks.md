@@ -16,11 +16,11 @@ Hooks are separate from plugin-bundled hooks (which use a `hooks/hooks.json` ins
 ```
 Central storage (user > system):
   ~/.agents/hooks/                    User-authored scripts (higher precedence)
-  ~/.agents-system/hooks/             System-shipped scripts
+  ~/.agents/.system/hooks/            System-shipped scripts
 
   Manifest declarations:
   ~/.agents/agents.yaml               User-layer hook manifest  (hooks: section)
-  ~/.agents-system/agents.yaml        System-layer hook manifest (hooks: section)
+  ~/.agents/.system/agents.yaml       System-layer hook manifest (hooks: section)
 
   Merge rule: user wins on key collision.
               enabled: false in user layer disables a system hook without forking it.
@@ -35,8 +35,7 @@ Central storage (user > system):
 
   registerHooksToSettings() writes resolved paths into agent-native config:
     Claude:   <version-home>/.claude/settings.json        (hooks: {...})
-    Codex:    <version-home>/.codex/hooks.json            + config.toml features.codex_hooks=true
-    Gemini:   <version-home>/.gemini/settings.json        (hooks: {...})
+    Codex:    <version-home>/.codex/hooks.json            + config.toml features.hooks=true
     Agy:      <version-home>/.gemini/antigravity-cli/settings.json
 
                          Agent fires event
@@ -63,6 +62,7 @@ Central storage (user > system):
 | `agents hooks add [source]` | Install from GitHub, local path, or pick interactively from `~/.agents/hooks/` |
 | `agents hooks remove [name]` | Delete a hook from agent version homes |
 | `agents hooks view [name]` | Print the shell script source for a hook |
+| `agents hooks profile` | Per-hook timing + cache stats from recent invocations |
 
 ### Options
 
@@ -74,10 +74,11 @@ Central storage (user > system):
 | `add` | `--names <list>` | Install specific hooks by name from `~/.agents/hooks/` (comma-separated) |
 | `add` | `-y, --yes` | Skip all prompts |
 | `remove` | `-a, --agents <list>` | Limit removal to specific agents |
+| `profile` | `--days <n>` / `--warn-ms <n>` / `--project <key>` / `--json` | Window (default 7), slow-hook threshold (default 2000), one project's samples, raw JSON rows |
 
 ## Hook Manifest Schema
 
-Hooks are declared in the `hooks:` section of `agents.yaml`. The schema maps to `ManifestHook` in `src/lib/types.ts:110`.
+Hooks are declared in the `hooks:` section of `agents.yaml`. The schema maps to `ManifestHook` in `src/lib/types.ts:206`.
 
 ```yaml
 # ~/.agents/agents.yaml  (user layer)
@@ -164,7 +165,7 @@ registers that shim's path in the agent's native settings file
 (`~/.claude/settings.json`, `~/.codex/hooks.json`, etc.) instead of the raw
 script. The shim:
 
-1. Reads stdin once (Claude/Codex/Gemini pass JSON to every hook).
+1. Reads stdin once (Claude and Codex pass JSON to every hook).
 2. If `cache:` is set: computes the cache file path from `key:`, serves it if
    fresh (cache=hit), serves stale + spawns a detached refresh when
    `prefetch: background` (cache=stale-prefetch), or runs the real script +
@@ -173,12 +174,12 @@ script. The shim:
 3. Appends one JSONL line per fire to `~/.agents/.cache/logs/events-YYYY-MM-DD.jsonl`.
 4. Appends one NDJSON line to the disposable perf spool
    (`~/.agents/.cache/perf/spool.jsonl`), drained into `perf.db` on the next
-   `agents perf` / `agents hooks profile` open. This line carries `cwd` and
+   `agents insights perf` / `agents hooks profile` open. This line carries `cwd` and
    `session_id` when the hook's own stdin JSON has them — that's what lets
-   `agents perf hooks --project <key>` scope a hook's rollup to one repo.
+   `agents insights perf hooks --project <key>` scope a hook's rollup to one repo.
 
 Steps 3-4 (timing) run for EVERY shimmed hook, cache or not — that's what
-makes a matcher-only hook like git-guard show up in `agents perf hooks`.
+makes a matcher-only hook like git-guard show up in `agents insights perf hooks`.
 
 Stale shim files are garbage-collected automatically when a hook is renamed,
 deleted, or loses its `cache:`/`matches:`/`matcher:` field entirely.
@@ -199,14 +200,14 @@ events keeps its fail-open path. Removing a version re-points the shims at the
 surviving canonical home immediately, without waiting for the daemon's
 self-heal pass.
 
-### `agents hooks profile` / `agents perf hooks`
+### `agents hooks profile` / `agents insights perf hooks`
 
 ```
 agents hooks profile              # last 7 days, table form
 agents hooks profile --days 30
 agents hooks profile --json | jq
 agents hooks profile --warn-ms 500
-agents perf hooks                 # same rollup under the perf surface
+agents insights perf hooks        # same rollup under the perf surface
 ```
 
 Aggregates hook timings into per-hook p50/p95/p99/mean/max + cache hit rate +
@@ -221,8 +222,8 @@ lifecycle hook with nothing to gate, cache, or filter by tool) is the only kind
 that never shows up here; add `matches:`/`matcher:`/`cache:` to opt it in, then
 resync.
 
-See also [`observability.md`](./observability.md) for the `agents perf`
-summary (`commands`, `run`, multi-section default).
+See `agents insights perf --help` for the rest of the perf surface
+(`commands`, `run`, `friction`, and the multi-section default).
 
 
 ### Supported Events
@@ -240,7 +241,7 @@ summary (`commands`, `run`, multi-section default).
 | `Notification` | Agent sends a notification | Claude, Grok, Copilot (`notification`) |
 | `OnError` | Agent encounters an error | Antigravity (`on_error`), Copilot (`errorOccurred`) |
 
-Event name mapping across agents is handled in `src/lib/hooks/install.ts`: `GEMINI_EVENT_MAP`, `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `GOOSE_EVENT_MAP`, `CURSOR_EVENT_MAP`, and `HERMES_EVENT_MAP`.
+Event name mapping across agents is handled in `src/lib/hooks/install.ts`: `ANTIGRAVITY_EVENT_MAP`, Grok's `eventMap`, `COPILOT_EVENT_MAP`, `GOOSE_EVENT_MAP`, `CURSOR_EVENT_MAP`, and `HERMES_EVENT_MAP`.
 
 ## Registration ownership
 
@@ -273,7 +274,7 @@ Hermes (Nous Research, ≥ 0.11.0) declares hooks under a `hooks:` block in `~/.
 
 ## Predicate Matchers
 
-All predicates live in `matches:`. They AND together — every declared predicate must pass. Evaluated by `shouldFire()` in `src/lib/hooks/match.ts:120`. The hook input context (`HookInput`) is passed by the agent CLI as JSON to each registered script.
+All predicates live in `matches:`. They AND together — every declared predicate must pass. Evaluated by `shouldFire()` in `src/lib/hooks/match.ts:96`. The hook input context (`HookInput`) is passed by the agent CLI as JSON to each registered script.
 
 | Matcher | Tests | Example |
 |---------|-------|---------|
@@ -289,15 +290,15 @@ All predicates live in `matches:`. They AND together — every declared predicat
 
 ### Matcher Implementation Notes
 
-- `prompt_contains`: `src/lib/hooks/match.ts:125` — `prompt.includes(matches.prompt_contains)`
-- `prompt_matches`: `src/lib/hooks/match.ts:130` — compiled via `compileHookRegex()`; capped at 200 chars and max group depth 3 to prevent ReDoS
-- `tool_name`: `src/lib/hooks/match.ts:137` — accepts a string or array; `arrayOf()` normalizes both
-- `tool_args_match`: `src/lib/hooks/match.ts:156` — serializes `tool_args` to JSON if not already a string, then applies regex
-- `cwd_includes`: `src/lib/hooks/match.ts:166` — `cwd.includes(n)` for each needle; passes if any matches
-- `project_has`: `src/lib/hooks/match.ts:174` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
-- `git_dirty`: `src/lib/hooks/match.ts:180` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
-- `permission_mode`: `src/lib/hooks/match.ts:145` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
-- `permission_mode_not`: `src/lib/hooks/match.ts:156` — the inverse; skips only on an explicit value **inside** the deny list. It exists because the allowlist cannot express "everywhere except plan" without naming every other mode, and such an enumeration silently stops firing the moment a harness adds or renames one — for a guard, that means it quietly stops guarding. Naming the mode to skip keeps unknown modes firing, so the failure direction is "ran unnecessarily", never "did not run". Both forms AND together when declared on the same hook
+- `prompt_contains`: `src/lib/hooks/match.ts:101` — `prompt.includes(matches.prompt_contains)`
+- `prompt_matches`: `src/lib/hooks/match.ts:106` — compiled via `compileHookRegex()`; capped at 200 chars and max group depth 3 to prevent ReDoS
+- `tool_name`: `src/lib/hooks/match.ts:113` — accepts a string or array; `arrayOf()` normalizes both
+- `tool_args_match`: `src/lib/hooks/match.ts:139` — serializes `tool_args` to JSON if not already a string, then applies regex
+- `cwd_includes`: `src/lib/hooks/match.ts:149` — `cwd.includes(n)` for each needle; passes if any matches
+- `project_has`: `src/lib/hooks/match.ts:157` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
+- `git_dirty`: `src/lib/hooks/match.ts:163` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
+- `permission_mode`: `src/lib/hooks/match.ts:122` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
+- `permission_mode_not`: `src/lib/hooks/match.ts:131` — the inverse; skips only on an explicit value **inside** the deny list. It exists because the allowlist cannot express "everywhere except plan" without naming every other mode, and such an enumeration silently stops firing the moment a harness adds or renames one — for a guard, that means it quietly stops guarding. Naming the mode to skip keeps unknown modes firing, so the failure direction is "ran unnecessarily", never "did not run". Both forms AND together when declared on the same hook
 
 ### Two evaluators, kept in lockstep by test
 
@@ -324,13 +325,13 @@ fails the suite until it is exercised against both implementations.
 
 1. `~/.agents/hooks/<script>` (user dir)
 2. Each enabled extra repo's `hooks/` directory (insertion order)
-3. `~/.agents-system/hooks/<script>` (system dir)
+3. `~/.agents/.system/hooks/<script>` (system dir)
 
 The first match wins. At agent launch, scripts are copied from the central dirs into the version home (`<version-home>/.claude/hooks/`), and the registered command paths in `settings.json` point to the version-local copies — so scripts remain stable even when the source directories change.
 
 ## Disabling System Hooks
 
-To disable a hook shipped by `~/.agents-system/`, add an entry with `enabled: false` in your `~/.agents/agents.yaml`:
+To disable a hook shipped by the system repo (`~/.agents/.system/`), add an entry with `enabled: false` in your `~/.agents/agents.yaml`:
 
 ```yaml
 hooks:
@@ -434,13 +435,8 @@ agents hooks remove     # interactive picker
 agents hooks remove post-edit --agents claude
 ```
 
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/hooks.mp4"></video>
-
 ## See Also
 
 - [resource-sync.md](resource-sync.md) — hooks participate in the same layered resource sync as commands, skills, and rules
 - [docs/plugins.md](plugins.md) — plugins can bundle hooks alongside skills and MCP servers
-- docs/workflows.md — workflow lifecycle events that hooks can observe
 - [docs/subagents.md](subagents.md) — subagent definitions that parent agents dispatch to

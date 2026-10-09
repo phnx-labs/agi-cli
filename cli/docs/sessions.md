@@ -34,11 +34,11 @@ flowchart LR
 `agents ps` lists the sessions running right now on this machine and every reachable
 device, the same roster `agents sessions --active` prints. It is the home of the verbs
 that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`,
-plus `ps migrations` for the migration ledger (the `sessions` spellings run the same code). Typing into a running agent is
+plus `ps migrations` for the migration ledger (the `agents sessions` spellings run the same code). Typing into a running agent is
 `agents send --channel session --to <id>` (or `--pane <%id> [--socket <path>]` for a
-known tmux pane, with `--no-enter` and `--combined` covering every `sessions inject`
+known tmux pane, with `--no-enter` and `--combined` covering every `agents sessions inject`
 mode); resuming an ended one is
-`agents run --resume <id>`. Both moves are step A5 of PHNX-4227; the `sessions`
+`agents run auto --resume <id>` (auto resumes in the session's own harness). Both moves are step A5 of PHNX-4227; the `sessions`
 group itself leaves agents-cli in a later release.
 
 | Flag | Effect |
@@ -179,7 +179,7 @@ always wins over `--device`.
 
 Tool-call search is the standalone CLI's: `sessions --include tools --query
 'program:git input:merge' [--count] [--host <target>] --json` reads the tool
-index agents writes (`agents sessions backfill tools` fills it for historical
+index agents writes (`agents daemon index backfill tools` fills it for historical
 transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
 clause) exits 2 and names that command; reading one session's tool calls,
 `agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
@@ -188,16 +188,16 @@ it for a session).
 
 ## Off-box backup
 
-`agents sessions export --to-r2` and `agents sessions import --from-r2` are
+`sessions export --to-r2` and `sessions import --from-r2` are
 on-demand backup and restore operations. They do not enable the retired background
 R2/CRDT sync cycle.
 
 A signed-in Phoenix user gets the managed backend by default:
 
 ```bash
-agents sessions export --since 30d --to-r2
-agents sessions import --from-r2 --dry-run
-agents sessions import --from-r2
+sessions export --since 30d --to-r2
+sessions import --from-r2 --dry-run
+sessions import --from-r2
 ```
 
 No personal Cloudflare bucket or `r2.backups` bundle is required. The CLI encrypts
@@ -212,8 +212,8 @@ Phoenix-operated infrastructure can recover the escrowed key. Users who require 
 key Phoenix cannot access can force their own bucket:
 
 ```bash
-agents sessions export --since 30d --to-r2 --byo
-agents sessions import --from-r2 --byo
+sessions export --since 30d --to-r2 --byo
+sessions import --from-r2 --byo
 ```
 
 The BYO path requires the `r2.backups` secrets bundle. Its `R2_SYNC_ENC_KEY` is the
@@ -222,7 +222,7 @@ shared restore key across the user's devices, and the existing
 
 The managed endpoint itself (`sessions.agents-cli.sh` — the Worker + R2 bucket) is
 provisioned once, by an operator, with `agents sessions backup-setup` (Cloudflare
-credentials from the `cloudflare` secrets bundle, e.g. `agents secrets exec
+credentials from the `cloudflare` secrets bundle, e.g. `secrets exec
 cloudflare -- agents sessions backup-setup`). It is idempotent — re-running
 redeploys the current Worker template in place. This is NOT a per-user step: a
 signed-in user backs up with zero setup; `backup-setup` is only how the first-party
@@ -247,7 +247,7 @@ endpoint is deployed. The BYO path never touches it.
   `firstUserMessage` — the verbatim originating request, captured at scan time
   and skipping harness-injected scaffolding. It is distinct from `topic` (a
   one-line distillation), `label` / an agent title, and the live row's cleaned
-  `userPromptClean`, and it is emitted on `agents sessions --json` and on the
+  `userPromptClean`, and it is emitted on `sessions --json` and on the
   `agents sessions watch --json` / `agents feed watch --json` streams. Grok
   recovers it via a bounded prefix read of `chat_history.jsonl` so the cheap
   summary-only scan does not open the full log. Its sibling **`lastUserMessage`**
@@ -265,7 +265,7 @@ endpoint is deployed. The BYO path never touches it.
   steps ride the row with an `earlier` counter for the rest. `files` is what the
   session created / modified / deleted, from the harness's own ledger where one
   exists. All three are computed by the daemon's reader-gated tick and cached in
-  `session_timelines` — never on the request path. `agents sessions trace <id>
+  `session_timelines` — never on the request path. `agents trace <id>
   --steps` prints the same fold as text, redacted by default like every other
   derived-label surface. A tool the operator cut short with Ctrl-C counts as
   `blocked`, not `failed`, alongside one a permission rule or hook denied.
@@ -278,7 +278,7 @@ endpoint is deployed. The BYO path never touches it.
   `generatedTitle` → the first-prompt `topic` — implemented once in
   `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
   `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,
-  the picker, `sessions watch --json`, and AGI EXT can never disagree about a
+  the picker, `agents sessions watch --json`, and AGI EXT can never disagree about a
   session's name. `generatedTitle` is a short, descriptive **action + object
   headline** ("Triage the AGI board", not just "Triage") produced by the daemon's
   `session-title` service through a swappable `SessionTitleProvider` — the shipped
@@ -287,7 +287,7 @@ endpoint is deployed. The BYO path never touches it.
   generated **once** per session and persisted in the index against a hash of the
   user text it came from — so a titled session costs no further model calls, and
   it regenerates only when that first user message changes or on an explicit
-  `agents sessions backfill titles --refresh`. Until it runs, the row honestly
+  `agents daemon index backfill titles --refresh`. Until it runs, the row honestly
   shows the user's own first message. The agent's rolling last line stays where a
   live status belongs: `lastAgentLine` / the preview pane. Each box titles its own
   sessions and publishes them on the fleet session mirror, so a peer's rows carry
@@ -315,7 +315,7 @@ attached directly to public work.
 
 ### Remote stream ownership
 
-Fleet `sessions watch --json` and `feed watch --json` publish one row per exact
+Fleet `agents sessions watch --json` and `agents feed watch --json` publish one row per exact
 session id, harness and execution device. `sourceDevice` and `machine` identify
 the execution owner. The worker's state and preview win over the origin launcher,
 even when that launcher is newer or has more fields. Observer-local terminal ids,

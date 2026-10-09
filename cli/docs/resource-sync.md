@@ -9,10 +9,10 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 
 | Resource | Source layers (resolved project > user > system) | Target Location | Sync Method |
 |----------|-----------------|----------------------|-------------|
-| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents-system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (command-skill conversion where required) |
+| Commands | `<project>/.agents/commands/*.md` › `~/.agents/commands/*.md` › `~/.agents/.system/commands/*.md` | Project sources: `<project>/.{agent}/{commandsSubdir}/`; user/system: `<version-home>/.{agent}/{commandsSubdir}/` | Copy (command-skill conversion where required) |
 | Skills | `…/.agents/skills/{name}/` (same layering) | Project sources: `<project>/.{agent}/skills/`; user/system: `<version-home>/.{agent}/skills/` | Copy |
-| Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Symlink |
-| Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Symlink |
+| Hooks | `…/.agents/hooks/*.sh` (same layering) | `.{agent}/hooks/` | Copy + register in the agent's hook config |
+| Rules | `…/.agents/rules/AGENTS.md` (same layering) | `.{agent}/{instructionsFile}` | Compile (layers composed into one file) |
 | MCP | `…/.agents/mcp/*.yaml` (same layering) | `.{agent}/settings.json` | Merge into JSON |
 | Permissions | `…/.agents/permissions/groups/*.yaml` (same layering) | Agent-native config (`settings.json`, TOML, YAML, or `.rules`) | Convert + merge |
 | Plugins | `…/.agents/plugins/{name}/` (same layering) | Agent-native plugin or extension directory | Copy + native manifest/registration |
@@ -21,7 +21,7 @@ For the conceptual model — what a DotAgents repo is, what resources are, and h
 
 ### Extra repos
 
-Users can register additional DotAgent repos via `agents repo add <source>`. Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout (`skills/`, `commands/`, `hooks/`, `rules/`). They participate as an additional layer below the user repo and above the system repo. Registrations live in `meta.extraRepos` in `~/.agents/agents.yaml`.
+Users can register additional DotAgent repos via `agents repo add <source>`. Extras clone into `~/.agents-<alias>/` (or register an existing local path) and ship the same layout (`skills/`, `commands/`, `hooks/`, `rules/`). They participate as an additional layer below the user repo and above the system repo. Registrations live in `meta.extraRepos` in `~/.agents/agents.yaml`.
 
 ## Memory File Mapping
 
@@ -32,7 +32,7 @@ Central `AGENTS.md` maps to agent-specific filenames:
                             ───▶  ~/.codex/AGENTS.md
                             ───▶  ~/.gemini/antigravity-cli/AGENTS.md
                             ───▶  ~/.cursor/.cursorrules
-                            ───▶  ~/.opencode/OPENCODE.md
+                            ───▶  ~/.opencode/AGENTS.md
                             ───▶  ~/.grok/AGENTS.md
 ```
 
@@ -382,9 +382,9 @@ Source: ~/.agents/mcp/*.yaml       Per-agent destinations:
 │ args: [...]        │             Claude  → CLI: `claude mcp add ...`
 │ env: { ... }       │                      (claude owns its own settings)
 └────────────────────┘             Codex   → CLI: `codex mcp add ...`
-                                            · HTTP transport not supported
-                                   OpenCode → <home>/.config/opencode/config.toml
-                                            · key: mcp.<name> (TOML)
+                                            · HTTP servers via `--url`
+                                   OpenCode → <home>/.config/opencode/opencode.jsonc
+                                            · key: mcp.<name> (JSONC)
                                    Grok    → <home>/.grok/config.toml
                                             · key: mcp_servers.<name> (TOML)
                                    Hermes  → <home>/.hermes/config.yaml
@@ -417,11 +417,12 @@ Behavior rules, per `src/lib/mcp.ts`:
    the YAML's values.
 
 3. **Source delete ≠ destination clean.** `removeMcpServerConfig(name)`
-   (`mcp.ts:381`) only unlinks the YAML file. The matching entry in each
+   (`mcp.ts`) only unlinks the YAML file. The matching entry in each
    agent's settings stays until manually removed.
 
 4. **Claude and Codex delegate.** Instead of editing settings.json directly,
-   agents-cli invokes `claude mcp add` / `codex mcp add` (`mcp.ts:169-186`).
+   agents-cli invokes `claude mcp add` / `codex mcp add` (`installMcpViaClaude` /
+   `installMcpViaCodex` in `mcp.ts`).
    Those commands own the merge. Benefit: agent-internal validation runs.
    Cost: write failures surface as `execSync` errors, not structured results.
 
@@ -437,8 +438,8 @@ a format rewrite.
 
 ┌─────────────────────┐                       ┌──────────────────┐          Claude (JSON):
 │ read-only.yaml      │                       │ allow: [         │          { permissions: {
-│ ───────             │ loadPermission-       │   "Read",        │              allow: [...],
-│ allow: [Read, Grep] │ ─Groups()──────────▶  │   "Grep",        │              deny:  [...]
+│ ───────             │ buildPermissions-     │   "Read",        │              allow: [...],
+│ allow: [Read, Grep] │ ─FromGroups()──────▶  │   "Grep",        │              deny:  [...]
 │ deny:  [Write]      │ concat per group      │   "Bash(git *)"  │            }}
 │                     │                       │ ],               │
 │ git-safe.yaml       │                       │ deny: [          │          OpenCode (JSONC/JSON):
@@ -453,9 +454,9 @@ a format rewrite.
 ```
 
 Group-to-permission-set is concatenation with one naming convention:
-groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
+groups whose name contains `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
 though their YAML lists appear under `allow`
-(`permissions.ts:230-235`).
+(`buildPermissionsFromGroups` in `permissions.ts`).
 
 Reading back — `agents permissions list <agent>`, and the config-file import
 behind `agents permissions add <path>` — goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
@@ -472,7 +473,7 @@ recovers a set that grants the same access, not the byte-identical rules that
 were written, and each target names its own loss in a `lossyBecause` line:
 
 - Claude's native format is closest to canonical — near 1:1 passthrough
-  (`permissions.ts:362-369`).
+  (`convertToClaudeFormat` in `permissions.ts`).
 - OpenCode 1.1.1+ maps `Bash(pattern)` rules into the `permission.bash`
   `allow`/`deny` map in `~/.config/opencode/opencode.jsonc` (or `.json`) for
   user scope, or project-root `opencode.jsonc` (or `.json`). Non-bash rules are
@@ -497,7 +498,7 @@ were written, and each target names its own loss in a `lossyBecause` line:
   never stops on a prompt; a denied command just fails and the agent works
   around it. Only explicit `skip` bypasses approvals and sandboxing.
   Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
-  (`permissions.ts:38-56`).
+  (`CODEX_RULES_FILENAME` in `permissions-registry.ts`).
 - Goose is **not** allowlist-capable. Its `permission.yaml` gates whole tools
   (`developer__shell`, `developer__text_editor`), so several distinct canonical
   rules collapse onto one entry and cannot be read back faithfully — the
@@ -545,15 +546,16 @@ Source: ~/.agents/plugins/<name>/        Per-version destination:
 └──────────────────────────────┘               └ enabledPlugins["<name>@agents-cli"] = true
 ```
 
-Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`:
+Behavior rules, per `syncPluginToVersion` in `src/lib/plugins/plugins.ts` and
+`src/lib/plugins/plugin-marketplace.ts`:
 
 1. **Discovery requires a valid manifest.** `discoverPlugins()`
-   (`plugins.ts:61`) scans `~/.agents/plugins/<dir>/` and only accepts entries
+   (`plugins.ts`) scans each layer's `plugins/<dir>/` and only accepts entries
    with a parseable `.claude-plugin/plugin.json` containing `name` and
    `version`. Directories without the manifest are silently skipped.
 
-2. **Copy, not symlink.** Unlike commands/skills/hooks/rules, plugins are
-   copied via `copyPluginToMarketplace()` (`plugin-marketplace.ts`). The copy
+2. **Copy, not symlink.** Like commands, skills, and hooks, plugins are
+   copied, via `copyPluginToMarketplace()` (`plugin-marketplace.ts`). The copy
    pre-expands `${user_config.*}` placeholders against the per-plugin
    `.user-config.json` so each version sees its resolved values. `${CLAUDE_PLUGIN_ROOT}`
    and `${CLAUDE_PLUGIN_DATA}` are left for Claude to expand at runtime.
@@ -574,9 +576,9 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
 4. **Exec-surface gate.** Plugins shipping `hooks/`, `.mcp.json`, `bin/`,
    `scripts/`, non-permissions `settings.json`, or `permissions/` are
    *installed* (copied + marketplace registered) but *not enabled* unless the
-   caller passes `allowExecSurfaces: true`. `enablePluginInSettings()`
-   (`plugin-marketplace.ts:196`) short-circuits without flipping
-   `enabledPlugins[<name>@agents-cli]` to `true`. The user-facing flag is
+   caller passes `allowExecSurfaces: true`. `syncPluginToVersion()` then skips
+   `addPluginToSettings()` (`plugin-marketplace.ts`), so
+   `enabledPlugins[<name>@agents-cli]` is never flipped to `true`. The user-facing flag is
    `--allow-exec-surfaces` on both `agents plugins add` and
    `agents sync --plugin`. The gate's purpose is to prevent unattended sync
    flows (e.g., `agents use claude@<v>`) from silently arming third-party
@@ -585,12 +587,12 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
 5. **Capability gating.** Only agents where `supports(agent, 'plugins', version)`
    passes participate (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins
    can additionally declare `agents: [...]` in their manifest to narrow further;
-   `pluginSupportsAgent()` (`plugins.ts:179`) intersects both lists.
+   `pluginSupportsAgent()` (`plugins.ts`) intersects both lists.
 
 6. **Codex command-to-skill fallback.** Codex `>= 0.117.0` dropped
    command support; for those versions, plugin `commands/*.md` are
    converted to skills prefixed with `<plugin>-<command>`
-   (`plugins.ts:444-453`) so they remain reachable as `$<plugin>-<command>`.
+   (`syncPluginToVersion` in `plugins.ts`) so they remain reachable as `$<plugin>-<command>`.
 
 7. **Source delete ≠ destination clean — but stale marketplace copies get
    swept.** `cleanOrphanedPluginSkills()` (`plugins.ts`) runs every sync and
@@ -605,7 +607,7 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    when the source repo is **absent** (a project we're not in, a removed extra
    repo) the sweep falls back to the name-only test so an unrelated sync never
    trashes a plugin whose source simply is not reachable in this context. Trashed
-   copies soft-delete to `~/.agents/.trash/plugins/`; `diffVersionPlugins()`
+   copies soft-delete to `~/.agents/.history/trash/plugins/`; `diffVersionPlugins()`
    surfaces the same orphans for `agents prune`.
 
 ## Key Functions
@@ -615,7 +617,7 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
 | `getAvailableResources()` | versions.ts | List central resources |
 | `getActuallySyncedResources()` | versions.ts | Check what's synced to version |
 | `getNewResources()` | versions.ts | Diff available vs synced |
-| `syncResourcesToVersion()` | versions.ts | Create symlinks in version home |
+| `syncResourcesToVersion()` | versions.ts | Copy/compile resources into the version home |
 | `pruneRemovedResources()` | staleness/prune.ts | Remove version-home resources deleted from source (manifest-bounded) |
 | `markdownToToml()` | convert.ts | Legacy command TOML conversion helper |
 | `WORKFLOW_TARGETS` | workflows-registry.ts | Per-harness workflow shape (dir, layout, transform, ownership marker); `syncWorkflowToVersion` / `listWorkflowsForAgent` / `removeWorkflowFromVersion` / `workflowContentMatches` and the staleness detector are generic over it |

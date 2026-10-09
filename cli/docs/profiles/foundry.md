@@ -8,8 +8,8 @@ Anthropic models served through Microsoft Azure AI Foundry (formerly Azure AI St
 ## Quick start
 
 ```bash
-agents harness create
-# pick foundry, fill prompts, run smoke test
+agents harness add
+# wizard: pick the foundry preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 

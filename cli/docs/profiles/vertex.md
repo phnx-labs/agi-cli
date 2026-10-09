@@ -6,8 +6,8 @@ Anthropic models served from Google Cloud Vertex AI.
 ## Quick start
 
 ```bash
-agents harness create
-# pick vertex, fill prompts, run smoke test
+agents harness add
+# wizard: pick the vertex preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 
