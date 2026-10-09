@@ -46,7 +46,8 @@ if (process.argv[2] === '__usage-ingest') {
 
 if (process.argv[2] === '__usage-export') {
   const { exportClaudeUsageCacheRows } = await import('./lib/accounting/usage.js');
-  process.stdout.write(JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows() }));
+  const { writeStdoutFlushed } = await import('./lib/stdout.js');
+  await writeStdoutFlushed(JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows() }));
   process.exit(0);
 }
 
