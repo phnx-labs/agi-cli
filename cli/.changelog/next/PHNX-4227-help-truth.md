@@ -6,3 +6,4 @@
   `agents ps focus` to attach, `agents run auto --resume <id>` to continue a session, and
   `agents daemon index` for index maintenance. `agents computer` keeps its spelling, since
   it supplies the permission allow list and session recording. No command or flag changed.
+  Source: `cli/src/commands/sessions.ts`, `cli/src/commands/exec.ts`, `cli/src/lib/hosts/option.ts`.

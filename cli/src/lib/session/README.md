@@ -182,7 +182,7 @@ for the `formatMetaOnlyBody` reason above.
 
 ## Fleet `--active` behavior and the scale requirement
 
-`agents sessions --active` splits on TTY (`sessions.ts:1157`): an interactive terminal
+`agents ps` splits on TTY (`runLiveRoster`, `commands/ps-roster.ts:760-772`): an interactive terminal
 gets the browser (`sessions-browser.ts`), everything else gets the static
 `renderActiveSessions` dump. Both funnel through one fleet sweep, `gatherActiveSessions`
 (`sessions.ts:947`) = local `getActiveSessions()` + remote SSH fan-out
@@ -246,7 +246,7 @@ cutoff 24 h (`active.ts:245`).
 
 **Gap 1 — "how long has it been idle" is not shown.** The value exists on every row
 (`lastActivityMs` = file mtime, `state.ts:531`, `active.ts:648`), but the primary
-`agents sessions --active` row (`printActiveRow`, `sessions.ts:543`) renders **no time
+`agents ps` row (`printActiveRow`, `commands/ps-roster.ts:267`) renders **no time
 column at all** — only id, kind, host, the status word, badges, description. The
 browser/picker listings do carry both ends of the session — `sessionAgeParts` renders
 `<created> → <last activity>` (`relative-time.ts`, `timeCell` in `sessions.ts`), so the

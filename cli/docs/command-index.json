@@ -18831,7 +18831,7 @@
             }
           ],
           "examples": "# Stop a live session by a short id prefix\nagents sessions stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents sessions stop 4b2f1a9c --local",
-          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents sessions detach <id>`, and bring it back\nwith `agents ps focus <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents ps focus <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
           "subcommands": []
         },
         {

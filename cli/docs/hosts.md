@@ -499,8 +499,9 @@ agents run <agent> ["<task>"] --device <device>
 > reached the host **and** held the pane for at least 10 seconds). A clean detach
 > (`Ctrl-b d`, exit 0) or a real agent exit (any non-255 code) is left alone, and
 > `--raw`/no-tmux runs are not retried (they don't survive a drop). If every attempt
-> fails the CLI prints a manual resume command (`agents sessions resume <id>`) to get
-> back in once the link is back.
+> fails the CLI prints the session id and a manual way back in once the link is back;
+> run `agents ps focus <id>` (attach the live pane, or recover an ended one) or
+> `agents run auto --resume <id>` (continue an ended session).
 >
 > **`agents ps focus <session-id>`** is the manual companion — one verb that always
 > tries hardest to put you back into a dropped agent terminal: attach the live pane

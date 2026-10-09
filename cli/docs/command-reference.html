@@ -3614,7 +3614,7 @@ agents sessions stop 4b2f1a9c
 
 # only look on this machine (skip the fleet sweep)
 agents sessions stop 4b2f1a9c --local stop ends the session; it does not background it. to keep an agent working
-unattended instead, use `agents sessions detach &lt;id&gt;`, and bring it back
+unattended instead, use `agents ps detach &lt;id&gt;`, and bring it back
 with `agents ps focus &lt;id&gt;`.
 
 a session that lives on another machine is stopped there over ssh — its pid
@@ -3623,7 +3623,7 @@ agents sessions stop 4b2f1a9c
 
 # Only look on this machine (skip the fleet sweep)
 agents sessions stop 4b2f1a9c --local</code></pre><h4>Notes</h4><p class="notes">stop ENDS the session; it does not background it. To keep an agent working
-unattended instead, use `agents sessions detach &lt;id&gt;`, and bring it back
+unattended instead, use `agents ps detach &lt;id&gt;`, and bring it back
 with `agents ps focus &lt;id&gt;`.
 
 A session that lives on another machine is stopped THERE over SSH — its pid

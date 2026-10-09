@@ -25,7 +25,7 @@ export function registerSessionsStopCommand(program: Command, group: 'sessions' 
     `,
     notes: `
       stop ENDS the session; it does not background it. To keep an agent working
-      unattended instead, use \`agents ${group} detach <id>\`, and bring it back
+      unattended instead, use \`agents ps detach <id>\`, and bring it back
       with \`agents ps focus <id>\`.
 
       A session that lives on another machine is stopped THERE over SSH — its pid

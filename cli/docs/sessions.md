@@ -32,7 +32,7 @@ flowchart LR
 ## Live roster: `agents ps`
 
 `agents ps` lists the sessions running right now on this machine and every reachable
-device, the same roster `agents sessions --active` prints. It is the home of the verbs
+device. It is the home of the verbs
 that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`,
 plus `ps migrations` for the migration ledger (the `agents sessions` spellings run the same code). Typing into a running agent is
 `agents send --channel session --to <id>` (or `--pane <%id> [--socket <path>]` for a
@@ -45,7 +45,7 @@ group itself leaves agents-cli in a later release.
 |---|---|
 | `--json` | One row per live session (the `sessions --active --json` shape) |
 | `--local` | This machine only; no SSH fan-out |
-| `-D, --device <name...>` | Only these devices. Peers answer `agents sessions --active --json`, so a peer on an older release still works |
+| `-D, --device <name...>` | Only these devices. Each peer is queried over SSH with the roster call older releases also answer (`lib/session/remote-active.ts:45`), so a peer on an older release still works |
 | `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
 | `--bookmarks` | Only bookmarked sessions (`sessions --active --bookmarks`) |
 | `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag (`sessions --active --routine`) |
@@ -180,9 +180,10 @@ always wins over `--device`.
 Tool-call search is the standalone CLI's: `sessions --include tools --query
 'program:git input:merge' [--count] [--host <target>] --json` reads the tool
 index agents writes (`agents daemon index backfill tools` fills it for historical
-transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
-clause) exits 2 and names that command; reading one session's tool calls,
-`agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
+transcripts). Use `sessions --include tools` for every tool search: agents-cli's legacy
+`sessions` group refuses one (no session id, or a `--query` clause) with exit 2 and
+names the standalone command. Reading one session's tool calls is
+`sessions <id> --include tools [--json|--markdown]`.
 Following a live transcript is `sessions tail <id>` (`agents logs -f <id>` runs
 it for a session).
 

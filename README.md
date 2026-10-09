@@ -385,7 +385,7 @@ On a terminal, a bare `sessions` opens the **interactive session browser** — o
 | `w` | time window | `--since` |
 | `tab` | toggle the preview pane | — |
 | `⏎` | resume | `agents run <agent> --resume <id>` |
-| `y` | copy the equivalent `sessions …` command | — |
+| `y` | copy the equivalent `sessions …` command | `agents sessions --print-cmd` (prints the `ag sessions …` line for the given flags) |
 
 **Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `sessions bookmark <id>` / `sessions --bookmarks` do the same outside a TTY. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
 
@@ -403,7 +403,7 @@ Landing on a session cold? `sessions preview <id>` prints a catch-up card: an in
 
 Sharing a session uses `sessions render <id> -o session.md`, not the raw harness JSONL. The document starts with that same preview, then presents user and assistant turns, fenced commands, structured tool arguments, and bounded tool output. Credential-shaped values and local home paths are redacted by default; `--no-redact` is for local-only inspection.
 
-`sessions share <id>` goes one step further and publishes that document as a self-contained web page through the standalone `artifacts` CLI, printing the link. Secrets and emails are masked before the page is written. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
+`sessions share <id>` goes one step further and publishes that document as a self-contained web page through the standalone `artifacts` CLI, printing the link. Secrets and emails are masked before the page is written. The slug is `session-<shortId>`, so re-sharing one session updates one URL. The agents-cli spelling, `agents sessions share <id>`, publishes the page **unlisted** unless you pass `--public` (with `--label <text>` as its gallery title): a transcript carries file paths, command output, and error text that a plan does not, so it stays out of your public gallery by default.
 
 ### Publish CleanShot recordings
 

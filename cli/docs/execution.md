@@ -58,7 +58,8 @@ engine on the target. Interactive remote work uses a reconnectable terminal tran
 link loss does not kill the harness. If that durability prerequisite is unavailable, the
 launch fails before doing work. When the local SSH client exits — clean detach,
 agent quit, or a drop that is not auto-reconnecting — the CLI prints the full
-session id and `agents sessions resume <id>` so the shell is not a dead end.
+session id and a resume command so the shell is not a dead end; get back in with
+`agents ps focus <id>`, or `agents run auto --resume <id>` once the session has ended.
 When the session id is known before the TTY is taken (Claude, or a resume),
 it is also printed as the stream starts.
 
