@@ -464,19 +464,48 @@ export function resolveNamesToSessionIds(
 
 const PID_REUSE_TOLERANCE_MS = 60_000;
 
-function processStartMs(pid: number): number | null {
-  if (process.platform === 'win32') return null;
+export const PROCESS_START_CACHE_TTL_MS = 30_000;
+const processStartCache = new Map<number, number | null>();
+let processStartTableAt = Number.NEGATIVE_INFINITY;
+
+function parseStartMs(text: string): number | null {
+  const ms = text ? Date.parse(text) : NaN;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function readProcessStartTable(now: number): void {
+  processStartCache.clear();
+  processStartTableAt = now;
   try {
-    const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+    const out = execFileSync('ps', ['-A', '-o', 'pid=,lstart='], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-    if (!out) return null;
-    const ms = Date.parse(out);
-    return Number.isFinite(ms) ? ms : null;
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    for (const line of out.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(.+)$/);
+      if (m) processStartCache.set(Number(m[1]), parseStartMs(m[2].trim()));
+    }
   } catch {
-    return null;
+    processStartCache.clear();
   }
+}
+
+export function processStartMs(pid: number, now: number = Date.now()): number | null {
+  if (process.platform === 'win32') return null;
+  if (now - processStartTableAt >= PROCESS_START_CACHE_TTL_MS) readProcessStartTable(now);
+  if (processStartCache.has(pid)) return processStartCache.get(pid)!;
+  let ms: number | null = null;
+  try {
+    ms = parseStartMs(execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim());
+  } catch {
+    ms = null;
+  }
+  processStartCache.set(pid, ms);
+  return ms;
 }
 
 export function isPidAlive(pid: number, startedAtMs?: number): boolean {
