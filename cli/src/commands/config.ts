@@ -11,7 +11,7 @@ import {
   devicePropertyToConfigName,
   configKeyStorageHint,
   listKnownConfigKeys,
-  MENUBAR_MENU_PROPERTIES,
+  MENUBAR_CONFIG_KEYS,
   type ParsedConfigKey,
   type ParsedRunConfigKey,
   type ParsedDeviceConfigKey,
@@ -391,8 +391,7 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  for (const prop of MENUBAR_MENU_PROPERTIES) {
-    const key = `menubar.menu.${prop}`;
+  for (const key of MENUBAR_CONFIG_KEYS) {
     const value = getConfigValue(key).value;
     if (value !== undefined) {
       yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
@@ -468,8 +467,10 @@ export function registerConfigCommand(program: Command): void {
       agents config set devices.mac-mini.max-agents 4
       agents config set updates.auto off
       agents config set updates.claude.auto off
-      agents config set menubar.menu.tabOrder home,projects,sessions,inbox
+      agents config set menubar.menu.tabOrder home,goals,sessions,projects,inbox
       agents config set menubar.menu.pinnedProjects '["Rush","AGI Menu"]'
+      agents config set menubar.menu.homeGoals company,myDay
+      agents config set menubar.statusbar.goalCountdown on
       agents config get run.claude@*.model
       agents config unset run.claude@*.tier.best
       agents config list

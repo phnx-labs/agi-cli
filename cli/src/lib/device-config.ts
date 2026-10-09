@@ -25,6 +25,8 @@ interface ConfigKeySpecBase {
   description: string;
   defaultValue?: unknown;
   validate?: (value: unknown) => string | null;
+  /** Canonicalizes a stored value on read and a valid value before it is written. */
+  normalize?: (value: unknown) => unknown;
 }
 
 export type ConfigKeySpec =
@@ -50,7 +52,26 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'sessions', 'inbox', 'projects'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'projects', 'sessions', 'inbox'] as const;
+
+/** Tabs added after `menubar.menu.tabOrder` shipped: an order written before them may leave them out. */
+const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals'];
+
+export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
+
+/**
+ * The tab order the AGI Menu shows for a stored list, mirroring its `TabLayout.resolve`:
+ * unknown and repeated ids are dropped, and a tab the list leaves out keeps its built-in
+ * place after the listed ones — so an order saved before `goals` existed gains it at the end.
+ */
+export function resolveMenubarTabOrder(stored: readonly string[]): string[] {
+  const known = MENUBAR_TABS as readonly string[];
+  const tabs: string[] = [];
+  for (const id of stored) {
+    if (known.includes(id) && !tabs.includes(id)) tabs.push(id);
+  }
+  return [...tabs, ...known.filter((t) => !tabs.includes(t))];
+}
 
 function oneOf(name: string, allowed: readonly string[]): (v: unknown) => string | null {
   return (v) => (allowed.includes(v as string) ? null : `${name} must be one of ${allowed.join(' | ')}.`);
@@ -605,12 +626,17 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: [...MENUBAR_TABS],
     description:
       `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
-      'Settings is always last and is not listed. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
+      'Settings is always last and is not listed. An order saved before Goals existed may omit goals; ' +
+      'it reads back with goals appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
     validate: (v) => {
       const tabs = v as string[];
-      const ok = tabs.length === MENUBAR_TABS.length && MENUBAR_TABS.every((t) => tabs.includes(t));
+      const required = MENUBAR_TABS.filter((t) => !MENUBAR_TABS_ADDED_LATER.includes(t));
+      const ok = new Set(tabs).size === tabs.length
+        && tabs.every((t) => (MENUBAR_TABS as readonly string[]).includes(t))
+        && required.every((t) => tabs.includes(t));
       return ok ? null : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once.`;
     },
+    normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
   },
   {
     name: 'menubar.menu.hiddenTabs',
@@ -659,6 +685,31 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'AGI Menu: how a project\'s recently merged pull requests are grouped — none, type (the ' +
       'conventional-commit type in the title), or day (Today, Yesterday, Earlier this week).',
     validate: oneOf('menubar.menu.prGroupMerged', ['none', 'type', 'day']),
+  },
+  {
+    name: 'menubar.menu.homeGoals',
+    yamlKey: 'menubarMenuHomeGoals',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: ['company'],
+    description:
+      `AGI Menu: the goal levels shown on Home, in order — any of ${MENUBAR_HOME_GOALS.join(', ')} ` +
+      '(company quarter goal, company week goal, your week goal, your day goal). Empty shows none.',
+    validate: (v) => {
+      const levels = v as string[];
+      const bad = levels.find((l) => !(MENUBAR_HOME_GOALS as readonly string[]).includes(l));
+      if (bad !== undefined) return `menubar.menu.homeGoals: "${bad}" is not one of ${MENUBAR_HOME_GOALS.join(', ')}.`;
+      const dup = levels.find((l, i) => levels.indexOf(l) !== i);
+      return dup === undefined ? null : `menubar.menu.homeGoals lists "${dup}" twice.`;
+    },
+  },
+  {
+    name: 'menubar.statusbar.goalCountdown',
+    yamlKey: 'menubarStatusbarGoalCountdown',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: false,
+    description: 'AGI Menu: show the countdown to the next goal deadline beside the menu-bar icon.',
   },
 ];
 
@@ -822,7 +873,8 @@ export function getConfigValue(name: string, opts?: ConfigTarget): ConfigEntry {
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
     const value = readMeta({ migrate: false }).config?.[spec.yamlKey];
-    return { spec, value, source: value !== undefined ? 'user' : 'default' };
+    if (value === undefined) return { spec, value, source: 'default' };
+    return { spec, value: spec.normalize ? spec.normalize(value) : value, source: 'user' };
   }
   ensureDeviceConfigMigrated();
   if (opts?.fleet) {
@@ -842,7 +894,8 @@ export async function getConfigValueAsync(name: string, opts?: ConfigTarget): Pr
   const spec = configKeySpec(name);
   if (spec.scope === 'user') {
     const value = readMeta({ migrate: false }).config?.[spec.yamlKey];
-    return { spec, value, source: value !== undefined ? 'user' : 'default' };
+    if (value === undefined) return { spec, value, source: 'default' };
+    return { spec, value: spec.normalize ? spec.normalize(value) : value, source: 'user' };
   }
   ensureDeviceConfigMigrated();
   if (opts?.fleet) {
@@ -929,6 +982,7 @@ export function setConfigValue(name: string, value: unknown, opts?: ConfigTarget
   ensureDeviceConfigMigrated();
   const spec = configKeySpec(name);
   assertValidValue(spec, value);
+  if (spec.normalize) value = spec.normalize(value);
   if (spec.scope === 'user') {
     if (opts?.fleet) {
       throw new Error(`Config key '${spec.name}' is user-scope (already fleet-wide) — --fleet does not apply.`);

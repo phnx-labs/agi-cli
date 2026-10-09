@@ -49,22 +49,32 @@ describe('menubar snapshot', () => {
       const scalarOnly = (prefs: Record<string, unknown>) =>
         Object.values(prefs).every((v) => ['string', 'number', 'boolean'].includes(typeof v));
       expect(scalarOnly(buildMenuPreferences())).toBe(true);
-      expect(buildMenuPreferences()).toMatchObject({ 'menubar.menu.groupTicketsByMilestone': false });
+      expect(buildMenuPreferences()).toMatchObject({
+        'menubar.menu.groupTicketsByMilestone': false,
+        'menubar.statusbar.goalCountdown': false,
+      });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
-        'menubar.menu.tabOrder': ['home', 'sessions', 'inbox', 'projects'],
+        'menubar.menu.tabOrder': ['home', 'goals', 'projects', 'sessions', 'inbox'],
         'menubar.menu.hiddenTabs': [],
+        'menubar.menu.homeGoals': ['company'],
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
       setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
       setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
+      setConfigValue('menubar.menu.homeGoals', ['company', 'myDay']);
       setConfigValue('menubar.menu.groupTicketsByMilestone', true);
+      setConfigValue('menubar.statusbar.goalCountdown', true);
       expect(scalarOnly(buildMenuPreferences())).toBe(true);
-      expect(buildMenuPreferences()).toMatchObject({ 'menubar.menu.groupTicketsByMilestone': true });
+      expect(buildMenuPreferences()).toMatchObject({
+        'menubar.menu.groupTicketsByMilestone': true,
+        'menubar.statusbar.goalCountdown': true,
+      });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
-        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox'],
+        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals'],
         'menubar.menu.hiddenTabs': ['inbox'],
+        'menubar.menu.homeGoals': ['company', 'myDay'],
       });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;

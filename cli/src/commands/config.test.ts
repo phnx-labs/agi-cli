@@ -148,13 +148,33 @@ describe('config command', () => {
     runAgents(home, ['config', 'set', 'menubar.menu.groupTicketsByMilestone', 'on']);
     const rows = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string; value: unknown }>;
     const value = (key: string) => rows.find((r) => r.key === key)?.value;
-    expect(value('menubar.menu.tabOrder')).toEqual(['home', 'projects', 'sessions', 'inbox']);
+    // An order without goals (the pre-Goals form) is accepted and stored with goals appended.
+    expect(value('menubar.menu.tabOrder')).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals']);
     expect(value('menubar.menu.pinnedProjects')).toEqual(['Rush', 'Ops, west']);
     expect(value('menubar.menu.groupTicketsByMilestone')).toBe(true);
 
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.hiddenTabs', 'settings'])).toThrow(/not one of/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.pinnedProjects', '["Rush", 3]'])).toThrow(/JSON array of strings/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.tabOrder', 'home,projects'])).toThrow(/exactly once/);
+  });
+
+  it('round-trips the Goals preferences through set, get, and list (PHNX-4291)', () => {
+    runAgents(home, ['config', 'set', 'menubar.menu.homeGoals', 'company,myDay']);
+    runAgents(home, ['config', 'set', 'menubar.statusbar.goalCountdown', 'on']);
+    expect(runAgents(home, ['config', 'get', 'menubar.menu.homeGoals'])).toContain('company');
+    expect(runAgents(home, ['config', 'get', 'menubar.menu.homeGoals'])).toContain('myDay');
+    expect(runAgents(home, ['config', 'get', 'menubar.statusbar.goalCountdown'])).toContain('true');
+    const rows = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string; value: unknown; hint: string }>;
+    expect(rows.find((r) => r.key === 'menubar.menu.homeGoals')?.value).toEqual(['company', 'myDay']);
+    const countdown = rows.find((r) => r.key === 'menubar.statusbar.goalCountdown');
+    expect(countdown?.value).toBe(true);
+    expect(countdown?.hint).toContain('config.menubarStatusbarGoalCountdown');
+
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeGoals', 'company,quarter'])).toThrow(/"quarter" is not one of/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeGoals', 'myDay,myDay'])).toThrow(/twice/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.statusbar.goalCountdown', 'maybe'])).toThrow();
+    runAgents(home, ['config', 'unset', 'menubar.statusbar.goalCountdown']);
+    expect(runAgents(home, ['config', 'get', 'menubar.statusbar.goalCountdown'])).toContain('(unset)');
   });
 
   it('rejects an out-of-set AGI Menu enum value', () => {

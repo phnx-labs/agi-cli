@@ -5,7 +5,7 @@ import {
   devicePropertyToConfigName,
   listKnownConfigKeys,
   configKeyStorageHint,
-  MENUBAR_MENU_PROPERTIES,
+  MENUBAR_CONFIG_KEYS,
 } from './config-keys.js';
 import { configKeySpec } from './device-config.js';
 
@@ -134,28 +134,39 @@ describe('config-keys', () => {
     });
 
     it('parses AGI Menu preference keys', () => {
-      expect(parseConfigKey('menubar.menu.defaultProject')).toEqual({ scope: 'menubar', property: 'defaultProject' });
-      expect(parseConfigKey('menubar.menu.workingRowsShown')).toEqual({ scope: 'menubar', property: 'workingRowsShown' });
-      expect(parseConfigKey('menubar.menu.showPullRequests')).toEqual({ scope: 'menubar', property: 'showPullRequests' });
+      expect(parseConfigKey('menubar.menu.defaultProject')).toEqual({ scope: 'menubar', section: 'menu', property: 'defaultProject' });
+      expect(parseConfigKey('menubar.menu.workingRowsShown')).toEqual({ scope: 'menubar', section: 'menu', property: 'workingRowsShown' });
+      expect(parseConfigKey('menubar.menu.showPullRequests')).toEqual({ scope: 'menubar', section: 'menu', property: 'showPullRequests' });
       expect(configKeyStorageHint(parseConfigKey('menubar.menu.groupBy'))).toContain('central agents.yaml');
       expect(listKnownConfigKeys()).toContain('menubar.menu.ticketSort');
     });
 
     it('rejects an unknown AGI Menu preference key', () => {
       expect(() => parseConfigKey('menubar.menu.bogus')).toThrow(/Unknown AGI Menu preference/);
+      expect(() => parseConfigKey('menubar.statusbar.bogus')).toThrow(/Unknown AGI Menu preference/);
+      expect(() => parseConfigKey('menubar.menu.goalCountdown')).toThrow(/Unknown AGI Menu preference/);
+    });
+
+    it('parses the Goals preferences: menubar.menu.homeGoals and menubar.statusbar.goalCountdown (PHNX-4291)', () => {
+      expect(parseConfigKey('menubar.menu.homeGoals')).toEqual({ scope: 'menubar', section: 'menu', property: 'homeGoals' });
+      const countdown = parseConfigKey('menubar.statusbar.goalCountdown');
+      expect(countdown).toEqual({ scope: 'menubar', section: 'statusbar', property: 'goalCountdown' });
+      expect(formatConfigKey(countdown)).toBe('menubar.statusbar.goalCountdown');
+      expect(configKeyStorageHint(countdown)).toBe('config.menubarStatusbarGoalCountdown (central agents.yaml; syncs fleet-wide)');
+      expect(listKnownConfigKeys()).toEqual(expect.arrayContaining(['menubar.menu.homeGoals', 'menubar.statusbar.goalCountdown']));
     });
 
     it('parses the Headless-runs, Home and device-sort preferences (PHNX-3999)', () => {
       for (const prop of ['sessionUpdates', 'deviceSort', 'headlessAgent', 'headlessFallbackAgent', 'headlessPlacement']) {
-        expect(parseConfigKey(`menubar.menu.${prop}`)).toEqual({ scope: 'menubar', property: prop });
+        expect(parseConfigKey(`menubar.menu.${prop}`)).toEqual({ scope: 'menubar', section: 'menu', property: prop });
         expect(listKnownConfigKeys()).toContain(`menubar.menu.${prop}`);
       }
     });
 
     it('every parser-accepted AGI Menu key has a registered store spec', () => {
-      for (const prop of MENUBAR_MENU_PROPERTIES) {
-        expect(() => configKeySpec(`menubar.menu.${prop}`)).not.toThrow();
-        expect(configKeySpec(`menubar.menu.${prop}`).scope).toBe('user');
+      for (const key of MENUBAR_CONFIG_KEYS) {
+        expect(() => configKeySpec(key)).not.toThrow();
+        expect(configKeySpec(key).scope).toBe('user');
       }
     });
   });

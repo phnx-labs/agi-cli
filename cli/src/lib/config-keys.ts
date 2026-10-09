@@ -31,7 +31,18 @@ export const MENUBAR_MENU_PROPERTIES = [
   'groupTicketsByMilestone',
   'prGroupOpen',
   'prGroupMerged',
+  'homeGoals',
 ] as const;
+
+export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;
+
+export type MenubarSection = 'menu' | 'statusbar';
+
+/** Every AGI Menu preference key, `menubar.menu.*` then `menubar.statusbar.*`. */
+export const MENUBAR_CONFIG_KEYS: readonly string[] = [
+  ...MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`),
+  ...MENUBAR_STATUSBAR_PROPERTIES.map((p) => `menubar.statusbar.${p}`),
+];
 
 export interface ParsedRunConfigKey {
   scope: 'run';
@@ -81,6 +92,7 @@ export interface ParsedUpdatesConfigKey {
 
 export interface ParsedMenubarConfigKey {
   scope: 'menubar';
+  section: MenubarSection;
   property: string;
 }
 
@@ -192,15 +204,12 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
-  const menubarMatch = raw.match(/^menubar\.menu\.(.+)$/);
+  const menubarMatch = raw.match(/^menubar\.(menu|statusbar)\.(.+)$/);
   if (menubarMatch) {
-    const property = menubarMatch[1];
-    if (!(MENUBAR_MENU_PROPERTIES as readonly string[]).includes(property)) {
-      throw new Error(
-        `Unknown AGI Menu preference '${key}'. Known keys: ${MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`).join(', ')}.`,
-      );
+    if (!MENUBAR_CONFIG_KEYS.includes(raw)) {
+      throw new Error(`Unknown AGI Menu preference '${key}'. Known keys: ${MENUBAR_CONFIG_KEYS.join(', ')}.`);
     }
-    return { scope: 'menubar', property };
+    return { scope: 'menubar', section: menubarMatch[1] as MenubarSection, property: menubarMatch[2] };
   }
 
   if (raw === 'updates.auto') {
@@ -252,7 +261,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
   if (raw.startsWith('menubar.')) {
     throw new Error(
-      `Invalid AGI Menu config key '${key}'. Use ${MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`).join(', ')}.`,
+      `Invalid AGI Menu config key '${key}'. Use ${MENUBAR_CONFIG_KEYS.join(', ')}.`,
     );
   }
   if (raw.startsWith('devices.')) {
@@ -290,7 +299,7 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
     case 'updates':
       return parsed.agent ? `updates.${parsed.agent}.auto` : 'updates.auto';
     case 'menubar':
-      return `menubar.menu.${parsed.property}`;
+      return `menubar.${parsed.section}.${parsed.property}`;
   }
 }
 
@@ -317,9 +326,7 @@ export function listKnownConfigKeys(): string[] {
     'updates.auto',
     'updates.<agent>.auto',
   );
-  for (const prop of MENUBAR_MENU_PROPERTIES) {
-    keys.push(`menubar.menu.${prop}`);
-  }
+  keys.push(...MENUBAR_CONFIG_KEYS);
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
   }
@@ -392,6 +399,6 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
     case 'menubar':
-      return `config.menubarMenu${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
+      return `config.menubar${parsed.section === 'menu' ? 'Menu' : 'Statusbar'}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
   }
 }
