@@ -6,6 +6,7 @@ import {
   localLiveSelectorMatches,
   shouldSkipRemoteSweep,
   isDefinitiveLiveMatch,
+  matchEditorTab,
   type Where,
 } from './go.js';
 import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
@@ -163,3 +164,32 @@ describe('remoteAttachEndedNotice — ControlMaster close leaves the session id 
     expect(remoteAttachEndedNotice('', 'yosemite-m2', 0)).toBeUndefined();
   });
 });
+
+describe('matchEditorTab — the VSCodium tab that holds a session on this machine', () => {
+  const self = 'zion';
+  const tab = (over: Partial<ActiveSession>): ActiveSession =>
+    s({ host: 'codium', terminalId: 'cl-1791445191278-7', workspaceDir: '/Users/me/src/agents', pidAlive: true, machine: self, ...over });
+
+  it('finds the tab whose session id is the target', () => {
+    const target = s({ sessionId: '7e333b52-67e8', machine: self });
+    const found = matchEditorTab(target, self, [tab({ sessionId: 'other' }), tab({ sessionId: '7e333b52-67e8', terminalId: 'cl-9' })]);
+    expect(found?.terminalId).toBe('cl-9');
+  });
+
+  it('finds the local tab that launched a session running on another device', () => {
+    const remote = s({ sessionId: '7e333b52-67e8', machine: 'yosemite-m6', originTerminal: { device: self, terminalId: 'cl-1791445191278-7' } });
+    expect(matchEditorTab(remote, self, [tab({ sessionId: undefined })])?.terminalId).toBe('cl-1791445191278-7');
+  });
+
+  it('ignores an origin tab recorded on a different desktop', () => {
+    const remote = s({ sessionId: 'x', machine: 'yosemite-m6', originTerminal: { device: 'mac-mini', terminalId: 'cl-1791445191278-7' } });
+    expect(matchEditorTab(remote, self, [tab({ sessionId: undefined })])).toBeUndefined();
+  });
+
+  it('skips a dead tab and a tab in a non-editor terminal', () => {
+    const target = s({ sessionId: 'abc', machine: self });
+    expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', pidAlive: false })])).toBeUndefined();
+    expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', host: 'ghostty' })])).toBeUndefined();
+  });
+});
+

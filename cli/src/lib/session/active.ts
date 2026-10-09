@@ -347,6 +347,7 @@ export interface ActiveSession {
   cloudTaskId?: string;
   cloudStatus?: string;
   windowId?: string;
+  workspaceDir?: string;
   tty?: string;
   ghosttyTab?: number;
   tmuxTarget?: string;
@@ -920,6 +921,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       startedAtMs: pidEntry?.startedAtMs ?? t.startedAtMs,
       lastActivityMs: sessionFileTimes(sessionFile).mtimeMs,
       windowId: t.windowId,
+      workspaceDir: t.cwd ?? undefined,
       windowHeartbeatMs: t.windowHeartbeatMs,
       owner: resolveOwner(pidEntry?.actor, resolvedId),
     }, state, sessionFile, pidAlive)];

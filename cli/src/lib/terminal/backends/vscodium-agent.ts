@@ -51,6 +51,26 @@ export function spawnUri(
   return `${scheme}://${EXTENSION_AUTHORITY}/spawn?p=${p}`;
 }
 
+export function editorVariantForHost(host: string | undefined): EditorVariant | undefined {
+  return host ? EDITOR_VARIANTS.find((v) => v.cli === host) : undefined;
+}
+
+export function focusUri(scheme: string, terminalId: string): string {
+  return `${scheme}://${EXTENSION_AUTHORITY}/focus?terminalId=${encodeURIComponent(terminalId)}`;
+}
+
+// The extension's /focus only searches the window that receives the URL, and
+// the editor routes a URL to its frontmost window. Opening the tab's folder
+// first brings the owning window forward, so the URL lands there.
+export function focusTabSpecs(variant: EditorVariant, folder: string, terminalId: string): LaunchSpec[] {
+  const bundled = `${variant.app}/Contents/Resources/app/bin/${variant.cli}`;
+  const cli = appExists(bundled) ? bundled : variant.cli;
+  return [
+    { argv: [cli, folder] },
+    { argv: [cli, '--open-url', focusUri(variant.scheme, terminalId)] },
+  ];
+}
+
 export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBackend {
   return {
     id: 'vscodium-agent',
