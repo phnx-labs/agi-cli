@@ -26,7 +26,6 @@ export type DaemonServiceId =
   | 'feed-stream'
   | 'session-summarizer'
   | 'attention-notify'
-  | 'owner-device-delivery'
   | 'recordings'
   | 'harness-update';
 
@@ -122,11 +121,6 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'attention-notify',
     title: 'Attention desktop banners',
     description: 'Posts one actionable desktop banner per new attention item (question / permission / plan review / stall) so the macOS helper can answer it through agents feed answer (PHNX-4004).',
-  },
-  {
-    id: 'owner-device-delivery',
-    title: 'Owner iMessage delivery',
-    description: 'macOS only: every 15 s, claims the iMessage notifications your account queued for a device and sends them through Messages, then reports each result. Idle without a Phoenix session or device token (PHNX-4267).',
   },
   {
     id: 'recordings',

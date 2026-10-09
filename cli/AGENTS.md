@@ -461,8 +461,8 @@ event (`agents send --to owner`, a `--blocked` or important `feed post`, an urge
 feed block, a failed routine) is one `POST /me/notifications` to rush/api through
 [`src/lib/owner-notify.ts`](src/lib/owner-notify.ts) `postOwnerNotification`.
 rush/api owns the preferences (edited in the console Settings page), quiet hours,
-dedup on `(event, dedupKey)` (`postOwnerNotification` prefixes every producer key with `owner:` so it can never collide with a cloud-run key), and delivery: email and Slack go out server-side,
-iMessage is queued as a `device_deliveries` row. Event mapping: a block is
+dedup on `(event, dedupKey)` (`postOwnerNotification` prefixes every producer key with `owner:` so it can never collide with a cloud-run key), and delivery: email, Slack and iMessage all go out
+server-side, iMessage from Rush's SendBlue number. Event mapping: a block is
 `needs_you` (the only event that bypasses quiet hours), a failed routine is
 `failed`, everything else is `message`; a green routine stays silent. The bearer is
 this box's Phoenix session, else the `notify`-scoped device token in this worker's
@@ -496,14 +496,12 @@ while the box has no session.
   device that is no longer a worker peer, and skips that pass when its device
   registry is empty or any role is unreadable. `agents auth logout` revokes the
   tokens that box minted.
-- **iMessage on a Mac.** The macOS-only `owner-device-delivery` daemon service
-  claims queued rows every 15 s (`POST /me/device-deliveries/claim`, one atomic
-  UPDATE server-side, so two signed-in Macs never send the same row), sends each
-  through the osascript builder in `channels/providers/rush.ts`, and reports the
-  result. It is idle on a box with no session and no device token. Delivery is
-  at-least-once: when the send succeeds but the result report fails, the row
-  becomes claimable again after rush/api's 5-minute stale-claim window and the
-  iMessage is sent a second time.
+- **rush/api sends every owner channel, iMessage included.** `POST /me/notifications`
+  answers with every channel in `queued` (`delivered` is always empty), and
+  rush/api's worker sends them, iMessage from Rush's own SendBlue number to the
+  number the owner confirmed in Settings. No daemon service on this side claims
+  or sends anything; `describeOwnerResult` reports the result as "Rush is sending
+  ...".
 - **Explicit channels are a different feature.** `agents send --channel slack --to
   '#eng'` and feed `channel:` sinks still deliver through the local providers
   (`notify.transports` still remaps a channel name). They no longer fall back to an

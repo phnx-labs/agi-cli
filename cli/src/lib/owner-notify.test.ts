@@ -56,7 +56,8 @@ describe('postOwnerNotification — the one owner path', () => {
     const result = await ownerNotify.postOwnerNotification({
       event: 'message', title: 'Hi', body: 'hello owner', dedupKey: 'k-1', source: { device: 'zion', agent: 'claude' },
     });
-    expect(result).toMatchObject({ delivered: ['slack'], queued: ['imessage'], skipped: [], suppressed: null });
+    expect(result).toMatchObject({ delivered: [], queued: ['slack', 'imessage'], skipped: [], suppressed: null });
+    expect(ownerNotify.describeOwnerResult(result)).toBe('Rush is sending slack, imessage');
     expect(api.requests[0]).toMatchObject({
       method: 'POST', path: '/me/notifications', bearer: api.sessionToken,
       body: { event: 'message', title: 'Hi', body: 'hello owner', dedupKey: 'owner:k-1', source: { device: 'zion', agent: 'claude' } },

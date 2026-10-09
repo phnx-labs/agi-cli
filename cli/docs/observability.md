@@ -92,15 +92,15 @@ is delivered verbatim.
 
 **Reaching the owner needs a sign-in.** The owner sink, `send --to owner`, urgent
 feed blocks and failed routines all post to your account; your notification
-preferences, quiet hours and iMessage handle live in the console Settings page. A
+preferences, quiet hours and iMessage number live in the console Settings page. A
 block posts `needs_you` (it bypasses quiet hours), a failed routine `failed`, and
 everything else `message`. A box with no Phoenix session (`agents auth login`) and,
 on a worker, no device token cannot reach the owner: the sink reports a failure and
 `agents doctor` shows `owner-not-signed-in`. Workers receive a `notify`-scoped
-device token from a signed-in personal or desktop box automatically; iMessage is
-sent by a signed-in Mac's daemon (`owner-device-delivery`), at least once: if the
-send succeeds but its result report fails, the row is re-claimed after 5 minutes
-and sent again. See
+device token from a signed-in personal or desktop box automatically. rush/api sends
+every channel itself, so the CLI reports them as "Rush is sending slack, imessage";
+an iMessage comes from Rush's own number to the phone number you confirmed in
+Settings, with no Mac involved. See
 [`../AGENTS.md`](../AGENTS.md) for the mechanism.
 
 Channel sinks may set `message:` to customize their outbound body. It supports

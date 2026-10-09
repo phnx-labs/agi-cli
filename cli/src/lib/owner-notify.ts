@@ -32,14 +32,6 @@ export interface OwnerNotifyResult {
   suppressed: null | 'duplicate' | 'quiet_hours';
 }
 
-export interface DeviceDelivery {
-  id: string;
-  channel: 'imessage';
-  address: string;
-  body: string;
-  createdAt: string;
-}
-
 export interface OwnerPreferencesPatch {
   preferences?: Array<{ event: OwnerEvent; channel: OwnerChannel; enabled: boolean }>;
   settings?: { timezone?: string; quietStart?: string | null; quietEnd?: string | null };
@@ -130,7 +122,6 @@ async function rushRequest<T>(method: 'POST' | 'PUT', route: string, body: unkno
     throw new OwnerNotifyApiError(`Could not reach ${RUSH_API_BASE} (${(err as Error).message}).`, 0);
   }
   if (response.ok && credential.kind === 'device') fs.rmSync(rejectedTokenPath(getCacheDir()), { force: true });
-  if (response.status === 204) return undefined as T;
   const text = await response.text();
   let payload: unknown = null;
   try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
@@ -156,15 +147,6 @@ export function postOwnerNotification(notification: OwnerNotification): Promise<
   });
 }
 
-export async function claimDeviceDeliveries(device: string, limit = 10): Promise<DeviceDelivery[]> {
-  const out = await rushRequest<{ deliveries: DeviceDelivery[] }>('POST', '/me/device-deliveries/claim', { device, limit });
-  return out.deliveries;
-}
-
-export async function reportDeviceDelivery(id: string, result: { ok: boolean; error?: string }): Promise<void> {
-  await rushRequest<void>('POST', `/me/device-deliveries/${encodeURIComponent(id)}/result`, result);
-}
-
 export async function putOwnerPreferences(patch: OwnerPreferencesPatch): Promise<void> {
   await rushRequest<unknown>('PUT', '/me/preferences', patch);
 }
@@ -174,7 +156,7 @@ export function describeOwnerResult(result: OwnerNotifyResult): string {
   if (result.suppressed === 'quiet_hours') return 'suppressed: quiet hours';
   const parts: string[] = [];
   if (result.delivered.length) parts.push(`delivered ${result.delivered.join(', ')}`);
-  if (result.queued.length) parts.push(`queued ${result.queued.join(', ')}`);
+  if (result.queued.length) parts.push(`Rush is sending ${result.queued.join(', ')}`);
   for (const s of result.skipped) parts.push(`skipped ${s.channel} (${s.reason})`);
   return parts.join('; ') || 'no channel enabled for this event';
 }
