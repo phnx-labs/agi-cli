@@ -9,7 +9,7 @@ import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessi
 import { getConfigValue, listConfiguredDeviceRoles, loadAutoLaunchPreferences } from '../device-config.js';
 import { filterAutoPool } from '../devices/pool.js';
 import { isFreshDeviceStats, readStatsCache } from '../devices/stats-cache.js';
-import { MENUBAR_MENU_PROPERTIES } from '../config-keys.js';
+import { MENUBAR_CONFIG_KEYS } from '../config-keys.js';
 import { migrateMenubarPreferencesFromUserDefaults } from './migrate-prefs.js';
 import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
@@ -109,8 +109,7 @@ export function buildMenuListPreferences(): Record<string, string[]> {
 
 function effectiveMenuPreferences(): Array<[string, unknown]> {
   const out: Array<[string, unknown]> = [];
-  for (const prop of MENUBAR_MENU_PROPERTIES) {
-    const name = `menubar.menu.${prop}`;
+  for (const name of MENUBAR_CONFIG_KEYS) {
     const entry = getConfigValue(name);
     const value = entry.value !== undefined ? entry.value : entry.spec.defaultValue;
     if (value === undefined) continue;

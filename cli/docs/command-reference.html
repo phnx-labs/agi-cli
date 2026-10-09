@@ -338,8 +338,10 @@ agents config set project.root ~/src/github.com/&lt;you&gt;
 agents config set devices.mac-mini.max-agents 4
 agents config set updates.auto off
 agents config set updates.claude.auto off
-agents config set menubar.menu.taborder home,projects,sessions,inbox
+agents config set menubar.menu.taborder home,goals,sessions,projects,inbox
 agents config set menubar.menu.pinnedprojects &#39;[&quot;rush&quot;,&quot;agi menu&quot;]&#39;
+agents config set menubar.menu.homegoals company,myday
+agents config set menubar.statusbar.goalcountdown on
 agents config get run.claude@*.model
 agents config unset run.claude@*.tier.best
 agents config list
@@ -358,8 +360,10 @@ agents config set project.root ~/src/github.com/&lt;you&gt;
 agents config set devices.mac-mini.max-agents 4
 agents config set updates.auto off
 agents config set updates.claude.auto off
-agents config set menubar.menu.tabOrder home,projects,sessions,inbox
+agents config set menubar.menu.tabOrder home,goals,sessions,projects,inbox
 agents config set menubar.menu.pinnedProjects &#39;[&quot;Rush&quot;,&quot;AGI Menu&quot;]&#39;
+agents config set menubar.menu.homeGoals company,myDay
+agents config set menubar.statusbar.goalCountdown on
 agents config get run.claude@*.model
 agents config unset run.claude@*.tier.best
 agents config list

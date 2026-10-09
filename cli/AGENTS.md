@@ -1471,12 +1471,20 @@ registered agent id, validated at write time, unset = the menu's own default and
 name; `auto` is `agents run --device auto`, which already refuses a `personal` or
 `desktop` box). Four keys shape the Projects tab and the tab bar:
 `pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
-`tabOrder` (every one of `home`, `sessions`, `inbox`, `projects` exactly once; default
-in that order), `hiddenTabs` (any of those four but not all; default `[]`), and
-`groupTicketsByMilestone` (default `false`, a flat ticket list). `prGroupOpen` and
+`tabOrder` (every one of `home`, `goals`, `projects`, `sessions`, `inbox` exactly once;
+default in that order — an order saved before Goals existed may omit `goals`, and every
+read resolves the stored list the way the menu's `TabLayout.resolve` does: unknown and
+repeated ids dropped, a missing tab appended in built-in order), `hiddenTabs` (any of
+those five but not all; default `[]`), and
+`groupTicketsByMilestone` (default `false`, a flat ticket list). Two keys drive Goals
+(PHNX-4291): `homeGoals` (the goal levels Home shows — any of `company`, `week`,
+`myWeek`, `myDay`, no duplicates; default `["company"]`) and
+`menubar.statusbar.goalCountdown` (default `false`; the one key outside the
+`menubar.menu.` prefix, parsed as section `statusbar`, listed in
+`MENUBAR_CONFIG_KEYS`). `prGroupOpen` and
 `prGroupMerged` (`none` | `type` | `day`; defaults `none` and `day`) group the PR board's
 open filters and its Merged filter. Settings is never in
-either tab list: it is always shown. The three list keys are `string-list` keys stored
+either tab list: it is always shown. The four list keys are `string-list` keys stored
 as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
 from a JSON array (`'["Rush","Ops, west"]'`, what the menu writes) or comma-separated
 items (what a person types), and the order, membership, and duplicate rules are
@@ -1486,10 +1494,10 @@ validated at write time. They are registered
 the list so the menu falls back to its own baked-in default (the defaults in
 `config-keys.ts`/`device-config.ts` match those). No credential ever lives here.
 `agents menubar snapshot --json` also emits a `menuPreferences` map (each
-`menubar.menu.*` key → its effective value, i.e. the stored value or the registered
+`menubar.menu.*` and `menubar.statusbar.*` key → its effective value, i.e. the stored value or the registered
 default; `defaultProject` omitted when unset) so the menu consumes preferences from
 the snapshot it already polls rather than a second read path. That map is scalar-only:
-the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`) ride a separate
+the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`) ride a separate
 `menuListPreferences` map, because a shipped menu decodes `menuPreferences` values as
 string/number/bool and a single array would fail its whole snapshot decode. On macOS, a one-shot
 sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
