@@ -545,6 +545,12 @@ the exception.
   operator runs by hand" is the anti-pattern (RUSH-2666 → PHNX-3696); it makes every
   future release a manual errand. A test that greps the script's source text does not
   count as covering the gate — the test must execute the path.
+- **Design decisions are constraints, not cleanup targets.** Check the diff against
+  [`cli/docs/design-decisions.md`](cli/docs/design-decisions.md). Flag, with `file:line`,
+  any removal or rename of something it lists as kept (for example folding `--device`
+  into `--host`, or deleting `feed`), and any reintroduction of something it lists as
+  removed. A refactor or simplification PR that removes a command, flag, config key or
+  `--json` field without a matching entry in that file is blocking.
 - **No dead or commented-out code.** Removed logic is deleted, not commented out "for
   later." git history is the archive.
 - **Tests exercise the real path.** New behavior ships with a test that hits the actual

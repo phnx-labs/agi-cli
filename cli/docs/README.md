@@ -12,7 +12,9 @@ Read the decision docs in this order:
 3. [Resources](resources.md) and [execution](execution.md) — inputs and the one launch path.
 4. [Sessions](sessions.md), [fleet](fleet.md), and [orchestration](orchestration.md).
 5. [Automation](automation.md), [interfaces](interfaces.md), and [secrets](secrets.md).
-6. [Observability](observability.md), [distribution](distribution.md),
+6. [Design decisions](design-decisions.md) — the owner's standing calls that a cleanup or
+   simplification pass must not reverse. Read it before removing anything.
+7. [Observability](observability.md), [distribution](distribution.md),
    [behavioral specifications](specifications.md), and [benchmarks](benchmarks.md)
    (measured numbers; not Linear).
 
