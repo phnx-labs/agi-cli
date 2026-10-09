@@ -496,11 +496,11 @@ export async function focusResolvedSession(
   reconnectReattach: boolean = false,
 ): Promise<void> {
   const active = liveById.get(meta.id);
-  if (active && await focusEditorTabOf(active, self)) return;
   if (active && isAttachableLiveSession(active)) {
     await jumpTo(active, self, fallback, meta.id);
     return;
   }
+  if (active && await focusEditorTabOf(active, self)) return;
   if (attachOnly) {
     console.log(chalk.yellow(`${meta.shortId} has no living process or pane to attach.`));
     process.exitCode = 1;

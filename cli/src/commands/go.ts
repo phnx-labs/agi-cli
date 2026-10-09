@@ -24,6 +24,7 @@ import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 import { editorVariantForHost, focusTabSpecs } from '../lib/terminal/backends/vscodium-agent.js';
 import { runLocal } from '../lib/terminal/transport.js';
 import { sessionHeadline } from '../lib/session/title.js';
+import { HOST_HEARTBEAT_STALE_MS } from '../lib/session/host-link.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -258,41 +259,47 @@ export async function refuseFallback(s: ActiveSession, remote: string | undefine
   process.exitCode = 1;
 }
 
-function isFocusableEditorTab(t: ActiveSession): boolean {
-  return !!(editorVariantForHost(t.host) && t.terminalId && t.workspaceDir && t.pidAlive);
+export const EDITOR_TAB_SELECTOR_MIN = 8;
+
+function isFocusableEditorTab(t: ActiveSession, nowMs: number): boolean {
+  const windowLive = t.windowHeartbeatMs !== undefined && nowMs - t.windowHeartbeatMs < HOST_HEARTBEAT_STALE_MS;
+  return !!(editorVariantForHost(t.host) && t.terminalId && t.workspaceDir && t.pidAlive && windowLive);
 }
 
-export function matchEditorTab(s: ActiveSession, self: string, tabs: ActiveSession[]): ActiveSession | undefined {
+export function matchEditorTab(s: ActiveSession, self: string, tabs: ActiveSession[], nowMs = Date.now()): ActiveSession | undefined {
   const originTab = s.originTerminal?.device === self ? s.originTerminal.terminalId : undefined;
-  return tabs.find((t) => isFocusableEditorTab(t) &&
+  return tabs.find((t) => isFocusableEditorTab(t, nowMs) &&
     ((s.sessionId && t.sessionId === s.sessionId) || (originTab && t.terminalId === originTab)));
 }
 
-export function editorTabsForSelector(selector: string, tabs: ActiveSession[]): ActiveSession[] {
-  return tabs.filter((t) => isFocusableEditorTab(t) && t.sessionId?.startsWith(selector));
+export function editorTabsForSelector(selector: string, tabs: ActiveSession[], nowMs = Date.now()): ActiveSession[] {
+  if (selector.length < EDITOR_TAB_SELECTOR_MIN) return [];
+  return tabs.filter((t) => isFocusableEditorTab(t, nowMs) && t.sessionId?.startsWith(selector));
 }
 
-export async function focusEditorTab(tab: ActiveSession): Promise<void> {
+async function focusEditorTab(tab: ActiveSession): Promise<boolean> {
   const variant = editorVariantForHost(tab.host)!;
   for (const spec of focusTabSpecs(variant, tab.workspaceDir!, tab.terminalId!)) {
     const result = await runLocal(spec, 10_000);
-    if (!result.ok) throw new Error(`Could not focus ${variant.label} tab ${tab.terminalId}: ${result.error}`);
+    if (!result.ok) {
+      console.error(chalk.yellow(`Could not focus ${variant.label} tab ${tab.terminalId}: ${result.error}. Trying the other rails.`));
+      return false;
+    }
   }
-  console.log(chalk.gray(`Focused ${shortId(tab)} → ${sessionHeadline(tab) || tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
+  console.log(chalk.gray(
+    `Sent ${shortId(tab)} → ${sessionHeadline(tab) || tab.terminalId} (${path.basename(tab.workspaceDir!)}) to ${variant.label}.`,
+  ));
+  return true;
 }
 
 export async function focusEditorTabOf(s: ActiveSession, self: string): Promise<boolean> {
   const tab = matchEditorTab(s, self, await listTerminalsActive());
-  if (!tab) return false;
-  await focusEditorTab(tab);
-  return true;
+  return tab ? focusEditorTab(tab) : false;
 }
 
 export async function focusLocalEditorTab(selector: string): Promise<boolean> {
   const matches = editorTabsForSelector(selector, await listTerminalsActive());
-  if (matches.length !== 1) return false;
-  await focusEditorTab(matches[0]);
-  return true;
+  return matches.length === 1 ? focusEditorTab(matches[0]) : false;
 }
 
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback, fallbackId?: string): Promise<void> {

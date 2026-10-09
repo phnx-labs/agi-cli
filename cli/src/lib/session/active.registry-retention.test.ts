@@ -8,6 +8,7 @@ process.env.HOME = TEST_HOME;
 
 const { listTerminalsActive, foldHostLink } = await import('./active.js');
 const { HOST_HEARTBEAT_STALE_MS } = await import('./host-link.js');
+const { writePidSessionEntry } = await import('./pid-registry.js');
 
 const REGISTRY = path.join(TEST_HOME, '.agents', '.cache', 'terminals', 'live-terminals.json');
 const DEAD_PID = 2_000_000_003;
@@ -67,15 +68,19 @@ describe('live-terminals retention for a crashed host', () => {
   });
 
   it('carries the window folder as workspaceDir, apart from the agent cwd, so focus can raise that window', async () => {
+    const windowFolder = path.join(TEST_HOME, 'project');
+    const agentCwd = path.join(windowFolder, '.agents', 'worktrees', 'feature');
     fs.mkdirSync(path.dirname(REGISTRY), { recursive: true });
     fs.writeFileSync(REGISTRY, JSON.stringify({
       'a-window': {
         at: new Date().toISOString(),
-        entries: [{ sessionId: 'sess-under-test', terminalId: 'cl-1-1', pid: process.pid, kind: 'claude', cwd: TEST_HOME, startedAtMs: Date.now() }],
+        entries: [{ sessionId: 'sess-under-test', terminalId: 'cl-1-1', pid: process.pid, kind: 'claude', cwd: windowFolder, startedAtMs: Date.now() }],
       },
     }));
+    writePidSessionEntry({ pid: process.pid, agent: 'claude', sessionId: 'sess-under-test', cwd: agentCwd, startedAtMs: Date.now() });
     const row = (await listTerminalsActive()).find((r) => r.sessionId === 'sess-under-test')!;
-    expect(row.workspaceDir).toBe(TEST_HOME);
+    expect(row.cwd).toBe(agentCwd);
+    expect(row.workspaceDir).toBe(windowFolder);
     expect(row.terminalId).toBe('cl-1-1');
     expect(row.windowId).toBe('a-window');
   });
