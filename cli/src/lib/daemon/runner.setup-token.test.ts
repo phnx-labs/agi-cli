@@ -149,6 +149,20 @@ describe('claudeVersionIsAuthenticated on a worker', () => {
     expect(claudeVersionIsAuthenticated(version)).toBe(true);
   });
 
+  it('on a desktop device, ignores the setup-token and checks the native login', () => {
+    const device = `routine-auth-desktop-${process.pid}`;
+    process.env.AGENTS_SYNC_MACHINE_ID = device;
+    setConfiguredDeviceRole(device, 'desktop');
+    const version = `routine-auth-desktop-v-${process.pid}`;
+    const email = 'alpha@example.com';
+    makeVersionHome(version, email);
+    installAuthStatusBinary(version);
+    writeAuthBundle({ [claudeAccountTokenKey(email)]: 'sk-ant-oat01-alpha' });
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+    expect(claudeVersionIsAuthenticated(version)).toBe(false);
+  });
+
   it('reports signed out when no setup-token is provisioned for the account', () => {
     const version = `routine-auth-worker-none-${process.pid}`;
     makeVersionHome(version, 'beta@example.com');
