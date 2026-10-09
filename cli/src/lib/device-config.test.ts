@@ -361,6 +361,17 @@ describe('validation', () => {
     expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals', 'secrets', 'github']);
   });
 
+  it('stores what the GitHub tab hides as org logins or owner/repo slugs and refuses anything else (PHNX-4269)', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    expect(getConfigValue('menubar.menu.githubHidden').spec.defaultValue).toEqual([]);
+    expect(getConfigValue('menubar.menu.githubDrafts').spec.defaultValue).toBe(false);
+    expect(getConfigValue('menubar.menu.githubBots').spec.defaultValue).toBe(false);
+    setConfigValue('menubar.menu.githubHidden', ['RE-LABS', 'acme/web']);
+    expect(getConfigValue('menubar.menu.githubHidden').value).toEqual(['RE-LABS', 'acme/web']);
+    expect(() => setConfigValue('menubar.menu.githubHidden', ['a b'])).toThrow(/"a b" is not an org login or owner\/repo/);
+    expect(() => setConfigValue('menubar.menu.githubHidden', ['acme', 'ACME'])).toThrow(/twice/);
+  });
+
   it('validates the Goals preferences: homeGoals levels and the goalCountdown switch (PHNX-4291)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     expect(getConfigValue('menubar.menu.homeGoals').spec.defaultValue).toEqual(['company']);

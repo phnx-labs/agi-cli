@@ -546,6 +546,23 @@ describe('projects prs — list is the default, merge owns its flags', () => {
     expect(method.err).toContain('--method expects one of rebase, squash, merge');
   });
 
+  it('without a project, the list and the verbs refuse malformed input before touching GitHub', async () => {
+    const repoOnly = await run(['prs', '--repo', 'acme/mono']);
+    expect(repoOnly.exit).toBe(1);
+    expect(repoOnly.err).toContain('pass --number with it, or --org');
+    const both = await run(['prs', '--repo', 'acme/mono', '--number', '7', '--org', 'acme']);
+    expect(both.err).toContain('--org scopes the list');
+    const orgWithProject = await run(['prs', 'list', 'merge', '--org', 'acme']);
+    expect(orgWithProject.err).toContain('--org reads across orgs');
+    const badOrg = await run(['prs', '--org', 'x repo:y/z', '--json']);
+    expect(badOrg.err).toContain('--org expects a GitHub org or account login, got "x repo:y/z"');
+    const verb = await run(['prs', 'merge', '--repo', 'not a slug', '--number', '7', '--sha', 'abc1234']);
+    expect(verb.exit).toBe(1);
+    expect(verb.err).toContain('--repo expects owner/repo, got "not a slug"');
+    const comment = await run(['prs', 'comment', '--repo', 'acme/mono', '--number', '7', '--body', ' ']);
+    expect(comment.err).toContain('The comment is empty.');
+  });
+
   it('`prs ready/review/comment` refuse bad flags before touching GitHub', async () => {
     const ready = await run(['prs', 'ready', 'merge', '--repo', 'acme/mono', '--number', '7junk']);
     expect(ready.exit).toBe(1);

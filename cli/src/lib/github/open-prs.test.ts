@@ -52,12 +52,12 @@ describe('buildOpenPrs across the viewer and their orgs', () => {
     expect(open.viewer).toBe('octo');
     expect(open.owners.map((o) => [o.login, o.open, o.error])).toEqual([['octo', 1, null], ['acme', 3, null]]);
     expect(open.repositories.map((r) => [r.slug, r.projects])).toEqual([
-      ['acme/app', ['app']], ['octo/tools', []], ['other/lib', []],
+      ['other/lib', []], ['octo/tools', []], ['acme/app', ['app']],
     ]);
-    const app = open.repositories[0].pullRequests.map((pr) => [pr.number, pr.needsMe]);
-    expect(app).toEqual([[1, 'conflicts'], [2, null], [3, null]]);
+    expect(open.repositories[0].pullRequests[0]).toMatchObject({ number: 9, needsMe: 'review', reviewRequested: true, mergeableState: 'clean' });
     expect(open.repositories[1].pullRequests[0]).toMatchObject({ number: 5, needsMe: 'failing', ciState: 'FAILURE', failingChecks: ['test'] });
-    expect(open.repositories[2].pullRequests[0]).toMatchObject({ number: 9, needsMe: 'review', reviewRequested: true, mergeableState: 'clean' });
+    const app = open.repositories[2].pullRequests.map((pr) => [pr.number, pr.needsMe]);
+    expect(app).toEqual([[1, 'conflicts'], [2, null], [3, null]]);
     expect(open.partial).toBe(false);
   });
 
@@ -67,7 +67,7 @@ describe('buildOpenPrs across the viewer and their orgs', () => {
     const open = await buildOpenPrs(DEFS, { cacheDir: tmpCache() }, gh);
     expect(open.partial).toBe(true);
     expect(open.owners.find((o) => o.login === 'acme')).toMatchObject({ open: 0, error: 'Server Error (HTTP 502)' });
-    expect(open.repositories.map((r) => r.slug)).toEqual(['octo/tools', 'other/lib']);
+    expect(open.repositories.map((r) => r.slug)).toEqual(['other/lib', 'octo/tools']);
   });
 
   it('a PR whose detail read fails keeps its search row and says why', async () => {
@@ -78,10 +78,25 @@ describe('buildOpenPrs across the viewer and their orgs', () => {
     expect(app.ciError).toBe('Not Found (HTTP 404)');
   });
 
-  it('--org reads only the named owners and never lists the viewer\'s orgs', async () => {
+  it('--org reads only the named owners, review requests included, and never lists the viewer\'s orgs', async () => {
     const { gh, asked } = fixtureGh();
     const open = await buildOpenPrs(DEFS, { owners: ['acme'], cacheDir: tmpCache() }, gh);
     expect(open.owners.map((o) => o.login)).toEqual(['acme']);
+    expect(open.repositories.map((r) => r.slug)).toEqual(['acme/app']);
     expect(asked).not.toContain('user/orgs');
+  });
+
+  it('a failed review-request search marks the read partial, since needs-me would silently lose reviews', async () => {
+    const q = `search/issues?q=${encodeURIComponent('is:pr is:open archived:false review-requested:@me')}&sort=updated&order=desc&per_page=100`;
+    const { gh } = fixtureGh({ [q]: ghError('gh: API rate limit exceeded (HTTP 403)\n') });
+    const open = await buildOpenPrs(DEFS, { cacheDir: tmpCache() }, gh);
+    expect(open.partial).toBe(true);
+    expect(open.reviewRequestedError).toBe('API rate limit exceeded (HTTP 403)');
+  });
+
+  it('an --org that is not a login is refused before it can add search qualifiers', async () => {
+    const { gh, asked } = fixtureGh();
+    await expect(buildOpenPrs(DEFS, { owners: ['x repo:y/z'], cacheDir: tmpCache() }, gh)).rejects.toThrow(/--org expects/);
+    expect(asked.some((e) => e.startsWith('search/'))).toBe(false);
   });
 });
