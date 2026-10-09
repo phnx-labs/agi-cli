@@ -77,7 +77,7 @@ stays put).
 
 **Learn (concepts):** [Loop + graph engineering](https://agi-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agi-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agi-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agi-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agi-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
-Already installed? `agents upgrade` updates agi-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agi-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).
+Already installed? `agents upgrade` updates agi-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agi-cli.
 
 Source: [github.com/phnx-labs/agi-cli](https://github.com/phnx-labs/agi-cli)
 
@@ -140,7 +140,7 @@ agents routines add nightly-payments-audit \
 agents menubar setup
 ```
 
-`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
+`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
@@ -296,61 +296,59 @@ ACP adapters are documented for claude, codex, cursor, opencode, openclaw, and g
 ## Sessions across agents
 
 <p align="center">
-  <img src="assets/sessions.svg" alt="agents sessions: search transcripts across Claude, Codex, legacy Gemini, and OpenCode at once, plus a live --active panel showing each running session's state (working / waiting / idle)." width="100%" />
+  <img src="assets/sessions.svg" alt="sessions: search transcripts across Claude, Codex, legacy Gemini, and OpenCode at once, plus a live panel showing each running session's state (working / waiting / idle)." width="100%" />
 </p>
 
 
-When you run multiple agents, conversations scatter across tools. Session search brings them together.
+When you run multiple agents, conversations scatter across tools. Session search brings them together. Searching and reading transcripts is the standalone **`sessions` CLI** (`@phnx-labs/sessions-cli`, installed by `agents setup tools`); agents-cli keeps the index it reads current.
 
 ```bash
 # Where was that auth conversation? Search Claude Code, Codex, legacy Gemini, OpenCode at once.
-agents sessions "auth middleware"
+sessions "auth middleware"
 
 # Filter by agent, project, or time window
-agents sessions --agent codex --since 7d
-agents sessions --project my-app
+sessions --agent codex --since 7d
+sessions --project my-app
 
 # Read a full conversation
-agents sessions a1b2c3d4 --markdown
+sessions a1b2c3d4 --markdown
 
 # Render a shareable, redacted Markdown transcript with the session preview on top
-agents sessions render a1b2c3d4 -o session.md
+sessions render a1b2c3d4 -o session.md
 
 # Or publish it as a link in one step (unlisted + redacted by default)
-agents sessions share a1b2c3d4
+sessions share a1b2c3d4
 
 # Visualize a session as a trajectory -- tool-call waterfall, timing, stalls, errors
 agents trace a1b2c3d4                    # opens the HTML (a person at a terminal)
 agents trace a1b2c3d4 --text --errors-only   # compact text an agent reads in-context
-agents sessions trace a1b2c3d4 --json    # the versioned sessions-trace envelope
+agents trace a1b2c3d4 --json             # the versioned sessions-trace envelope
 
 # Just the last 3 turns, user messages only
-agents sessions a1b2c3d4 --last 3 --include user
+sessions a1b2c3d4 --last 3 --include user
 
-# Search indexed tool calls with the standalone sessions CLI (same index)
+# Search indexed tool calls (same index)
 sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --json
 sessions --include tools --query 'program:git' --count --host box1,box2 --json
 
-# Populate historical tool rows once on each device (same as `agents daemon index backfill tools --fleet`)
-agents sessions backfill tools --fleet
+# Populate historical tool rows once on each device
+agents daemon index backfill tools --fleet
 
 # Which skills/commands you actually invoke -- and which installed ones are dead weight
-agents sessions stats
-agents sessions stats --zero            # only the never-invoked (dead weight)
-agents sessions backfill resources      # fold historical sessions into the usage index
+agents insights resources
+agents insights resources --zero        # only the never-invoked (dead weight)
+agents daemon index backfill resources  # fold historical sessions into the usage index
 
 # Friction, owner corrections, repeated recipes, and ranked actions across harnesses
-agents sessions insights --since 30d
-agents sessions insights --agent claude --agent codex --json
-# Top-level alias
-agents insights --since 7d
+agents insights --since 30d
+agents insights --agent claude --agent codex --json
 ```
 
-`sessions insights` is deterministic and offline by default. It caches per-session facets, compares harnesses, and emits an actions table with evidence counts plus shortened sample session ids. `--narrative` is opt-in and receives aggregates only, never raw transcripts.
+`agents insights` is deterministic and offline by default. It caches per-session facets, compares harnesses, and emits an actions table with evidence counts plus shortened sample session ids. `--narrative` is opt-in and receives aggregates only, never raw transcripts.
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached. agents writes the tool index (`agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions); the standalone `sessions --include tools` reads it, including `--count` over the ordered static Bash program sites. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/sessions.md](cli/docs/sessions.md) for the schemas and [docs/observability.md](cli/docs/observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached. agents writes the tool index (`agents daemon index backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions); the standalone `sessions --include tools` reads it, including `--count` over the ordered static Bash program sites. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/sessions.md](cli/docs/sessions.md) for the schemas and [docs/observability.md](cli/docs/observability.md) for the consumption patterns.
 
 ### Live state, and catching up fast
 
@@ -365,55 +363,47 @@ agents ps --bookmarks               # only bookmarked sessions
 agents ps --routine nightly-review  # only one routine's runs (omit the name for all routines)
 agents ps stop|focus|detach|migrate <id>   # act on one running agent
 agents ps migrations                # where migrated sessions went
+agents ps --status working          # actively producing work (fleet-wide)
+agents ps --status idle             # stopped between turns
+agents ps --status orphaned         # agent outlived its terminal client
+agents ps focus a1b2c3d4            # jump back into one — attach in place, or recover
+agents ps focus ag-claude-a1b2c3d4  # or by its tmux alias
 ```
 
-`agents sessions --active` and its status flags still answer with the same roster; `agents ps` is where the live verbs live from here on ([PHNX-4227](https://linear.app/getrush/issue/PHNX-4227)).
-
-```bash
-agents sessions --active            # every live run across the fleet, with state
-agents sessions --working           # actively producing work (fleet-wide)
-agents sessions --idle              # stopped between turns (fleet-wide)
-agents sessions --orphan            # agent outlived its terminal client
-agents sessions --crashed           # terminal and agent disappeared uncleanly
-agents sessions resume a1b2c3d4     # jump back into one — attach in place, or recover
-agents sessions resume ag-claude-a1b2c3d4  # or by its tmux alias
-```
-
-On a terminal, `agents sessions --active` (and a bare `agents sessions`) open the **interactive session browser** — one filter you drive with single keys, re-pulled live across the fleet:
+On a terminal, a bare `sessions` opens the **interactive session browser** — one filter you drive with single keys:
 
 | key | filters by | flag it mirrors |
 |---|---|---|
-| `s` | search text | `--query` / positional |
-| `r` | running only | `--active` |
-| `b` | bookmarks only | `--bookmarks` |
-| `*` | bookmark / unbookmark the highlighted session | `agents sessions bookmark <id>` |
-| `f` | focus the highlighted session | `agents sessions resume <id>` |
-| `c` | team sessions | `--team` (alias: `--teams`) |
+| `s` | search text (title + full text) | positional query |
 | `a` | agent (cycles) | `-a` |
-| `d` | device (cycles) | `--device` |
+| `d` | device (cycles) | `--machine` |
+| `t` | one team | `--in-team` |
+| `c` | team-spawned sessions | `--teams` |
+| `b` | bookmarks only | `--bookmarks` |
+| `*` | bookmark / unbookmark the highlighted session | `sessions bookmark <id>` |
 | `p` | this repo ↔ all dirs | `--all` |
 | `w` | time window | `--since` |
 | `tab` | toggle the preview pane | — |
-| `⏎` | resume / attach | `resume` / `focus` |
-| `y` | copy the equivalent command | `--print-cmd` |
+| `⏎` | resume | `agents run <agent> --resume <id>` |
+| `y` | copy the equivalent `sessions …` command | — |
 
-**Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `agents sessions bookmark <id>` / `--bookmarks` do the same outside a TTY. Press `f` to focus the highlighted row through the same attach-or-recover flow as `agents sessions resume <id>`; Enter keeps its existing resume behavior. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
+**Bookmark the sessions you keep coming back to.** `*` marks the highlighted row (a `★` shows in the listing), `b` narrows to bookmarks, and `sessions bookmark <id>` / `sessions --bookmarks` do the same outside a TTY. Bookmarks live in `~/.agents/.history/bookmarks.json` keyed by session id, so they survive a reindex of the session cache. They're per-machine — session sync carries transcripts, not this file.
 
-**A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from `--active`; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents sessions detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
+**A session that lost its host says so.** When an editor window or an SSH connection goes down hard, the agent it owned used to simply disappear from the live roster; when an agent outlived its window in tmux, it reported a plain `idle`. Both now carry their own status: `✗ crashed` (the host went down and took the agent with it) and `◍ orphan` (still alive, but no client is attached — nothing is showing it). Read from tmux's attached-client count and the editor window's registry heartbeat, so a deliberate `agents ps detach` is never mistaken for one, and a session that is still *working* headlessly is left alone.
 
-Filters **stack** (they AND together), the active set shows in the header, and the highlighted row **previews below by default** (`tab` hides it) — prompt, activity, last response, plus a links line where the worked-on ticket and the PR the session opened are **clickable** (OSC 8 hyperlinks: the ticket jumps to Linear, the `PR#` to GitHub, in terminals that support them). The Linear workspace is resolved from `LINEAR_WORKSPACE` or the linear-cli config, so tickets stay plain text when it's unknown. Because every hotkey has a flag, the view you build by hand is a real command: press `y` (or run `--print-cmd`) to get the exact `ag sessions …` line — explore interactively, hand the line to an agent. Piped output, `--json`, or `--no-interactive` keep the plain listing for scripts. Peek without opening the pager with `agents sessions preview <uuid-or-8-char-id>`; it resolves across the fleet and supports `--json`. The older `agents sessions <id> --preview` spelling remains available.
+Filters **stack** (they AND together), the active set shows in the header, and the highlighted row **previews beside the list** (`tab` toggles it) — prompt, activity, last response, plus a links line where the worked-on ticket and the PR the session opened are **clickable** (OSC 8 hyperlinks: the ticket jumps to Linear, the `PR#` to GitHub, in terminals that support them). The Linear workspace is resolved from `LINEAR_WORKSPACE` or the linear-cli config, so tickets stay plain text when it's unknown. Because the filters map to flags, the view you build by hand is a real command: press `y` to get the exact `sessions …` line — explore interactively, hand the line to an agent. Piped output, `--json`, or `--no-interactive` keep the plain listing for scripts. Peek without opening the browser with `sessions preview <uuid-or-8-char-id>` (`--json` for its digest).
 
 | before — preview hidden | after — preview open + clickable links |
 | --- | --- |
 | ![sessions browser, preview hidden](assets/demos/sessions-preview-before.png) | ![sessions browser, preview open with a links line](assets/demos/sessions-preview-after.png) |
 
-Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Pass the matching flag (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`) directly; each implies `--active`, and several flags form a union. The fleet fan-out is already the default; `--local` opts out. `--all` instead widens historical directory and time scope. Rows also carry badges for the PR, worktree, and ticket. `agents sessions resume [selector]` accepts the same agent/version, device, time, team, project, skill/plugin, bookmark, and live-state filters as the session browser. A unique id or `ag-<agent>-<shortid>` tmux alias resolves directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
+Each live session resolves to `working`, `waiting_input` (with why -- a question, a plan review, or a permission prompt), `idle`, or a lifecycle state such as `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, or `unknown`. Narrow `agents ps` to one with `--status <state>`. The fleet fan-out is already the default; `--local` opts out. Rows also carry badges for the PR, worktree, and ticket. `agents ps focus [selector]` accepts agent/version, device, time, team, project, skill/plugin, bookmark, and live-state filters (`--working`, `--idle`, `--waiting`, `--orphan`, `--crashed`, `--closed`, `--abandoned`, `--queued`, `--unknown`). A unique id or `ag-<agent>-<shortid>` tmux alias resolves directly; an agent/version or text selector always opens the preview picker. Immediately before attach it checks the tmux pane process: a living pane is joined in place, while a dead/missing pane enters recovery instead of showing tmux's `Pane is dead` screen.
 
-Landing on a session cold? `agents sessions <id>` prints a catch-up digest: an inferred title, files changed grouped by directory (created / modified / deleted), a histogram of which tools did the work (including parsed Bash commands -- `git`, `npm`, `ffmpeg`, `ssh`, and so on), and the last test verdict -- the signals to reload a task in seconds.
+Landing on a session cold? `sessions preview <id>` prints a catch-up card: an inferred title, what was asked, the files changed, failures, a histogram of which tools did the work, and the latest response -- the signals to reload a task in seconds.
 
-Sharing a session uses `agents sessions render <id> -o session.md`, not the raw harness JSONL. The document starts with that same preview, then presents user and assistant turns, fenced commands, structured tool arguments, and bounded tool output. Credential-shaped values and local home paths are redacted by default; `--no-redact` is for local-only inspection.
+Sharing a session uses `sessions render <id> -o session.md`, not the raw harness JSONL. The document starts with that same preview, then presents user and assistant turns, fenced commands, structured tool arguments, and bounded tool output. Credential-shaped values and local home paths are redacted by default; `--no-redact` is for local-only inspection.
 
-`agents sessions share <id>` goes one step further and publishes that document as a self-contained web page on your own share endpoint, printing the link. It is **unlisted** unless you pass `--public` — a transcript carries file paths, command output, and error text that a plan does not, so it stays out of your public gallery by default, and emails are masked on top of the render's own redaction. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
+`sessions share <id>` goes one step further and publishes that document as a self-contained web page through the standalone `artifacts` CLI, printing the link. Secrets and emails are masked before the page is written. The slug is `session-<shortId>`, so re-sharing one session updates one URL.
 
 ### Publish CleanShot recordings
 
@@ -444,9 +434,9 @@ Signed-in Phoenix users can back sessions up without creating a Cloudflare bucke
 an `r2.backups` secrets bundle:
 
 ```bash
-agents sessions export --since 30d --to-r2
-agents sessions import --from-r2 --dry-run
-agents sessions import --from-r2
+sessions export --since 30d --to-r2
+sessions import --from-r2 --dry-run
+sessions import --from-r2
 ```
 
 The managed path encrypts every transcript body locally with AES-256-GCM before
@@ -457,8 +447,8 @@ Phoenix-operated infrastructure stores the recovery key. Use `--byo` with your o
 `r2.backups` bundle and `R2_SYNC_ENC_KEY` when Phoenix must never possess the key:
 
 ```bash
-agents sessions export --since 30d --to-r2 --byo
-agents sessions import --from-r2 --byo
+sessions export --since 30d --to-r2 --byo
+sessions import --from-r2 --byo
 ```
 
 Both targets are on-demand backups only; neither enables background session sync.
@@ -470,42 +460,37 @@ and conversation previews. These commands use the same picker and account filter
 
 ```bash
 ag run claude --resume
-agents sessions resume --agent claude
-
 ag run claude#work --resume
-agents sessions resume --agent claude --account work
 ```
 
 Resume restores the conversation's account, model, mode and working directory with
 the currently installed harness. Updating that binary does not select a different
-account. `agents sessions resume <id> --vscodium` opens the selected conversation in
-VSCodium. If only archived context remains, the CLI asks before starting a new
+account. If only archived context remains, the CLI asks before starting a new
 conversation from it; a missing transcript fails before launching an agent.
 
 
 Pick up any past conversation and drop it back into a terminal:
 
 ```bash
-agents sessions resume                     # multi-select; packs two sessions per tab
-agents sessions resume "auth middleware"   # pre-filter the pool, then choose
-agents sessions resume --tmux              # into persistent tmux — survives editor restarts
-agents sessions resume --device zion --tmux  # resume on another machine over SSH
-agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
-agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
+agents ps focus                            # multi-select; each opens as a tab in this terminal
+agents ps focus "auth middleware"          # pre-filter the pool, then choose
+agents ps focus --device zion              # pick from one machine's live sessions
+agents ps focus 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/version/device/mode
+agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # scripted continue; adapts if its account is unavailable
 ```
 
-`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents sessions resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. When that origin login is usage-limited but the home still owns the transcript, resume stays native and rotates to a healthy injectable provider account of the **same harness**. `/continue <id>` is the last-resort fallback — a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin, or a limited origin whose transcript is no longer in that home — and still authenticates as a healthy same-harness account (injecting a provider credential when that is the pick, so it never launches the exhausted native login). It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents ps focus` reopens several sessions as tabs in the terminal you're in. `agents ps focus <id>` resumes one session without requiring you to name its harness, and `agents run auto --resume <id>` does the same as a single scripted continue: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. When that origin login is usage-limited but the home still owns the transcript, resume stays native and rotates to a healthy injectable provider account of the **same harness**. `/continue <id>` is the last-resort fallback — a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin, or a limited origin whose transcript is no longer in that home — and still authenticates as a healthy same-harness account (injecting a provider credential when that is the pick, so it never launches the exhausted native login). It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
 
 ### Send an agent to the background — and bring it back
 
-Running 30 agents and drowning in terminal tabs? `agents sessions detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents sessions resume <id>` brings it back through the same origin-device recovery decision: native resume in the owned account home, or an explicitly chosen same-harness `/continue` replay when native context is unavailable.
+Running 30 agents and drowning in terminal tabs? `agents ps detach <id>` stops a session's interactive process and keeps it working **headless** in the background -- it drives its task to done unattended, no tab, lower cost. `agents ps focus <id>` brings it back through the same origin-device recovery decision: native resume in the owned account home, or an explicitly chosen same-harness `/continue` replay when native context is unavailable.
 
 ```
-agents sessions detach a1b2c3d4     # go headless in the background, keep working
-agents sessions resume a1b2c3d4     # bring it back interactively, right here
+agents ps detach a1b2c3d4           # go headless in the background, keep working
+agents ps focus a1b2c3d4            # bring it back interactively, right here
 ```
 
-Both are agent-agnostic -- they route through the same `agents run --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents sessions --active` shows each session's **owner** (the human who launched it, resolved from the tailnet identity, or `-` for an unresolved local run) and its `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and AGI EXT show who is running what, and where. In AGI EXT, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.
+Both are agent-agnostic -- they route through the same `agents run <agent> --resume` path (native resume for Claude/Codex, `/continue` replay for the rest). `agents ps` shows each session's **owner** (the human who launched it, resolved from the tailnet identity, or `-` for an unresolved local run) and its `presence` -- `attached` (you're watching it), `background` (running headless), or `parked` (its background run finished) -- so the menu bar and AGI EXT show who is running what, and where. In AGI EXT, **Agents: Detach** (`Cmd/Ctrl+K B`) and **Agents: Attach** (`Cmd/Ctrl+K A`) do the same over the focused terminal.
 
 ---
 
@@ -514,7 +499,7 @@ Both are agent-agnostic -- they route through the same `agents run --resume` pat
 Running agents aren't fire-and-forget. Steer them mid-run without opening their terminals.
 
 <p align="center">
-  <img src="assets/fleet-control.svg" alt="agents sessions infers live state (working, waiting, idle); watchdog injects Continue into the exact stalled split; message reaches a running agent at its next tool call" width="100%" />
+  <img src="assets/fleet-control.svg" alt="agents ps infers live state (working, waiting, idle); watchdog injects Continue into the exact stalled split; message reaches a running agent at its next tool call" width="100%" />
 </p>
 
 ### Message a running agent
@@ -716,16 +701,16 @@ Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harne
 ## Run on your own machines
 
 <p align="center">
-  <img src="assets/hosts.svg" alt="agents hosts: dispatch agents run and config commands to another machine over plain SSH (no daemon); the Tailscale fleet is auto-discovered." width="100%" />
+  <img src="assets/hosts.svg" alt="agents devices: dispatch agents run and config commands to another machine over plain SSH (no daemon); the Tailscale fleet is auto-discovered." width="100%" />
 </p>
 
 
 Dispatch any read-only or config command -- and `agents run` itself -- to another machine over SSH. No daemon.
 
 ```bash
-# Enroll a machine (from ~/.ssh/config, or inline with user@address)
-agents hosts add gpu-box
-agents hosts check gpu-box              # reachable? which agi-cli version?
+# Enroll a machine by hand (Tailscale nodes register with `agents devices sync`, below)
+agents devices add gpu-box me@gpu-box.example.com
+agents devices show gpu-box             # the resolved profile: address, user, auth
 
 # Run there instead of locally
 agents run claude --device gpu-box "profile this build"   # headless: follows live by default
@@ -736,8 +721,8 @@ agents run claude --device auto "…"                        # same — auto is 
 agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
 agents insights output --device all                      # per-device burn vs shipped output across the fleet
 agents view --device all --json                          # machine-readable fleet inventory
-agents hosts ps                         # list dispatched runs + terminal status
-agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
+agents devices ps                       # list dispatched runs + terminal status
+agents devices stop <id>                # terminate a hung/detached run
 agents logs --device gpu-box              # pick a dispatched run — concise summary by default
 agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
 agents logs <id> -f                     # re-attach to a running one and follow
@@ -748,7 +733,6 @@ agents doctor claude@latest             # diagnose only the newest installed ver
 agents doctor claude@oldest             # diagnose only the oldest installed version
 agents doctor claude@pinned             # diagnose the global-default (pinned) version
 agents doctor claude@all                # diagnose all versions, including isolated copies
-agents doctor claude@latest --fix       # auto-fix the newest installed version
 agents doctor claude@latest --device mac-mini  # diagnose newest claude on mac-mini
 agents doctor --devices                 # readiness matrix for every registered device
 agents doctor --devices --json          # machine-readable fleet readiness
@@ -787,11 +771,9 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
                                         # backspace, colors & clear work on the remote
 scp mac-mini:/abs/log.json /tmp/        # fleet file transfer; host:path or abs local
 scp -r /tmp/src/ yosemite-s0:~/dst/     # ~ and $HOME expand on the REMOTE, never locally
-agents hosts list                       # devices show up here too (one host pool)
-agents hosts add mac-mini --cap gpu     # tag a device for capability routing (`--device` + `--cap gpu`)
 
-# Hosts as a task backend + scheduled placement
-agents cloud run "nightly benchmark" --device gpu-box --agent claude   # task in cloud ps AND hosts ps
+# Devices as a task backend + scheduled placement
+agents cloud run "nightly benchmark" --device gpu-box --agent claude   # task in cloud list AND devices ps
 agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
@@ -832,7 +814,7 @@ email) and naming which harnesses use it — the fast way to see which accounts 
 and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
 add `--json` for the machine-readable per-host rows.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](cli/docs/concepts.md#devices--hosts).
+**Devices** (`agents devices`) are your machines: Tailscale nodes ingested by `agents devices sync` plus any added by hand, in one registry that every `--device` flag resolves against. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](cli/docs/concepts.md#devices-placement-and-projects).
 
 Every `--device` command rides the shared SSH transport so host resolution,
 identity checks, environment forwarding, reconnect behavior, and multiplexing cannot
@@ -877,7 +859,7 @@ evidence, so re-adding the same name needs `teams remove <team> <name>` first.
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud list` and `agents devices ps` alike).
 
 <p align="center">
   <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Cursor, Factory, or Antigravity) that runs while you keep working" width="100%" />
@@ -1067,49 +1049,47 @@ ordinary [resource architecture](cli/docs/resources.md).
 ## Browser
 
 <p align="center">
-  <img src="assets/browser.svg" alt="agents browser drives your real, already-installed Chrome over CDP — the CLI issues start / refs / click / type / screenshot; the browser exposes numbered element refs and returns a token-efficient screenshot. Same fingerprint, same IP, so sites can't detect automation — it works where Playwright gets blocked." width="100%" />
+  <img src="assets/browser.svg" alt="browser drives your real, already-installed Chrome over CDP — the CLI issues start / refs / click / type / screenshot; the browser exposes numbered element refs and returns a token-efficient screenshot. Same fingerprint, same IP, so sites can't detect automation — it works where Playwright gets blocked." width="100%" />
 </p>
 
-Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked.
+Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked. Browser driving is the standalone **`browser` CLI** (`@phnx-labs/browser-cli`; `agents setup browser` or `agents clis install browser` installs it).
 
 Each device declares its own browsers in its own `devices/<machine>/agents.yaml`.
 The fleet registry is the union of those files: a name declared by one device is
 identity-bearing (the daemon tunnels to that device); a name declared by several
-is fungible (use the local one). `--device` is only valid on `agents browser start`;
+is fungible (use the local one). `--device` is only valid on `browser start`;
 later verbs resolve the device from the task.
 
 ```bash
-# First run: omit --profile and we auto-pick the first installed Chromium-family
-# browser. macOS prefers Chrome > Brave > Edge > Chromium > Comet; Linux prefers
-# Chrome > Chromium > Brave > Edge; Windows prefers Edge (always preinstalled) >
-# Chrome > Brave > Comet. The auto-picked profile is saved as "auto-chrome".
-export AGENTS_BROWSER_TASK=$(agents browser start --url https://app.example.com)
+# Omit --profile to use this machine's default (`browser use <name>` sets it;
+# `browser profiles seed` creates a <browser>-local profile per installed browser).
+export AGENTS_BROWSER_TASK=$(browser start --url https://app.example.com)
 
 # Or pin a named profile to a specific browser (chrome, comet, brave, chromium,
 # edge, or custom) when you want isolation from auto-detect.
-agents browser profiles create work --browser chrome
+browser profiles create work --browser chrome
 # `start` writes the resolved name (e.g. `swift-crab-falcon-a3f92b1c`) to stdout
 # and human-friendly commentary to stderr, so $(...) capture stays clean.
-export AGENTS_BROWSER_TASK=$(agents browser start --profile work --url https://app.example.com)
-agents browser refs                  # Get interactive element refs
-agents browser click 42              # Click element ref 42
-agents browser type 15 --text "hello"  # Type into element ref 15
-agents browser screenshot            # Smart resizing, token-efficient
-agents browser record start --fps 10 --duration 40
+export AGENTS_BROWSER_TASK=$(browser start --profile work --url https://app.example.com)
+browser refs                  # Get interactive element refs
+browser click 42              # Click element ref 42
+browser type 15 --text "hello"  # Type into element ref 15
+browser screenshot            # Smart resizing, token-efficient
+browser record start --fps 10 --duration 40
 # Drive the page, then finalize a playable WebM under the task's recordings/ dir.
-agents browser record stop
-agents browser tabs                  # List tabs open for the current task
-agents browser tab focus tab123      # Switch focus to another tab
-agents browser done                  # Close task's tabs when finished
+browser record stop
+browser tabs                  # List tabs open for the current task
+browser tab focus tab123      # Switch focus to another tab
+browser done                  # Close task's tabs when finished
 
 # Need to address a different task in the same shell? Override per call:
-agents browser screenshot --task other-flow
+browser screenshot --task other-flow
 
 # Repeated observe/action loops: one Node process and daemon socket stay warm.
 printf '%s\n' \
   '{"action":"screenshot","path":"/tmp/page.jpg"}' \
   '{"action":"click","atX":320,"atY":540}' \
-  | agents browser stream --task "$AGENTS_BROWSER_TASK"
+  | browser stream --task "$AGENTS_BROWSER_TASK"
 ```
 
 Recording resolves ffmpeg automatically. It reuses a usable binary on `PATH` or
@@ -1121,7 +1101,7 @@ automatic path cannot run, the error names the exact manual install command.
 
 Playwright and Puppeteer spin up fresh browser instances with automation flags. Sites like LinkedIn, Google, and most finance apps detect and block them immediately.
 
-`agents browser` launches your existing residential Chrome (or Brave, Edge, Chromium) on your machine via CDP. Same browser fingerprint, same IP, same everything. Sites can't detect automation because you're using the same browser you'd use manually.
+`browser` launches your existing residential Chrome (or Brave, Edge, Chromium) on your machine via CDP. Same browser fingerprint, same IP, same everything. Sites can't detect automation because you're using the same browser you'd use manually.
 
 ### Token-efficient automation
 
@@ -1132,8 +1112,8 @@ The CLI handles the mechanical work so agents don't burn tokens on low-level bro
 Multiple agents can run browser tasks simultaneously without stepping on each other. Each profile gets its own user data directory, cookies, and state. One agent logs into your work Slack, another into your personal email — no conflicts, no shared state.
 
 ```bash
-agents browser profiles create work-slack --browser chrome
-agents browser profiles create personal-gmail --browser chrome
+browser profiles create work-slack --browser chrome
+browser profiles create personal-gmail --browser chrome
 # Two agents, two profiles, no interference
 ```
 
@@ -1142,7 +1122,7 @@ agents browser profiles create personal-gmail --browser chrome
 Attach a [secrets bundle](#secrets) to a profile. The agent can log in without credentials in plaintext, and every secret access is recorded in the session log.
 
 ```bash
-agents browser profiles create bank --browser chrome --secrets bank-creds
+browser profiles create bank --browser chrome --secrets bank-creds
 ```
 
 ### Electron apps
@@ -1150,7 +1130,7 @@ agents browser profiles create bank --browser chrome --secrets bank-creds
 Control Electron apps (Slack, Discord, VS Code, your own app) with custom binaries:
 
 ```bash
-agents browser profiles create slack \
+browser profiles create slack \
   --browser custom \
   --binary "/Applications/Slack.app/Contents/MacOS/Slack" \
   --electron
@@ -1165,21 +1145,21 @@ or an explicit pick). Later verbs reject `--device`.
 
 ```bash
 # Local CDP (discovers WebSocket URL automatically)
-agents browser profiles create local-debug \
+browser profiles create local-debug \
   --browser chrome \
   --endpoint "http://localhost:9222"
 
 # Bind a task to a fleet device at start; later verbs resolve it from the task
-agents browser start --task post --device zion --url https://x.com/
-agents browser screenshot --task post
+browser start --task post --device zion --url https://x.com/
+browser screenshot --task post
 
 # Explicit SSH endpoint, declared on the machine that owns the browser
-agents browser profiles create staging \
+browser profiles create staging \
   --browser chrome \
   --endpoint "ssh://deploy@staging.example.com?port=9222"
 
 # Cloud browser services (BrowserBase, Steel, etc.)
-agents browser profiles create cloud \
+browser profiles create cloud \
   --browser chrome \
   --endpoint "wss://connect.browserbase.com?apiKey=..."
 ```
@@ -1261,7 +1241,7 @@ agents harness add deepinfra --account deepinfra
 ```
 
 Mixing `accounts add <harness>` with `--provider` fails loud as ambiguous. One
-provider account **is** one `agents secrets` bundle -- `accounts add` creates it
+provider account **is** one `secrets` bundle -- `accounts add` creates it
 with secrets policy `never`, so a background launch never raises Touch ID.
 Harness-native OAuth stays where the harness put it and is never copied.
 
@@ -1288,7 +1268,7 @@ The `connect` / `name` / `label` / `mint` / `attach` / `detach` / `switch` /
 
 ## Secrets
 
-Secrets are the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). agi-cli does not ship the engine. `agents secrets` is a passthrough to the same binary.
+Secrets are the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). agi-cli does not ship the engine; it resolves bundles through `secrets` when a run asks for them.
 
 ```bash
 # Install (pick one — no extra env vars)
@@ -1308,7 +1288,7 @@ agents run claude "charge a test card" --secrets prod-stripe
 
 > **Platform:** macOS Keychain, Linux libsecret / file store. On Windows (non-WSL), use environment variables or a `.env` file instead.
 
-The macOS broker is **not** the agents daemon. It is `secrets _agent-run` (started by `secrets start` or on first unlock), socket under `$SECRETS_HOME/.cache/helpers/secrets-agent/` (`~/.agents` when you go through `agents secrets`). Linux has no broker. `agents daemon` never hosts it.
+The macOS broker is **not** the agents daemon. It is `secrets _agent-run` (started by `secrets start` or on first unlock), socket under `$SECRETS_HOME/.cache/helpers/secrets-agent/`. Linux has no broker. `agents daemon` never hosts it.
 
 <p align="center">
   <img src="assets/secrets.svg" alt="How agi-cli secrets work: bundle definitions live in the macOS Keychain alongside their values, agi-cli resolves at runtime and injects the env into the child process" width="100%" />
@@ -1325,12 +1305,12 @@ through `api.prix.dev` — no copy-paste, no `.env` files emailed to yourself:
 
 ```bash
 # On laptop:
-agents secrets create npm-tokens
-agents secrets add npm-tokens NPM_TOKEN          # value lives in the local keychain/file store
-agents secrets push npm-tokens                   # encrypt + upload
+secrets create npm-tokens
+secrets add npm-tokens NPM_TOKEN                 # value lives in the local keychain/file store
+secrets push npm-tokens                          # encrypt + upload
 
 # On another machine:
-agents secrets pull npm-tokens                   # decrypt + restore locally
+secrets pull npm-tokens                          # decrypt + restore locally
 agents run claude "..." --secrets npm-tokens     # injects NPM_TOKEN automatically
 ```
 
@@ -1338,12 +1318,12 @@ Nothing about a secret's value ever lives in plaintext on disk, on either end.
 
 ### Per-secret metadata and rotation
 
-Tag each secret with `--type`, `--expires`, and `--note` so the bundle is self-documenting. `--expires` is always future-dated (`YYYY-MM-DD`); past or same-day values are rejected. Use `agents secrets rotate <bundle> <key>` to refresh a credential — `add` only creates new keys, `rotate` replaces the value and preserves metadata unless overridden.
+Tag each secret with `--type`, `--expires`, and `--note` so the bundle is self-documenting. `--expires` is always future-dated (`YYYY-MM-DD`); past or same-day values are rejected. Use `secrets rotate <bundle> <key>` to refresh a credential — `add` only creates new keys, `rotate` replaces the value and preserves metadata unless overridden.
 
 ```bash
-agents secrets add prod STRIPE_API_KEY --type api-key --expires 2027-01-15 --note "Live key, owner: payments-team"
-agents secrets rotate prod STRIPE_API_KEY --note "rotated after suspected leak"
-agents secrets list   # EXPIRING column flags secrets due in the next 30 days
+secrets add prod STRIPE_API_KEY --type api-key --expires 2027-01-15 --note "Live key, owner: payments-team"
+secrets rotate prod STRIPE_API_KEY --note "rotated after suspected leak"
+secrets list   # EXPIRING column flags secrets due in the next 30 days
 ```
 
 ---
@@ -1394,7 +1374,7 @@ some of it is planned (RUSH-2290), and the section marks what is landed vs inten
 
 ### Daemon
 
-Routines, browser IPC, and the watchdog pass all run inside one always-on
+Routines, the watchdog pass, and the session index all run inside one always-on
 daemon per device. `agents daemon` is its runtime surface:
 
 ```bash
@@ -1409,11 +1389,10 @@ agents daemon disable        # persist daemon.enabled: false -- nothing auto-sta
 agents daemon enable         # clear the kill switch
 
 agents daemon reload                        # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
-agents daemon services                      # health of every hosted service (browser IPC, scheduler, ...)
+agents daemon services                      # health of every hosted service (scheduler, watchdog, ...)
 agents daemon services list                 # every toggleable service and its current on/off state
 agents daemon services enable scheduler
-agents daemon services disable browser-ipc  # stop hosting browser IPC without stopping the daemon
-agents browser stop --service               # browser-scoped alias; next browser action requiring IPC re-enables it
+agents daemon services disable watchdog     # stop the watchdog pass without stopping the daemon
 agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
@@ -1425,11 +1404,9 @@ agents daemon index backfill tools --fleet  # one-shot historical parse (also: r
 
 `agents daemon index` is foreground maintenance of the index the daemon's
 session-index service keeps current; it never starts or restarts the daemon.
-Each verb runs the same engine as its `agents sessions` spelling (`--roots`,
-`optimize`, `backfill`), which keeps working.
 
-Each hosted responsibility (browser IPC, scheduler, watchdog, recordings, device
-probe, self-heal, self-update, account-state refresh, state-dir checks) is an
+Each hosted responsibility (scheduler, watchdog, recordings, device probe,
+self-heal, self-update, account-state refresh, state-dir checks) is an
 independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
 agents-cli with the same primitives `agents upgrade` uses, then exits so the OS
@@ -1438,12 +1415,12 @@ with auto-update forced off and only picked up new code on a manual
 `agents daemon restart`.
 `agents daemon services list` shows every service; `enable|disable <id>` flips
 one. Missing keys default to enabled except the opt-in `recordings` service. Most services take
-effect on the next daemon start; browser IPC is registered even when boot-disabled
-so browser commands can enable it live; recordings is also registered while disabled
+effect on the next daemon start; recordings is registered while disabled
 so `agents recordings watch` can enable it live, while the scheduler
 re-evaluates on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
-whole process lifecycle. Browser and routines clients change their own service
-state without evicting sibling work.
+whole process lifecycle. The routines and recordings commands change their own
+service state without evicting sibling work. Browser IPC is not a daemon service:
+the standalone `browser` CLI runs its own (`browser stop --service`).
 
 There is no `agents daemon jobs` -- scheduled work is always `agents routines`
 (see `agents routines stats` for per-routine failure detail). `disable` is a
@@ -1466,7 +1443,7 @@ artifacts auth login       # Phoenix ID device-code sign-in
 artifacts share plan.html  # publish the HTML and print the link
 ```
 
-`agents sessions share <id>` stays in this CLI: it renders a session transcript to
+`sessions share <id>` (the standalone sessions CLI) renders a session transcript to
 HTML locally, then shells out to `artifacts share` to publish it, so a conversation
 becomes a shareable link the same way any other artifact does.
 
@@ -1509,16 +1486,16 @@ Two repos with the same shape, different roles:
 
 | Repo | Role | Owner |
 |---|---|---|
-| `~/.agents-system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agi-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents](https://github.com/phnx-labs/.agents) (formerly `.agents-system`) |
+| `~/.agents/.system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agi-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents](https://github.com/phnx-labs/.agents) (formerly `.agents-system`) |
 | `~/.agents/` | **User repo** — your personal additions and overrides. This is what `agents repo push`/`pull` syncs. | You |
 
 **Version pinning:** `agents.yaml` at project root pins which agent version to use (like `.nvmrc` for Node).
 
-**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents view --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
+**Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents/.system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents view --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
 
 See [docs/concepts.md](cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists, restores (`agents trash restore <agent>@<version>`) and empties (`agents trash empty --older-than 30d`) soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see `agents config budget --help`), `agents import` adopts an existing unmanaged install, `agents trash` lists, restores (`agents trash restore <agent>@<version>`) and empties (`agents trash empty --older-than 30d`) soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1542,7 +1519,7 @@ The helper itself is AGI Menu, developed in
 signed, notarized build on this repo's `menubar/v<x.y.z>` releases; the CLI
 downloads and verifies it on demand, so nothing is built on your machine.
 
-The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents sessions --active`, one click away.
+The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents ps`, one click away.
 
 ### Quick-issue bar (⌘⇧O)
 
@@ -1573,7 +1550,7 @@ agents repo disable acme  # Stop merging without deleting
 agents repo remove acme   # Unregister and delete the clone
 ```
 
-Extras clone into `~/.agents-system/.repos/<alias>/` and ship the same layout as the primary (`skills/`, `commands/`, `hooks/`, `rules/`). Their contents merge into agent version homes after the primary's — so `~/.agents/` always wins on name collisions. `agents skills list` shows which repo each skill came from.
+Extras clone into `~/.agents-<alias>/` and ship the same layout as the primary (`skills/`, `commands/`, `hooks/`, `rules/`). Their contents merge into agent version homes after the primary's — so `~/.agents/` always wins on name collisions. `agents skills list` shows which repo each skill came from.
 
 ---
 
@@ -1613,13 +1590,13 @@ Every agent run, version install, browser launch, and secrets access is logged t
 Conversations with Claude, Codex, legacy Gemini, and other agents scatter across their native storage. Session search indexes them locally so you can find any conversation:
 
 ```bash
-agents sessions "auth middleware"     # Full-text search across all agents
-agents sessions --agent claude --since 7d
-sessions --include tools --query 'program:git' --json   # standalone sessions CLI
-agents sessions backfill tools --fleet
+sessions "auth middleware"            # Full-text search across all agents
+sessions --agent claude --since 7d
+sessions --include tools --query 'program:git' --json
+agents daemon index backfill tools --fleet
 ```
 
-The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Tool-call evidence is stored redacted and bounded; the standalone `sessions --include tools` searches it, reading another box over SSH with `--host`. Historical tool parsing is explicit via `agents sessions backfill tools`; searches never parse transcripts. See [Sessions](#sessions-across-agents) for full usage.
+The index lives at `~/.agents/.history/sessions/sessions.db` (SQLite + FTS5). Tool-call evidence is stored redacted and bounded; the standalone `sessions --include tools` searches it, reading another box over SSH with `--host`. Historical tool parsing is explicit via `agents daemon index backfill tools`; searches never parse transcripts. See [Sessions](#sessions-across-agents) for full usage.
 
 ### Secrets
 
@@ -1628,8 +1605,8 @@ in the OS keychain or an encrypted file store — never in plaintext files.
 Bundle definitions live alongside their values.
 
 ```bash
-agents secrets create my-keys
-agents secrets add my-keys API_KEY    # Prompts for value, stores in the keychain/file backend
+secrets create my-keys
+secrets add my-keys API_KEY           # Prompts for value, stores in the keychain/file backend
 ```
 
 Move a bundle to another machine with `secrets push`/`secrets pull` (encrypted
@@ -1641,14 +1618,14 @@ round trip through `api.prix.dev`). See [Secrets](#secrets) for full usage.
 |------|----------|--------------|---------|
 | Event log | `~/.agents/.cache/logs/` | You only (0600) | `AGENTS_DISABLE_EVENT_LOG=1` |
 | Session index | `~/.agents/.history/sessions/` | You only | Delete the directory |
-| Secrets | OS keychain / encrypted file store | You + apps you authorize | Don't use `agents secrets` |
+| Secrets | OS keychain / encrypted file store | You + apps you authorize | Don't use `secrets` |
 | Config | `~/.agents/` | You only | N/A |
 
 ---
 
 ## Compatibility
 
-Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](cli/docs/concepts.md).
+Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agent-spec/agents.ts](cli/src/lib/agent-spec/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](cli/docs/concepts.md).
 
 > **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agi-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
@@ -1664,12 +1641,11 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Copilot | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Amp | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Goose | yes | no | yes | no | no | no | no | no | `AGENTS.md` | no |
-| Roo Code | yes | no | yes | no | yes | yes | no | no | `AGENTS.md` | no |
 | Droid | yes | yes | yes | >= 0.57.5 | >= 0.26.0 | yes | yes | yes | `AGENTS.md` | no |
 
 **Legend:** `yes` / `no` = synced or skipped at install time. `skills ($name)` = no file-based slash-command dir; behavior ships as a generated skill invoked with `$command`. `IDE + skills ($name)` = an IDE command file plus a generated skill for the CLI. `gateway` = OpenClaw resolves slash commands at runtime, not from synced files. Version suffixes are enforced at sync time — out-of-range versions are skipped with a clear message.
 
-**Host CLIs** (`agents cli`) are separate: YAML manifests under `~/.agents/cli/` install binaries onto your PATH (`gh`, `higgsfield`, etc.). They are not copied into per-agent version homes.
+**Host CLIs** (`agents clis`) are separate: YAML manifests under `~/.agents/clis/` install binaries onto your PATH (`gh`, `higgsfield`, etc.). They are not copied into per-agent version homes.
 
 ### agi-cli features (not agent-native resources)
 
@@ -1682,7 +1658,7 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 | Grok Build | -- | yes | yes |
 | Antigravity | -- | yes | -- |
 | Copilot | -- | -- | yes |
-| OpenClaw, Amp, Goose, Roo | -- | -- | -- |
+| OpenClaw, Amp, Goose | -- | -- | -- |
 
 ### Version-gated sync
 
@@ -1718,7 +1694,7 @@ Same approach as nvm, pyenv, and rbenv — battle-tested by millions of develope
 
 ### How do I share my agent setup with my team?
 
-Add a `.agents/` directory at your project root with your skills, hooks, rules, and commands. Resources merge automatically: project > user (`~/.agents/`) > system (`~/.agents-system/`). Commit it with your repo and teammates get the same agent environment.
+Add a `.agents/` directory at your project root with your skills, hooks, rules, and commands. Resources merge automatically: project > user (`~/.agents/`) > system (`~/.agents/.system/`). Commit it with your repo and teammates get the same agent environment.
 
 ### Do I need to write separate rules for each agent (CLAUDE.md, .cursorrules, etc.)?
 
@@ -1738,11 +1714,11 @@ For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/lo
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** `agents accounts add` requires macOS. `agents secrets` itself is cross-platform — macOS Keychain, Linux libsecret, or the `file` backend everywhere, including Windows (non-WSL) via environment variables or a `.env` file as a fallback when neither native store applies.
+**Secrets:** the standalone `secrets` CLI is cross-platform — macOS Keychain, Linux libsecret, or the `file` backend everywhere, including Windows (non-WSL) via environment variables or a `.env` file as a fallback when neither native store applies.
 
 Interactive runs spawn directly by default. Enable `tmux.enabled` on a device to
 give each run an addressable pane for `agents message`, injection, and `agents
-focus`; tmux-backed runs require tmux 3.2 or newer.
+ps focus`; tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?
 
@@ -1760,7 +1736,7 @@ To update on demand instead of waiting for the prompt, run `agents upgrade` (add
 
 ### What happens to my config when I switch versions?
 
-Each version has its own isolated config directory. Switching just repoints a symlink — your per-version config stays untouched. On first migration (if you had a real `~/.claude/` directory before using agi-cli), that gets backed up once to `~/.agents-system/backups/`.
+Each version has its own isolated config directory. Switching just repoints a symlink — your per-version config stays untouched. On first migration (if you had a real `~/.claude/` directory before using agi-cli), that gets backed up once to `~/.agents/.history/backups/`.
 
 ### Does session search use RAG or semantic search?
 
@@ -1772,7 +1748,7 @@ Profiles (experimental — available by default). Works with LiteLLM Proxy, Olla
 
 ### Can I add support for a new agent?
 
-Agents are defined in [src/lib/agents.ts](cli/src/lib/agents.ts) -- each is a config object declaring commands dir, rules file, and capabilities. PRs welcome.
+Agents are defined in [src/lib/agent-spec/agents.ts](cli/src/lib/agent-spec/agents.ts) -- each is a config object declaring commands dir, rules file, and capabilities. PRs welcome.
 
 ### What's the relationship to Phoenix Labs / Rush?
 
@@ -1784,7 +1760,7 @@ Agents are defined in [src/lib/agents.ts](cli/src/lib/agents.ts) -- each is a co
 
 | Path | What |
 |---|---|
-| [`cli`](cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
+| [`cli`](cli) | **The CLI** (this README) — version management, config sync, the session index and live roster, teams, cloud, fleet; fronts the standalone `sessions`, `browser`, `secrets`, and `computer` CLIs. |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | **AGI EXT** — the VS Code extension (agent terminals as tabs + the Fleet dashboard). Moved to its own repo (RUSH-3189); separate product, own publish identity. |
 | `@phnx-labs/computer-cli` | The engine behind `agents computer`, published separately (`npm i -g @phnx-labs/computer-cli`): the Swift macOS Accessibility daemon, the C#/.NET Windows UI Automation daemon, and an install-free **VNC/RFB** backend for a Linux GUI desktop (`agents computer --vnc <host:port> screenshot` — coordinate-based screenshot/click/type/key/scroll against any x11vnc/Xvnc server). agents-cli supplies the app allow list, `--device` fleet resolution, and the action history. |
 | [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state **AGI EXT** reads back (agi-ext `src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
@@ -1794,7 +1770,7 @@ Agents are defined in [src/lib/agents.ts](cli/src/lib/agents.ts) -- each is a co
 ```bash
 git clone https://github.com/phnx-labs/agi-cli
 cd agi-cli/cli
-bun install && bun run build && bun test
+bun install && scripts/build.sh --here   # build + run the suite on this machine
 ```
 
 Commands live in [`cli/src/commands/`](cli/src/commands/), libraries in

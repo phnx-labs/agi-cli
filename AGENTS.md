@@ -1,8 +1,8 @@
 # agents-cli (monorepo)
 
-A monorepo housing the `agents` CLI plus its shared libraries and native
-helpers. Install, configure, run, and dispatch AI coding agents (Claude, Codex,
-Cursor, OpenCode, OpenClaw, Grok, Droid, …) from one place.
+A monorepo housing the `agents` CLI plus its helper packages. Install, configure,
+run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, OpenClaw, Grok,
+Droid, …) from one place.
 
 > Phoenix Labs · FSL-1.1-Apache-2.0.
 
@@ -44,7 +44,7 @@ the ones that have **stopped** progressing: blocked on a real prompt, stalled on
 statement, **idle mid-task**, or crashed. Idle-but-unfinished work is the
 **highest-risk** state, not the lowest, because it is the most likely to be silently
 abandoned with no progress ever made. So any status or attention surface (the Fleet
-panel, `sessions`, notifications) surfaces not-progressing work **first** and collapses
+panel, `agents ps`, notifications) surfaces not-progressing work **first** and collapses
 the healthy running set; it never buries idle work below running work. `done` is a
 distinct terminal state from `idle`: an idle session that is genuinely finished is safe
 to fold away, while an idle session that is unfinished is exactly the one to raise.
@@ -57,12 +57,12 @@ packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli
   swarmify-mirror/  legacy npm-redirect stub (@companion/agents-cli → @phnx-labs/agents-cli)
-assets/ website/   Brand + launch demo (under assets/demo/), landing (repo-root, not shipped in any tarball)
+assets/       Brand + launch demo (under assets/demo/) (repo-root, not shipped in any tarball)
 ```
 
 | Component | What it is | Read |
 |---|---|---|
-| [`cli`](cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](cli/AGENTS.md) · [README.md](cli/README.md) |
+| [`cli`](cli) | The CLI — version mgmt, config sync, session index + live roster, teams, cloud, fleet; fronts the standalone `sessions`, `browser`, `secrets`, and `computer` CLIs | [AGENTS.md](cli/AGENTS.md) · [README.md](README.md) (the root README is the package README) |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
 | [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) | AGI Menu, the macOS menu-bar helper (own repo) — published as `MenubarHelper.app.zip` on this repo's `menubar/v<x.y.z>` tag, installed by `agents menubar` | that repo's AGENTS.md · [cli/docs/menubar.md](cli/docs/menubar.md) (the contract) |
 | `@phnx-labs/computer-cli` | The standalone `computer` engine (own repo) — the helper daemons, the RPC, and the autonomous loop behind `agents computer`. agents-cli is a thin consumer of it (PHNX-4075) | [cli/docs/computer.md](cli/docs/computer.md) (the contract) |
@@ -73,7 +73,8 @@ assets/ website/   Brand + launch demo (under assets/demo/), landing (repo-root,
 **No JS workspaces.** Each package self-installs (`bun install` inside it). There is
 deliberately no root `workspaces` field — adding one changed bun's hoisting and broke
 `@inquirer/core` resolution under `--frozen-lockfile`. Don't add it back. There are no
-cross-package imports except the CLI resolving the native helpers by relative path.
+cross-package imports except `cli/scripts/build.sh` bundling `packages/session-tracker`
+by relative path.
 
 ## Core concepts
 
@@ -96,19 +97,19 @@ and [`architecture.md`](cli/docs/architecture.md).
   [`cli/src/lib/exec.ts`](cli/src/lib/exec.ts), entered via `agents run`. Each
   agent version runs in an isolated **version home** (`HOME` swapped before exec) so
   configs never bleed between versions.
-- **Real-world tool surfaces.** `agents browser` (web) and `agents computer` (native
-  desktop, a thin consumer of the standalone `computer` CLI) are the essential tools that
+- **Real-world tool surfaces.** The standalone `browser` CLI (web) and `agents computer`
+  (native desktop, an adapter over the standalone `computer` CLI) are the essential tools that
   let an agent act on real UIs — the difference between talking about a task and doing it.
 - **Sessions.** Two things wear the name: a durable **transcript** (on disk, indexed in
-  `sessions.db`, read by `agents sessions`) and an ephemeral **live identity** (which pid
-  is which session right now, surfaced by `--active`). Transcripts sync across the fleet,
-  so a session is searchable and resumable **cross-device**.
+  `sessions.db`, read by the standalone `sessions` CLI) and an ephemeral **live identity**
+  (which pid is which session right now, surfaced by `agents ps`). Transcripts sync across
+  the fleet, so a session is searchable and resumable **cross-device**.
 - **Teams.** `agents teams` runs several agents in parallel on one task, each isolated in
   its own worktree — the multi-agent surface.
-- **Devices & hosts.** agents-cli runs commands on other machines over SSH, no daemon:
-  **devices** are the Tailscale fleet (`agents devices`), **hosts** are dispatch targets
-  (`agents hosts`); `-D/--device <name>` routes a command to any of them. This is the
-  cross-device fabric under sessions, teams, run, and cloud.
+- **Devices.** agents-cli runs commands on other machines over SSH, no daemon:
+  **devices** are the Tailscale fleet plus machines added by hand (`agents devices`);
+  `-D/--device <name>` routes a command to any of them. This is the cross-device fabric
+  under sessions, teams, run, and cloud.
 - **One engine, many consumers.** `cli` owns the state — the session index, the
   pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. AGI EXT
   ([phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext))
@@ -165,7 +166,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
 
 - **Nest by relatedness, not dogma.** Put a command under the group that owns its noun;
   a free-standing top-level command is right when nothing owns the concept. Navigate by
-  noun then action — `agents sessions resume <id>`, not `agents resume --session <id>`.
+  noun then action — `agents ps stop <id>`, not `agents stop --session <id>`.
   Flags refine an action, they don't stand in for the group. Don't force a command under
   the wrong parent just to deepen the tree, and don't flatten a verb that collides with an
   owned noun.
@@ -335,8 +336,8 @@ scripts/test.sh --device mark-1   # the suite, on an explicit fleet Linux box
 scripts/test.sh --crabbox         # the suite, on a disposable crabbox
 
 scripts/install.sh --skip-tests   # build + install this working tree
-agents-dev sessions --active      # drive YOUR build
-agents     sessions --active      # the installed CLI, unaffected
+agents-dev ps                     # drive YOUR build
+agents     ps                     # the installed CLI, unaffected
 ```
 
 Hard rules:
@@ -559,19 +560,19 @@ the exception.
 ## Security
 
 **No sensitive data in any DotAgents repo** — all three (`project` / `user` / `system`)
-are designed to be safely version-controlled. Use `agents secrets` (macOS
-Keychain-backed, metadata only, never raw credentials on disk). Committed a secret by
-accident? Rotate immediately — git history persists.
+are designed to be safely version-controlled. Use the standalone `secrets` CLI (OS
+keychain or encrypted file store, metadata only, never raw credentials on disk).
+Committed a secret by accident? Rotate immediately — git history persists.
 
 **Never attach a raw session transcript.** Before linking a session from a PR, issue,
-or ticket, run `agents sessions render <id> -o /tmp/session.md` and attach or place
+or ticket, run `sessions render <id> -o /tmp/session.md` and attach or place
 that redacted Markdown file in a secret gist. The renderer masks credential-shaped
 values and local home paths by default. `--no-redact` output is local-only and must
 never be shared.
 
 ## Assets & voice
 
-Only if you touch `assets/` (incl. `assets/demo/`) or `website/`. Visual language is terminal-coded —
+Only if you touch `assets/` (incl. `assets/demo/`). Visual language is terminal-coded —
 `#0a0a0a` bg, `#a3e635` lime accent, JetBrains Mono for the wordmark + code, Inter for
 prose. Voice is direct-developer: verb + artifact, no marketing claims — closer to a
 `man` page than a landing pitch. (AGI EXT keeps its own `swarmify` publish identity,
