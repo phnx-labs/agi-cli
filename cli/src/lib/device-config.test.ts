@@ -351,7 +351,6 @@ describe('validation', () => {
     setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
     expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals']);
 
-    // A list a pre-Goals CLI wrote straight to agents.yaml, plus an id a newer menu might know.
     const central = readCentral().replace(
       /menubarMenuTabOrder:\n(\s+- \w+\n)+/,
       'menubarMenuTabOrder:\n    - inbox\n    - home\n    - inbox\n    - calendar\n    - sessions\n    - projects\n',

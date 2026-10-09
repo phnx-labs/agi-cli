@@ -38,7 +38,6 @@ export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;
 
 export type MenubarSection = 'menu' | 'statusbar';
 
-/** Every AGI Menu preference key, `menubar.menu.*` then `menubar.statusbar.*`. */
 export const MENUBAR_CONFIG_KEYS: readonly string[] = [
   ...MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`),
   ...MENUBAR_STATUSBAR_PROPERTIES.map((p) => `menubar.statusbar.${p}`),

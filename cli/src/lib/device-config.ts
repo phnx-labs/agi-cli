@@ -25,7 +25,6 @@ interface ConfigKeySpecBase {
   description: string;
   defaultValue?: unknown;
   validate?: (value: unknown) => string | null;
-  /** Canonicalizes a stored value on read and a valid value before it is written. */
   normalize?: (value: unknown) => unknown;
 }
 
@@ -54,16 +53,10 @@ const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
 export const MENUBAR_TABS = ['home', 'goals', 'projects', 'sessions', 'inbox'] as const;
 
-/** Tabs added after `menubar.menu.tabOrder` shipped: an order written before them may leave them out. */
 const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
 
-/**
- * The tab order the AGI Menu shows for a stored list, mirroring its `TabLayout.resolve`:
- * unknown and repeated ids are dropped, and a tab the list leaves out keeps its built-in
- * place after the listed ones — so an order saved before `goals` existed gains it at the end.
- */
 export function resolveMenubarTabOrder(stored: readonly string[]): string[] {
   const known = MENUBAR_TABS as readonly string[];
   const tabs: string[] = [];
@@ -634,7 +627,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       const ok = new Set(tabs).size === tabs.length
         && tabs.every((t) => (MENUBAR_TABS as readonly string[]).includes(t))
         && required.every((t) => tabs.includes(t));
-      return ok ? null : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once.`;
+      return ok
+        ? null
+        : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once ` +
+          `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and is appended).`;
     },
     normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
   },
