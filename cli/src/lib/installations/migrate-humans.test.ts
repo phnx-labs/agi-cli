@@ -54,6 +54,12 @@ describe('humansToPreferencesPatch', () => {
     expect(patch.destinations).toEqual({ imessage: { address: '+15555550123' } });
     expect(dropped).toEqual(['telegram (openclaw-telegram)']);
   });
+
+  it('reports a quiet_hours key written by an older CLI instead of silently dropping it', () => {
+    const { patch, dropped } = migrate.humansToPreferencesPatch(yaml.parse(HUMANS.replace('quietHours:', 'quiet_hours:')));
+    expect(patch.settings).toEqual({ timezone: 'America/Los_Angeles' });
+    expect(dropped).toContain('quiet_hours (older key; set quietHours or use console Settings)');
+  });
 });
 
 describe('migrateHumansToAccount — one-shot upload of humans.yaml', () => {

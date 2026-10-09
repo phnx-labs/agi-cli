@@ -1536,6 +1536,7 @@ export function humansToPreferencesPatch(doc: unknown): { patch: OwnerPreference
   } else if (typeof owner?.quietHours === 'string' && owner.quietHours.trim()) {
     dropped.push(`quietHours '${owner.quietHours}' (expected HH:MM-HH:MM)`);
   }
+  if (owner?.quiet_hours !== undefined) dropped.push(`quiet_hours (older key; set quietHours or use console Settings)`);
   if (Object.keys(settings).length > 0) patch.settings = settings;
   if (imessageAddress) patch.destinations = { imessage: { address: imessageAddress } };
   return { patch, dropped };
