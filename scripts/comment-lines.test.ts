@@ -104,6 +104,8 @@ describe('tracked inventory and budget', () => {
     expect(classifyPath('cli/src/a.ts')).toBe('typescript');
     expect(classifyPath('.agents/artifacts/x.ts')).toBeNull();
     expect(classifyPath('README.md')).toBeNull();
+    expect(classifyPath('cli/HEALTH.html')).toBeNull();
+    expect(classifyPath('cli/docs.html')).toBe('html');
     expect(() => classifyPath('src/main.rs')).toThrow('unclassified tracked file');
     expect(() => classifyPath('scripts/tool', 'echo ok\n')).toThrow('unclassified tracked file');
   });
