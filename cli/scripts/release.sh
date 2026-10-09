@@ -75,10 +75,6 @@ run_ci_publish() {
   command -v jq >/dev/null || die "jq not found"
 
   local npm_version checked_out_ver repo_root tree assets attest tgz_json tgz dist_tag published registry_state
-  checked_out_ver="$(jq -r .version package.json)"
-  [[ "$checked_out_ver" == "$TARGET" ]] \
-    || die "checked-out package is $checked_out_ver, not $TARGET"
-
   if ! $PUBLISH_DRY_RUN; then
     [[ "${GITHUB_ACTIONS:-}" == "true" ]] \
       || die "--ci-publish is restricted to GitHub Actions"
@@ -90,6 +86,10 @@ run_ci_publish() {
     npm_version_at_least "$npm_version" "11.5.1" \
       || die "npm >=11.5.1 is required for trusted publishing (found $npm_version)"
   fi
+
+  checked_out_ver="$(jq -r .version package.json)"
+  [[ "$checked_out_ver" == "$TARGET" ]] \
+    || die "checked-out package is $checked_out_ver, not $TARGET"
 
   repo_root="$(git rev-parse --show-toplevel)"
   tree="$(git rev-parse 'HEAD^{tree}')"
