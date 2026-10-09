@@ -7,7 +7,7 @@ import { PROCESS_START_CACHE_TTL_MS, processStartMs } from './active.js';
 
 const unix = process.platform === 'win32' ? describe.skip : describe;
 
-unix('processStartMs — one ps spawn per pid per TTL (PHNX-4225)', () => {
+unix('processStartMs — one ps per TTL for the whole process table (PHNX-4225)', () => {
   let dir: string;
   let log: string;
   let savedPath: string | undefined;
@@ -26,15 +26,15 @@ unix('processStartMs — one ps spawn per pid per TTL (PHNX-4225)', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('reads a live pid start time once and serves repeats from the cache until the TTL passes', () => {
-    const pid = process.pid;
+  it('reads every pid start time with one ps per TTL, not one per pid', () => {
+    const calls = () => fs.readFileSync(log, 'utf-8').trim().split('\n');
     const t0 = 1_000_000;
-    const first = processStartMs(pid, t0);
-    expect(first).not.toBeNull();
-    expect(processStartMs(pid, t0 + 1_000)).toBe(first);
-    expect(processStartMs(pid, t0 + PROCESS_START_CACHE_TTL_MS - 1)).toBe(first);
-    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toHaveLength(1);
-    expect(processStartMs(pid, t0 + PROCESS_START_CACHE_TTL_MS)).toBe(first);
-    expect(fs.readFileSync(log, 'utf-8').trim().split('\n')).toHaveLength(2);
+    const self = processStartMs(process.pid, t0);
+    expect(self).not.toBeNull();
+    expect(processStartMs(process.ppid, t0 + 1_000)).not.toBeNull();
+    expect(processStartMs(process.pid, t0 + PROCESS_START_CACHE_TTL_MS - 1)).toBe(self);
+    expect(calls()).toEqual(['-A -o pid=,lstart=']);
+    expect(processStartMs(process.pid, t0 + PROCESS_START_CACHE_TTL_MS)).toBe(self);
+    expect(calls()).toEqual(['-A -o pid=,lstart=', '-A -o pid=,lstart=']);
   });
 });
