@@ -59,9 +59,6 @@ export function focusUri(scheme: string, terminalId: string): string {
   return `${scheme}://${EXTENSION_AUTHORITY}/focus?terminalId=${encodeURIComponent(terminalId)}`;
 }
 
-// The extension's /focus only searches the window that receives the URL, and
-// the editor routes a URL to its frontmost window. Opening the tab's folder
-// first brings the owning window forward, so the URL lands there.
 export function focusTabSpecs(variant: EditorVariant, folder: string, terminalId: string): LaunchSpec[] {
   const bundled = `${variant.app}/Contents/Resources/app/bin/${variant.cli}`;
   const cli = appExists(bundled) ? bundled : variant.cli;
