@@ -1,5 +1,266 @@
 # Changelog
 
+## 1.22.123
+
+- **Feed and session watch rows carry a PR's head SHA, title and per-check items,
+  and each subagent's model and prompt (PHNX-3939).** On `agents feed watch --json`
+  (and `sessions watch --json` for subagents), a live row's `pr` adds `headSha`,
+  `title`, and `checkItems` — one `{ name, state, url? }` per check on the head
+  commit, `state` being `passed`, `failed`, `running` or `skipped`, a re-run
+  check listed once at its latest run, at most 30. They come from the same
+  `gh pr view` the row's `checks` verdict already reads; no new GitHub call is
+  made. Each `subagents[]` entry adds `model` (the model id its replies report)
+  and `prompt` (its first user turn, whitespace-collapsed, at most 400
+  characters), read in the existing incremental fold of the child transcript.
+  All fields are absent when unknown, so older clients are unaffected.
+  Source: `cli/src/lib/feed/pr-status.ts`, `cli/src/lib/session/glance-files.ts`.
+
+- **Browser rows on the feed read the engine's native task history (PHNX-4227).**
+  `agents feed watch --json`, `agents browser sessions` and the browser picker now
+  include tasks recorded in `~/.agents/.history/browser/history.db`, which
+  browser-cli 0.1.16+ writes. Values from native history take precedence over
+  agents' own `browser_sessions` row, which fills in whatever native history does
+  not record.
+  - A finished task that captured nothing still has a row.
+  - After its tabs close, a task keeps its session link, start time, recorded
+    capture counts, and the machine it ran on.
+  - Browser rows carry new optional `machine`, `captureDir`, and `capturesRemote`
+    fields.
+  - Both stores are read-only, and the feed no longer prunes `sessions.db` on
+    every refresh.
+  - An unreadable history record keeps the existing rows instead of removing them.
+  Source: `cli/src/lib/browser/sessions-list.ts`, `cli/src/lib/feed/tool-activity.ts`,
+  `cli/src/lib/feed/tools.ts`, `cli/src/lib/sqlite.ts`.
+
+- **`agents cloud transcripts` and `agents sessions --cloud` work against the current Rush API (PHNX-4227).**
+  Both failed with `cloud-runs list failed (404)` because Rush retired `/api/v1/cloud-runs`.
+  They now list your organization's sessions across every project (`GET /o/{org}/sessions`) and
+  fetch a transcript as raw NDJSON from `/o/{org}/p/_/sessions/{id}/trajectory`. The organization
+  is the one saved in `~/.rush/user.yaml`, else your personal one, as `rush` resolves it. Each run
+  is parsed by its captured harness rather than its agent profile name.
+  Source: `cli/src/lib/session/cloud.ts`, `cli/src/lib/cloud/rush.ts`.
+
+- **`agents cloud transcripts [selector]` reads captured Rush Cloud run transcripts (PHNX-4227).**
+  It lists runs, or renders the one matching an id, short id, or id prefix, with
+  the same `--json`, `--markdown`, `--no-redact`, `--include`/`--exclude`,
+  `--first`/`--last` and `--limit` (default 50) behavior as `agents sessions --cloud`,
+  which now runs the same handler and stays registered. A failed login or an
+  unmatched or ambiguous selector exits 1 without falling back to local sessions.
+  Source: `cli/src/commands/cloud-transcripts.ts`, `cli/src/commands/cloud.ts`.
+
+- **`agents daemon index` owns session-index maintenance (PHNX-4227).**
+  `agents daemon index roots`, `agents daemon index optimize`, and
+  `agents daemon index backfill tools|resources|titles` run the same engines as
+  `agents sessions --roots --json`, `sessions optimize`, and `sessions backfill`, in
+  the foreground; none of them starts, stops, or restarts the daemon. The backfill
+  verbs declare their own filters (`--agent`, `--project`, `--since`, `--until`,
+  `--unmanaged`, `--teams`, `--local`, `--fleet`, `--device`, `--json`), so
+  `sessions backfill … --help` now lists them too. `daemon index backfill tools
+  --device <box>` reaches the backfill coordinator instead of being refused by the
+  global `--device` dispatcher, and still drives peers with
+  `agents sessions backfill tools --local`, which every released CLI understands.
+  A `--since`/`--until` value that is neither a duration nor a date now fails before
+  anything is indexed, in both spellings; before, it silently meant "all time".
+  The `sessions` spellings are unchanged otherwise.
+  Source: `cli/src/commands/daemon-index.ts`, `cli/src/commands/sessions-backfill.ts`,
+  `cli/src/commands/sessions-optimize.ts`, `cli/src/lib/hosts/passthrough.ts`.
+
+- **`agents feed watch --json` exits cleanly when its reader goes away (PHNX-4227).**
+  When the consumer closed the pipe (`| head -n1`, a client that stops reading),
+  the Node CLI crashed with an unhandled `EPIPE` stack trace and exit 1, and under
+  Bun it kept running and printed a stack trace on every heartbeat. It now ends
+  the stream with exit 0 and nothing on stderr, matching `agents sessions watch
+  --json`. Any other stdout write failure, such as `ENOSPC`, still exits 1, and a
+  hub failure that reconnecting does not recover still fails.
+  Source: `cli/src/commands/feed-watch.ts`.
+
+- **Browser rows on the feed now act through the standalone `browser` CLI, and the
+  AGI Menu floor is 1.14.6 (PHNX-4227).** In `agents feed watch --json`, a live
+  browser row's `showCommand` and `closeCommand` now carry `command: "browser"`
+  with the same argv minus the `browser` group word (`browser done --task <name>`,
+  `browser tab focus <id> --task <name>`). `runOn`, borrowed-tab handling, and the
+  rule that computer rows never get a close control are unchanged. `agents menubar`
+  now installs AGI Menu 1.14.6 or newer, the first build that runs either command.
+  Source: `cli/src/lib/feed/tools.ts`, `cli/src/lib/helper-versions.ts`.
+
+- **`agents ps` gains `--bookmarks`, `--routine [name]` and `ps migrations` (PHNX-4227).**
+  `ps --bookmarks` and `ps --routine [name]` (also spelled `--routines`) narrow the
+  live roster exactly as `sessions --active --bookmarks` / `--routine` do, and compose
+  with `--status waiting`, which still exits 1 when a selected session waits.
+  `agents ps migrations [--json] [--session <id>]` reads the same migration ledger as
+  `agents sessions migrations`; each spelling's empty-ledger hint and `migrate --help`
+  name its own group. `agents sessions migrations --json` now prints JSON: before,
+  the parent `sessions --json` consumed the flag and the table printed instead.
+  Source: `cli/src/commands/ps.ts`, `cli/src/commands/sessions-migrate.ts`.
+
+- **`agents insights resources` reports skill and command usage (PHNX-4227).**
+  It runs the same report as `agents sessions stats`, which stays registered for
+  now: the same flags, the all-time default window, and the same `--json`
+  envelope (`schemaVersion: 2`, `kind: "sessions-stats"`). `--agent` works before
+  or after `resources`; two different agents exit 1 instead of being merged.
+  Source: `cli/src/commands/sessions-stats.ts`, `cli/src/commands/insights.ts`.
+
+- **`--device` routing reads option values the way the command parses them (PHNX-4227).**
+  A message such as `--text '--device=other'`, `--text -Dx` or `--text --host=other`
+  is now delivered as the message instead of being taken as a routing flag, and
+  everything after `--` stays positional. A selector placed before the command
+  (`agents --device <peer> send …`, `agents -D<peer> send …`) now finds the command
+  instead of failing with `unknown command '<peer>'`. Command discovery, the
+  routing-selector read and the flag strip before the SSH hop share one scan
+  driven by each command's registered Commander options. Repeated selectors keep
+  the first value, as before. Separately, the tmux backend now ends `send-keys`
+  options with `--`, so text that starts with `-` reaches the pane instead of
+  failing with `tmux exited with code 1`; this also applies to `sessions inject`. Source: `cli/src/lib/hosts/routing-flag.ts`,
+  `cli/src/lib/hosts/remote-cmd.ts`, `cli/src/bootstrap.ts`, `cli/src/lib/terminal/inject.ts`.
+
+- **`agents run <harness> --resume` takes the session picker's filters (PHNX-4227).**
+  A bare `--resume` now accepts `--all`, `--teams`, `--since <time>` and
+  `-n/--limit <n>` and passes them to the same picker `agents sessions resume`
+  uses, so `agents run claude --resume --all --since 7d` matches
+  `agents sessions resume --agent claude --all --since 7d`. The defaults are
+  unchanged (this project, last 30 days, 200 rows). The four options are refused
+  with `--resume <id>` or without `--resume`, and they are removed from the
+  command that resumes the chosen session, so they never reach the harness.
+  Anything after `--` is still forwarded verbatim. Source:
+  `cli/src/commands/exec.ts`, `cli/src/commands/sessions-resume.ts`.
+- **Routing and picker flags inside a short-option cluster are recognized (PHNX-4227).**
+  The option-aware scan behind `--device` routing and the resume picker filters now
+  walks a short-option cluster the way Commander does, so `-bn5` and `-bn 5` drop
+  only the `-n` limit and keep `-b`, and `-bDpeer` routes to `peer`. A cluster that is
+  another option's value, or that follows `--`, is left alone. Source:
+  `cli/src/lib/hosts/routing-flag.ts`, `cli/src/lib/hosts/remote-cmd.ts`.
+
+- **`agents send --channel session` covers every `sessions inject` mode (PHNX-4227).**
+  New session-only options: `--pane <id>` (with `--socket <path>`) types into a known
+  tmux pane without session lookup and replaces `--to`; `--no-enter` types without
+  submitting; `--combined` sends text and Enter as one write. The session channel now
+  delivers the text exactly as given, so surrounding spaces and newlines are kept and
+  `--text ""` presses Enter alone; other channels still trim. A `--to` prefix that
+  matches several live sessions is refused instead of picking one (this also applies
+  to `sessions inject`), and the four options are refused on every other channel and
+  on `--to owner`. `--json` adds `backend`, `writes` and `confirmed` to the existing
+  result fields. Source: `cli/src/commands/send.ts`, `cli/src/lib/channels/send.ts`,
+  `cli/src/lib/channels/providers/session.ts`, `cli/src/lib/session/inject-target.ts`.
+
+- **A live session's cwd is never an error string, and a Grok row keeps its session id (PHNX-4263).** On Linux, `agents sessions --active` read each process's cwd through `lsof`, which prints `/proc/<pid>/cwd (readlink: Permission denied)` for a process it cannot inspect (a sandboxed or other-user agent), and the CLI published that text as the row's `cwd`. The cwd is now read from `/proc/<pid>/cwd` directly and is unknown when the link cannot be read. A Grok session whose transcript was matched by cwd showed that transcript's topic and state but `sessionId: null`, because the id was read from the file name and Grok's file is `<id>/summary.json`; the id now comes from the index row for that file, for every harness except Claude. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/session/db.ts`.
+
+- **A tab that dispatches an agent to another box binds to its session for every harness (PHNX-4263).**
+  `agents run --device` now forwards `AGENTS_ORIGIN_DEVICE` (the dispatching machine id)
+  beside `AGENTS_ORIGIN_TERMINAL_ID`. The remote run records both in its pid entry as
+  `originTerminal`, and the fleet projection adds `{device, terminalId, launchId}` for
+  that desktop to the row's `observerTerminals`. Codex and Grok tabs launched with
+  `--device auto` no longer stay on "tracking session": before, only Claude got a
+  desktop-side observation, because only Claude has a pre-minted session id. A
+  `live-terminals.json` agent entry with a `terminalId` and no (or an empty) `sessionId`
+  now produces a terminal row instead of being dropped. It is keyed by `terminalId`,
+  and no session id is guessed from its cwd. Shell tabs published by the extension
+  produce no session row unless an agent runs under them.
+  Source: `cli/src/lib/launch-identity.ts`, `cli/src/lib/session/projection.ts`,
+  `cli/src/lib/session/active.ts`.
+
+- **Owner notifications go through your account (PHNX-4267).** `agents send --to owner`, an
+  important or `--blocked` `feed post`, an urgent feed block and a failed routine now post one
+  event to rush/api (`POST /me/notifications`), which applies your preferences, quiet hours and
+  dedup and delivers by email, Slack DM or iMessage. Edit them in the console Settings page. A
+  block is `needs_you` and bypasses quiet hours; a failed routine is `failed`; everything else is
+  `message`. Reaching the owner now requires `agents auth login`: a box with no Phoenix session
+  (and, on a worker, no device token) reports the send as failed, and `agents doctor` shows the
+  critical `owner-not-signed-in` finding (it replaces `owner-sink-unreachable`). `--to owner`
+  takes no `--channel`, `--thread` or `--attach`. Source: `cli/src/lib/owner-notify.ts`.
+- **Workers get a scoped device token automatically (PHNX-4267).** The first signed-in personal or
+  desktop box mints one `notify`-scoped Phoenix device token per `role=worker` device and pushes
+  it into that worker's own `__notify-<worker>__` reserved store on the `auth-sync` tick. It is
+  never pushed to a headed device. A worker whose token was rejected or lost gets a replacement;
+  a device that leaves the fleet or stops being a worker has its token revoked, and
+  `agents auth logout` revokes the tokens that box minted. Source:
+  `cli/src/lib/owner-notify-tokens.ts`.
+- **A signed-in Mac sends the iMessages (PHNX-4267).** The new macOS-only `owner-device-delivery`
+  daemon service claims queued iMessage deliveries every 15 seconds, sends them through Messages
+  and reports each result. Delivery is at-least-once: a sent message whose result report fails is
+  sent again after the 5-minute stale-claim window. Source:
+  `cli/src/lib/daemon/owner-device-delivery-service.ts`.
+- **`humans.yaml` moves to your account, once (PHNX-4267).** On the first run with a Phoenix
+  session, `~/.agents/humans.yaml` is uploaded to your notification preferences (channels, policy,
+  quiet hours, timezone, iMessage handle), moved to trash, and its removal committed. Without a
+  session the file stays and the upload retries. Transports with no account equivalent (Telegram,
+  desktop) are reported and not migrated. `notify.owner` in `agents.yaml` is no longer read.
+  Source: `cli/src/lib/installations/migrate.ts`.
+- **`agents trash restore` and `agents trash empty` (PHNX-4267).** `agents restore` moves to
+  `agents trash restore <agent>@<version>`. `agents trash empty [--older-than <duration>] [--yes]`
+  permanently deletes trashed items, optionally only those trashed before the cutoff; it asks
+  first in a terminal and refuses without `--yes` elsewhere. `agents prune cleanup trash`, which
+  never deleted anything, is gone. Source: `cli/src/commands/trash.ts`, `cli/src/lib/trash.ts`.
+- **Removed `agents humans`, `agents reminders`, `agents modes` and `agents feedback`
+  (PHNX-4267).** The owner's settings live in the console. Reminders still show in the Claude
+  statusline from `~/.agents/reminders/reminders.yaml`. The per-harness mode table now prints in
+  `agents run --help`. Explicit `--channel` sends and feed `channel:` sinks no longer forward to a
+  Mac peer over SSH when this box cannot deliver. Source: `cli/src/lib/startup/command-registry.ts`.
+
+### Fixed
+
+- `agents browser <verb> --help`, `agents computer <verb> --help` and
+  `agents secrets --help` now print the standalone CLI's own help with its real
+  options. The global help conventions re-added agents-cli's `-h, --help` to these
+  forwarding commands, so they printed a page with no options and agents guessed
+  flags (PHNX-4283).
+- The pinned browser engine is now `@phnx-labs/browser-cli` 0.1.16, the release
+  that reads the config keys agents-cli writes. Before it, `browser.device` and each
+  machine's default browser profile were ignored, so a bare `agents browser start`
+  ran on whatever profile the calling box guessed instead of the configured browser.
+
+- **Publish finished CleanShot recordings as organization artifacts (PHNX-4287).**
+  `agents recordings watch [--dir …]` enables a daemon-owned, restart-safe watcher;
+  `list [--json]`, `upload <file>`, and `unwatch` expose its ledger and controls.
+  Settled MP4/MOV files are transcoded through ffmpeg without changing the original,
+  identity-gated to organization accounts, deduplicated across CleanShot re-exports,
+  and published through the standalone artifacts CLI with org-only visibility. Enabling
+  the watcher baselines existing files so only newly completed exports auto-publish.
+  Source: `cli/src/lib/recordings/`, `cli/src/commands/recordings.ts`.
+
+- **AGI Menu gains a Goals tab and two goal preferences (PHNX-4291).** `goals` joins
+  the tab ids, and the default tab bar becomes home, goals, projects, sessions, inbox.
+  A `menubar.menu.tabOrder` saved before Goals existed still validates and reads back
+  with `goals` appended, the same way the menu resolves an order that leaves a tab out.
+  `menubar.menu.homeGoals` picks the goal levels Home shows (any of `company`, `week`,
+  `myWeek`, `myDay`, no duplicates; default `["company"]`) and rides the snapshot's
+  `menuListPreferences`. `menubar.statusbar.goalCountdown` (default `false`) turns on
+  the goal countdown beside the menu-bar icon and rides `menuPreferences`. All three
+  work with `agents config set/get/list/unset`. Source: `cli/src/lib/device-config.ts`,
+  `cli/src/lib/config-keys.ts`, `cli/src/lib/menubar/snapshot.ts`.
+
+- **CLI releases now publish from a versioned branch through protected GitHub OIDC.** Push `release/x.y.z` or `release/x.y.z-pre.n`; one GitHub-hosted job behind the `npm-publish` environment derives the exact release-tree attestation from the newest compatible tested proof anywhere in the `main` ancestry, or impact-tests changes since the newest retained proof when packaged inputs or policy drifted. It rejects every diff outside the CLI release-input allowlist from that proof through the release head, rejects every release-branch change outside generated CLI release metadata, builds and install-smokes the bound tarball, creates `v<version>` plus its GitHub release, and publishes the same bytes to npm with provenance only while the remote release branch still names the event commit. Pre-releases use the `next` dist-tag. The former home-base/token publisher and its dead `NPM_TOKEN` auth probe are removed, so there is no stored npm credential or second publisher. Source: `.github/workflows/release.yml`, `cli/scripts/release-ci.sh`, `cli/scripts/release.sh`.
+
+### Fixed
+
+- Release commits now include the generated HTML command reference alongside the
+  JSON and Markdown indexes. CI checks all three on release version bumps, help
+  changes, and direct HTML edits. Regenerate with `scripts/generate-reference.sh`,
+  use `--check` for a read-only freshness check, or `--out-dir` for a separate preview.
+
+### Fixed
+
+- AGI Menu updates itself to a new release again. The periodic update checked
+  whether the new release was signed before downloading it, so a release not
+  yet on disk always failed the check and was skipped as "another install owns
+  the helper". It now downloads and verifies the release first, then decides.
+
+### Fixed
+
+- `agents projects prs --repo … --number …` no longer fails when the shared
+  GraphQL budget is spent. The review verdict is GraphQL-only, so it reads
+  null and `ciError` says the review status is unavailable; the head and checks
+  still come from REST. Any other error still fails the read.
+
+### Changed
+
+- `agents run` no longer adds a permission flag when you did not choose a mode.
+  Without `--mode` or a configured `run.<agent>@*.mode`, the harness's own
+  settings decide (for Claude, `permissions.defaultMode` in its settings), the
+  same as launching it directly. Set a default for agents-cli runs with
+  `agents config set 'run.claude@*.mode' auto`. This also fixes
+  `agents run claude#work -- rc`, which Claude refused because
+  `--permission-mode plan` came before the `remote-control` verb.
+
 ## 1.22.122
 
 - **`agents monitors` is removed (PHNX-4241).** The command group, the monitor
