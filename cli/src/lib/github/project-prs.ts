@@ -167,8 +167,8 @@ export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<Pr
   return parseNdjson(out).map(rowToProjectPr);
 }
 
-export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghExec): Promise<ProjectPr> {
-  const out = await gh(['api', `repos/${repo}/pulls/${number}`, '--jq', PR_JQ]);
+export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghExec, cache?: string): Promise<ProjectPr> {
+  const out = await gh(['api', `repos/${repo}/pulls/${number}`, ...(cache ? ['--cache', cache] : []), '--jq', PR_JQ]);
   const rows = parseNdjson(out);
   if (rows.length === 0) throw new Error(`no PR ${repo}#${number}`);
   return rowToProjectPr(rows[0]);
@@ -261,7 +261,7 @@ function rollupTtlMs(items: readonly RollupItem[]): number {
   return isPassingRollup(items) ? PASSING_ROLLUP_TTL_MS : FAILING_ROLLUP_TTL_MS;
 }
 
-interface CachedRollup {
+export interface CachedRollup {
   items: RollupItem[];
   readAt: number;
 }
@@ -270,7 +270,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 const isFileList = (v: unknown): v is string[] => Array.isArray(v) && v.every((f) => typeof f === 'string');
 
-const isCachedRollup = (v: unknown): v is CachedRollup =>
+export const isCachedRollup = (v: unknown): v is CachedRollup =>
   isRecord(v) && typeof v.readAt === 'number' && Array.isArray(v.items) &&
   v.items.every((i) => isRecord(i) && typeof i.name === 'string');
 
@@ -330,7 +330,7 @@ export class KeyedCache<T> {
   }
 }
 
-class CiErrors {
+export class CiErrors {
   message: string | null = null;
 
   record(err: unknown): void {
@@ -343,7 +343,7 @@ function isRateLimited(message: string): boolean {
   return isRateLimitError(message) || /API rate limit exceeded/i.test(message);
 }
 
-interface CiReader {
+export interface CiReader {
   slug: string;
   gh: GhExec;
   rollups: KeyedCache<CachedRollup>;
@@ -352,7 +352,7 @@ interface CiReader {
   reads: Map<string, Promise<CiSummary>>;
 }
 
-function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
+export function readCi(ci: CiReader, sha: string | null): Promise<CiSummary> {
   if (!sha) return Promise.resolve(NO_CI);
   let read = ci.reads.get(sha);
   if (!read) {
@@ -516,7 +516,7 @@ class PrFilesCache extends KeyedCache<string[]> {
   }
 }
 
-async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapBounded<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
   const worker = async () => {
@@ -728,6 +728,8 @@ export async function defaultMergeMethod(repo: string, gh: GhExec = ghExec): Pro
   return method;
 }
 
+const NO_BRANCH_PROTECTION = /\(HTTP 404\)|Upgrade to GitHub Pro or make this repository public/;
+
 export async function readRepoMergeAbility(repo: string, gh: GhExec = ghExec): Promise<RepoMergeAbility> {
   const settings = await readRepoMergeSettings(repo, gh);
   let adminBypass = false;
@@ -739,7 +741,7 @@ export async function readRepoMergeAbility(repo: string, gh: GhExec = ghExec): P
       ])).trim();
       adminBypass = enforced !== 'true';
     } catch (err) {
-      if (!/\(HTTP 404\)/.test(ghFailure(err))) throw err;
+      if (!NO_BRANCH_PROTECTION.test(ghFailure(err))) throw err;
       adminBypass = true;
     }
   }

@@ -87,7 +87,8 @@ import {
   type CiState,
   type MergeMethod,
 } from '../lib/github/project-prs.js';
-import { ghExec } from '../lib/github/pr-mergeable.js';
+import { ghExec, canonicalizeRepo } from '../lib/github/pr-mergeable.js';
+import { buildOpenPrs, type OpenPrsEnvelope } from '../lib/github/open-prs.js';
 import { readCiFailure, rerunFailedJobs } from '../lib/github/ci-failure.js';
 import { registerProjectTodoCommands } from './projects-todo.js';
 
@@ -492,7 +493,8 @@ function prFail(message: string): never {
   process.exit(1);
 }
 
-function prProjectOrExit(name: string): ProjectDef {
+function prProjectOrExit(name: string | undefined): ProjectDef | undefined {
+  if (name === undefined) return undefined;
   return loadProjectDef(name) ?? prFail(`No project named "${name}". List them: agents projects list`);
 }
 
@@ -530,13 +532,39 @@ function prMethodOrExit(raw: string | undefined): MergeMethod | undefined {
   return raw as MergeMethod | undefined;
 }
 
-async function prRepoOrExit(def: ProjectDef, repo: string): Promise<string> {
+async function prRepoOrExit(def: ProjectDef | undefined, repo: string): Promise<string> {
+  if (!def) {
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) prFail(`--repo expects owner/repo, got "${repo}".`);
+    return canonicalizeRepo(repo, ghExec);
+  }
   try {
     const [resolved] = await resolveTargetSlugs(def, repo, ghExec);
     return resolved;
   } catch (e) {
     return prFail(e instanceof Error ? e.message : String(e));
   }
+}
+
+function printOpenPrs(open: OpenPrsEnvelope): void {
+  const marks = { review: chalk.yellow('review requested'), failing: chalk.red('failing'), conflicts: chalk.red('conflicts') };
+  for (const o of open.owners) {
+    if (o.error) console.log(`${chalk.bold(o.login)}  ${chalk.red(`— search failed: ${o.error}`)}`);
+    else if (o.truncated) console.log(chalk.yellow(`${o.login}: GitHub search stops at ${o.open} results; some open PRs are not listed.`));
+  }
+  if (open.reviewRequestedError) console.log(chalk.yellow(`Review requests could not be read: ${open.reviewRequestedError}`));
+  for (const r of open.repositories) {
+    const projects = r.projects.length ? chalk.dim(`  ${r.projects.join(', ')}`) : '';
+    console.log(`${chalk.bold(r.slug)}  ${chalk.dim(`${r.pullRequests.length} open`)}${projects}`);
+    for (const pr of r.pullRequests) {
+      const draft = pr.isDraft ? chalk.gray(' [draft]') : '';
+      const needs = pr.needsMe ? `  ${marks[pr.needsMe]}` : '';
+      console.log(`  ${ciMark(pr.ciState)} #${pr.number}${draft}  ${pr.title}  ${chalk.gray(`@${pr.author.login}`)}${needs}`);
+    }
+    if (r.ciError) console.log(chalk.yellow(`  Checks or mergeability are incomplete: ${r.ciError}`));
+  }
+  const total = open.repositories.reduce((n, r) => n + r.pullRequests.length, 0);
+  const needs = open.repositories.reduce((n, r) => n + r.pullRequests.filter((pr) => pr.needsMe).length, 0);
+  console.log(chalk.dim(`\n${total} open across ${open.repositories.length} repos · ${needs} need you`));
 }
 
 export function registerProjectsCommands(program: Command): void {
@@ -846,32 +874,36 @@ async function runProjectCard(
 
   const prsCmd = projects
     .command('prs')
-    .description('A project\'s open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).');
+    .description('Open pull requests: every one across your GitHub account and orgs, or one project\'s (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).');
   const prsListCmd = prsCmd
-    .command('list <name>', { isDefault: true })
-    .description('Every OPEN pull request across a project\'s attached repos (drafts included, no author filter), scoped to this project\'s paths in a shared repo.')
+    .command('list [name]', { isDefault: true })
+    .description('Every OPEN pull request across a project\'s attached repos, or with no project across your GitHub account and every org you belong to, with what needs you first.')
     .option('--json', 'Machine-readable output (the AGI Menu contract shape)')
-    .option('--repo <owner/repo>', 'Restrict to one of the project\'s attached repos')
+    .option('--repo <owner/repo>', 'With a project: restrict to one of its attached repos. Without: the repo of the one PR --number names')
     .option('--number <n>', 'Lazy detail: enrich exactly this PR with checks + reviewDecision (requires --repo)')
-    .action(async (name: string, opts: { json?: boolean; repo?: string; number?: string }) => {
-      const def = loadProjectDef(name);
-      if (!def) {
-        console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
-        process.exit(1);
-      }
+    .option('--org <login...>', 'Without a project: read only these GitHub orgs or accounts (default: you and every org you belong to)')
+    .action(async (name: string | undefined, opts: { json?: boolean; repo?: string; number?: string; org?: string[] }) => {
       let number: number | undefined;
       if (opts.number !== undefined) {
-        if (!opts.repo) {
-          console.error(chalk.red('--number names one PR in one repo; pass --repo <owner/repo> with it.'));
-          process.exit(1);
-        }
-        const raw = opts.number.trim();
-        number = /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
-        if (!Number.isSafeInteger(number) || number <= 0) {
-          console.error(chalk.red(`--number expects a positive integer, got "${opts.number}".`));
-          process.exit(1);
-        }
+        if (!opts.repo) prFail('--number names one PR in one repo; pass --repo <owner/repo> with it.');
+        number = prNumberOrExit(opts.number);
       }
+      if (name === undefined) {
+        if (opts.repo !== undefined && number === undefined) prFail('Without a project, --repo names the repo of one PR; pass --number with it, or --org to scope the list.');
+        if (opts.repo !== undefined && opts.org !== undefined) prFail('--org scopes the list; --repo with --number reads one PR. Pass one or the other.');
+        let open: OpenPrsEnvelope;
+        try {
+          open = await buildOpenPrs(listProjectDefs(), { owners: opts.org, repo: opts.repo, number });
+        } catch (e) {
+          prFail(e instanceof Error ? e.message : String(e));
+        }
+        if (opts.json) console.log(JSON.stringify(open, null, 2));
+        else printOpenPrs(open);
+        if (open.partial) process.exit(1);
+        return;
+      }
+      if (opts.org !== undefined) prFail('--org reads across orgs; drop the project name to use it.');
+      const def = prProjectOrExit(name)!;
       let envelope;
       try {
         envelope = await buildProjectPrs(def, { repo: opts.repo, number }, undefined, listProjectDefs());
@@ -918,15 +950,15 @@ async function runProjectCard(
     });
 
   const mergeCmd = prsCmd
-    .command('merge <name>')
-    .description('Merge one open PR of a project, pinned to the head SHA you reviewed.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .command('merge [name]')
+    .description('Merge one open PR, pinned to the head SHA you reviewed.')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--number <n>', 'The PR number')
     .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; GitHub refuses if the branch moved since')
     .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
     .option('--admin', 'Merge a PR branch protection blocks, as a repository admin. For a person\'s explicit confirm only; agents must never pass it')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha: string; method?: string; admin?: boolean; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; number: string; sha: string; method?: string; admin?: boolean; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const sha = prShaOrExit(opts.sha);
@@ -948,6 +980,7 @@ async function runProjectCard(
       agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json
+      agents projects prs merge --repo muqsitnawaz/agents --number 12 --sha <headSha>   # any repo, no project
     `,
     notes: `
       The merge is a single REST call pinned to --sha: if anything was pushed after
@@ -957,21 +990,23 @@ async function runProjectCard(
       computed goes on to the call and GitHub decides. --admin skips that refusal and lets a
       repository admin merge past branch protection where GitHub allows it; it exists
       for a person's explicit confirm (AGI Menu's "Confirm admin merge") and agents
-      must never pass it. To land a PR once its checks pass, use prs automerge. A
+      must never pass it. To land a PR once its checks pass, use prs automerge.
+      Every prs verb takes the project name optionally: without it, --repo may be any
+      owner/repo you can reach, as the GitHub tab of AGI Menu uses them. A
       refusal exits 1 with GitHub's reason (merged: false in --json).
     `,
   });
 
   const automergeCmd = prsCmd
-    .command('automerge <name>')
+    .command('automerge [name]')
     .description('Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--number <n>', 'The PR number')
     .option('--sha <head-sha>', 'The head SHA you reviewed (required to turn it on); GitHub refuses if the branch moved since')
     .option('--method <method>', `${MERGE_METHODS.join(' | ')} (default: the first the repo allows, in that order)`)
     .option('--off', 'Turn auto-merge off instead')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha?: string; method?: string; off?: boolean; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; number: string; sha?: string; method?: string; off?: boolean; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const enable = opts.off !== true;
@@ -1005,13 +1040,13 @@ async function runProjectCard(
   });
 
   const readyCmd = prsCmd
-    .command('ready <name>')
-    .description('Mark one draft PR of a project ready for review.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .command('ready [name]')
+    .description('Mark one draft PR ready for review.')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--number <n>', 'The PR number')
     .option('--sha <head-sha>', 'The head SHA you looked at; refused if the branch moved since')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha?: string; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; number: string; sha?: string; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const sha = opts.sha === undefined ? undefined : prShaOrExit(opts.sha);
@@ -1038,15 +1073,15 @@ async function runProjectCard(
   });
 
   const reviewCmd = prsCmd
-    .command('review <name>')
-    .description('Approve one open PR of a project, pinned to the head SHA you reviewed.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .command('review [name]')
+    .description('Approve one open PR, pinned to the head SHA you reviewed.')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--number <n>', 'The PR number')
     .requiredOption('--sha <head-sha>', 'The head SHA you reviewed; refused if the branch moved since')
     .option('--approve', 'Submit an approving review (the only review this command submits)')
     .option('--body <text>', 'Text to post with the approval')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; sha: string; approve?: boolean; body?: string; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; number: string; sha: string; approve?: boolean; body?: string; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const sha = prShaOrExit(opts.sha);
@@ -1074,14 +1109,14 @@ async function runProjectCard(
   });
 
   const commentCmd = prsCmd
-    .command('comment <name>')
-    .description('Post a comment on one open PR of a project.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .command('comment [name]')
+    .description('Post a comment on one open PR.')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--number <n>', 'The PR number')
     .option('--body <text>', 'The comment text')
     .option('--body-file <path>', 'Read the comment from a file; - reads stdin')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; number: string; body?: string; bodyFile?: string; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; number: string; body?: string; bodyFile?: string; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const number = prNumberOrExit(opts.number);
       const body = prCommentBodyOrExit(opts.body, opts.bodyFile);
@@ -1105,12 +1140,12 @@ async function runProjectCard(
   });
 
   const failureCmd = prsCmd
-    .command('failure <name>')
+    .command('failure [name]')
     .description('Why one commit\'s CI failed: each failing check with the error lines of its job log.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--sha <commit>', 'The commit whose checks failed: a PR head, a merge commit, or the default branch head')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; sha: string; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; sha: string; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const sha = prShaOrExit(opts.sha);
       const repo = await prRepoOrExit(def, opts.repo);
@@ -1126,7 +1161,7 @@ async function runProjectCard(
           console.log(`${chalk.red('✗')} ${chalk.bold(check.name)}  ${chalk.gray(check.conclusion.toLowerCase())}${check.url ? `  ${chalk.gray(check.url)}` : ''}`);
           for (const line of check.excerpt) console.log(`    ${line}`);
           if (check.excerptError) console.log(chalk.yellow(`    ${check.excerptError}`));
-          if (check.runId !== null) console.log(chalk.gray(`    re-run: agents projects prs rerun ${name} --repo ${repo} --run-id ${check.runId}`));
+          if (check.runId !== null) console.log(chalk.gray(`    re-run: agents projects prs rerun ${name ? `${name} ` : ''}--repo ${repo} --run-id ${check.runId}`));
         }
       }
       if (report.error) process.exit(1);
@@ -1150,12 +1185,12 @@ async function runProjectCard(
   });
 
   const rerunCmd = prsCmd
-    .command('rerun <name>')
+    .command('rerun [name]')
     .description('Re-run the failed jobs of one GitHub Actions workflow run.')
-    .requiredOption('--repo <owner/repo>', 'One of the project\'s attached repos')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
     .requiredOption('--run-id <id>', 'The workflow run (runId from prs failure --json)')
     .option('--json', 'Machine-readable result')
-    .action(async (name: string, opts: { repo: string; runId: string; json?: boolean }) => {
+    .action(async (name: string | undefined, opts: { repo: string; runId: string; json?: boolean }) => {
       const def = prProjectOrExit(name);
       const raw = opts.runId.trim();
       const runId = /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -1182,6 +1217,7 @@ async function runProjectCard(
 
   setHelpSections(prsCmd, {
     examples: `
+      agents projects prs --json                            # every open PR across your account and orgs, needs-me first
       agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)
       agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability
       agents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
@@ -1195,14 +1231,26 @@ async function runProjectCard(
 
   setHelpSections(prsListCmd, {
     examples: `
+      agents projects prs --json                            # every open PR across your account and every org you belong to
+      agents projects prs --json --org phnx-labs --org muqsitnawaz
+      agents projects prs --json --repo phnx-labs/agi-cli --number 3646  # one PR in any repo, with checks + review + mergeability
       agents projects prs rush --json                       # every open PR across rush's repos
       agents projects prs rush --json --repo phnx-labs/agi-cli
       agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review + mergeability
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
     `,
     notes: `
-      Repos come from the project definition's attached repos only (repo + repos[].slug);
-      --repo is refused unless it is one of them.
+      Without a project, the read covers you and every org you belong to (--org
+      narrows it): one REST search per owner (GitHub caps a search at 1000 results;
+      owners[].truncated says when it was hit), one for review requests from you, then
+      each PR's REST detail and checks, cached like the project read. Each PR carries
+      reviewRequested and needsMe: review (a review is requested from you), failing
+      (yours, CI red) or conflicts (yours, conflicts with its base), else null; each
+      repository's PRs come needs-me first, then most recently updated. Each
+      repository names the projects that attach it.
+
+      With a project, repos come from its definition's attached repos only (repo +
+      repos[].slug); --repo is refused unless it is one of them.
 
       The list is read from GitHub over REST and paginated in full, drafts included,
       with no author filter. checks and reviewDecision are null in the list; --number

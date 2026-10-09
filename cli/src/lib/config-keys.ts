@@ -32,6 +32,9 @@ export const MENUBAR_MENU_PROPERTIES = [
   'prGroupOpen',
   'prGroupMerged',
   'homeGoals',
+  'githubHidden',
+  'githubDrafts',
+  'githubBots',
 ] as const;
 
 export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;

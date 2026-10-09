@@ -10359,7 +10359,7 @@
           "name": "prs",
           "path": "projects prs",
           "aliases": [],
-          "description": "A project's open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).",
+          "description": "Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).",
           "args": [],
           "options": [
             {
@@ -10373,7 +10373,7 @@
               "negate": false
             }
           ],
-          "examples": "agents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\nagents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\nagents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
+          "examples": "agents projects prs --json                            # every open PR across your account and orgs, needs-me first\nagents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\nagents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\nagents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
           "subcommands": [
             {
               "name": "automerge",
@@ -10383,7 +10383,7 @@
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10391,7 +10391,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10462,11 +10462,11 @@
               "name": "comment",
               "path": "projects prs comment",
               "aliases": [],
-              "description": "Post a comment on one open PR of a project.",
+              "description": "Post a comment on one open PR.",
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10474,7 +10474,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10540,7 +10540,7 @@
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10548,7 +10548,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10592,11 +10592,11 @@
               "name": "list",
               "path": "projects prs list",
               "aliases": [],
-              "description": "Every OPEN pull request across a project's attached repos (drafts included, no author filter), scoped to this project's paths in a shared repo.",
+              "description": "Every OPEN pull request across a project's attached repos, or with no project across your GitHub account and every org you belong to, with what needs you first.",
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10613,7 +10613,7 @@
                 },
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "Restrict to one of the project's attached repos",
+                  "description": "With a project: restrict to one of its attached repos. Without: the repo of the one PR --number names",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10630,6 +10630,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--org <login...>",
+                  "description": "Without a project: read only these GitHub orgs or accounts (default: you and every org you belong to)",
+                  "long": "--org",
+                  "required": true,
+                  "optional": false,
+                  "variadic": true,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -10640,19 +10649,19 @@
                   "negate": false
                 }
               ],
-              "examples": "agents projects prs rush --json                       # every open PR across rush's repos\nagents projects prs rush --json --repo phnx-labs/agi-cli\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review + mergeability\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
-              "notes": "Repos come from the project definition's attached repos only (repo + repos[].slug);\n--repo is refused unless it is one of them.\n\nThe list is read from GitHub over REST and paginated in full, drafts included,\nwith no author filter. checks and reviewDecision are null in the list; --number\nenriches exactly that one PR against its live head SHA, with mergeable and\nmergeableState.\n\nA repository attached to several projects (a monorepo) is scoped by the paths\neach project claims, the same rule that attributes a session's cwd: a\ndefaultPath narrowed under root, or a repos[] subpath. A PR is listed when it\ntouches this project's paths (scope: project) or no sharing project's paths\n(scope: repo-wide). Changed files are cached per head SHA, so only a new push\ncosts a read.\n\nA repository whose fetch fails is reported with an error and marks the result\npartial (JSON reports errors per repository; text mode exits non-zero).",
+              "examples": "agents projects prs --json                            # every open PR across your account and every org you belong to\nagents projects prs --json --org phnx-labs --org muqsitnawaz\nagents projects prs --json --repo phnx-labs/agi-cli --number 3646  # one PR in any repo, with checks + review + mergeability\nagents projects prs rush --json                       # every open PR across rush's repos\nagents projects prs rush --json --repo phnx-labs/agi-cli\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + review + mergeability\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>",
+              "notes": "Without a project, the read covers you and every org you belong to (--org\nnarrows it): one REST search per owner (GitHub caps a search at 1000 results;\nowners[].truncated says when it was hit), one for review requests from you, then\neach PR's REST detail and checks, cached like the project read. Each PR carries\nreviewRequested and needsMe: review (a review is requested from you), failing\n(yours, CI red) or conflicts (yours, conflicts with its base), else null; each\nrepository's PRs come needs-me first, then most recently updated. Each\nrepository names the projects that attach it.\n\nWith a project, repos come from its definition's attached repos only (repo +\nrepos[].slug); --repo is refused unless it is one of them.\n\nThe list is read from GitHub over REST and paginated in full, drafts included,\nwith no author filter. checks and reviewDecision are null in the list; --number\nenriches exactly that one PR against its live head SHA, with mergeable and\nmergeableState.\n\nA repository attached to several projects (a monorepo) is scoped by the paths\neach project claims, the same rule that attributes a session's cwd: a\ndefaultPath narrowed under root, or a repos[] subpath. A PR is listed when it\ntouches this project's paths (scope: project) or no sharing project's paths\n(scope: repo-wide). Changed files are cached per head SHA, so only a new push\ncosts a read.\n\nA repository whose fetch fails is reported with an error and marks the result\npartial (JSON reports errors per repository; text mode exits non-zero).",
               "subcommands": []
             },
             {
               "name": "merge",
               "path": "projects prs merge",
               "aliases": [],
-              "description": "Merge one open PR of a project, pinned to the head SHA you reviewed.",
+              "description": "Merge one open PR, pinned to the head SHA you reviewed.",
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10660,7 +10669,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10723,19 +10732,19 @@
                   "negate": false
                 }
               ],
-              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json",
-              "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\nyou read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose\nlive mergeable_state is blocked (a pending or red required check, or a review),\nbehind, conflicted or a draft is refused before the call; one GitHub has not\ncomputed goes on to the call and GitHub decides. --admin skips that refusal and lets a\nrepository admin merge past branch protection where GitHub allows it; it exists\nfor a person's explicit confirm (AGI Menu's \"Confirm admin merge\") and agents\nmust never pass it. To land a PR once its checks pass, use prs automerge. A\nrefusal exits 1 with GitHub's reason (merged: false in --json).",
+              "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + mergeableState\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha> --method squash --json\nagents projects prs merge --repo muqsitnawaz/agents --number 12 --sha <headSha>   # any repo, no project",
+              "notes": "The merge is a single REST call pinned to --sha: if anything was pushed after\nyou read the PR, GitHub refuses and nothing merges. Without --admin, a PR whose\nlive mergeable_state is blocked (a pending or red required check, or a review),\nbehind, conflicted or a draft is refused before the call; one GitHub has not\ncomputed goes on to the call and GitHub decides. --admin skips that refusal and lets a\nrepository admin merge past branch protection where GitHub allows it; it exists\nfor a person's explicit confirm (AGI Menu's \"Confirm admin merge\") and agents\nmust never pass it. To land a PR once its checks pass, use prs automerge.\nEvery prs verb takes the project name optionally: without it, --repo may be any\nowner/repo you can reach, as the GitHub tab of AGI Menu uses them. A\nrefusal exits 1 with GitHub's reason (merged: false in --json).",
               "subcommands": []
             },
             {
               "name": "ready",
               "path": "projects prs ready",
               "aliases": [],
-              "description": "Mark one draft PR of a project ready for review.",
+              "description": "Mark one draft PR ready for review.",
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10743,7 +10752,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10800,7 +10809,7 @@
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10808,7 +10817,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,
@@ -10852,11 +10861,11 @@
               "name": "review",
               "path": "projects prs review",
               "aliases": [],
-              "description": "Approve one open PR of a project, pinned to the head SHA you reviewed.",
+              "description": "Approve one open PR, pinned to the head SHA you reviewed.",
               "args": [
                 {
                   "name": "name",
-                  "required": true,
+                  "required": false,
                   "variadic": false,
                   "description": ""
                 }
@@ -10864,7 +10873,7 @@
               "options": [
                 {
                   "flags": "--repo <owner/repo>",
-                  "description": "One of the project's attached repos",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
                   "long": "--repo",
                   "required": true,
                   "optional": false,

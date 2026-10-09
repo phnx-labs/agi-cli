@@ -51,9 +51,9 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'sessions', 'inbox'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'github', 'sessions', 'inbox'] as const;
 
-const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets'];
+const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'github'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
 
@@ -619,7 +619,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: [...MENUBAR_TABS],
     description:
       `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
-      'Settings is always last and is not listed. An order saved before Goals or Secrets existed may omit them; ' +
+      'Settings is always last and is not listed. An order saved before Goals, Secrets or GitHub existed may omit them; ' +
       'they read back appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
     validate: (v) => {
       const tabs = v as string[];
@@ -651,6 +651,39 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       if (tabs.length === MENUBAR_TABS.length) return 'menubar.menu.hiddenTabs cannot hide every tab.';
       return null;
     },
+  },
+  {
+    name: 'menubar.menu.githubHidden',
+    yamlKey: 'menubarMenuGithubHidden',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [],
+    description:
+      'AGI Menu: what the GitHub tab leaves out — an org or account login hides all of its repos, an ' +
+      'owner/repo slug hides one repo. Unset shows every org and repo `agents projects prs --json` reads.',
+    validate: (v) => {
+      const entries = v as string[];
+      const bad = entries.find((e) => !/^[\w.-]+(\/[\w.-]+)?$/.test(e));
+      if (bad !== undefined) return `menubar.menu.githubHidden: "${bad}" is not an org login or owner/repo.`;
+      const dup = entries.find((e, i) => entries.findIndex((x) => x.toLowerCase() === e.toLowerCase()) !== i);
+      return dup === undefined ? null : `menubar.menu.githubHidden lists "${dup}" twice.`;
+    },
+  },
+  {
+    name: 'menubar.menu.githubDrafts',
+    yamlKey: 'menubarMenuGithubDrafts',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: false,
+    description: 'AGI Menu: show draft pull requests on the GitHub tab (default off).',
+  },
+  {
+    name: 'menubar.menu.githubBots',
+    yamlKey: 'menubarMenuGithubBots',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: false,
+    description: 'AGI Menu: show pull requests opened by bots (dependabot, CI bots) on the GitHub tab (default off).',
   },
   {
     name: 'menubar.menu.groupTicketsByMilestone',
