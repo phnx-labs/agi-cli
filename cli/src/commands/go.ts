@@ -257,11 +257,18 @@ export async function refuseFallback(s: ActiveSession, remote: string | undefine
   process.exitCode = 1;
 }
 
+function isFocusableEditorTab(t: ActiveSession): boolean {
+  return !!(editorVariantForHost(t.host) && t.terminalId && t.workspaceDir && t.pidAlive);
+}
+
 export function matchEditorTab(s: ActiveSession, self: string, tabs: ActiveSession[]): ActiveSession | undefined {
   const originTab = s.originTerminal?.device === self ? s.originTerminal.terminalId : undefined;
-  return tabs.find((t) =>
-    editorVariantForHost(t.host) && t.terminalId && t.workspaceDir && t.pidAlive &&
+  return tabs.find((t) => isFocusableEditorTab(t) &&
     ((s.sessionId && t.sessionId === s.sessionId) || (originTab && t.terminalId === originTab)));
+}
+
+export function editorTabsForSelector(selector: string, tabs: ActiveSession[]): ActiveSession[] {
+  return tabs.filter((t) => isFocusableEditorTab(t) && t.sessionId?.startsWith(selector));
 }
 
 export async function focusEditorTab(tab: ActiveSession): Promise<void> {
@@ -270,13 +277,20 @@ export async function focusEditorTab(tab: ActiveSession): Promise<void> {
     const result = await runLocal(spec, 10_000);
     if (!result.ok) throw new Error(`Could not focus ${variant.label} tab ${tab.terminalId}: ${result.error}`);
   }
+  console.log(chalk.gray(`Focused ${shortId(tab)} → ${tab.label || tab.topic || tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
+}
+
+export async function focusLocalEditorTab(selector: string): Promise<boolean> {
+  const matches = editorTabsForSelector(selector, await listTerminalsActive());
+  if (matches.length !== 1) return false;
+  await focusEditorTab(matches[0]);
+  return true;
 }
 
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback, fallbackId?: string): Promise<void> {
   const tab = matchEditorTab(s, self, await listTerminalsActive());
   if (tab) {
     await focusEditorTab(tab);
-    console.log(chalk.gray(`Focused ${shortId(s)} → ${tab.label ?? tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
     return;
   }
   const remote = sessionProcessHost(s, self);

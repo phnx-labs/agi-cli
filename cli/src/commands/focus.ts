@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import fs from 'node:fs';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
-import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
+import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, focusLocalEditorTab, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
@@ -237,6 +237,10 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
     }
 
     if (await attachLocalLiveSelector(textSelector, hosts)) {
+      return;
+    }
+
+    if (textSelector && looksLikeIdSelector(textSelector) && await focusLocalEditorTab(textSelector)) {
       return;
     }
 
