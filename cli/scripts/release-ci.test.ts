@@ -236,6 +236,10 @@ printf '%s\n' "$*" >> "$CI_TEST_STATE/npm.log"
 if [[ "$1" == --version ]]; then echo 12.2.0; exit 0; fi
 if [[ "$1" == install ]]; then exec "$CI_TEST_REAL_NPM" "$@"; fi
 if [[ "$1" == view && "$3" == versions ]]; then
+  if [[ -f "$CI_TEST_STATE/visible-after" && "$(cat "$CI_TEST_STATE/registry-state")" == present ]]; then
+    pending="$(cat "$CI_TEST_STATE/visible-after")"
+    if (( pending > 0 )); then echo $((pending - 1)) > "$CI_TEST_STATE/visible-after"; echo '[]'; exit 0; fi
+  fi
   if [[ "$(cat "$CI_TEST_STATE/registry-state")" == present ]]; then printf '["%s"]\n' "$CI_TEST_VERSION"; else echo '[]'; fi
   exit 0
 fi
@@ -372,6 +376,27 @@ describeUnix('release branch push path', () => {
     expect(invalid.out).toContain('npm already exposes the immutable version');
     const after = fs.readFileSync(path.join(fx.state, 'npm.log'), 'utf-8').match(/^publish /gm)?.length ?? 0;
     expect(after).toBe(before);
+  }, 60_000);
+
+  it('keeps polling until a published version becomes registry-visible', () => {
+    const fx = ciModeFixture('9.9.9');
+    fs.writeFileSync(path.join(fx.state, 'visible-after'), '7\n');
+    fx.env.RELEASE_VISIBILITY_ATTEMPTS = '10';
+    fx.env.RELEASE_VISIBILITY_INTERVAL_S = '0';
+    const result = runCiMode(fx);
+    expect(result.status, result.out).toBe(0);
+    expect(result.out).toContain('BRANCH_RELEASE_PUBLISH version=9.9.9 tag=latest');
+    expect(fs.readFileSync(path.join(fx.state, 'visible-after'), 'utf-8').trim()).toBe('0');
+  }, 60_000);
+
+  it('fails loud when a published version never becomes registry-visible', () => {
+    const fx = ciModeFixture('9.9.9');
+    fs.writeFileSync(path.join(fx.state, 'visible-after'), '99\n');
+    fx.env.RELEASE_VISIBILITY_ATTEMPTS = '3';
+    fx.env.RELEASE_VISIBILITY_INTERVAL_S = '0';
+    const result = runCiMode(fx);
+    expect(result.status).not.toBe(0);
+    expect(result.out).toContain('is not registry-visible after 3 checks 0 s apart');
   }, 60_000);
 
   it('refuses an off-main release parent and code added only on the release branch', () => {
