@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { getActiveSessions, findSessionFileForKind, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
+import { getActiveSessions, findSessionFileForKind, listTerminalsActive, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 import { isSessionIdShape } from '../lib/session/pid-registry.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
@@ -21,6 +21,8 @@ import { sshExec, sshStream, assertValidSshTarget, shellQuote, SSH_CONN_FAILURE_
 import { connectionEndedNotice } from '../lib/hosts/reconnect.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
 import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
+import { editorVariantForHost, focusTabSpecs } from '../lib/terminal/backends/vscodium-agent.js';
+import { runLocal } from '../lib/terminal/transport.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -255,7 +257,28 @@ export async function refuseFallback(s: ActiveSession, remote: string | undefine
   process.exitCode = 1;
 }
 
+export function matchEditorTab(s: ActiveSession, self: string, tabs: ActiveSession[]): ActiveSession | undefined {
+  const originTab = s.originTerminal?.device === self ? s.originTerminal.terminalId : undefined;
+  return tabs.find((t) =>
+    editorVariantForHost(t.host) && t.terminalId && t.workspaceDir && t.pidAlive &&
+    ((s.sessionId && t.sessionId === s.sessionId) || (originTab && t.terminalId === originTab)));
+}
+
+export async function focusEditorTab(tab: ActiveSession): Promise<void> {
+  const variant = editorVariantForHost(tab.host)!;
+  for (const spec of focusTabSpecs(variant, tab.workspaceDir!, tab.terminalId!)) {
+    const result = await runLocal(spec, 10_000);
+    if (!result.ok) throw new Error(`Could not focus ${variant.label} tab ${tab.terminalId}: ${result.error}`);
+  }
+}
+
 export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback, fallbackId?: string): Promise<void> {
+  const tab = matchEditorTab(s, self, await listTerminalsActive());
+  if (tab) {
+    await focusEditorTab(tab);
+    console.log(chalk.gray(`Focused ${shortId(s)} → ${tab.label ?? tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
+    return;
+  }
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
 

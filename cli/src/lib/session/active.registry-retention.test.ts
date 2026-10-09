@@ -65,4 +65,18 @@ describe('live-terminals retention for a crashed host', () => {
     expect(row.windowHeartbeatMs).toBeTypeOf('number');
     expect(Date.now() - row.windowHeartbeatMs!).toBeGreaterThanOrEqual(HOST_HEARTBEAT_STALE_MS);
   });
+
+  it('carries the window folder as workspaceDir, apart from the agent cwd, so focus can raise that window', async () => {
+    fs.mkdirSync(path.dirname(REGISTRY), { recursive: true });
+    fs.writeFileSync(REGISTRY, JSON.stringify({
+      'a-window': {
+        at: new Date().toISOString(),
+        entries: [{ sessionId: 'sess-under-test', terminalId: 'cl-1-1', pid: process.pid, kind: 'claude', cwd: TEST_HOME, startedAtMs: Date.now() }],
+      },
+    }));
+    const row = (await listTerminalsActive()).find((r) => r.sessionId === 'sess-under-test')!;
+    expect(row.workspaceDir).toBe(TEST_HOME);
+    expect(row.terminalId).toBe('cl-1-1');
+    expect(row.windowId).toBe('a-window');
+  });
 });

@@ -7,6 +7,7 @@ import {
   vscodiumAgentBackend,
   makeVscodiumAgentBackend,
   spawnUri,
+  focusTabSpecs,
   EDITOR_VARIANTS,
 } from './vscodium-agent.js';
 import { detectCurrentBackend, availableBackends, BACKENDS } from './index.js';
@@ -161,3 +162,19 @@ describe('availability + detection', () => {
     expect(Object.keys(BACKENDS).at(-1)).toBe('terminal');
   });
 });
+
+describe('focusTabSpecs — raise the owning window, then focus the tab in it', () => {
+  const variant = { cli: 'codium', scheme: 'vscodium', app: '/nonexistent/VSCodium.app', label: 'VSCodium' };
+
+  it('opens the window folder first, then sends /focus with the terminal id', () => {
+    const [raise, focus] = focusTabSpecs(variant, '/Users/me/src/agents', 'cl-1791445191278-7');
+    expect(raise.argv).toEqual(['codium', '/Users/me/src/agents']);
+    expect(focus.argv).toEqual(['codium', '--open-url', 'vscodium://swarmify.swarm-ext/focus?terminalId=cl-1791445191278-7']);
+  });
+
+  it('encodes a terminal id that is not URL-safe', () => {
+    const [, focus] = focusTabSpecs(variant, '/d', 'a b&c');
+    expect(focus.argv[2]).toBe('vscodium://swarmify.swarm-ext/focus?terminalId=a%20b%26c');
+  });
+});
+
