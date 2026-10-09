@@ -70,7 +70,11 @@ function memoPath(root: string): string {
 interface MintedToken {
   id: string;
   pushedAt?: number;
+  rejected?: number;
 }
+
+export const OWNER_NOTIFY_REJECT_BACKOFF_AFTER = 3;
+export const OWNER_NOTIFY_REJECT_BACKOFF_MS = 6 * 60 * 60 * 1000;
 
 type Memo = Record<string, MintedToken>;
 
@@ -171,7 +175,14 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
       result.skipped.push({ device: worker.name, reason: `host key not pinned; run \`agents ssh ${worker.name}\` once` });
       continue;
     }
-    if (peerState.deviceToken) { result.skipped.push({ device: worker.name, reason: 'token present' }); continue; }
+    if (peerState.deviceToken) {
+      if (memo[name]?.rejected) {
+        memo[name] = { ...memo[name], rejected: 0 };
+        writeMemo(cacheDir, memo);
+      }
+      result.skipped.push({ device: worker.name, reason: 'token present' });
+      continue;
+    }
     let onServer = tokens.find((t) => normalizeHost(t.device!) === name);
     const held = memo[name];
     try {
@@ -181,6 +192,16 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
         result.skipped.push({ device: worker.name, reason: 'waiting for the worker to report the pushed token' });
         continue;
       }
+      const rejectedSoFar = held?.rejected ?? 0;
+      if (rejectedSoFar >= OWNER_NOTIFY_REJECT_BACKOFF_AFTER && held?.pushedAt !== undefined
+        && now - held.pushedAt < OWNER_NOTIFY_REJECT_BACKOFF_MS) {
+        result.skipped.push({
+          device: worker.name,
+          reason: `worker rejected ${rejectedSoFar} pushed tokens in a row; next attempt after ${new Date(held.pushedAt + OWNER_NOTIFY_REJECT_BACKOFF_MS).toISOString()}`,
+        });
+        continue;
+      }
+      const rejected = holdsLive && held.pushedAt !== undefined ? rejectedSoFar + 1 : rejectedSoFar;
       if (onServer && !(holdsLive && held.pushedAt === undefined)) {
         await revokeApiToken(onServer.id);
         onServer = undefined;
@@ -198,7 +219,7 @@ export async function syncOwnerNotifyTokens(deps: OwnerNotifySyncDeps = {}): Pro
           await revokeApiToken(minted.id);
           throw err;
         }
-        memo[name] = { id: minted.id };
+        memo[name] = { id: minted.id, rejected };
         writeMemo(cacheDir, memo);
         result.minted.push(worker.name);
       }
