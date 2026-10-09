@@ -549,7 +549,8 @@ Important posts, blocks and `agents send --to owner` reach you through your
 account once you run `agents auth login`: email, Slack and iMessage per the
 preferences in the console Settings page, with quiet hours and dedup applied
 there. Workers get a scoped device token from your signed-in laptop
-automatically, and a signed-in Mac sends the iMessages. Ordinary milestone posts
+automatically. rush/api sends the iMessages from Rush's own number to the phone
+number you confirmed in Settings, so no Mac is involved. Ordinary milestone posts
 remain record-only unless configured.
 
 An optional **per-session summarizer** (off by default) adds a daemon-computed
