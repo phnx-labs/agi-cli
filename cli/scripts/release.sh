@@ -151,13 +151,14 @@ run_ci_publish() {
     || die "npm publish failed for $PHNX_PKG@$TARGET"
   if ! $PUBLISH_DRY_RUN; then
     published="absent"
-    for _attempt in 1 2 3 4 5; do
+    local visible_attempts="${RELEASE_VISIBILITY_ATTEMPTS:-30}" visible_interval="${RELEASE_VISIBILITY_INTERVAL_S:-10}" attempt
+    for ((attempt = 1; attempt <= visible_attempts; attempt++)); do
       published="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET" 2>/dev/null || true)"
       [[ "$published" == "present" ]] && break
-      sleep 2
+      (( attempt < visible_attempts )) && sleep "$visible_interval"
     done
     [[ "$published" == "present" ]] \
-      || die "npm publish returned success but $PHNX_PKG@$TARGET is not registry-visible"
+      || die "npm publish returned success but $PHNX_PKG@$TARGET is not registry-visible after $visible_attempts checks $visible_interval s apart"
     scripts/release-tarball-integrity.sh verify-registry "$PHNX_PKG" "$TARGET" "$tgz" \
       || die "npm serves bytes that differ from the attested tarball for $PHNX_PKG@$TARGET"
   fi

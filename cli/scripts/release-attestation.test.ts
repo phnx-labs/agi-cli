@@ -410,6 +410,20 @@ describeUnix('release-attestation.sh', () => {
       expect(rec.policyVersion).toBe(baseRec.policyVersion);
     });
 
+    it('ignores a repo-root CHANGELOG.md edit, which is not a packaged release input', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-root-changelog-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'CHANGELOG.md'), '# Changelog\n\n- a repo-level note\n');
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
+    });
+
     it('a derived record satisfies require() for the release tree (round-trip)', () => {
       const { root, tree: baseTree } = initRepo();
       const store = tmp('rel-attest-derive-rt-');

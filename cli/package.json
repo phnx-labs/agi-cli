@@ -23,6 +23,7 @@
     "dist/**/*.d.ts",
     "dist/**/*.json",
     "dist/**/*.sh",
+    "!dist/**/testdata/**",
     "scripts/postinstall.js",
     "scripts/install-helper.js",
     "CHANGELOG.md",

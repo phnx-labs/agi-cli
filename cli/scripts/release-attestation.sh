@@ -274,6 +274,7 @@ release_diff_is_cli_scoped() {
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     case "$line" in
+      CHANGELOG.md) continue ;;
       cli/*|apps/cli/*|packages/session-tracker/*|scripts/ci-scope.ts) ;;
       *) die "release diff refused: '$line' is outside the CLI release-input allowlist" ;;
     esac
@@ -289,6 +290,7 @@ release_diff_is_metadata_only() {
   while IFS= read -r line; do
     [[ -n "$line" ]] || continue
     case "$line" in
+      CHANGELOG.md) continue ;;
       cli/*|apps/cli/*) ;;
       packages/session-tracker/*)
         die "derive refused: packaged session-tracker input changes '$line' -- run the full suite for this tree"
