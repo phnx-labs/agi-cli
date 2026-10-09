@@ -148,7 +148,6 @@ describe('config command', () => {
     runAgents(home, ['config', 'set', 'menubar.menu.groupTicketsByMilestone', 'on']);
     const rows = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string; value: unknown }>;
     const value = (key: string) => rows.find((r) => r.key === key)?.value;
-    // An order without goals (the pre-Goals form) is accepted and stored with goals appended.
     expect(value('menubar.menu.tabOrder')).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals']);
     expect(value('menubar.menu.pinnedProjects')).toEqual(['Rush', 'Ops, west']);
     expect(value('menubar.menu.groupTicketsByMilestone')).toBe(true);
