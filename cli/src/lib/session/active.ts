@@ -464,19 +464,31 @@ export function resolveNamesToSessionIds(
 
 const PID_REUSE_TOLERANCE_MS = 60_000;
 
-function processStartMs(pid: number): number | null {
+export const PROCESS_START_CACHE_TTL_MS = 30_000;
+const processStartCache = new Map<number, { ms: number | null; at: number }>();
+
+export function processStartMs(pid: number, now: number = Date.now()): number | null {
   if (process.platform === 'win32') return null;
+  const hit = processStartCache.get(pid);
+  if (hit && now - hit.at < PROCESS_START_CACHE_TTL_MS) return hit.ms;
+  let ms: number | null = null;
   try {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    if (!out) return null;
-    const ms = Date.parse(out);
-    return Number.isFinite(ms) ? ms : null;
+    const parsed = out ? Date.parse(out) : NaN;
+    ms = Number.isFinite(parsed) ? parsed : null;
   } catch {
-    return null;
+    ms = null;
   }
+  if (processStartCache.size > 2048) {
+    for (const [key, entry] of processStartCache) {
+      if (now - entry.at >= PROCESS_START_CACHE_TTL_MS) processStartCache.delete(key);
+    }
+  }
+  processStartCache.set(pid, { ms, at: now });
+  return ms;
 }
 
 export function isPidAlive(pid: number, startedAtMs?: number): boolean {
