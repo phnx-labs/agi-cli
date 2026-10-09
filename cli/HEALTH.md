@@ -331,7 +331,7 @@ Each was checked against the version in `cli/package.json`/`node_modules`.
 | Custom code | Replacement | Est. |
 |---|---|---:|
 | 9 `sleep` helpers + 29 inline `new Promise(r => setTimeout(r, …))` | `node:timers/promises` (zero uses today) | ~25 |
-| 4 recursive `copyDir` + 4 `removePath` (`project-resources.ts:306`, `staleness/writers/*`, `agent-spec/materialize.ts:36`) | `fs.cpSync` (already used at 17 sites), `fs.rmSync` | ~50 |
+| 4 recursive `copyDir` + 4 `removePath` (`project-resources.ts:306`, `staleness/writers/{skills,hooks}.ts`, `agent-spec/materialize.ts:36`) | `fs.cpSync` (already used at 17 sites), `fs.rmSync` | ~50 |
 | Crabbox spinner `crabbox/progress.ts:45-106` | `ora` 9.4.1 (already a dependency) | ~55 |
 | 9 ANSI-strip regexes, 2 `stripAnsi` defs | `node:util` `stripVTControlCharacters` | ~15 |
 | PATH walks `models.ts:216`, `cli-resources.ts:551`, `shims.ts:693`; raw `which` at 5 sites | `platform/exec.ts:13` or `agents.ts:114` `findInPath` (pick one; two exist) | ~35 |
@@ -349,8 +349,8 @@ or loses a guarantee).
 The command reference (`cli/docs/command-reference.html`, linked from `README.md:47`) is
 generated from the live commander tree by `cli/scripts/gen-command-index.ts`; `--check`
 passed and a regenerated copy is byte-identical (61 groups, 483 commands). CI runs the check
-only when `cli/src/commands/**`, `cli/src/cli/**` or the reference inputs change
-(`cli/ci/test-ownership.yaml:63-85`), so a `lib/**` or `bootstrap.ts` change can stale it
+only when files under `cli/src/commands/`, `cli/src/cli/` or the reference inputs change
+(`cli/ci/test-ownership.yaml:63-85`), so a change under `lib/` or to `bootstrap.ts` can stale it
 until the next release. Problems are in the prose around it:
 
 - **No rendered URL.** The README's "searchable HTML page" opens as source on GitHub; the
@@ -399,14 +399,14 @@ GraphQL `gh … --json` reads that the repo's REST-only rule forbids.
 ## Evidence
 
 **Scope.** `cli/` at `ef9ff0d5b` (fresh `origin/main`), assessed in a clean linked worktree.
-`packages/*`, the root `scripts/`, and the companion repos were not assessed except where a
+The `packages/` directory, the root `scripts/`, and the companion repos were not assessed except where a
 finding names them. No uncommitted changes were assessed.
 
 **Counts.** `cloc 2.06` (`npx cloc@2.6.0`), TypeScript only, over `git ls-files`:
 
-- production: `cli/src/**/*.ts{,x}` excluding `*.test.ts`, `*.bench.ts`, `__tests__/`,
+- production: `.ts`/`.tsx` files under `cli/src`, excluding `*.test.ts`, `*.bench.ts`, `__tests__/`,
   `testdata/` → 811 files, 194,628 code / 1,719 comment / 22,495 blank.
-- tests: `cli/**/*.test.ts{,x}` and `__tests__/` → 1,052 files, 184,346 code
+- tests: `*.test.ts{,x}` files under `cli/` plus `__tests__/` directories → 1,052 files, 184,346 code
   (`--timeout 0`).
 - previous baseline at `6143f3743`: 805 files, 192,591 code / 74,183 comment.
 - `git diff --shortstat 6143f3743 HEAD -- cli/src`: 1,780 files, +18,560 / −107,203.

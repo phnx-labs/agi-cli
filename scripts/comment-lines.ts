@@ -68,6 +68,7 @@ const IGNORED_BASENAMES = new Set([
   '.gitkeep', '.prettierrc', 'LICENSE', 'SHA256SUMS',
 ]);
 const IGNORED_PREFIXES = ['.agents/', 'cli/docs/', 'cli/schema/'];
+const GENERATED_BASENAMES = new Set(['HEALTH.html']);
 
 let indexedSource = '';
 let indexedLines: number[] = [];
@@ -456,6 +457,7 @@ function htmlComments(source: string): CommentToken[] {
 export function classifyPath(path: string, source?: string): string | null {
   if (IGNORED_PREFIXES.some((prefix) => path.startsWith(prefix))) return null;
   const name = basename(path);
+  if (GENERATED_BASENAMES.has(name)) return null;
   if (name.startsWith('Dockerfile')) return 'shell';
   if (name === 'Makefile' || name === 'CODEOWNERS' || name === '.gitignore' || name === '.npmignore') return 'shell';
   const language = CODE_EXTENSIONS.get(extname(name).toLowerCase());
