@@ -17,23 +17,12 @@ interface DeviceToken {
   createdAt: string;
 }
 
-interface Delivery {
-  id: string;
-  address: string;
-  body: string;
-  createdAt: string;
-  claimedBy?: string;
-  result?: { ok: boolean; error?: string };
-}
-
 export interface OwnerNotifyApi {
   url: string;
   requests: RecordedRequest[];
   sessionToken: string;
   deviceTokens: DeviceToken[];
-  deliveries: Delivery[];
   dedupKeys: string[];
-  imessageAddress: string | null;
   preferencesStatus: number;
   close(): Promise<void>;
 }
@@ -51,9 +40,7 @@ export async function startOwnerNotifyApi(sessionToken = 'phx-session-token'): P
     requests: [],
     sessionToken,
     deviceTokens: [],
-    deliveries: [],
     dedupKeys: [],
-    imessageAddress: '+15555550100',
     preferencesStatus: 200,
     close: async () => {},
   };
@@ -106,31 +93,13 @@ export async function startOwnerNotifyApi(sessionToken = 'phx-session-token'): P
         const key = `${body.event}\0${body.dedupKey}`;
         if (seen.has(key)) return send(res, 200, { dispatchId: null, delivered: [], queued: [], skipped: [], suppressed: 'duplicate' });
         seen.add(key);
-        const queued = api.imessageAddress ? ['imessage'] : [];
-        if (api.imessageAddress) {
-          api.deliveries.push({ id: `dlv-${++seq}`, address: api.imessageAddress, body: String(body.body), createdAt: new Date().toISOString() });
-        }
         return send(res, 200, {
           dispatchId: `dsp-${++seq}`,
-          delivered: ['slack'],
-          queued,
-          skipped: api.imessageAddress ? [] : [{ channel: 'imessage', reason: 'no imessage destination' }],
+          delivered: [],
+          queued: ['slack', 'imessage'],
+          skipped: [],
           suppressed: null,
         });
-      }
-
-      if (url.pathname === '/me/device-deliveries/claim' && req.method === 'POST') {
-        const claimed = api.deliveries.filter((d) => !d.claimedBy && !d.result).slice(0, Number(body?.limit ?? 10));
-        for (const d of claimed) d.claimedBy = String(body?.device);
-        return send(res, 200, { deliveries: claimed.map((d) => ({ id: d.id, channel: 'imessage', address: d.address, body: d.body, createdAt: d.createdAt })) });
-      }
-
-      const result = url.pathname.match(/^\/me\/device-deliveries\/([^/]+)\/result$/);
-      if (result && req.method === 'POST') {
-        const delivery = api.deliveries.find((d) => d.id === decodeURIComponent(result[1]));
-        if (!delivery) return send(res, 404, { error: 'not found' });
-        delivery.result = { ok: Boolean(body?.ok), ...(typeof body?.error === 'string' ? { error: body.error } : {}) };
-        return send(res, 204);
       }
 
       return send(res, 404, { error: `no route ${req.method} ${url.pathname}` });

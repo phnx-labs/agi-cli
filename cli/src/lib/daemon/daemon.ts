@@ -525,7 +525,6 @@ export async function runDaemon(): Promise<void> {
     { SessionStateService },
     { FeedStreamService },
     { AttentionNotifyService },
-    { OwnerDeviceDeliveryService },
     { RecordingsService },
     { WebhookReceiverService },
     { HeartbeatService },
@@ -547,7 +546,6 @@ export async function runDaemon(): Promise<void> {
     import('./session-state-service.js'),
     import('./feed-stream-service.js'),
     import('./attention-notify-service.js'),
-    import('./owner-device-delivery-service.js'),
     import('../recordings/service.js'),
     import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
@@ -655,11 +653,6 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('attention-notify')) supervisor.register(new AttentionNotifyService());
   else log('INFO', 'Attention-notify service disabled');
-
-  if (process.platform === 'darwin') {
-    if (isEnabled('owner-device-delivery')) supervisor.register(new OwnerDeviceDeliveryService());
-    else log('INFO', 'Owner device-delivery service disabled');
-  }
 
   if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
   else log('INFO', 'Session-title service disabled');
