@@ -319,7 +319,8 @@ describe('validation', () => {
 
   it('stores the AGI Menu pin, tab, and milestone preferences as YAML lists and refuses malformed ones', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
-    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'projects', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'secrets', 'projects', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.hiddenTabs').spec.defaultValue).toEqual(['secrets']);
     expect(getConfigValue('menubar.menu.groupTicketsByMilestone').spec.defaultValue).toBe(false);
 
     setConfigValue('menubar.menu.pinnedProjects', ['Rush', 'AGI Menu, legacy']);
@@ -328,7 +329,7 @@ describe('validation', () => {
     setConfigValue('menubar.menu.groupTicketsByMilestone', true);
     expect(readCentral()).toMatch(/menubarMenuPinnedProjects:\n\s+- Rush\n/);
     expect(getConfigValue('menubar.menu.pinnedProjects').value).toEqual(['Rush', 'AGI Menu, legacy']);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'goals', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'goals', 'sessions', 'inbox', 'secrets']);
     expect(getConfigValue('menubar.menu.hiddenTabs').value).toEqual(['inbox']);
     expect(getConfigValue('menubar.menu.groupTicketsByMilestone').value).toBe(true);
     setConfigValue('menubar.menu.pinnedProjects', []);
@@ -342,14 +343,14 @@ describe('validation', () => {
     expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'goals', 'sessions', 'inbox', 'projects', 'settings'])).toThrow(/exactly once/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['settings'])).toThrow(/"settings" is not one of/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['inbox', 'inbox'])).toThrow(/twice/);
-    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'secrets', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
     expect(() => setConfigValue('menubar.menu.groupTicketsByMilestone', 'on')).toThrow(/expects a boolean/);
   });
 
-  it('reads a tab order saved before the Goals tab with goals appended, as the menu resolves it (PHNX-4291)', async () => {
+  it('reads a tab order saved before the Goals and Secrets tabs with both appended, as the menu resolves it (PHNX-4291, PHNX-4269)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets']);
 
     const central = readCentral().replace(
       /menubarMenuTabOrder:\n(\s+- \w+\n)+/,
@@ -357,7 +358,7 @@ describe('validation', () => {
     );
     expect(central).toContain('- calendar');
     writeCentral(central);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals', 'secrets']);
   });
 
   it('validates the Goals preferences: homeGoals levels and the goalCountdown switch (PHNX-4291)', async () => {

@@ -51,9 +51,9 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'goals', 'projects', 'sessions', 'inbox'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'sessions', 'inbox'] as const;
 
-const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals'];
+const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
 
@@ -619,8 +619,8 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: [...MENUBAR_TABS],
     description:
       `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
-      'Settings is always last and is not listed. An order saved before Goals existed may omit goals; ' +
-      'it reads back with goals appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
+      'Settings is always last and is not listed. An order saved before Goals or Secrets existed may omit them; ' +
+      'they read back appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
     validate: (v) => {
       const tabs = v as string[];
       const required = MENUBAR_TABS.filter((t) => !MENUBAR_TABS_ADDED_LATER.includes(t));
@@ -630,7 +630,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       return ok
         ? null
         : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once ` +
-          `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and is appended).`;
+          `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and are appended).`;
     },
     normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
   },
@@ -639,10 +639,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'menubarMenuHiddenTabs',
     scope: 'user',
     type: 'string-list',
-    defaultValue: [],
+    defaultValue: ['secrets'],
     description:
       `AGI Menu: tabs hidden from the tab bar — any of ${MENUBAR_TABS.join(', ')}, but not all of them. ` +
-      'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home.',
+      'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home. Secrets starts hidden.',
     validate: (v) => {
       const tabs = v as string[];
       const bad = tabs.find((t) => !(MENUBAR_TABS as readonly string[]).includes(t));

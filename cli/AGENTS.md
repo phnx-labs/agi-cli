@@ -1472,11 +1472,12 @@ registered agent id, validated at write time, unset = the menu's own default and
 name; `auto` is `agents run --device auto`, which already refuses a `personal` or
 `desktop` box). Four keys shape the Projects tab and the tab bar:
 `pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
-`tabOrder` (every one of `home`, `goals`, `projects`, `sessions`, `inbox` exactly once;
-default in that order — an order saved before Goals existed may omit `goals`, and every
-read resolves the stored list the way the menu's `TabLayout.resolve` does: unknown and
-repeated ids dropped, a missing tab appended in built-in order), `hiddenTabs` (any of
-those five but not all; default `[]`), and
+`tabOrder` (every one of `home`, `goals`, `secrets`, `projects`, `sessions`, `inbox`
+exactly once; default in that order — an order saved before Goals or Secrets existed may
+omit them, and every read resolves the stored list the way the menu's `TabLayout.resolve`
+does: unknown and repeated ids dropped, a missing tab appended in built-in order),
+`hiddenTabs` (any of those six but not all; default `["secrets"]`, so the Secrets tab
+starts hidden), and
 `groupTicketsByMilestone` (default `false`, a flat ticket list). Two keys drive Goals
 (PHNX-4291): `homeGoals` (the goal levels Home shows — any of `company`, `week`,
 `myWeek`, `myDay`, no duplicates; default `["company"]`) and
