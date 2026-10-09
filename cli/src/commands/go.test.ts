@@ -7,6 +7,7 @@ import {
   shouldSkipRemoteSweep,
   isDefinitiveLiveMatch,
   matchEditorTab,
+  editorTabsForSelector,
   type Where,
 } from './go.js';
 import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
@@ -190,6 +191,21 @@ describe('matchEditorTab — the VSCodium tab that holds a session on this machi
     const target = s({ sessionId: 'abc', machine: self });
     expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', pidAlive: false })])).toBeUndefined();
     expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', host: 'ghostty' })])).toBeUndefined();
+  });
+});
+
+describe('editorTabsForSelector — the fast path a click takes before any fleet sweep', () => {
+  const tab = (over: Partial<ActiveSession>): ActiveSession =>
+    s({ host: 'codium', terminalId: 'cl-1', workspaceDir: '/w', pidAlive: true, ...over });
+
+  it('matches a live editor tab by session id prefix', () => {
+    const tabs = [tab({ sessionId: '216c5440-cf08', terminalId: 'cl-a' }), tab({ sessionId: 'e0153fd5-e6e3', terminalId: 'cl-b' })];
+    expect(editorTabsForSelector('216c5440', tabs).map((t) => t.terminalId)).toEqual(['cl-a']);
+  });
+
+  it('returns every tab an ambiguous prefix names, so the caller falls through to full resolution', () => {
+    const tabs = [tab({ sessionId: 'abc1', terminalId: 'cl-a' }), tab({ sessionId: 'abc2', terminalId: 'cl-b' })];
+    expect(editorTabsForSelector('abc', tabs)).toHaveLength(2);
   });
 });
 
