@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import { REMOTE_STDOUT_MAX_BYTES, RemoteUtf8Accumulator } from '../ssh-exec.js';
+import { writeStdoutFlushed } from '../stdout.js';
 import { ingestPeerClaudeUsageRows } from './usage.js';
 import {
   applyPeerFleetState,
@@ -94,6 +95,6 @@ export async function runUsageIngest(argv: string[] = process.argv.slice(3)): Pr
   const published = await publishOwnFleetState();
   errors.push(...published.errors);
   for (const message of published.errors) process.stderr.write(`[agents] __usage-ingest: ${message}\n`);
-  process.stdout.write(formatFleetStateReply(buildFleetStatePayload({ errors })));
+  await writeStdoutFlushed(formatFleetStateReply(buildFleetStatePayload({ errors })));
   return 0;
 }
