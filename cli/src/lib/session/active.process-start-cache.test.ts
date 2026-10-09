@@ -31,7 +31,7 @@ unix('processStartMs — one ps per TTL for the whole process table (PHNX-4225)'
     const t0 = 1_000_000;
     const self = processStartMs(process.pid, t0);
     expect(self).not.toBeNull();
-    expect(processStartMs(process.ppid, t0 + 1_000)).not.toBeNull();
+    expect(processStartMs(1, t0 + 1_000)).not.toBeNull();
     expect(processStartMs(process.pid, t0 + PROCESS_START_CACHE_TTL_MS - 1)).toBe(self);
     expect(calls()).toEqual(['-A -o pid=,lstart=']);
     expect(processStartMs(process.pid, t0 + PROCESS_START_CACHE_TTL_MS)).toBe(self);
