@@ -1,0 +1,209 @@
+{
+ "viewer": {
+  "login": "octo",
+  "avatar_url": "https://avatars.githubusercontent.com/octo",
+  "name": "Octo",
+  "email": null
+ },
+ "orgs": "acme\n",
+ "search": {
+  "user:octo": [
+   {
+    "avatarUrl": "https://avatars.githubusercontent.com/octo",
+    "createdAt": "2026-10-01T00:00:00Z",
+    "isDraft": false,
+    "login": "octo",
+    "number": 5,
+    "slug": "octo/tools",
+    "state": "OPEN",
+    "title": "fix: tools build",
+    "updatedAt": "2026-10-08T10:00:00Z",
+    "url": "https://github.com/octo/tools/pull/5"
+   }
+  ],
+  "user:acme": [
+   {
+    "avatarUrl": "https://avatars.githubusercontent.com/octo",
+    "createdAt": "2026-10-01T00:00:00Z",
+    "isDraft": false,
+    "login": "octo",
+    "number": 1,
+    "slug": "acme/app",
+    "state": "OPEN",
+    "title": "feat: app conflict",
+    "updatedAt": "2026-10-08T09:00:00Z",
+    "url": "https://github.com/acme/app/pull/1"
+   },
+   {
+    "avatarUrl": "https://avatars.githubusercontent.com/dependabot[bot]",
+    "createdAt": "2026-10-01T00:00:00Z",
+    "isDraft": false,
+    "login": "dependabot[bot]",
+    "number": 2,
+    "slug": "acme/app",
+    "state": "OPEN",
+    "title": "chore(deps): bump x",
+    "updatedAt": "2026-10-08T12:00:00Z",
+    "url": "https://github.com/acme/app/pull/2"
+   },
+   {
+    "avatarUrl": "https://avatars.githubusercontent.com/octo",
+    "createdAt": "2026-10-01T00:00:00Z",
+    "isDraft": false,
+    "login": "octo",
+    "number": 3,
+    "slug": "acme/app",
+    "state": "OPEN",
+    "title": "feat: app ready",
+    "updatedAt": "2026-10-08T11:00:00Z",
+    "url": "https://github.com/acme/app/pull/3"
+   }
+  ],
+  "review-requested:@me": [
+   {
+    "avatarUrl": "https://avatars.githubusercontent.com/friend",
+    "createdAt": "2026-10-01T00:00:00Z",
+    "isDraft": false,
+    "login": "friend",
+    "number": 9,
+    "slug": "other/lib",
+    "state": "OPEN",
+    "title": "fix(lib): review me",
+    "updatedAt": "2026-10-07T00:00:00Z",
+    "url": "https://github.com/other/lib/pull/9"
+   }
+  ]
+ },
+ "pulls": {
+  "octo/tools#5": {
+   "number": 5,
+   "title": "fix: tools build",
+   "url": "https://github.com/octo/tools/pull/5",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-10-01T00:00:00Z",
+   "updatedAt": "2026-10-08T10:00:00Z",
+   "login": "octo",
+   "avatarUrl": "",
+   "headRefName": "b5",
+   "baseRefName": "main",
+   "headSha": "5555555555555555555555555555555555555555",
+   "body": "",
+   "mergeable": true,
+   "mergeableState": "blocked",
+   "autoMerge": null
+  },
+  "acme/app#1": {
+   "number": 1,
+   "title": "feat: app conflict",
+   "url": "https://github.com/acme/app/pull/1",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-10-01T00:00:00Z",
+   "updatedAt": "2026-10-08T09:00:00Z",
+   "login": "octo",
+   "avatarUrl": "",
+   "headRefName": "b1",
+   "baseRefName": "main",
+   "headSha": "1111111111111111111111111111111111111111",
+   "body": "",
+   "mergeable": false,
+   "mergeableState": "dirty",
+   "autoMerge": null
+  },
+  "acme/app#2": {
+   "number": 2,
+   "title": "chore(deps): bump x",
+   "url": "https://github.com/acme/app/pull/2",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-10-01T00:00:00Z",
+   "updatedAt": "2026-10-08T12:00:00Z",
+   "login": "dependabot[bot]",
+   "avatarUrl": "",
+   "headRefName": "b2",
+   "baseRefName": "main",
+   "headSha": "2222222222222222222222222222222222222222",
+   "body": "",
+   "mergeable": true,
+   "mergeableState": "blocked",
+   "autoMerge": null
+  },
+  "acme/app#3": {
+   "number": 3,
+   "title": "feat: app ready",
+   "url": "https://github.com/acme/app/pull/3",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-10-01T00:00:00Z",
+   "updatedAt": "2026-10-08T11:00:00Z",
+   "login": "octo",
+   "avatarUrl": "",
+   "headRefName": "b3",
+   "baseRefName": "main",
+   "headSha": "3333333333333333333333333333333333333333",
+   "body": "",
+   "mergeable": true,
+   "mergeableState": "clean",
+   "autoMerge": null
+  },
+  "other/lib#9": {
+   "number": 9,
+   "title": "fix(lib): review me",
+   "url": "https://github.com/other/lib/pull/9",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-10-01T00:00:00Z",
+   "updatedAt": "2026-10-07T00:00:00Z",
+   "login": "friend",
+   "avatarUrl": "",
+   "headRefName": "b9",
+   "baseRefName": "main",
+   "headSha": "9999999999999999999999999999999999999999",
+   "body": "",
+   "mergeable": true,
+   "mergeableState": "clean",
+   "autoMerge": null
+  }
+ },
+ "checkRuns": {
+  "5555555555555555555555555555555555555555": {
+   "name": "test",
+   "status": "COMPLETED",
+   "conclusion": "FAILURE",
+   "link": ""
+  },
+  "1111111111111111111111111111111111111111": {
+   "name": "test",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS",
+   "link": ""
+  },
+  "2222222222222222222222222222222222222222": {
+   "name": "test",
+   "status": "COMPLETED",
+   "conclusion": "FAILURE",
+   "link": ""
+  },
+  "3333333333333333333333333333333333333333": {
+   "name": "test",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS",
+   "link": ""
+  },
+  "9999999999999999999999999999999999999999": {
+   "name": "test",
+   "status": "COMPLETED",
+   "conclusion": "SUCCESS",
+   "link": ""
+  }
+ },
+ "settings": {
+  "admin": false,
+  "rebase": true,
+  "squash": true,
+  "merge": true,
+  "autoMerge": false,
+  "defaultBranch": "main"
+ }
+}

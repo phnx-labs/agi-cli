@@ -55,9 +55,10 @@ describe('menubar snapshot', () => {
       });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
-        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'projects', 'sessions', 'inbox'],
+        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'projects', 'github', 'sessions', 'inbox'],
         'menubar.menu.hiddenTabs': ['secrets'],
         'menubar.menu.homeGoals': ['company'],
+        'menubar.menu.githubHidden': [],
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
       setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
@@ -72,9 +73,10 @@ describe('menubar snapshot', () => {
       });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
-        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets'],
+        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'github'],
         'menubar.menu.hiddenTabs': ['inbox'],
         'menubar.menu.homeGoals': ['company', 'myDay'],
+        'menubar.menu.githubHidden': [],
       });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;

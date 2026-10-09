@@ -546,11 +546,13 @@ describe('readRepoMergeAbility', () => {
     expect(asked).toEqual(['repos/acme/mono', 'repos/acme/mono/branches/main/protection']);
   });
 
-  it('an admin bypasses when enforce_admins is off, and when the branch is unprotected (404)', async () => {
+  it('an admin bypasses when enforce_admins is off, when the branch is unprotected (404), and on a free-plan private repo that cannot protect it (403)', async () => {
     const off = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': MERGE['protection-not-enforced'] });
     expect((await readRepoMergeAbility('acme/mono', off.gh)).adminBypass).toBe(true);
     const none = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': ghError(MERGE['protection-404-stderr']) });
     expect((await readRepoMergeAbility('acme/mono', none.gh)).adminBypass).toBe(true);
+    const free = recordedGh({ 'repos/acme/mono': MERGE['repo-protected'], 'repos/acme/mono/branches/main/protection': ghError('gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)\n') });
+    expect((await readRepoMergeAbility('acme/mono', free.gh)).adminBypass).toBe(true);
   });
 
   it('a protection read that fails for another reason fails the read instead of guessing', async () => {

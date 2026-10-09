@@ -430,15 +430,15 @@ agents projects edit <name>           Open the project YAML in $EDITOR (it is ha
 agents projects import                Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>           Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list                  List defined projects (definitions only by default; no session scan).
-agents projects prs                   A project's open pull requests: list them (default), act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).
-agents projects prs automerge <name>  Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.
-agents projects prs comment <name>    Post a comment on one open PR of a project.
-agents projects prs failure <name>    Why one commit's CI failed: each failing check with the error lines of its job log.
-agents projects prs list <name>       Every OPEN pull request across a project's attached repos (drafts included, no author filter), scoped to this project's paths in a shared repo.
-agents projects prs merge <name>      Merge one open PR of a project, pinned to the head SHA you reviewed.
-agents projects prs ready <name>      Mark one draft PR of a project ready for review.
-agents projects prs rerun <name>      Re-run the failed jobs of one GitHub Actions workflow run.
-agents projects prs review <name>     Approve one open PR of a project, pinned to the head SHA you reviewed.
+agents projects prs                   Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).
+agents projects prs automerge [name]  Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.
+agents projects prs comment [name]    Post a comment on one open PR.
+agents projects prs failure [name]    Why one commit's CI failed: each failing check with the error lines of its job log.
+agents projects prs list [name]       Every OPEN pull request across a project's attached repos, or with no project across your GitHub account and every org you belong to, with what needs you first.
+agents projects prs merge [name]      Merge one open PR, pinned to the head SHA you reviewed.
+agents projects prs ready [name]      Mark one draft PR ready for review.
+agents projects prs rerun [name]      Re-run the failed jobs of one GitHub Actions workflow run.
+agents projects prs review [name]     Approve one open PR, pinned to the head SHA you reviewed.
 agents projects pull <name>           Fast-forward every fleet checkout of a named project to its remote default branch.
 agents projects remove <name>         Remove a project definition. Never touches the repo.
 agents projects save                  Create or update one project from a complete ProjectDef JSON object on stdin.
