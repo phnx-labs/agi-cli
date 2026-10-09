@@ -380,8 +380,8 @@ describeUnix('release branch push path', () => {
 
   it('keeps polling until a published version becomes registry-visible', () => {
     const fx = ciModeFixture('9.9.9');
-    fs.writeFileSync(path.join(fx.state, 'visible-after'), '3\n');
-    fx.env.RELEASE_VISIBILITY_ATTEMPTS = '5';
+    fs.writeFileSync(path.join(fx.state, 'visible-after'), '7\n');
+    fx.env.RELEASE_VISIBILITY_ATTEMPTS = '10';
     fx.env.RELEASE_VISIBILITY_INTERVAL_S = '0';
     const result = runCiMode(fx);
     expect(result.status, result.out).toBe(0);
