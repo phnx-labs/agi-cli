@@ -154,6 +154,34 @@ describe('syncOwnerNotifyTokens — headed box mints one scoped token per worker
     expect(pushes).toEqual([{ bundle: '__notify-worker-a__', host: 'user@worker-a' }]);
   });
 
+  it('backs off for six hours after a worker rejects three pushed tokens in a row, and resets once one works', async () => {
+    let at = Date.now();
+    await peerState('worker-a', { signedIn: false, deviceToken: false }, at - 1_000);
+    await run('zion', ['zion', 'worker-a'], at);
+    for (let i = 0; i < tokens.OWNER_NOTIFY_REJECT_BACKOFF_AFTER; i++) {
+      await peerState('worker-a', { signedIn: false, deviceToken: false }, at + 60_000);
+      at += 120_000;
+      const replaced = await run('zion', ['zion', 'worker-a'], at);
+      expect(replaced.minted).toEqual(['worker-a']);
+    }
+    await peerState('worker-a', { signedIn: false, deviceToken: false }, at + 60_000);
+    const minted = api.deviceTokens.length;
+    const held = await run('zion', ['zion', 'worker-a'], at + 120_000);
+    expect(held.minted).toEqual([]);
+    expect(held.skipped.find((s) => s.device === 'worker-a')?.reason).toMatch(/rejected 3 pushed tokens in a row; next attempt after /);
+    expect(api.deviceTokens.length).toBe(minted);
+
+    const retry = await run('zion', ['zion', 'worker-a'], at + tokens.OWNER_NOTIFY_REJECT_BACKOFF_MS + 1);
+    expect(retry.minted).toEqual(['worker-a']);
+
+    const later = at + tokens.OWNER_NOTIFY_REJECT_BACKOFF_MS + 120_000;
+    await peerState('worker-a', { signedIn: false, deviceToken: true }, later);
+    await run('zion', ['zion', 'worker-a'], later + 60_000);
+    await peerState('worker-a', { signedIn: false, deviceToken: false }, later + 120_000);
+    const afterReset = await run('zion', ['zion', 'worker-a'], later + 180_000);
+    expect(afterReset.minted).toEqual(['worker-a']);
+  });
+
   it('only the first signed-in headed box by name mints', async () => {
     await peerState('worker-a', { signedIn: false, deviceToken: false });
     await peerState('pinnacles', { signedIn: true, deviceToken: false });
