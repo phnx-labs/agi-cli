@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.22.126
+
+- **Liveness checks no longer spawn one `ps` per session (PHNX-4225).** Every PID-reuse check
+  ran a synchronous `ps -o lstart= -p <pid>` per live session, and several daemon services
+  (session state, the feed's tool activity, the recordings settler) repeat that scan. On a busy
+  laptop with ~100 live sessions those spawns blocked the event loop past the 5–10 s service
+  deadlines, so the supervisor kept restarting the daemon. Start times now come from one
+  `ps -A -o pid=,lstart=` per 30 s (35 ms for 2,050 processes on that laptop), with a single
+  per-pid read only for a process that started after the snapshot.
+  Source: `cli/src/lib/session/active.ts`.
+
+- **A worker that keeps rejecting its owner-notify token is no longer re-minted every exchange.**
+  After a worker reports three pushed device tokens unusable in a row, the minting box waits six
+  hours before the next attempt and says so in its skip reason; the count resets once the worker
+  reports a working token. Source: `cli/src/lib/owner-notify-tokens.ts`.
+
 ## 1.22.125
 
 - **`agents ps focus <id>` jumps to the VSCodium tab that holds the session.** It used to
