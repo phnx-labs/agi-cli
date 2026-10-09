@@ -270,7 +270,11 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 editor tabs before anything else: the rows `listTerminalsActive` builds from the
 extension's `live-terminals.json`, matched on the session id, or on the tab a
 `--device` run was launched from (`originTerminal`, so a session running on a
-worker through a local tab is found too). A hit runs two commands:
+worker through a local tab is found too). Only a run a person started in that tab
+carries an `originTerminal`; a worker an agent dispatched has none, so focusing it never
+lands on the orchestrator's tab. A tab counts only while its pid is alive and its window
+still republishes the registry (`HOST_HEARTBEAT_STALE_MS`). A bare id needs at least the
+8-character short id to match before the fleet sweep. A hit runs two commands:
 
 ```
 codium <window folder>                                  # brings the owning window forward
@@ -285,7 +289,9 @@ not the agent's `cwd`, which is often a worktree and would open a new window.
 The first `/focus` or `/spawn` on a machine shows VSCodium's "Allow 'Agents'
 extension to open this URI?" prompt and drops the request until it is accepted;
 `extensions.confirmedUriHandlerExtensionIds: ["swarmify.swarm-ext"]` in the user
-settings pre-approves it.
+settings pre-approves it. `--open-url` exits 0 either way, so the CLI reports the
+request as sent rather than confirmed; if either command fails it says so and goes on
+to the attach rails.
 
 **Layout:** Every backend defaults to **one full-width tab per session**. `--splits`
 opts into two-per-tab split packing for side-by-side sessions.

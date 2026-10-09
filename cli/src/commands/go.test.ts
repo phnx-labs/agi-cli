@@ -11,6 +11,7 @@ import {
   type Where,
 } from './go.js';
 import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
+import { HOST_HEARTBEAT_STALE_MS } from '../lib/session/host-link.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function s(over: Partial<ActiveSession>): ActiveSession {
@@ -169,7 +170,7 @@ describe('remoteAttachEndedNotice — ControlMaster close leaves the session id 
 describe('matchEditorTab — the VSCodium tab that holds a session on this machine', () => {
   const self = 'zion';
   const tab = (over: Partial<ActiveSession>): ActiveSession =>
-    s({ host: 'codium', terminalId: 'cl-1791445191278-7', workspaceDir: '/Users/me/src/agents', pidAlive: true, machine: self, ...over });
+    s({ host: 'codium', terminalId: 'cl-1791445191278-7', workspaceDir: '/Users/me/src/agents', pidAlive: true, windowHeartbeatMs: Date.now(), machine: self, ...over });
 
   it('finds the tab whose session id is the target', () => {
     const target = s({ sessionId: '7e333b52-67e8', machine: self });
@@ -187,16 +188,18 @@ describe('matchEditorTab — the VSCodium tab that holds a session on this machi
     expect(matchEditorTab(remote, self, [tab({ sessionId: undefined })])).toBeUndefined();
   });
 
-  it('skips a dead tab and a tab in a non-editor terminal', () => {
+  it('skips a dead tab, a tab in a non-editor terminal, and a tab whose window stopped publishing', () => {
     const target = s({ sessionId: 'abc', machine: self });
     expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', pidAlive: false })])).toBeUndefined();
     expect(matchEditorTab(target, self, [tab({ sessionId: 'abc', host: 'ghostty' })])).toBeUndefined();
+    const hung = tab({ sessionId: 'abc', windowHeartbeatMs: Date.now() - HOST_HEARTBEAT_STALE_MS - 1 });
+    expect(matchEditorTab(target, self, [hung])).toBeUndefined();
   });
 });
 
 describe('editorTabsForSelector — the fast path a click takes before any fleet sweep', () => {
   const tab = (over: Partial<ActiveSession>): ActiveSession =>
-    s({ host: 'codium', terminalId: 'cl-1', workspaceDir: '/w', pidAlive: true, ...over });
+    s({ host: 'codium', terminalId: 'cl-1', workspaceDir: '/w', pidAlive: true, windowHeartbeatMs: Date.now(), ...over });
 
   it('matches a live editor tab by session id prefix', () => {
     const tabs = [tab({ sessionId: '216c5440-cf08', terminalId: 'cl-a' }), tab({ sessionId: 'e0153fd5-e6e3', terminalId: 'cl-b' })];
@@ -204,8 +207,12 @@ describe('editorTabsForSelector — the fast path a click takes before any fleet
   });
 
   it('returns every tab an ambiguous prefix names, so the caller falls through to full resolution', () => {
-    const tabs = [tab({ sessionId: 'abc1', terminalId: 'cl-a' }), tab({ sessionId: 'abc2', terminalId: 'cl-b' })];
-    expect(editorTabsForSelector('abc', tabs)).toHaveLength(2);
+    const tabs = [tab({ sessionId: 'abcdef12-1', terminalId: 'cl-a' }), tab({ sessionId: 'abcdef12-2', terminalId: 'cl-b' })];
+    expect(editorTabsForSelector('abcdef12', tabs)).toHaveLength(2);
+  });
+
+  it('ignores a prefix shorter than a short id, which may name another session elsewhere in the fleet', () => {
+    expect(editorTabsForSelector('216c544', [tab({ sessionId: '216c5440-cf08' })])).toEqual([]);
   });
 });
 

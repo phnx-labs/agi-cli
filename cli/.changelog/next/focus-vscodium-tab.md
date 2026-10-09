@@ -4,6 +4,7 @@
   running on another device through a local tab tried a tmux pane on that device instead.
   Focus now finds the tab on this machine (by session id, or by the tab a `--device` run
   was launched from), brings its window to the front and selects it. The same applies to
-  `agents://session/<id>` links, which focus a local tab in about 3 s instead of sweeping
-  the fleet first. `agents sessions --active --json` rows from an editor tab carry
+  `agents://session/<id>` links, which focus a local tab before sweeping the fleet when the
+  id (at least the 8-character short id) names exactly one live tab here, even if the link
+  names another host. `agents sessions --active --json` rows from an editor tab carry
   `workspaceDir`, the window's folder.
