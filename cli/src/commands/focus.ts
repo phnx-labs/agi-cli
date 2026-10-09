@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import fs from 'node:fs';
 import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
-import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, focusLocalEditorTab, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
+import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, focusEditorTabOf, focusLocalEditorTab, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
@@ -496,6 +496,7 @@ export async function focusResolvedSession(
   reconnectReattach: boolean = false,
 ): Promise<void> {
   const active = liveById.get(meta.id);
+  if (active && await focusEditorTabOf(active, self)) return;
   if (active && isAttachableLiveSession(active)) {
     await jumpTo(active, self, fallback, meta.id);
     return;
