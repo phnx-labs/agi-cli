@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.22.127
+
+- **A peer's fleet-state reply now arrives whole over ssh.** `agents __usage-ingest --reply`
+  and `agents __usage-export` exited before stdout drained, so a reply larger than one pipe
+  buffer was cut at 65,536 bytes and the dialing box logged "malformed JSON payload" for every
+  peer. That left peer state stale, which blocked worker owner-notify tokens from minting. Both
+  verbs now wait for stdout to flush before exiting. Source: `cli/src/lib/stdout.ts`.
+
 ## 1.22.126
 
 - **Liveness checks no longer spawn one `ps` per session (PHNX-4225).** Every PID-reuse check
