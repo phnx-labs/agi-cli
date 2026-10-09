@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { buildRoutineSpawnEnv } from './runner.js';
+import { buildRoutineSpawnEnv, claudeVersionIsAuthenticated } from './runner.js';
 import { claudeAccountTokenKey } from '../claude-account-token.js';
 import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from '../secrets-client.js';
 import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
-import { getVersionHomePath } from '../installations/versions.js';
+import { getBinaryPath, getVersionHomePath } from '../installations/versions.js';
 import { setConfiguredDeviceRole } from '../device-config.js';
 
 let versionDirs: string[] = [];
@@ -123,5 +123,38 @@ describe('buildRoutineSpawnEnv — CLAUDE_CODE_OAUTH_TOKEN handling', () => {
 
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     });
+  });
+});
+
+function installAuthStatusBinary(version: string): void {
+  const binary = getBinaryPath('claude', version);
+  fs.mkdirSync(path.dirname(binary), { recursive: true });
+  fs.writeFileSync(
+    binary,
+    '#!/bin/sh\nif [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]; then echo \'{"loggedIn":true}\'; else echo \'{"loggedIn":false}\'; fi\n',
+    { mode: 0o755 },
+  );
+}
+
+describe('claudeVersionIsAuthenticated on a worker', () => {
+  useFreshSecretsHome();
+
+  it('counts the provisioned setup-token the routine launch injects as signed in', () => {
+    const version = `routine-auth-worker-token-${process.pid}`;
+    const email = 'alpha@example.com';
+    makeVersionHome(version, email);
+    installAuthStatusBinary(version);
+    writeAuthBundle({ [claudeAccountTokenKey(email)]: 'sk-ant-oat01-alpha' });
+
+    expect(claudeVersionIsAuthenticated(version)).toBe(true);
+  });
+
+  it('reports signed out when no setup-token is provisioned for the account', () => {
+    const version = `routine-auth-worker-none-${process.pid}`;
+    makeVersionHome(version, 'beta@example.com');
+    installAuthStatusBinary(version);
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+    expect(claudeVersionIsAuthenticated(version)).toBe(false);
   });
 });
