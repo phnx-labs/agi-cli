@@ -1246,8 +1246,10 @@ async function runProjectCard(
       each PR's REST detail and checks, cached like the project read. Each PR carries
       reviewRequested and needsMe: review (a review is requested from you), failing
       (yours, CI red) or conflicts (yours, conflicts with its base), else null; each
-      repository's PRs come needs-me first, then most recently updated. Each
-      repository names the projects that attach it.
+      repository's PRs come needs-me first, then most recently updated, and
+      repositories are ordered by their most urgent PR. Each repository names the
+      projects that attach it. With --org, review requests count only inside those
+      owners. A failed owner or review-request search marks the read partial.
 
       With a project, repos come from its definition's attached repos only (repo +
       repos[].slug); --repo is refused unless it is one of them.
