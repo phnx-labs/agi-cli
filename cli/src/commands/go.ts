@@ -23,6 +23,7 @@ import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-
 import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 import { editorVariantForHost, focusTabSpecs } from '../lib/terminal/backends/vscodium-agent.js';
 import { runLocal } from '../lib/terminal/transport.js';
+import { sessionHeadline } from '../lib/session/title.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -277,7 +278,7 @@ export async function focusEditorTab(tab: ActiveSession): Promise<void> {
     const result = await runLocal(spec, 10_000);
     if (!result.ok) throw new Error(`Could not focus ${variant.label} tab ${tab.terminalId}: ${result.error}`);
   }
-  console.log(chalk.gray(`Focused ${shortId(tab)} → ${tab.label || tab.topic || tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
+  console.log(chalk.gray(`Focused ${shortId(tab)} → ${sessionHeadline(tab) || tab.terminalId} (${path.basename(tab.workspaceDir!)}).`));
 }
 
 export async function focusEditorTabOf(s: ActiveSession, self: string): Promise<boolean> {
