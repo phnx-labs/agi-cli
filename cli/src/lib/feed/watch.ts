@@ -13,7 +13,7 @@ import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
-import { collectToolRows, watchToolActivity, type ToolDiff } from './tool-activity.js';
+import { watchToolActivity, type ToolDiff } from './tool-activity.js';
 import { type ToolRow } from './tools.js';
 import { FeedWatchState, type FeedWatchEnvelope } from './envelope.js';
 import { FeedHub } from './hub.js';
@@ -190,7 +190,8 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   const state = new FeedWatchState();
   const activity = new ActivityStream();
   let activityCursor = Date.now();
-  let toolRows: ToolRow[] = collectToolRows(options.scope, options.tools?.sources).rows;
+  // The tool listings spawn processes; the first projection runs on the tool watcher so it never delays sessions or attention.
+  let toolRows: ToolRow[] = [];
   const readSetup = options.setup?.read ?? getCachedToolSetup;
   let setupRows: ToolSetupRow[] = (() => {
     try { return readSetup(); } catch { return []; }
@@ -235,7 +236,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
     });
   }, options.activityPollMs ?? 500);
   const toolWatch = watchToolActivity({
-    ...options.tools, scope: options.scope, signal: options.signal, initial: toolRows,
+    ...options.tools, scope: options.scope, signal: options.signal,
     onDiff: (diff: ToolDiff) => {
       for (const tool of diff.upserts) {
         toolRows = [...toolRows.filter((row) => row.rowKey !== tool.rowKey), tool];

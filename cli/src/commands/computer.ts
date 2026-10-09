@@ -11,9 +11,8 @@
  *   2. the peer allow list, and `--device <name>` resolved against the fleet —
  *      both carried in the fd-3 context (`lib/computer/context.ts`);
  *   3. the acting actor and agent session, likewise on fd 3;
- *   4. a recorder for the action events the engine streams back on fd 4, so
- *      `agents computer sessions` and `agents sessions --computer` keep their
- *      history (`lib/computer/record.ts`).
+ *   4. a recorder for the action events the engine streams back on fd 4
+ *      (`lib/computer/record.ts`).
  *
  * The remote path is the ENGINE's. `--device <name>` is resolved against the
  * fleet here — that is what the registry, ssh identity and platform check are
@@ -34,9 +33,6 @@
  * verb CATALOG — names, one-line descriptions, help groups — because that is
  * what makes the surface discoverable from `agents computer --help`, and a
  * verb the engine drops should fail loud here rather than silently vanish.
- *
- * `sessions` is the one verb that never reaches the engine: it reads agents-cli's
- * own event ledger.
  */
 
 import { Command } from 'commander';
@@ -48,7 +44,6 @@ import {
   resolveVncEndpoint,
 } from '../lib/computer/policy.js';
 import { forwardToComputer, type ForwardToComputerOptions } from '../lib/computer-client.js';
-import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 
 const COMPUTER_HELP_GROUPS = [
   { title: 'Installation', names: ['setup'] },
@@ -110,7 +105,7 @@ export function registerComputerCommand(program: Command): void {
         if (globals.vncPassword) process.env.COMPUTER_HELPER_VNC_PASSWORD = globals.vncPassword;
       }
       const device = globals.device;
-      if (shouldBlockOffPlatform({
+      if (actionCommand.name() !== 'sessions' && shouldBlockOffPlatform({
         platform: process.platform,
         tcpConfigured: resolveTcpEndpoint() != null,
         vncConfigured: resolveVncEndpoint() != null,
@@ -149,15 +144,15 @@ export function registerComputerCommand(program: Command): void {
     notes: `
       The engine is the standalone \`computer\` CLI (npm i -g @phnx-labs/computer-cli);
       agents-cli supplies the permission allow list, --device fleet resolution, and
-      the session/feed history. Per-verb flags are the engine's — \`agents computer
+      the agent-session link on the feed. Per-verb flags are the engine's — \`agents computer
       click --help\` asks it directly.
 
       Apps are deny-by-default: a verb only reaches an app named by a
       Computer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,
       then \`agents computer reload\`.
 
-      \`agents computer sessions\` (and \`agents sessions --computer\`) reads the
-      action history agents-cli records — it never leaves this CLI.
+      \`agents computer sessions\` is the engine's own run history
+      (\`computer sessions --help\`); the feed stream reads the same rows.
     `,
   });
 }
@@ -259,12 +254,11 @@ function registerStatusCommand(program: Command): void {
 function registerSessionsCommand(program: Command): void {
   program
     .command('sessions')
-    .description('Browse computer-driving history, grouped by run — one row per `agents computer` invocation')
-    .option('--machine <name>', 'Only rows invoked from/driving this machine (hostname, machineId, or --device name)')
-    .option('--limit <n>', 'Cap the flat/--no-interactive table at this many rows (default 50; --json is unbounded)', (v) => parseInt(v, 10))
-    .option('--json', 'Emit machine-readable JSON')
-    .option('--no-interactive', 'Print the flat listing instead of opening the interactive run browser')
-    .action(async (opts: { machine?: string; limit?: number; json?: boolean; interactive?: boolean }) => {
-      await runComputerSessionsCommand({ machine: opts.machine, limit: opts.limit, json: opts.json, interactive: opts.interactive });
+    .description('Browse computer-driving history, grouped by run — the engine\'s own picker')
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .helpOption(false)
+    .action(async (_opts: unknown, cmd: Command) => {
+      await forwardAndExit({ argv: ['sessions', ...cmd.args], record: false });
     });
 }

@@ -65,7 +65,7 @@ it.skipIf(process.platform !== 'linux')('composes a real hook owner, SQLite hist
     expect(fs.readFileSync(getDBPath()).subarray(0, 15).toString()).toBe('SQLite format 3');
     writeActiveSessionsCache('local', [row]);
     clearActiveSnapshotMemoryForTest();
-    watching = watchLocalFeed({ scope, signal: controller.signal, activityPollMs: 20, emit: event => {
+    watching = watchLocalFeed({ scope, signal: controller.signal, activityPollMs: 20, tools: { sources: { browserRows: () => [], computerRows: () => [] } }, emit: event => {
       events.push(...projection.apply(event));
       for (const listener of listeners) listener();
     } });

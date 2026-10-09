@@ -52,8 +52,7 @@ to fold away, while an idle session that is unfinished is exactly the one to rai
 ## Repo map
 
 ```
-apps/
-  cli/        @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
+cli/          @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
 packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli

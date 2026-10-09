@@ -47,7 +47,6 @@ agent process
      │
      │  spawn, env + stdio 0/1/2 INHERITED
      │    fd 3  BROWSER_CONTEXT_FD  →  one JSON context object, then EOF
-     │    fd 4  BROWSER_EVENTS_FD   ←  NDJSON action events, one per line
      ▼
   browser  (@phnx-labs/browser-cli)
      │
@@ -59,16 +58,15 @@ agent process
      └── Profile B  chrome-data/B/  →  Task bold-phoenix-c3d4
 ```
 
-The action events on fd 4 come back to agents-cli, which records them in the
-durable `browser_sessions` row that `agents browser sessions` and
-`agents sessions --browser` read. The engine keeps its own task history in
-`~/.agents/.history/browser/history.db` (browser-cli 0.1.16+). agents-cli reads
-that file read-only, one summary per profile and task, and falls back to the
-`browser_sessions` row only for fields native history does not record. The
-feed's browser rows come from that merge, so a finished task with no capture
-still has a row, and it keeps its session link, start time, recorded capture
-counts and source machine after the live task is gone. Neither store is written
-by the reader.
+agents-cli opens no events pipe (PHNX-4227): the engine records every action in
+its own task history, and `BROWSER_EVENTS_FD` stays unset. The engine keeps that history in
+`~/.agents/.history/browser/history.db` and adopts those legacy rows itself, so
+the history agents-cli shows is the engine's: `agents browser sessions` runs the
+engine's own picker, and the feed's browser rows come from
+`browser sessions --tasks --json`. A finished task with no capture still has a
+row, and it keeps its session link, start time, capture counts and source
+machine after the live task is gone. agents-cli adds only the session link: it
+looks the recorded session or launch id up in its own session index.
 
 ### What lives where
 
@@ -103,18 +101,6 @@ engine matches the alias against `context.target`, then `~/.ssh/config` — it h
 no fleet registry of its own. The device is bound once at `start`; page verbs run
 against the task's bound device, so `--device` is only valid there.
 
-### The action events (fd 4)
-
-One JSON object per line, each an action the engine actually performed. A line
-carries `event: "browser.action"` and needs at least a string `command` — the
-verb that ran. `invocationId`, `pid`, `task`, `profile`, `url`, `host` (the
-driven device), `sessionId`, `launchId`, `actor`, and free-form detail are
-optional. agents-cli upserts the durable `browser_sessions` row from an event
-that names a `task` AND a `profile` — a lifecycle verb (`status`, `profiles`)
-carries neither and is skipped. An unreadable line is dropped rather than failing
-the command; the engine must never block on this pipe, and emitting nothing is
-valid.
-
 ## Profiles and endpoints
 
 A **profile** names a browser, where it runs, and how to reach it. Profiles are
@@ -138,21 +124,21 @@ Each profile resolves to an endpoint the engine drives:
 
 ## Sessions and captures
 
-`agents browser sessions` (and `agents sessions --browser`) is agents-cli's own
-reader — it never reaches the engine. It groups a profile's on-disk captures
-(screenshots, PDFs, recordings, downloads under
-`~/.agents/.cache/browser/<profile>/sessions/<task>/`) by task, newest first, and
-links each task to the agent session that drove it when the identity resolves:
+`agents browser sessions` forwards to the engine's own `browser sessions`, which
+groups a profile's captures (screenshots, PDFs, recordings, downloads under
+`~/.agents/.cache/browser/<profile>/sessions/<task>/`) by task, newest first.
+Its flags are the engine's (`agents browser sessions --help` asks it): among them
+`--profile <name>`, `--open [selector]`, `--tasks`, `--search <text>`,
+`--since`/`--until`, `--limit <n>`, `--json` and `--no-interactive`. On a TTY it
+opens the engine's interactive task browser; `enter` browses a task's captures.
+`agents sessions --browser` was removed (PHNX-4227); run `browser sessions`
+or `agents browser sessions` instead.
 
-- **linked** — the run carried a real session id / launch id that indexes here,
-  so the row shows the owning session's digest.
-- **unresolved** — an identity nothing on this machine can index.
-- **unlinked** — a bare invocation with no agent-session identity, or a legacy
-  task whose run already stopped. Its captures are still listed.
-
-Flags: `--profile <name>`, `--open [selector]` (`latest` or a filename
-substring), `--json`, `--no-interactive`. On a TTY it opens an interactive
-task-first browser; `enter` opens a capture.
+The feed stream (`agents feed watch --json`) reads `browser sessions --tasks
+--json` and adds the one thing the engine cannot know — the agent session behind
+a task. A row is **linked** when its session id (or launch id) resolves in this
+machine's session index, **unresolved** when it carries an id nothing here
+indexes, and **unlinked** when it carries none.
 
 ## Remote-control consent
 
@@ -282,7 +268,7 @@ browser-cli keeps every path the in-repo subsystem used:
 | `~/.agents/.cache/helpers/browser/browser.sock` | IPC socket |
 | `~/.agents/.cache/browser/<profile>@<device>/` | runtime chrome-data / pids |
 | `~/.agents/.history/browser-profiles/` | durable user-data dirs (logins survive) |
-| `~/.agents/.history/browser/history.db` | native task history (SQLite, WAL), read by the feed |
+| `~/.agents/.history/browser/history.db` | native task history (SQLite, WAL), behind `browser sessions` |
 | `~/.agents/devices/<machine>/agents.yaml` `browser:` | machine-local profiles |
 | `~/.agents/.cache/browser/actions/YYYY-MM-DD.jsonl` | local action ledger |
 

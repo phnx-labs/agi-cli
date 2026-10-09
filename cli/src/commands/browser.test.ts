@@ -4,19 +4,15 @@ import { BROWSER_PASSTHROUGH_VERBS, peekDevice } from './browser.js';
 describe('BROWSER_PASSTHROUGH_VERBS', () => {
   const names = BROWSER_PASSTHROUGH_VERBS.map((v) => v.name);
 
-  it('covers the standalone browser verb surface, minus the agents-owned `sessions`', () => {
+  it('covers the standalone browser verb surface, `sessions` included', () => {
     expect(names).toEqual([
       'use', 'start', 'done', 'status', 'prune', 'stream',
       'navigate', 'tabs', 'screenshot', 'evaluate', 'click', 'type', 'press', 'wait',
       'console', 'errors', 'requests', 'responsebody', 'record', 'pdf', 'logs',
-      'history', 'refs',
+      'sessions', 'history', 'refs',
       'profiles', 'remote-control', 'stop', 'show', 'tab', 'ps', 'tasks', 'hover',
       'scroll', 'upload', 'set', 'devices', 'download', 'waitdownload',
     ]);
-  });
-
-  it('never lists `sessions` — that verb reads agents-cli\'s own history, not the engine', () => {
-    expect(names).not.toContain('sessions');
   });
 
   it('every verb carries a one-line description for `agents browser --help`', () => {

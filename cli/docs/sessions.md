@@ -144,7 +144,8 @@ A read query — list, search, or id lookup — execs the `sessions` binary from
 `@phnx-labs/sessions-cli` dependency this CLI installs. No second global install
 is required. A non-empty `$SESSIONS_BIN` pins a different binary. An empty
 `$SESSIONS_BIN` ignores the dependency and uses a `sessions` on `PATH`. With
-none of those, the query stays on the in-repo engine. Two flag families on that
+none of those resolving, the read fails with an error naming the install; there
+is no in-process read (PHNX-4227). Two flag families on that
 path are version-gated so an older standalone can never mis-read them as search
 tokens:
 the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
@@ -152,7 +153,7 @@ the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
 `sessions` is ≥ 0.2.0, and the point-to-one remote read `agents sessions <query>
 --host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back)
 forwards only when it is ≥ 0.2.1 — its own, higher floor. Below a floor, or with no
-standalone resolved at all, that query stays on the in-repo engine (which
+standalone new enough, that query stays on the in-repo engine (which
 implements the same filters and resolves `--device` against the fleet); nothing
 mis-routes or crashes. `--host` targets one box directly.
 
@@ -171,11 +172,19 @@ peers. It is safe because the peer may not have the standalone yet: if the remot
 fan-out** so it still succeeds — a capability gate keyed on that one signal, a
 migration bridge until the fleet is uniformly on 0.2.1, after which the in-repo read
 fan-out can be removed (a PHNX-4012 follow-up). Everything else (e.g. 255
-unreachable) is a real error and propagates. Below the 0.2.1 host floor, or with no
-standalone resolved, a `--device` read stays on the in-repo engine exactly as
-before. Only reads route this way: a lifecycle `--device` (resume / watch / inject /
+unreachable) is a real error and propagates. Below the 0.2.1 host floor a `--device` read stays on the in-repo engine exactly
+as before. Only reads route this way: a lifecycle `--device` (resume / watch / inject /
 focus / …) keeps its in-repo / `runOnPeer` behavior, and an explicit `--host`
 always wins over `--device`.
+
+Tool-call search is the standalone CLI's: `sessions --include tools --query
+'program:git input:merge' [--count] [--host <target>] --json` reads the tool
+index agents writes (`agents sessions backfill tools` fills it for historical
+transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
+clause) exits 2 and names that command; reading one session's tool calls,
+`agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
+Following a live transcript is `sessions tail <id>` (`agents logs -f <id>` runs
+it for a session).
 
 ## Off-box backup
 

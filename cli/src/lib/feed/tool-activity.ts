@@ -1,14 +1,119 @@
+import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { getBrowserRuntimeDir, getHistoryDir } from '../state.js';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
+import { getBrowserRuntimeDir, getCacheDir } from '../state.js';
 import { getEventsDir } from './events.js';
-import { readBrowserSessionRows, type BrowserSessionRow } from '../browser/sessions-list.js';
-import { buildComputerSessionRows, standaloneComputerActionsDir, type ComputerRunRow } from '../computer/sessions-list.js';
-import type { LiveBrowserTask, ToolTab } from './tools.js';
-import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, sortToolRows, type ToolRow } from './tools.js';
+import { readRecentActivity } from './activity.js';
+import { invocation as browserInvocation, resolveBrowserBin } from '../browser-client.js';
+import { invocation as computerInvocation, resolveComputerBin } from '../computer-client.js';
+import { getSessionById } from '../session/db.js';
+import { loadHookSessionIndex } from '../session/hook-sessions.js';
+import { listPidSessionEntries } from '../session/pid-registry.js';
+import type { BrowserSessionRow, ComputerRunRow, LiveBrowserTask, ToolTab } from './tools.js';
+import { boundBrowserRow, projectBrowserToolRow, projectComputerToolRow, sortToolRows, type ToolKind, type ToolRow } from './tools.js';
 
 export const TOOL_SWEEP_MS = 5_000;
 const TOOL_COMPUTER_LIMIT = 500;
+const TOOL_JSON_MAX_BYTES = 64 * 1024 * 1024;
+const TOOL_JSON_TIMEOUT_MS = 30_000;
+
+type StandaloneTool = 'browser' | 'computer';
+
+export class ToolNotInstalledError extends Error {}
+
+function resolveTool(tool: StandaloneTool): { command: string; prefix: string[] } {
+  let bin: string;
+  try { bin = tool === 'browser' ? resolveBrowserBin() : resolveComputerBin(); }
+  catch (error) {
+    throw new ToolNotInstalledError(`${(error as Error).message}\nRun \`agents setup tools\` to install the pinned \`${tool}\` CLI.`);
+  }
+  return tool === 'browser' ? browserInvocation(bin) : computerInvocation(bin);
+}
+
+/** Runs a standalone tool's `--json` listing; any failure rejects so the snapshot is reported incomplete. */
+export async function readToolJson(tool: StandaloneTool, argv: string[]): Promise<unknown[]> {
+  const { command, prefix } = resolveTool(tool);
+  const label = `\`${tool} ${argv.join(' ')}\``;
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [...prefix, ...argv], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdout: Buffer[] = [];
+    let stdoutBytes = 0;
+    let stderr = '';
+    let failure: Error | undefined;
+    const fail = (error: Error) => { failure ??= error; child.kill('SIGKILL'); };
+    const timer = setTimeout(() => fail(new Error(`${label} did not finish within ${TOOL_JSON_TIMEOUT_MS / 1000}s`)), TOOL_JSON_TIMEOUT_MS);
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > TOOL_JSON_MAX_BYTES) fail(new Error(`${label} printed more than ${TOOL_JSON_MAX_BYTES} bytes`));
+      else stdout.push(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
+    child.on('error', (error) => fail(new Error(`${label} failed: ${error.message}`)));
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      if (failure) return reject(failure);
+      if (code !== 0) return reject(new Error(`${label} exited ${code ?? signal}: ${stderr.trim().slice(0, 500)}`));
+      let value: unknown;
+      try { value = JSON.parse(Buffer.concat(stdout).toString('utf8')); }
+      catch (error) { return reject(new Error(`${label} printed unparseable JSON: ${(error as Error).message}`)); }
+      if (!Array.isArray(value)) return reject(new Error(`${label} printed ${typeof value}, expected an array of rows`));
+      resolve(value);
+    });
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+export async function readStandaloneBrowserRows(): Promise<BrowserSessionRow[]> {
+  return (await readToolJson('browser', ['sessions', '--tasks', '--json', '--no-interactive'])).map((row, index) => {
+    if (!isRecord(row) || typeof row.profile !== 'string' || !Array.isArray(row.artifacts)
+      || !isRecord(row.counts) || typeof row.latestMtimeMs !== 'number') {
+      throw new Error(`\`browser sessions --json\` row ${index} lacks profile, artifacts, counts or latestMtimeMs`);
+    }
+    return row as unknown as BrowserSessionRow;
+  });
+}
+
+export async function readStandaloneComputerRows(): Promise<ComputerRunRow[]> {
+  return (await readToolJson('computer', ['sessions', '--json', '--no-interactive', '--limit', String(TOOL_COMPUTER_LIMIT)])).map((row, index) => {
+    if (!isRecord(row) || typeof row.machine !== 'string' || !Array.isArray(row.actions)
+      || !isRecord(row.counts) || typeof row.startMs !== 'number' || typeof row.endMs !== 'number') {
+      throw new Error(`\`computer sessions --json\` row ${index} lacks machine, actions, counts or startMs/endMs`);
+    }
+    return row as unknown as ComputerRunRow;
+  });
+}
+
+function buildLaunchSessionIndex(): Map<string, string> {
+  const byLaunchId = new Map<string, string>();
+  for (const event of readRecentActivity({ maxBytesPerSession: 64 * 1024 })) {
+    if (event.launchId && event.sessionId) byLaunchId.set(event.launchId, event.sessionId);
+  }
+  for (const [launchId, record] of loadHookSessionIndex().byLaunchId) {
+    if (record.session_id) byLaunchId.set(launchId, record.session_id);
+  }
+  for (const entry of listPidSessionEntries()) {
+    if (entry.launchId && entry.sessionId) byLaunchId.set(entry.launchId, entry.sessionId);
+  }
+  return byLaunchId;
+}
+
+/** The tools record a session or launch id; only agents-cli's index can say which agent session that was. */
+export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[]): T[] {
+  let byLaunchId: Map<string, string> | undefined;
+  return rows.map((row) => {
+    let linked = row.sessionId ? getSessionById(row.sessionId) : null;
+    if (!linked && row.launchId) {
+      byLaunchId ??= buildLaunchSessionIndex();
+      const sessionId = byLaunchId.get(row.launchId);
+      linked = sessionId ? getSessionById(sessionId) : null;
+    }
+    return linked ? { ...row, linkedSession: linked } : row;
+  });
+}
 
 export interface ToolDiff {
   upserts: ToolRow[];
@@ -16,31 +121,42 @@ export interface ToolDiff {
 }
 
 interface ToolSources {
-  browserRows?: () => BrowserSessionRow[];
-  computerRows?: () => ComputerRunRow[];
+  browserRows?: () => BrowserSessionRow[] | Promise<BrowserSessionRow[]>;
+  computerRows?: () => ComputerRunRow[] | Promise<ComputerRunRow[]>;
   bindings?: () => Array<{ name: string; device?: string; profile?: string; url?: string; createdAt?: number; sessionId?: string; launchId?: string }>;
   liveTasks?: () => LiveBrowserTask[];
 }
 
 export interface ToolSnapshot {
   rows: ToolRow[];
-  complete: boolean;
+  incomplete: ToolKind[];
+  // An absent tool is a stable state; only a failed read of an installed one is worth retrying.
+  retry: boolean;
 }
 
-export function collectToolRows(scope: string, sources: ToolSources = {}): ToolSnapshot {
-
-  let complete = true;
-  const read = <T>(source: () => T, empty: T): T => {
-    try { return source(); } catch { complete = false; return empty; }
+export async function collectToolRows(scope: string, sources: ToolSources = {}): Promise<ToolSnapshot> {
+  const incomplete = new Set<ToolKind>();
+  let retry = false;
+  const read = async <T>(kind: ToolKind, source: () => T | Promise<T>, empty: T): Promise<T> => {
+    try { return await source(); } catch (error) {
+      incomplete.add(kind);
+      if (!(error instanceof ToolNotInstalledError)) retry = true;
+      return empty;
+    }
   };
 
+  const [bindingList, liveTaskList, browserRows, computerRows] = await Promise.all([
+    read('browser', sources.bindings ?? (() => []), []),
+    read('browser', sources.liveTasks ?? (() => readLiveBrowserTasks()), []),
+    read('browser', sources.browserRows ?? (async () => linkToolSessions(await readStandaloneBrowserRows())), [] as BrowserSessionRow[]),
+    read('computer', sources.computerRows ?? (async () => linkToolSessions(await readStandaloneComputerRows())), [] as ComputerRunRow[]),
+  ]);
   const bindings = new Map<string, { device?: string; profile?: string; url?: string; createdAt?: number; sessionId?: string; launchId?: string }>();
-  for (const binding of read(sources.bindings ?? (() => []), [])) bindings.set(binding.name, binding);
+  for (const binding of bindingList) bindings.set(binding.name, binding);
   const liveTasks = new Map<string, LiveBrowserTask>();
-  for (const task of read(sources.liveTasks ?? (() => readLiveBrowserTasks()), [])) liveTasks.set(task.task, task);
+  for (const task of liveTaskList) liveTasks.set(task.task, task);
 
   const rows: ToolRow[] = [];
-  const browserRows = read(sources.browserRows ?? (() => readBrowserSessionRows()), [] as BrowserSessionRow[]);
   const captured = new Set<string>();
   for (const row of browserRows) {
     if (row.task) captured.add(row.task);
@@ -52,27 +168,27 @@ export function collectToolRows(scope: string, sources: ToolSources = {}): ToolS
     const live = liveTasks.get(task);
     rows.push(projectBrowserToolRow(scope, boundBrowserRow(task, live ?? binding ?? {}), binding, live));
   }
-  const computerRows = read(sources.computerRows ?? (() => buildComputerSessionRows({ limit: TOOL_COMPUTER_LIMIT, observer: scope })), [] as ComputerRunRow[]);
   for (const row of computerRows) rows.push(projectComputerToolRow(scope, row));
-  return { rows: sortToolRows(rows), complete };
+  return { rows: sortToolRows(rows.filter((row) => !incomplete.has(row.kind))), incomplete: [...incomplete], retry };
 }
 
 export class ToolRowSet {
-  private readonly rows = new Map<string, string>();
+  private readonly rows = new Map<string, { kind: ToolKind; serialized: string }>();
 
-  diff(next: ToolRow[]): ToolDiff {
+  // A kind whose read failed keeps the rows it last published: a failed read is not "every task closed".
+  diff(next: ToolRow[], unreadKinds: readonly ToolKind[] = []): ToolDiff {
     const upserts: ToolRow[] = [];
     const seen = new Set<string>();
     for (const row of next) {
       seen.add(row.rowKey);
       const serialized = JSON.stringify(row);
-      if (this.rows.get(row.rowKey) === serialized) continue;
-      this.rows.set(row.rowKey, serialized);
+      if (this.rows.get(row.rowKey)?.serialized === serialized) continue;
+      this.rows.set(row.rowKey, { kind: row.kind, serialized });
       upserts.push(row);
     }
     const removes: string[] = [];
-    for (const key of [...this.rows.keys()]) {
-      if (seen.has(key)) continue;
+    for (const [key, { kind }] of [...this.rows]) {
+      if (seen.has(key) || unreadKinds.includes(kind)) continue;
       this.rows.delete(key);
       removes.push(key);
     }
@@ -81,7 +197,7 @@ export class ToolRowSet {
 
   reset(rows: ToolRow[]): void {
     this.rows.clear();
-    for (const row of rows) this.rows.set(row.rowKey, JSON.stringify(row));
+    for (const row of rows) this.rows.set(row.rowKey, { kind: row.kind, serialized: JSON.stringify(row) });
   }
 }
 
@@ -95,8 +211,10 @@ interface ToolWatchOptions {
   initial?: ToolRow[];
 }
 
-export function toolWatchRoots(): string[] {
-  return [getBrowserRuntimeDir(), path.join(getHistoryDir(), 'browser'), getEventsDir(), standaloneComputerActionsDir()];
+// Only roots the tools append to while they act: their history databases are
+// written by the very listings this watcher runs, so watching those would loop.
+function toolWatchRoots(): string[] {
+  return [getBrowserRuntimeDir(), getEventsDir(), path.join(getCacheDir(), 'computer', 'actions')];
 }
 
 function readLiveTasksFor(profileDir: string): LiveBrowserTask[] {
@@ -182,18 +300,24 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
   for (const root of roots) armRoot(root);
 
   const armed = () => [...watchers.values()].every((watcher) => watcher !== undefined);
-  const reproject = () => {
-    const snapshot = collectToolRows(options.scope, options.sources);
-    if (!snapshot.complete) { dirty = true; return; }
-    const diff = set.diff(snapshot.rows);
-    if (diff.upserts.length > 0 || diff.removes.length > 0) options.onDiff(diff);
+  let projecting = false;
+  const reproject = async () => {
+    projecting = true;
+    try {
+      const snapshot = await collectToolRows(options.scope, options.sources);
+      if (stopped) return;
+      if (snapshot.retry) dirty = true;
+      const diff = set.diff(snapshot.rows, snapshot.incomplete);
+      if (diff.upserts.length > 0 || diff.removes.length > 0) options.onDiff(diff);
+    } finally { projecting = false; }
   };
   const timer = setInterval(() => {
     for (const root of roots) armRoot(root);
-    if (armed() && !dirty) return;
+    if (projecting || (armed() && !dirty)) return;
     dirty = false;
-    reproject();
+    void reproject();
   }, options.sweepMs ?? TOOL_SWEEP_MS);
+  if (!options.initial) void reproject();
   const stop = () => {
     stopped = true;
     clearInterval(timer);

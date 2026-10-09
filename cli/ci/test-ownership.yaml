@@ -117,7 +117,6 @@ groups:
     tests:
       - cli/src/commands/sessions.cli-list.test.ts
       - cli/src/commands/sessions.cli-tools.test.ts
-      - cli/src/commands/sessions.computer.test.ts
       - cli/src/commands/sessions.render.test.ts
     checks: [typecheck, sessions-bench]
     budget_sec: 240

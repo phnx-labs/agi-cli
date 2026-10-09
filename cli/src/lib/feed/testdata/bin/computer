@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stands in for the standalone computer CLI: logs its argv, prints the named fixture.
+printf 'computer %s\n' "$*" >> "$TOOL_FIXTURE_ARGV_LOG"
+exec cat "$COMPUTER_SESSIONS_FIXTURE"

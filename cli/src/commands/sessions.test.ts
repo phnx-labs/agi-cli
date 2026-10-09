@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, fleetNotFoundMessage, mergeToolSearchEnvelopes, mergeToolProgramCountEnvelopes, toolOriginSessions, toolSearchFleetSortError, toolSearchForwardedArgs, resolveSessionAgentName, parseInstalledAgentVersionQuery, executionKind, printRoutineDrilldown, parseRemoteComputerSessionRows, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
+import { buildResumeCommand, resumeSpawnInvocation, resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, fleetNotFoundMessage, resolveSessionAgentName, parseInstalledAgentVersionQuery, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
 import { buildSessionDescription } from './ps-roster.js';
 import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
@@ -185,89 +185,6 @@ describe('positional installed agent version filters', () => {
     expect(parseInstalledAgentVersionQuery('cladue@2.1.181', installed)).toBeUndefined();
     expect(parseInstalledAgentVersionQuery('project@2026', installed)).toBeUndefined();
     expect(parseInstalledAgentVersionQuery('claude@2.1.181 notes', installed)).toBeUndefined();
-  });
-});
-describe('toolSearchForwardedArgs', () => {
-  it('removes coordinator device flags and forces a whole-index local peer query', () => {
-    const argv = [
-      process.execPath, 'agents', 'sessions', '--include', 'tools',
-      '--query', 'program:git', '--device', 'peer-one', '--fleet', '--json',
-    ];
-    expect(toolSearchForwardedArgs(argv, ['peer-one'])).toEqual([
-      'sessions', '--include', 'tools', '--query', 'program:git', '--json', '--all', '--local',
-    ]);
-  });
-});
-
-describe('toolSearchFleetSortError', () => {
-  it('rejects cost and duration sorts only when tool evidence spans devices', () => {
-    expect(toolSearchFleetSortError('cost', true)).toContain('only --sort recent');
-    expect(toolSearchFleetSortError('duration', true)).toContain('only --sort recent');
-    expect(toolSearchFleetSortError('recent', true)).toBeUndefined();
-    expect(toolSearchFleetSortError('cost', false)).toBeUndefined();
-  });
-});
-
-describe('fleet tool query origin partitioning', () => {
-  it('sums occurrences, containing calls, sessions, and coverage across machines', () => {
-    const make = (machine: string, occurrences: number, complete = true) => ({
-      schemaVersion: 1 as const,
-      kind: 'tool-program-count' as const,
-      generatedAt: '2026-08-03T00:00:00Z',
-      query: { program: 'git', semantics: 'static-program-occurrences-v1' as const },
-      coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
-      totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
-      machines: [{
-        machine,
-        coverage: { indexedFiles: 1, indexedCalls: 2, skippedFiles: 0, limitedFiles: 0, remainingFiles: complete ? 0 : 1, complete },
-        totals: { occurrences, toolCalls: occurrences - 1, sessions: 1 },
-      }],
-    });
-    expect(mergeToolProgramCountEnvelopes(make('one', 3), [make('two', 2, false)]))
-      .toMatchObject({
-        coverage: { indexedFiles: 2, complete: false },
-        totals: { occurrences: 5, toolCalls: 3, sessions: 2 },
-        machines: [{ machine: 'one' }, { machine: 'two' }],
-      });
-  });
-
-  it('keeps synced mirrors out of an origin device fleet partition', () => {
-    const local = { id: 'local', machine: 'one' } as SessionMeta;
-    const mirror = { id: 'mirror', machine: 'two' } as SessionMeta;
-    expect(toolOriginSessions([local, mirror], 'one', true)).toEqual([local]);
-    expect(toolOriginSessions([local, mirror], 'one', false)).toEqual([local, mirror]);
-  });
-
-  it('deduplicates evidence for the same origin session returned through two peers', () => {
-    const coverage = {
-      indexedFiles: 1, indexedCalls: 1, skippedFiles: 0,
-      limitedFiles: 0, remainingFiles: 0, complete: true,
-    };
-    const make = (timestamp: string) => ({
-      schemaVersion: 1 as const,
-      generatedAt: timestamp,
-      query: { clauses: ['program:git'] },
-      coverage,
-      sessions: [{
-        id: 'same', shortId: 'same', agent: 'codex', machine: 'origin-one', timestamp,
-        calls: [],
-      }],
-    });
-    expect(mergeToolSearchEnvelopes(make('2026-08-03T00:00:00Z'), [
-      make('2026-08-03T00:00:01Z'),
-    ]).sessions).toHaveLength(1);
-  });
-});
-describe('parseRemoteComputerSessionRows', () => {
-  it('accepts a clean peer array and supplies its machine name', () => {
-    const parsed = parseRemoteComputerSessionRows('[{"pid":7,"endMs":9}]', 'yosemite-m0');
-    expect(parsed.valid).toBe(true);
-    expect(parsed.items).toEqual([{ pid: 7, endMs: 9, machine: 'yosemite-m0' }]);
-  });
-
-  it('rejects banner-prefixed multi-host output instead of corrupting JSON', () => {
-    const parsed = parseRemoteComputerSessionRows('── host ──\n[{"pid":7}]', 'yosemite-m0');
-    expect(parsed).toEqual({ items: [], valid: false });
   });
 });
 describe('buildResumeCommand version-pinned resume', () => {

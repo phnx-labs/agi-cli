@@ -2,13 +2,11 @@
 import { Command } from 'commander';
 import { forwardsHelp, registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { buildBrowserContext } from '../lib/browser/context.js';
-import { recordBrowserAction } from '../lib/browser/record.js';
 import {
   isBrowserClientError,
   resolveBrowserBin,
   runBrowser,
 } from '../lib/browser-client.js';
-import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 
 const BROWSER_HELP_GROUPS = [
   { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'prune'] },
@@ -41,6 +39,7 @@ export const BROWSER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; descriptio
   { name: 'record', description: 'Record a video of the page (record start / record stop)' },
   { name: 'pdf', description: 'Export the current tab as PDF via CDP — auto-saved under sessions/<task>/ when omitted' },
   { name: 'logs', description: 'Read merged rush-app + rush-cli logs for a task' },
+  { name: 'sessions', description: 'Browse captured screenshots, PDFs, recordings and downloads, grouped by task' },
   { name: 'history', description: 'Show recent browser task history' },
   { name: 'refs', description: 'Get DOM refs for interactive elements' },
   { name: 'profiles', description: 'Manage browser profiles (create / list / edit / rename / show / remove / use / …)' },
@@ -89,7 +88,6 @@ async function forwardToBrowser(opts: {
     argv: opts.argv,
     context,
     capture: opts.capture,
-    onEvent: (event) => recordBrowserAction(event, { device: opts.device }),
   });
 }
 
@@ -113,26 +111,12 @@ function registerPassthroughVerbs(program: Command): void {
   }
 }
 
-function registerSessionsCommand(program: Command): void {
-  program
-    .command('sessions')
-    .description('Browse a profile\'s captured screenshots, PDFs, recordings, and downloads, grouped by task')
-    .option('--profile <name>', 'Only this profile (default: all profiles with captures)')
-    .option('--open [selector]', "Open a capture in the OS default app: 'latest' or a filename")
-    .option('--json', 'Emit machine-readable JSON')
-    .option('--no-interactive', 'Print the flat listing instead of opening the interactive task browser')
-    .action(async (opts: { profile?: string; open?: string | boolean; json?: boolean; interactive?: boolean }) => {
-      await runBrowserSessionsCommand({ profile: opts.profile, open: opts.open, json: opts.json, interactive: opts.interactive });
-    });
-}
-
 export function registerBrowserCommand(program: Command): void {
   const browser = program
     .command('browser')
     .description('Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box');
 
   registerPassthroughVerbs(browser);
-  registerSessionsCommand(browser);
   registerCommandGroups(browser, BROWSER_HELP_GROUPS);
   setHelpSections(browser, {
     examples: `
@@ -155,7 +139,7 @@ export function registerBrowserCommand(program: Command): void {
     notes: `
       The engine is the standalone \`browser\` CLI (npm i -g @phnx-labs/browser-cli);
       agents-cli supplies --device fleet resolution, remote-control consent, and the
-      session/feed history. Per-verb flags are the engine's — \`agents browser
+      agent-session link on the feed. Per-verb flags are the engine's — \`agents browser
       screenshot --help\` asks it directly.
 
       \`--device\` is bound once at \`start\`; page verbs run against the task's bound
@@ -164,8 +148,8 @@ export function registerBrowserCommand(program: Command): void {
       Another fleet machine may drive this browser only after \`agents browser
       remote-control on\` here (device-local, never synced; default off).
 
-      \`agents browser sessions\` (and \`agents sessions --browser\`) reads the capture
-      and task history agents-cli records — it never leaves this CLI.
+      \`agents browser sessions\` is the engine's own task and capture history
+      (\`browser sessions --help\`); the feed stream reads the same rows.
     `,
   });
 }

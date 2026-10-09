@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 61,
-  "commands": 483,
+  "commands": 482,
   "root": {
     "name": "agents",
     "path": "",
@@ -1102,7 +1102,7 @@
         }
       ],
       "examples": "# One-time: install the engine, then pick a profile\nnpm i -g @phnx-labs/browser-cli\nagents browser profiles create work --browser chromium\nagents browser use work\n\n# Start a task, drive it, capture, close\nagents browser start --profile work\nagents browser navigate https://example.com\nagents browser screenshot -o /tmp/shot.png\nagents browser done\n\n# A remote box over the fleet (device bound at start)\nagents browser start --device box --profile work\nagents browser navigate https://example.com\nagents browser done",
-      "notes": "The engine is the standalone `browser` CLI (npm i -g @phnx-labs/browser-cli);\nagents-cli supplies --device fleet resolution, remote-control consent, and the\nsession/feed history. Per-verb flags are the engine's — `agents browser\nscreenshot --help` asks it directly.\n\n`--device` is bound once at `start`; page verbs run against the task's bound\ndevice. `--device local` forces this machine.\n\nAnother fleet machine may drive this browser only after `agents browser\nremote-control on` here (device-local, never synced; default off).\n\n`agents browser sessions` (and `agents sessions --browser`) reads the capture\nand task history agents-cli records — it never leaves this CLI.",
+      "notes": "The engine is the standalone `browser` CLI (npm i -g @phnx-labs/browser-cli);\nagents-cli supplies --device fleet resolution, remote-control consent, and the\nagent-session link on the feed. Per-verb flags are the engine's — `agents browser\nscreenshot --help` asks it directly.\n\n`--device` is bound once at `start`; page verbs run against the task's bound\ndevice. `--device local` forces this machine.\n\nAnother fleet machine may drive this browser only after `agents browser\nremote-control on` here (device-local, never synced; default off).\n\n`agents browser sessions` is the engine's own task and capture history\n(`browser sessions --help`); the feed stream reads the same rows.",
       "subcommands": [
         {
           "name": "click",
@@ -1315,56 +1315,9 @@
           "name": "sessions",
           "path": "browser sessions",
           "aliases": [],
-          "description": "Browse a profile's captured screenshots, PDFs, recordings, and downloads, grouped by task",
+          "description": "Browse captured screenshots, PDFs, recordings and downloads, grouped by task",
           "args": [],
-          "options": [
-            {
-              "flags": "--profile <name>",
-              "description": "Only this profile (default: all profiles with captures)",
-              "long": "--profile",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--open [selector]",
-              "description": "Open a capture in the OS default app: 'latest' or a filename",
-              "long": "--open",
-              "required": false,
-              "optional": true,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-interactive",
-              "description": "Print the flat listing instead of opening the interactive task browser",
-              "long": "--no-interactive",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
+          "options": [],
           "subcommands": []
         },
         {
@@ -1940,7 +1893,7 @@
         }
       ],
       "examples": "# One-time: install the engine, the helper, and the TCC grants\nnpm i -g @phnx-labs/computer-cli\nagents setup computer\n\n# Allow an app, then reload so the daemon picks it up\n#   ~/.agents/permissions/groups/computer.yaml:  allow: [\"Computer(com.apple.notes)\"]\nagents computer reload\n\n# Observe, then act\nagents computer apps --json\nagents computer describe --bundle com.apple.notes\nagents computer click --bundle com.apple.notes --id <element-id>\n\n# A remote Windows device over the fleet\nagents computer setup --device win-mini\nagents computer start --device win-mini\nagents computer screenshot --device win-mini -o /tmp/win.png\nagents computer stop  --device win-mini",
-      "notes": "The engine is the standalone `computer` CLI (npm i -g @phnx-labs/computer-cli);\nagents-cli supplies the permission allow list, --device fleet resolution, and\nthe session/feed history. Per-verb flags are the engine's — `agents computer\nclick --help` asks it directly.\n\nApps are deny-by-default: a verb only reaches an app named by a\nComputer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,\nthen `agents computer reload`.\n\n`agents computer sessions` (and `agents sessions --computer`) reads the\naction history agents-cli records — it never leaves this CLI.",
+      "notes": "The engine is the standalone `computer` CLI (npm i -g @phnx-labs/computer-cli);\nagents-cli supplies the permission allow list, --device fleet resolution, and\nthe agent-session link on the feed. Per-verb flags are the engine's — `agents computer\nclick --help` asks it directly.\n\nApps are deny-by-default: a verb only reaches an app named by a\nComputer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,\nthen `agents computer reload`.\n\n`agents computer sessions` is the engine's own run history\n(`computer sessions --help`); the feed stream reads the same rows.",
       "subcommands": [
         {
           "name": "apps",
@@ -2231,56 +2184,9 @@
           "name": "sessions",
           "path": "computer sessions",
           "aliases": [],
-          "description": "Browse computer-driving history, grouped by run — one row per `agents computer` invocation",
+          "description": "Browse computer-driving history, grouped by run — the engine's own picker",
           "args": [],
-          "options": [
-            {
-              "flags": "--machine <name>",
-              "description": "Only rows invoked from/driving this machine (hostname, machineId, or --device name)",
-              "long": "--machine",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--limit <n>",
-              "description": "Cap the flat/--no-interactive table at this many rows (default 50; --json is unbounded)",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-interactive",
-              "description": "Print the flat listing instead of opening the interactive run browser",
-              "long": "--no-interactive",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
+          "options": [],
           "subcommands": []
         },
         {
@@ -16613,8 +16519,8 @@
       ],
       "options": [
         {
-          "flags": "--query <clause>",
-          "description": "Search text; repeat with --include tools to require distinct matching calls",
+          "flags": "--query <text>",
+          "description": "Search text (same as the positional query)",
           "long": "--query",
           "required": true,
           "optional": false,
@@ -16846,7 +16752,7 @@
         },
         {
           "flags": "--include <roles>",
-          "description": "Only include these roles (comma-separated): user, assistant, thinking, tools. \"user\" is genuine user turns only, not harness-injected scaffolding (bash-input, system-reminder)",
+          "description": "Only include these roles (comma-separated): user, assistant, thinking, tools. \"user\" is genuine user turns only, not harness-injected scaffolding (bash-input, system-reminder). Tool-call search across sessions is `sessions --include tools`",
           "long": "--include",
           "required": true,
           "optional": false,
@@ -17062,42 +16968,6 @@
           "negate": false
         },
         {
-          "flags": "--fleet",
-          "description": "With --include tools: query every registered online compute device and merge compact matches",
-          "long": "--fleet",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--count",
-          "description": "With one program:<name> tool query: count static occurrences, containing calls, and sessions",
-          "long": "--count",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--browser",
-          "description": "List browser-profile captures (screenshots, PDFs, recordings, downloads) instead of agent transcripts — alias of `agents browser sessions`",
-          "long": "--browser",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--computer",
-          "description": "List computer-driving history, grouped by run, instead of agent transcripts — alias of `agents computer sessions`",
-          "long": "--computer",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
           "flags": "--no-interactive",
           "description": "Print the listing instead of opening the interactive browser (default on a TTY for the bare listing and --active)",
           "long": "--no-interactive",
@@ -17135,8 +17005,8 @@
           "negate": false
         }
       ],
-      "examples": "# Search indexed transcripts by topic, file path, or command\nagents sessions \"add auth middleware\"\n\n# Read a session as markdown (user + assistant + thinking + tools)\nagents sessions a1b2c3d4 --markdown\n\n# Just the user turns — useful for recalling intent\nagents sessions a1b2c3d4 --include user\n\n# Show only what's running right now (terminals, teams, cloud, headless)\nagents sessions --active\n\n# Filter the live fleet by the status word shown in the roster\nagents sessions --working\nagents sessions --idle\nagents sessions --orphan\nagents sessions --crashed\n\n# --- Session lifecycle ---\n# Get back into a session — attaches a live pane, or recovers an ended one\nagents sessions resume a1b2c3d4\n# Same, by the tmux name shown in: agents tmux ls\nagents sessions resume ag-claude-a1b2c3d4\n# Attach only — never fork a copy\nagents sessions resume a1b2c3d4 --attach-only\n# Multi-select history and open each in a tab\nagents sessions resume\n# The other direction: interactive → headless (keep working unattended)\nagents sessions detach a1b2c3d4\n\n# The interactive list folds in other online machines automatically,\n# labelled by host with this machine first. Stay local with --local:\nagents sessions --local\n\n# Search across every directory, not just this project\nagents sessions \"topic\" --all\n\n# Filter one installed harness version (equivalent forms)\nagents sessions claude@2.1.181\nagents sessions --agent claude --version 2.1.181\n\n# Team-spawned sessions, grouped by team (spawner + spawn time per team,\n# teammate mode/handle per row; team-flagged spawns with no team record\n# in a trailing (no team) bucket)\nagents sessions --teams\n\n# Who spawned which team: an orchestrator row carries team:<name>, and a\n# teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\nagents sessions --in-team redesign --teams\n\n# Pick a routine across every directory, then open one of its run sessions\nagents sessions --routine\nagents sessions --routine nightly-review\nagents sessions 2026-07-21T10-30-00-000Z\n\n# Export for analysis\nagents sessions --since 30d --limit 200 --json > sessions.json\n\n# List indexed tool calls in recent Codex sessions on one device\nagents sessions --include tools --agent codex --device mac-mini --since 7d\n\n# Each repeated clause must match a different call in the same session\nagents sessions --include tools --query 'program:git input:merge' --query 'program:gh output:CONFLICT' --fleet --json\n\n# Count every pre-indexed static git site without reparsing transcripts\nagents sessions --include tools --query 'program:git' --count --fleet --json\n\n# Explicitly populate historical tool rows once on every device\nagents sessions backfill tools --fleet\n\n# Resolve one historical selector to metadata only, across the fleet\nagents sessions --resolve d3470b57 --json\n\n# Search another machine's sessions live over SSH (no sync needed)\nagents sessions \"auth bug\" --last 3 --device yosemite-s1\n\n# Fan the same query out across several machines\nagents sessions --all \"deploy script\" --device box-a --device box-b",
-      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n  resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n  resume <id> --attach-only  attach only; never fork a copy\n  resume                  multi-select history -> open tabs\n  detach <id>             the other direction: interactive -> headless\n- The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n- --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n- --version <version> requires --agent and is equivalent to --agent <agent@version>.\n- --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n- --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n- --include and --exclude are mutually exclusive.\n- With --include tools, repeat --query for same-session AND across distinct calls. Fields: tool, program, input, output, status, exit, error.\n- --count accepts exactly one program:<name> clause and reports static source occurrences, containing tool calls, and sessions.\n- Tool queries read SQLite only. Run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n- Tool evidence is redacted and bounded before it reaches SQLite. --markdown and --no-redact conflict with --include tools.\n- Tool queries accept 32 clauses (4 KiB each), --limit 1–1,000, and at most 8 MiB of materialized evidence.\n- --first and --last are mutually exclusive.\n- A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n- --cloud sources from Rush Cloud captured runs instead of local disk.\n- --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n- Without --teams, team-spawned sessions are hidden by default.",
+      "examples": "# Search indexed transcripts by topic, file path, or command\nagents sessions \"add auth middleware\"\n\n# Read a session as markdown (user + assistant + thinking + tools)\nagents sessions a1b2c3d4 --markdown\n\n# Just the user turns — useful for recalling intent\nagents sessions a1b2c3d4 --include user\n\n# Show only what's running right now (terminals, teams, cloud, headless)\nagents sessions --active\n\n# Filter the live fleet by the status word shown in the roster\nagents sessions --working\nagents sessions --idle\nagents sessions --orphan\nagents sessions --crashed\n\n# --- Session lifecycle ---\n# Get back into a session — attaches a live pane, or recovers an ended one\nagents sessions resume a1b2c3d4\n# Same, by the tmux name shown in: agents tmux ls\nagents sessions resume ag-claude-a1b2c3d4\n# Attach only — never fork a copy\nagents sessions resume a1b2c3d4 --attach-only\n# Multi-select history and open each in a tab\nagents sessions resume\n# The other direction: interactive → headless (keep working unattended)\nagents sessions detach a1b2c3d4\n\n# The interactive list folds in other online machines automatically,\n# labelled by host with this machine first. Stay local with --local:\nagents sessions --local\n\n# Search across every directory, not just this project\nagents sessions \"topic\" --all\n\n# Filter one installed harness version (equivalent forms)\nagents sessions claude@2.1.181\nagents sessions --agent claude --version 2.1.181\n\n# Team-spawned sessions, grouped by team (spawner + spawn time per team,\n# teammate mode/handle per row; team-flagged spawns with no team record\n# in a trailing (no team) bucket)\nagents sessions --teams\n\n# Who spawned which team: an orchestrator row carries team:<name>, and a\n# teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\nagents sessions --in-team redesign --teams\n\n# Pick a routine across every directory, then open one of its run sessions\nagents sessions --routine\nagents sessions --routine nightly-review\nagents sessions 2026-07-21T10-30-00-000Z\n\n# Export for analysis\nagents sessions --since 30d --limit 200 --json > sessions.json\n\n# Populate historical tool rows once on every device (search them with\n# the standalone CLI: sessions --include tools --query 'program:git')\nagents sessions backfill tools --fleet\n\n# Resolve one historical selector to metadata only, across the fleet\nagents sessions --resolve d3470b57 --json\n\n# Search another machine's sessions live over SSH (no sync needed)\nagents sessions \"auth bug\" --last 3 --device yosemite-s1\n\n# Fan the same query out across several machines\nagents sessions --all \"deploy script\" --device box-a --device box-b",
+      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n  resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n  resume <id> --attach-only  attach only; never fork a copy\n  resume                  multi-select history -> open tabs\n  detach <id>             the other direction: interactive -> headless\n- The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n- --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n- --version <version> requires --agent and is equivalent to --agent <agent@version>.\n- --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n- --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n- --include and --exclude are mutually exclusive.\n- Tool-call search and --count run in the standalone `sessions` CLI (`sessions --include tools --query <clause>`). agents indexes the calls: run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n- --first and --last are mutually exclusive.\n- A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n- --cloud sources from Rush Cloud captured runs instead of local disk.\n- --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n- Without --teams, team-spawned sessions are hidden by default.",
       "subcommands": [
         {
           "name": "backfill",
@@ -18953,62 +18823,6 @@
           ],
           "examples": "# Stop a live session by a short id prefix\nagents sessions stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents sessions stop 4b2f1a9c --local",
           "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents sessions detach <id>`, and bring it back\nwith `agents sessions resume <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
-          "subcommands": []
-        },
-        {
-          "name": "tail",
-          "path": "sessions tail",
-          "aliases": [],
-          "description": "Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.",
-          "args": [
-            {
-              "name": "sessionId",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--latest",
-              "description": "Tail the most recent tailable session (claude or codex)",
-              "long": "--latest",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--from-start",
-              "description": "Emit the full file first, then follow (default: start at EOF)",
-              "long": "--from-start",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit raw JSONL events instead of compact live lines",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Follow the most recent active Claude or Codex session\nagents sessions tail --latest\n\n# Follow a specific session by short or full ID\nagents sessions tail a1b2c3d4\n\n# Replay from the beginning, then follow\nagents sessions tail a1b2c3d4 --from-start\n\n# Pipe raw events through jq to extract just user messages\nagents sessions tail --latest --json | jq 'select(.type == \"user\")'",
-          "notes": "- Only Claude and Codex sessions are tailable — they append JSONL one event per line.\n- Live tail is compact by default; pass --json for the raw JSONL stream.\n- Gemini, OpenCode, and OpenClaw use formats that rewrite the file or store state elsewhere.",
           "subcommands": []
         },
         {

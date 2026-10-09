@@ -143,19 +143,18 @@ if (process.argv[2] === 'sessions') {
   }
 
   if (isReadQuery(forwarded, { filters, host })) {
-    if (bin) {
-      const { spawnSync } = await import('node:child_process');
-      const { command, prefix } = invocation(bin);
-      const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
-      if (res.error) {
-        process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
-        process.exit(1);
-      }
-      process.exit(res.status ?? 1);
+    if (!bin) {
+      process.stderr.write(`agents: the standalone \`sessions\` CLI was not found. Install it with ${SESSIONS_INSTALL_HINT}, or point $SESSIONS_BIN at its executable.\n`);
+      process.exit(1);
     }
-    if (process.env.AGENTS_SESSIONS_FASTPATH_HINT !== '0') {
-      process.stderr.write(`agents: standalone \`sessions\` not installed; using the in-process engine (${SESSIONS_INSTALL_HINT})\n`);
+    const { spawnSync } = await import('node:child_process');
+    const { command, prefix } = invocation(bin);
+    const res = spawnSync(command, [...prefix, ...forwarded], { stdio: 'inherit' });
+    if (res.error) {
+      process.stderr.write(`Failed to run \`sessions\`: ${res.error.message}\n`);
+      process.exit(1);
     }
+    process.exit(res.status ?? 1);
   }
 }
 
