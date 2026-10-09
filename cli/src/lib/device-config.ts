@@ -642,7 +642,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: ['secrets'],
     description:
       `AGI Menu: tabs hidden from the tab bar — any of ${MENUBAR_TABS.join(', ')}, but not all of them. ` +
-      'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home. Secrets starts hidden.',
+      'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home. Secrets is hidden unless this list is set without it.',
     validate: (v) => {
       const tabs = v as string[];
       const bad = tabs.find((t) => !(MENUBAR_TABS as readonly string[]).includes(t));
