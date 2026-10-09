@@ -159,7 +159,7 @@
             },
             {
               "flags": "--from-secrets <bundle:key>",
-              "description": "Provider form: import from an existing agents secrets entry",
+              "description": "Provider form: import from an existing `secrets` bundle entry",
               "long": "--from-secrets",
               "required": true,
               "optional": false,
@@ -538,7 +538,7 @@
           "options": [
             {
               "flags": "--from-secrets <bundle:key>",
-              "description": "Import from an existing agents secrets entry",
+              "description": "Import from an existing `secrets` bundle entry",
               "long": "--from-secrets",
               "required": true,
               "optional": false,
@@ -1087,7 +1087,7 @@
       "name": "browser",
       "path": "browser",
       "aliases": [],
-      "description": "Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box",
+      "description": "Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture. Legacy passthrough: call the standalone `browser` CLI directly",
       "args": [],
       "options": [
         {
@@ -1101,8 +1101,8 @@
           "negate": false
         }
       ],
-      "examples": "# One-time: install the engine, then pick a profile\nnpm i -g @phnx-labs/browser-cli\nagents browser profiles create work --browser chromium\nagents browser use work\n\n# Start a task, drive it, capture, close\nagents browser start --profile work\nagents browser navigate https://example.com\nagents browser screenshot -o /tmp/shot.png\nagents browser done\n\n# A remote box over the fleet (device bound at start)\nagents browser start --device box --profile work\nagents browser navigate https://example.com\nagents browser done",
-      "notes": "The engine is the standalone `browser` CLI (npm i -g @phnx-labs/browser-cli);\nagents-cli supplies --device fleet resolution, remote-control consent, and the\nagent-session link on the feed. Per-verb flags are the engine's — `agents browser\nscreenshot --help` asks it directly.\n\n`--device` is bound once at `start`; page verbs run against the task's bound\ndevice. `--device local` forces this machine.\n\nAnother fleet machine may drive this browser only after `agents browser\nremote-control on` here (device-local, never synced; default off).\n\n`agents browser sessions` is the engine's own task and capture history\n(`browser sessions --help`); the feed stream reads the same rows.",
+      "examples": "# One-time: install the engine, then pick a profile\nagents clis install browser\nbrowser profiles create work --browser chromium\nbrowser use work\n\n# Start a task, drive it, capture, close\nbrowser start --profile work\nbrowser navigate https://example.com\nbrowser screenshot -o /tmp/shot.png\nbrowser done\n\n# A remote box over the fleet (device bound at start)\nbrowser start --device box --profile work\nbrowser navigate https://example.com\nbrowser done",
+      "notes": "The engine is the standalone `browser` CLI (npm i -g @phnx-labs/browser-cli), and\nit is the canonical spelling: every verb here forwards to it unchanged, adding\nonly fleet --device resolution, remote-control consent, and the agent-session\nlink on the feed. Per-verb flags are the engine's — `browser screenshot --help`.\n\n`--device` is bound once at `start`; page verbs run against the task's bound\ndevice. `--device local` forces this machine.\n\nAnother fleet machine may drive this browser only after `browser\nremote-control on` here (device-local, never synced; default off).\n\n`browser sessions` is the engine's own task and capture history\n(`browser sessions --help`); the feed stream reads the same rows.",
       "subcommands": [
         {
           "name": "click",
@@ -1423,7 +1423,7 @@
           "name": "use",
           "path": "browser use",
           "aliases": [],
-          "description": "Pick the profile `agents browser start` uses when no --profile is passed",
+          "description": "Pick the profile `browser start` uses when no --profile is passed",
           "args": [],
           "options": [],
           "subcommands": []
@@ -1892,8 +1892,8 @@
           "negate": false
         }
       ],
-      "examples": "# One-time: install the engine, the helper, and the TCC grants\nnpm i -g @phnx-labs/computer-cli\nagents setup computer\n\n# Allow an app, then reload so the daemon picks it up\n#   ~/.agents/permissions/groups/computer.yaml:  allow: [\"Computer(com.apple.notes)\"]\nagents computer reload\n\n# Observe, then act\nagents computer apps --json\nagents computer describe --bundle com.apple.notes\nagents computer click --bundle com.apple.notes --id <element-id>\n\n# A remote Windows device over the fleet\nagents computer setup --device win-mini\nagents computer start --device win-mini\nagents computer screenshot --device win-mini -o /tmp/win.png\nagents computer stop  --device win-mini",
-      "notes": "The engine is the standalone `computer` CLI (npm i -g @phnx-labs/computer-cli);\nagents-cli supplies the permission allow list, --device fleet resolution, and\nthe agent-session link on the feed. Per-verb flags are the engine's — `agents computer\nclick --help` asks it directly.\n\nApps are deny-by-default: a verb only reaches an app named by a\nComputer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,\nthen `agents computer reload`.\n\n`agents computer sessions` is the engine's own run history\n(`computer sessions --help`); the feed stream reads the same rows.",
+      "examples": "# One-time: install the engine, the helper, and the TCC grants\nagents clis install computer\nagents setup computer\n\n# Allow an app, then reload so the daemon picks it up\n#   ~/.agents/permissions/groups/computer.yaml:  allow: [\"Computer(com.apple.notes)\"]\nagents computer reload\n\n# Observe, then act\nagents computer apps --json\nagents computer describe --bundle com.apple.notes\nagents computer click --bundle com.apple.notes --id <element-id>\n\n# A remote Windows device over the fleet\nagents computer setup --device win-mini\nagents computer start --device win-mini\nagents computer screenshot --device win-mini --out /tmp/win.png\nagents computer stop  --device win-mini",
+      "notes": "The engine is the standalone `computer` CLI (npm i -g @phnx-labs/computer-cli);\nagents-cli supplies the permission allow list, --device fleet resolution, and\nthe agent-session link on the feed. Per-verb flags are the engine's — `agents computer\nclick --help` asks it directly.\n\nApps are deny-by-default: a verb only reaches an app named by a\nComputer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,\nthen `agents computer reload`.\n\nRun history is the engine's own: `computer sessions` (`agents computer\nsessions` forwards to it); the feed stream reads the same rows.",
       "subcommands": [
         {
           "name": "apps",
@@ -2795,7 +2795,7 @@
             }
           ],
           "examples": "# Directories the indexer scans, per agent (JSON)\nagents daemon index roots\n\n# Compact the full-text search index\nagents daemon index optimize\n\n# One-shot historical catch-up\nagents daemon index backfill tools --fleet\nagents daemon index backfill resources --since 30d\nagents daemon index backfill titles --limit 20",
-          "notes": "- The daemon's session-index service keeps new and changed sessions current on its own; these verbs are explicit maintenance on top of it.\n- Each verb is the same engine as its `agents sessions` spelling (`--roots`, `optimize`, `backfill`).",
+          "notes": "- The daemon's session-index service keeps new and changed sessions current on its own; these verbs are explicit maintenance on top of it.\n- Each verb is the same engine as its legacy `agents sessions` spelling (`--roots`, `optimize`, `backfill`).",
           "subcommands": [
             {
               "name": "backfill",
@@ -2892,7 +2892,7 @@
                     }
                   ],
                   "examples": "# Fold every historical session on this machine into the usage index\nagents daemon index backfill resources\n\n# Narrow the historical work\nagents daemon index backfill resources --agent claude --since 30d\n\n# Machine-readable summary\nagents daemon index backfill resources --json",
-                  "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents sessions stats`.\n- Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents daemon index backfill resources`).\n- Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n- Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
+                  "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents insights resources`.\n- Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents daemon index backfill resources`).\n- Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n- Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
                   "subcommands": []
                 },
                 {
@@ -3482,7 +3482,7 @@
             }
           ],
           "examples": "# What this box hosts today\nagents daemon webhooks list\n\n# Host a receiver on the default port, signing secrets from a bundle\nagents daemon webhooks add --secrets-bundle linear-webhook\n\n# A second receiver on its own port, publicly exposed via Tailscale Funnel\nagents daemon webhooks add --secrets-bundle gh-webhook --port 8788 --funnel-port 443\n\n# Apply the change (the running daemon rebinds on restart)\nagents daemon restart\n\n# Stop hosting the receiver bound to a port\nagents daemon webhooks remove 8788",
-          "notes": "The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET\n('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it\nheadlessly through the standalone 'secrets' CLI, so a hosted receiver needs\nno AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver\nloud in 'agents daemon logs' rather than binding unverified ingress.\n\nPort is the identity: a second 'add' on the same port edits that receiver.\nFunnel ports are limited by Tailscale to 443, 8443, and 10000.",
+          "notes": "The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET\n('secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it\nheadlessly through the standalone 'secrets' CLI, so a hosted receiver needs\nno AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver\nloud in 'agents daemon logs' rather than binding unverified ingress.\n\nPort is the identity: a second 'add' on the same port edits that receiver.\nFunnel ports are limited by Tailscale to 443, 8443, and 10000.",
           "subcommands": [
             {
               "name": "add",
@@ -3493,7 +3493,7 @@
               "options": [
                 {
                   "flags": "--secrets-bundle <name>",
-                  "description": "agents secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET",
+                  "description": "secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET",
                   "long": "--secrets-bundle",
                   "required": true,
                   "optional": false,
@@ -4774,7 +4774,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -5166,7 +5166,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -7016,7 +7016,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -7144,8 +7144,8 @@
           "negate": false
         }
       ],
-      "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+      "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
+      "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents sessions insights` is the legacy spelling of `agents insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "cost",
@@ -7156,7 +7156,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -7285,7 +7285,7 @@
             }
           ],
           "examples": "# Auto recipe board (7d)\nagents insights mix\n\n# Last 30 days\nagents insights mix --days 30\n\n# One recipe as JSON\nagents insights mix harness-mix --json\n\n# List baked recipe ids\nagents insights mix --list\n\n# Raw usage events\nagents insights query --kind secret --days 7",
-          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\nEmpty recipes are skipped on the default mix board. Pass one recipe id\n(`agents insights mix harness-mix`) for just that section; `--list` names them.\nThis is the cheap counter path. Behavioural report (transcript content, account split)\nis bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\nSkill/slash-command popularity is `agents sessions stats`.",
+          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\nEmpty recipes are skipped on the default mix board. Pass one recipe id\n(`agents insights mix harness-mix`) for just that section; `--list` names them.\nThis is the cheap counter path. Behavioural report (transcript content, account split)\nis bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\nSkill/slash-command popularity is `agents insights resources`.",
           "subcommands": []
         },
         {
@@ -7297,7 +7297,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -7760,8 +7760,8 @@
               "negate": false
             }
           ],
-          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents insights resources\n\n# Just the dead weight — installed but never explicitly invoked\nagents insights resources --zero\n\n# Skills only, last 30 days, machine-readable\nagents insights resources --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents insights resources --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
-          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
+          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents insights resources\n\n# Just the dead weight — installed but never explicitly invoked\nagents insights resources --zero\n\n# Skills only, last 30 days, machine-readable\nagents insights resources --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents insights resources --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents daemon index backfill resources",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents daemon index backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from `sessions --plugin`, which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` is the canonical spelling of this report (`agents sessions stats` is the legacy one); --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         }
       ]
@@ -7782,7 +7782,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -8171,7 +8171,7 @@
           "name": "audit",
           "path": "logs audit",
           "aliases": [],
-          "description": "Alias for `agents events audit`",
+          "description": "Operational and audit events without the agent-activity lane (`agents events` minus activity)",
           "args": [],
           "options": [
             {
@@ -8529,7 +8529,7 @@
             }
           ],
           "examples": "# One-shot sweep using the live session set as the liveness source\nagents mailboxes prune\n\n# Machine-readable summary (for scripts)\nagents mailboxes prune --json",
-          "notes": "A box is considered dead when no live session (the same source\n`agents sessions --active` uses) owns it. Pending messages in dead boxes\nare archived as `dropped: dead`; expired messages in live boxes are\narchived as `dropped: expired'. Both surfaces a failure receipt back to\nthe feed store when the message carried a blockId.",
+          "notes": "A box is considered dead when no live session (the same source\n`agents ps` uses) owns it. Pending messages in dead boxes\nare archived as `dropped: dead`; expired messages in live boxes are\narchived as `dropped: expired'. Both surfaces a failure receipt back to\nthe feed store when the message carried a blockId.",
           "subcommands": []
         }
       ]
@@ -11630,7 +11630,7 @@
         },
         {
           "flags": "--bookmarks",
-          "description": "Only bookmarked sessions (bookmark one with `agents sessions bookmark <id>`)",
+          "description": "Only bookmarked sessions (bookmark one with `sessions bookmark <id>`)",
           "long": "--bookmarks",
           "required": false,
           "optional": false,
@@ -11668,7 +11668,7 @@
         }
       ],
       "examples": "# What is running right now, here and on every reachable device\nagents ps\n\n# Machine-readable roster for this box only\nagents ps --json --local\n\n# One peer's running agents, over SSH\nagents ps --json -D yosemite-s0\n\n# Only agents waiting on you (exits 1 when any are waiting)\nagents ps --status waiting\n\n# Only bookmarked sessions, or the runs of one routine\nagents ps --bookmarks\nagents ps --routine nightly-review\n\n# Act on one row by its 8-character id\nagents ps focus 4b2f1a9c\nagents ps detach 4b2f1a9c\nagents ps stop 4b2f1a9c\nagents ps migrate 4b2f1a9c --auto\n\n# Where migrated sessions went\nagents ps migrations",
-      "notes": "- On a TTY with no --status, ps opens the session picker filtered to running\n  sessions: r toggles that filter, f focuses, enter resumes, y copies the command.\n- Type into a running agent with: agents send --channel session --to <id> --text \"continue\"\n- Resume an ended session with: agents run --resume <id>\n- A session on another device is stopped, detached, or focused there over SSH.\n- Put -D and --status after the verb or after the roster flags, never before a\n  verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.",
+      "notes": "- On a TTY with no --status, ps opens the session picker filtered to running\n  sessions: r toggles that filter, f focuses, enter resumes, y copies the command.\n- Type into a running agent with: agents send --channel session --to <id> --text \"continue\"\n- Resume an ended session with: agents run auto --resume <id>\n- A session on another device is stopped, detached, or focused there over SSH.\n- Put -D and --status after the verb or after the roster flags, never before a\n  verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.",
       "subcommands": [
         {
           "name": "detach",
@@ -11704,7 +11704,7 @@
               "negate": false
             }
           ],
-          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents ps detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents sessions resume 4b2f1a9c",
+          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents ps detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents ps focus 4b2f1a9c",
           "subcommands": []
         },
         {
@@ -12226,7 +12226,7 @@
             }
           ],
           "examples": "# Stop a live session by a short id prefix\nagents ps stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents ps stop 4b2f1a9c --local",
-          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents sessions resume <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents ps focus <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
           "subcommands": []
         }
       ]
@@ -12627,7 +12627,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -13401,7 +13401,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -13773,7 +13773,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -13839,7 +13839,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -13921,7 +13921,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -13987,7 +13987,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14078,7 +14078,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14205,7 +14205,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14271,7 +14271,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14356,7 +14356,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14440,7 +14440,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14508,7 +14508,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14572,7 +14572,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14646,7 +14646,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14719,7 +14719,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14792,7 +14792,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14870,7 +14870,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -14927,7 +14927,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15000,7 +15000,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15066,7 +15066,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15118,12 +15118,12 @@
           "name": "stop",
           "path": "routines stop",
           "aliases": [],
-          "description": "Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.",
+          "description": "Stop only the scheduler service. The shared daemon and its other services (usage sync, session index, watchdog, and the rest) stay running.",
           "args": [],
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15196,7 +15196,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15260,7 +15260,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15354,7 +15354,7 @@
             },
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -15689,7 +15689,7 @@
         },
         {
           "flags": "--secrets <bundle>",
-          "description": "Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `agents secrets`.",
+          "description": "Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `secrets --help`.",
           "long": "--secrets",
           "required": true,
           "optional": false,
@@ -15904,7 +15904,7 @@
         },
         {
           "flags": "--name <slug>",
-          "description": "Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.",
+          "description": "Name the run — seeds the session label so it shows up as `<name>` in `sessions` and resolves by it instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.",
           "long": "--name",
           "required": true,
           "optional": false,
@@ -15931,7 +15931,7 @@
         },
         {
           "flags": "--terminal [backend]",
-          "description": "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
+          "description": "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents ps` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
           "long": "--terminal",
           "required": false,
           "optional": true,
@@ -16133,7 +16133,7 @@
         },
         {
           "flags": "--no-follow",
-          "description": "With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).",
+          "description": "With --device, dispatch detached and return immediately (track via `agents devices ps` and `agents logs <id>`).",
           "long": "--no-follow",
           "required": false,
           "optional": false,
@@ -16288,7 +16288,7 @@
         }
       ],
       "examples": "      # Headless, read-only: investigate or summarize without writing files\n      agents run claude \"summarize recent git commits\" --mode plan\n\n      # Headless, can edit: have the agent make changes\n      agents run claude \"fix lint errors in src/\" --mode edit\n\n      # Interactive (TUI): a bare run places itself like --device auto (a fleet\n      # worker, TUI forwarded over SSH); --local keeps it on this machine\n      agents run claude\n      agents run claude --local            # stay local (or pick this machine in claude@)\n\n      # Pick a signed-in account/version for only this run (# = account picker)\n      agents run claude#\n\n      # Pick the device this run lands on (@ = device picker); this machine\n      # first, offline rows disabled, fleet state aged in the prompt\n      agents run claude@\n\n      # Ask both, account first, then device — the run dispatches with the\n      # picked account to the picked device\n      agents run claude#@\n\n      # Full-auto: affinity-pick the host, then the harness with the most\n      # account headroom, then a balanced account on it\n      agents run auto \"fix the flaky test\" --mode edit\nagents run auto --device yosemite-s0 \"fix the flaky test\"   # pin the device\n      agents run auto --interactive --device auto --strategy balanced --mode auto\n\n      # Placement (one door — where the body runs). Old flags still work.\n      agents run claude \"…\" --where device:yosemite-s0   # = --device yosemite-s0\n      agents run claude \"…\" --where auto                 # = --device auto\n      agents run claude \"fix CI\" --where lease --mode edit\n\n      # Vendor cloud placement — the agent's own cloud runs the task and\n      # agents cloud list/status/logs tracks it. Fire-and-forget: --no-follow\n      agents run claude \"fix the flaky e2e\" --cloud --repo acme/example\n      agents run codex \"add parser tests\" --cloud --cloud-env env_a1b2c3\n      agents run droid \"QA the onboarding flow\" --cloud --no-follow\n      agents run claude \"…\" --where cloud          # same as --cloud\n\n      # Open the session in a terminal tab — detected from where your sessions\n      # already run (Ghostty / iTerm / Terminal.app); force one with a value\n      agents run claude --terminal\n      agents run claude --terminal ghostty\n\n      # Pipe JSON events to a parser (--quiet drops the preamble)\n      agents run claude \"...\" --json --quiet | jq\n\n      # Bounded run — kill the agent after 30 minutes\n      agents run claude \"generate sales report for yesterday\" --mode plan --timeout 30m\n\n      # Inject a keychain-backed secrets bundle\n      agents run claude \"deploy the worker\" --secrets prod --mode edit\n\n      # Run on a cloud box — reuses a warm box from the repo's profile pool when\n      # one is ready (kept after the run), else leases a fresh box, torn down after\n      agents run claude \"fix the failing tests\" --lease\n\n      # Force a brand-new box (destroyed after), or target a warm box by slug\n      agents run claude \"fix the failing tests\" --lease --fresh\n      agents run claude \"fix the failing tests\" --box warm-one\n\n      # Broadcast one prompt (or --task) across agents × models\n      agents run --broadcast claude,codex \"say hello\" --model cheap,default\n      agents run --broadcast --task hello-repo --model cheap\n      agents run --broadcast --list-tasks\n      agents run --broadcast --results --json\n\n      # Pass arbitrary native flags to the underlying CLI via -- separator\n      agents run kimi -- --plan --some-kimi-option value\n      agents run claude \"fix the bug\" -- --custom-flag",
-      "notes": "Modes (not every agent supports every mode — see the table below):\n  plan  read-only investigation; no writes, no shell side-effects\n  edit  may edit files; prompts for shell / risky operations\n  auto  more autonomous than edit; the mechanism is per-harness --\n        claude, copilot: smart classifier auto-approves safe ops and\n               STILL PROMPTS for risky ones\n        codex: approval_policy=never over the edit sandbox; never\n               prompts at all, and a denied command fails instead\n  skip  bypass every permission prompt (dangerously-skip-permissions)\n  Legacy 'full' is silently rewritten to 'skip'.\n  Unsupported requests degrade: auto falls back to edit, plan to the\n  harness's safest native mode; skip errors where a harness has none.\n  Models (cheap|default|best|ultra): agents models <agent[@version]>\n\nMode support per harness (* = the harness's native default):\n  claude       plan* edit auto skip\n  codex        plan* edit auto skip\n  cursor       plan* edit skip\n  opencode     plan* edit\n  openclaw     plan* edit skip\n  copilot      plan* edit auto skip\n  amp          plan* edit\n  goose        edit*\n  antigravity  edit* skip\n  grok         plan* edit skip\n  kimi         plan* edit auto skip\n  droid        plan* edit auto skip\n  hermes       edit*\n  muse         plan* edit auto skip\n  warp         edit*\n\nHeadless plan support (a prompt makes the run headless):\n  plan works headless on claude, codex, cursor, droid, opencode.\n  kimi, grok, antigravity have no headless plan mode — a headless\n  --mode plan auto-downgrades to --mode auto (with a stderr warning).\n  Interactive plan (omit the prompt) works everywhere it is listed.\n\nRun strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n  pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)\n  available  use pinned if it can run right now; otherwise switch to another signed-in version\n  balanced   distribute load across healthy accounts by remaining capacity (default)\n  A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n  --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n  Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each\n  excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.\n\n'auto' harness (agents run auto): picks the host (14d usage affinity,\nunless --device is given), the harness (installed CLIs weighted by\nbest-account headroom), and the account (the strategy above). Zero\nhealthy accounts on any harness exits nonzero with the earliest reset.\n\nPickers: a trailing # opens the account picker (agents run claude#) to\n  choose one installed account for this run — rows show identity, login\n  state, plan, and available limits; unsafe accounts stay visible but\n  disabled. A trailing @ opens the device picker (agents run claude@);\n  #@ asks both, account first, then device. The pickers cannot combine\n  with an explicit pin of the same thing (--account, --device/--on/\n  --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.\n\nInteractive placement: a bare 'agents run <harness>' (no prompt, real TTY)\n  places itself like --device auto — a fleet worker runs it, with the TUI\n  forwarded over SSH. Headless runs (any prompt, --json, no TTY) are\n  unchanged: they run in place. To stay on this machine, pass --local\n  (--device <this machine> means the same), or pick this machine (listed\n  first) in the '<harness>@' device picker. When placement finds no\n  healthy device the run fails loud and names the local spelling.\n\nFallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\nCloud placement: --cloud sends the run to the agent's native vendor cloud\n  (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the\n  same dispatch as agents cloud run --agent <agent>, tracked by agents\n  cloud list/status/logs/cancel/message. --provider overrides the routing;\n  --repo/--branch/--cloud-env refine the task. Agents without a native\n  cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is\n  given. --cloud is mutually exclusive with --device/--lease and with\n  local-run flags (--loop, --resume, --secrets, --terminal, …).\n\nResume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.\n\nPassthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n  agents run kimi -- --plan --some-native-flag value",
+      "notes": "Modes (not every agent supports every mode — see the table below):\n  plan  read-only investigation; no writes, no shell side-effects\n  edit  may edit files; prompts for shell / risky operations\n  auto  more autonomous than edit; the mechanism is per-harness --\n        claude, copilot: smart classifier auto-approves safe ops and\n               STILL PROMPTS for risky ones\n        codex: approval_policy=never over the edit sandbox; never\n               prompts at all, and a denied command fails instead\n  skip  bypass every permission prompt (dangerously-skip-permissions)\n  Legacy 'full' is silently rewritten to 'skip'.\n  Unsupported requests degrade: auto falls back to edit, plan to the\n  harness's safest native mode; skip errors where a harness has none.\n  Models (cheap|default|best|ultra): agents models <agent[@version]>\n\nMode support per harness (* = the harness's native default):\n  claude       plan* edit auto skip\n  codex        plan* edit auto skip\n  cursor       plan* edit skip\n  opencode     plan* edit\n  openclaw     plan* edit skip\n  copilot      plan* edit auto skip\n  amp          plan* edit\n  goose        edit*\n  antigravity  edit* skip\n  grok         plan* edit skip\n  kimi         plan* edit auto skip\n  droid        plan* edit auto skip\n  hermes       edit*\n  muse         plan* edit auto skip\n  warp         edit*\n\nHeadless plan support (a prompt makes the run headless):\n  plan works headless on claude, codex, cursor, droid, opencode.\n  kimi, grok, antigravity have no headless plan mode — a headless\n  --mode plan auto-downgrades to --mode auto (with a stderr warning).\n  Interactive plan (omit the prompt) works everywhere it is listed.\n\nRun strategy (set via --strategy or run.<agent>.strategy in agents.yaml):\n  pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)\n  available  use pinned if it can run right now; otherwise switch to another signed-in version\n  balanced   distribute load across healthy accounts by remaining capacity (default)\n  A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.\n  --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.\n  Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each\n  excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.\n\n'auto' harness (agents run auto): picks the host (14d usage affinity,\nunless --device is given), the harness (installed CLIs weighted by\nbest-account headroom), and the account (the strategy above). Zero\nhealthy accounts on any harness exits nonzero with the earliest reset.\n\nPickers: a trailing # opens the account picker (agents run claude#) to\n  choose one installed account for this run — rows show identity, login\n  state, plan, and available limits; unsafe accounts stay visible but\n  disabled. A trailing @ opens the device picker (agents run claude@);\n  #@ asks both, account first, then device. The pickers cannot combine\n  with an explicit pin of the same thing (--account, --device/--on/\n  --computer/--host) or with --strategy/--balanced/--resume/--lease/--box.\n\nInteractive placement: a bare 'agents run <harness>' (no prompt, real TTY)\n  places itself like --device auto — a fleet worker runs it, with the TUI\n  forwarded over SSH. Headless runs (any prompt, --json, no TTY) are\n  unchanged: they run in place. To stay on this machine, pass --local\n  (--device <this machine> means the same), or pick this machine (listed\n  first) in the '<harness>@' device picker. When placement finds no\n  healthy device the run fails loud and names the local spelling.\n\nFallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.\n\nCloud placement: --cloud sends the run to the agent's native vendor cloud\n  (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) — the\n  same dispatch as agents cloud run --agent <agent>, tracked by agents\n  cloud list/status/logs/cancel/message. --provider overrides the routing;\n  --repo/--branch/--cloud-env refine the task. Agents without a native\n  cloud (kimi, grok, opencode, …) fail loud unless --provider is\n  given. --cloud is mutually exclusive with --device/--lease and with\n  local-run flags (--loop, --resume, --secrets, --terminal, …).\n\nResume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. With auto as the agent (agents run auto --resume <id>) the harness is inferred from the session; a named agent must match it. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.\n\nPassthrough: everything after -- is forwarded verbatim to the underlying agent CLI.\n  agents run kimi -- --plan --some-native-flag value",
       "subcommands": []
     },
     {
@@ -16353,7 +16353,7 @@
       "name": "secrets",
       "path": "secrets",
       "aliases": [],
-      "description": "Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.",
+      "description": "Named bundles of env variables — legacy passthrough to the standalone `secrets` CLI. Call `secrets` directly (`secrets --help`); install it with `agents setup secrets`.",
       "args": [],
       "options": [],
       "subcommands": []
@@ -16517,7 +16517,7 @@
       "name": "sessions",
       "path": "sessions",
       "aliases": [],
-      "description": "Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.",
+      "description": "Find, browse, and read agent conversation transcripts. Legacy group: search and read with the standalone `sessions` CLI; live roster: `agents ps`.",
       "args": [
         {
           "name": "query",
@@ -16621,7 +16621,7 @@
         },
         {
           "flags": "--bookmarks",
-          "description": "Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`",
+          "description": "Show only bookmarked sessions — bookmark them with `*` in the browser or `sessions bookmark <id>`",
           "long": "--bookmarks",
           "required": false,
           "optional": false,
@@ -17014,8 +17014,8 @@
           "negate": false
         }
       ],
-      "examples": "# Search indexed transcripts by topic, file path, or command\nagents sessions \"add auth middleware\"\n\n# Read a session as markdown (user + assistant + thinking + tools)\nagents sessions a1b2c3d4 --markdown\n\n# Just the user turns — useful for recalling intent\nagents sessions a1b2c3d4 --include user\n\n# Show only what's running right now (terminals, teams, cloud, headless)\nagents sessions --active\n\n# Filter the live fleet by the status word shown in the roster\nagents sessions --working\nagents sessions --idle\nagents sessions --orphan\nagents sessions --crashed\n\n# --- Session lifecycle ---\n# Get back into a session — attaches a live pane, or recovers an ended one\nagents sessions resume a1b2c3d4\n# Same, by the tmux name shown in: agents tmux ls\nagents sessions resume ag-claude-a1b2c3d4\n# Attach only — never fork a copy\nagents sessions resume a1b2c3d4 --attach-only\n# Multi-select history and open each in a tab\nagents sessions resume\n# The other direction: interactive → headless (keep working unattended)\nagents sessions detach a1b2c3d4\n\n# The interactive list folds in other online machines automatically,\n# labelled by host with this machine first. Stay local with --local:\nagents sessions --local\n\n# Search across every directory, not just this project\nagents sessions \"topic\" --all\n\n# Filter one installed harness version (equivalent forms)\nagents sessions claude@2.1.181\nagents sessions --agent claude --version 2.1.181\n\n# Team-spawned sessions, grouped by team (spawner + spawn time per team,\n# teammate mode/handle per row; team-flagged spawns with no team record\n# in a trailing (no team) bucket)\nagents sessions --teams\n\n# Who spawned which team: an orchestrator row carries team:<name>, and a\n# teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.\nagents sessions --in-team redesign --teams\n\n# Pick a routine across every directory, then open one of its run sessions\nagents sessions --routine\nagents sessions --routine nightly-review\nagents sessions 2026-07-21T10-30-00-000Z\n\n# Export for analysis\nagents sessions --since 30d --limit 200 --json > sessions.json\n\n# Populate historical tool rows once on every device (search them with\n# the standalone CLI: sessions --include tools --query 'program:git')\nagents sessions backfill tools --fleet\n\n# Resolve one historical selector to metadata only, across the fleet\nagents sessions --resolve d3470b57 --json\n\n# Search another machine's sessions live over SSH (no sync needed)\nagents sessions \"auth bug\" --last 3 --device yosemite-s1\n\n# Fan the same query out across several machines\nagents sessions --all \"deploy script\" --device box-a --device box-b",
-      "notes": "Session lifecycle — ONE verb gets you back in, it detects the state:\n  resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover\n  resume <id> --attach-only  attach only; never fork a copy\n  resume                  multi-select history -> open tabs\n  detach <id>             the other direction: interactive -> headless\n- The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.\n- --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n- --version <version> requires --agent and is equivalent to --agent <agent@version>.\n- --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n- --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n- --include and --exclude are mutually exclusive.\n- Tool-call search and --count run in the standalone `sessions` CLI (`sessions --include tools --query <clause>`). agents indexes the calls: run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n- --first and --last are mutually exclusive.\n- A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n- --cloud sources from Rush Cloud captured runs instead of local disk.\n- --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n- Without --teams, team-spawned sessions are hidden by default.",
+      "examples": "# Search indexed transcripts by topic, file path, or command\nsessions \"add auth middleware\"\n\n# Read a session as markdown (user + assistant + thinking + tools)\nsessions a1b2c3d4 --markdown\n\n# Just the user turns — useful for recalling intent\nsessions a1b2c3d4 --include user\n\n# What is running right now (terminals, teams, cloud, headless)\nagents ps\n\n# Filter the live fleet by the status word shown in the roster\nagents ps --status working\nagents ps --status idle,orphaned,crashed\n\n# --- Session lifecycle ---\n# Get back into a session: attach a live pane, or recover an ended one\nagents ps focus a1b2c3d4\n# Attach only — never fork a copy\nagents ps focus a1b2c3d4 --attach-only\n# Continue an ended session by id (auto infers the harness)\nagents run auto --resume a1b2c3d4\n# The other direction: interactive → headless (keep working unattended)\nagents ps detach a1b2c3d4\n\n# Search across every directory and all time, not just this project\nsessions \"topic\" --all\n\n# Filter one installed harness version\nsessions --agent claude@2.1.181\n\n# Include team-spawned sessions; narrow to one team's lineage\nsessions --teams\nsessions --in-team redesign --teams\n\n# Pick a routine across every directory, then open one of its run sessions\nsessions --routine\nsessions --routine nightly-review\nsessions 2026-07-21T10-30-00-000Z\n\n# Export for analysis\nsessions --since 30d --limit 200 --json > sessions.json\n\n# Search indexed tool calls; populate historical rows once per device\nsessions --include tools --query 'program:git input:merge' --since 7d\nagents daemon index backfill tools --fleet\n\n# Resolve one selector to safe metadata only\nsessions --resolve d3470b57 --json\n\n# Search other machines' indexes live over SSH (no sync needed)\nsessions \"auth bug\" --host yosemite-s1\nsessions --all \"deploy script\" --host box-a,box-b",
+      "notes": "Canonical homes (this group is legacy, PHNX-4227):\n  search, read, export, bookmark   sessions …\n  live roster and status           agents ps [--status <state>]\n  attach or recover                agents ps focus <id>\n  continue an ended session        agents run <agent|auto> --resume <id>\n  type into a running agent        agents send --channel session --to <id> --text \"…\"\n  fork                             agents fork <id>\n  index maintenance                agents daemon index roots | optimize | backfill\n  skill and command usage          agents insights resources\n- This group's own listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local. The standalone `sessions` reads this machine unless you pass --host.\n- --all is not a device flag: it widens historical directory and time filters. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.\n- --version <version> requires --agent and is equivalent to --agent <agent@version>.\n- --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.\n- --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.\n- --include and --exclude are mutually exclusive.\n- Tool-call search and --count run in the standalone `sessions` CLI (`sessions --include tools --query <clause>`). agents indexes the calls: run 'agents daemon index backfill tools' once for historical transcripts; normal scans index new and changed sessions.\n- --first and --last are mutually exclusive.\n- A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.\n- --cloud sources from Rush Cloud captured runs instead of local disk.\n- --routine [name] spans every directory and shows transcripts archived from routine runs. On a TTY, omit the name to pick a routine; a name accepts exact, substring, or unambiguous typo matches. --routines is an alias. Routine rows also resolve by run id.\n- Without --teams, team-spawned sessions are hidden by default.",
       "subcommands": [
         {
           "name": "backfill",
@@ -17112,7 +17112,7 @@
                 }
               ],
               "examples": "# Fold every historical session on this machine into the usage index\nagents sessions backfill resources\n\n# Narrow the historical work\nagents sessions backfill resources --agent claude --since 30d\n\n# Machine-readable summary\nagents sessions backfill resources --json",
-              "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents sessions stats`.\n- Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents sessions backfill resources`).\n- Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n- Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
+              "notes": "- Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by `agents insights resources`.\n- Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over `agents ssh <host> agents sessions backfill resources`).\n- Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.\n- Only slash commands and `Skill` tool calls are recorded — auto-triggered skills emit no signal.",
               "subcommands": []
             },
             {
@@ -17367,7 +17367,7 @@
               "negate": false
             }
           ],
-          "examples": "$ agents secrets exec cloudflare -- agents sessions backup-setup\n  Provision the managed session-backup Worker + R2 bucket (creds from the bundle).\n\n  $ agents sessions backup-setup --account <id> --domain sessions.example.com\n  Provision against a private account service and custom domain.",
+          "examples": "$ secrets exec cloudflare -- agents sessions backup-setup\n  Provision the managed session-backup Worker + R2 bucket (creds from the bundle).\n\n  $ agents sessions backup-setup --account <id> --domain sessions.example.com\n  Provision against a private account service and custom domain.",
           "subcommands": []
         },
         {
@@ -17422,8 +17422,8 @@
               "negate": false
             }
           ],
-          "examples": "# Bookmark a session by its short id (the 8 chars the listing prints)\nagents sessions bookmark 26c27162\n\n# See what is bookmarked\nagents sessions bookmark --list\n\n# Browse only the bookmarked ones\nagents sessions --bookmarks\n\n# Remove it from bookmarks again\nagents sessions bookmark 26c27162 --remove",
-          "notes": "In the interactive browser (`agents sessions`), `*` bookmarks the highlighted\nsession and `b` filters the list down to the bookmarked ones.\n\nBookmarks live in ~/.agents/.history/bookmarks.json, keyed by session id, so\nthey survive a reindex of the session cache. They are per-machine: session\nsync carries transcripts, not this file.",
+          "examples": "# Bookmark a session by its short id (the 8 chars the listing prints)\nsessions bookmark 26c27162\n\n# See what is bookmarked\nsessions bookmark --list\n\n# Browse only the bookmarked ones\nsessions --bookmarks\n\n# Remove it from bookmarks again\nsessions bookmark 26c27162 --remove",
+          "notes": "In the interactive browser (`sessions`), `*` bookmarks the highlighted\nsession and `b` filters the list down to the bookmarked ones.\n\nBookmarks live in ~/.agents/.history/bookmarks.json, keyed by session id, so\nthey survive a reindex of the session cache. They are per-machine: session\nsync carries transcripts, not this file.",
           "subcommands": []
         },
         {
@@ -17460,7 +17460,7 @@
               "negate": false
             }
           ],
-          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents sessions detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents sessions resume 4b2f1a9c",
+          "examples": "# Background a live session: its terminal closes, the agent keeps working headless\nagents sessions detach 4b2f1a9c\n\n# Bring it back into a terminal later\nagents ps focus 4b2f1a9c",
           "subcommands": []
         },
         {
@@ -17534,8 +17534,8 @@
               "negate": false
             }
           ],
-          "examples": "# Bundle the last week of sessions to a file\nagents sessions export --since 7d -o week.bundle\n\n# Bundle two specific sessions\nagents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle\n\n# Encrypt + pipe straight into another machine over SSH\nagents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'\n\n# Back the last month up off-box (managed Phoenix store — no bucket to set up)\nagents sessions export --since 30d --to-r2\n\n# Or to your own r2.backups bucket (R2_SYNC_ENC_KEY keeps it zero-knowledge)\nagents sessions export --since 30d --to-r2 --byo",
-          "notes": "Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,\n-a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one\nline per transcript file. Secrets are redacted by default. Dir-shaped sessions\n(Kimi) carry all their files. Restore with 'agents sessions import'.\n\n--to-r2 backs each session up off-box, one encrypted object per transcript keyed\nby machine/agent/session. When you are signed in ('agents auth login') it uploads\nto the MANAGED Phoenix store — no Cloudflare or r2.backups bucket to set up — and\nevery body is sealed with a per-account key (mandatory; never plaintext). --byo\nforces your own r2.backups bucket instead; with R2_SYNC_ENC_KEY, neither Phoenix\nnor the storage provider can decrypt it. Restore with 'agents sessions import --from-r2'.",
+          "examples": "# Bundle the last week of sessions to a file\nsessions export --since 7d -o week.bundle\n\n# Bundle two specific sessions\nsessions export 4f8a2b1c 9d3e7a55 -o pair.bundle\n\n# Encrypt + pipe straight into another machine over SSH\nsessions export --since 7d --stdout --encrypt | agents ssh boxB 'sessions import - --decrypt <key>'\n\n# Back the last month up off-box (managed Phoenix store — no bucket to set up)\nsessions export --since 30d --to-r2\n\n# Or to your own r2.backups bucket (R2_SYNC_ENC_KEY keeps it zero-knowledge)\nsessions export --since 30d --to-r2 --byo",
+          "notes": "Selection uses the same flags as 'sessions' (--since, -n/--limit, --all,\n-a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one\nline per transcript file. Secrets are redacted by default. Dir-shaped sessions\n(Kimi) carry all their files. Restore with 'sessions import'.\n\n--to-r2 backs each session up off-box, one encrypted object per transcript keyed\nby machine/agent/session. When you are signed in ('agents auth login') it uploads\nto the MANAGED Phoenix store — no Cloudflare or r2.backups bucket to set up — and\nevery body is sealed with a per-account key (mandatory; never plaintext). --byo\nforces your own r2.backups bucket instead; with R2_SYNC_ENC_KEY, neither Phoenix\nnor the storage provider can decrypt it. Restore with 'sessions import --from-r2'.",
           "subcommands": []
         },
         {
@@ -17590,7 +17590,7 @@
               "negate": false
             }
           ],
-          "examples": "# Fork a session by (partial) id — launches a same-harness sibling seeded with a recap\nagents sessions fork 4f3a9c21\n\n# Name the fork's session label\nagents sessions fork 4f3a9c21 --name \"try redis instead\"\n\n# Place the sibling on a fleet worker instead of here\nagents sessions fork 4f3a9c21 --device auto\n\n# Open the sibling in a fresh terminal tab where you work\nagents sessions fork 4f3a9c21 --terminal",
+          "examples": "# Fork a session by (partial) id — launches a same-harness sibling seeded with a recap\nagents fork 4f3a9c21\n\n# Name the fork's session label\nagents fork 4f3a9c21 --name \"try redis instead\"\n\n# Place the sibling on a fleet worker instead of here\nagents fork 4f3a9c21 --device auto\n\n# Open the sibling in a fresh terminal tab where you work\nagents fork 4f3a9c21 --terminal",
           "notes": "- 'resume' continues the SAME conversation; 'fork' launches a NEW same-harness\n  session seeded with a recap of the source, so the two diverge.\n- Works cross-device and cross-harness: the source is resolved across the fleet\n  and the sibling gets a plain-text recap, so it never reaches the source transcript.\n- The recap carries the source id — the sibling can run '/continue <id>' for the\n  full history if it needs more than the recap.\n- Resolve the source the same way as resume: an exact or prefix id fragment.",
           "subcommands": []
         },
@@ -17673,8 +17673,8 @@
               "negate": false
             }
           ],
-          "examples": "# Preview what a bundle would restore\nagents sessions import week.bundle --dry-run\n\n# Restore it\nagents sessions import week.bundle\n\n# Pull straight off another machine (one command, over SSH)\nagents sessions import --from-host yosemite-s1 --since 7d\n\n# Or the equivalent raw pipe\nagents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -\n\n# Restore everything backed up to R2 (e.g. on a fresh box)\nagents sessions import --from-r2",
-          "notes": "Sessions land under the cross-machine mirror keyed by their origin machine, so\nthey show up in 'agents sessions' tagged with that machine and never overwrite\nyour own local sessions. Byte-exact duplicates are skipped. --from-host reuses\nthe same SSH transport as the cross-machine listing (no R2, no daemon).\n\n--from-r2 downloads every session backup from the off-box store and restores it\nthrough the same placement. When signed in it restores from the MANAGED Phoenix\nstore and decrypts with your per-account key (recovered automatically, even on a\nfresh box); --byo restores from your own r2.backups bucket with its shared\nR2_SYNC_ENC_KEY (or pass --decrypt <key>). It is the inverse of\n'sessions export --to-r2'.",
+          "examples": "# Preview what a bundle would restore\nsessions import week.bundle --dry-run\n\n# Restore it\nsessions import week.bundle\n\n# Pull straight off another machine (one command, over SSH)\nsessions import --from-host yosemite-s1 --since 7d\n\n# Or the equivalent raw pipe\nagents ssh boxB 'sessions export --since 7d --stdout' | sessions import -\n\n# Restore everything backed up to R2 (e.g. on a fresh box)\nsessions import --from-r2",
+          "notes": "Sessions land under the cross-machine mirror keyed by their origin machine, so\nthey show up in 'sessions' tagged with that machine and never overwrite\nyour own local sessions. Byte-exact duplicates are skipped. --from-host reuses\nthe same SSH transport as the cross-machine listing (no R2, no daemon).\n\n--from-r2 downloads every session backup from the off-box store and restores it\nthrough the same placement. When signed in it restores from the MANAGED Phoenix\nstore and decrypts with your per-account key (recovered automatically, even on a\nfresh box); --byo restores from your own r2.backups bucket with its shared\nR2_SYNC_ENC_KEY (or pass --decrypt <key>). It is the inverse of\n'sessions export --to-r2'.",
           "subcommands": []
         },
         {
@@ -17762,7 +17762,7 @@
               "negate": false
             }
           ],
-          "examples": "# Nudge a stalled agent by session id (resolves its tmux pane)\nagents sessions inject a1b2c3d4 \"continue\"\n\n# Target a tmux pane directly (what a watchdog already holds)\nagents sessions inject _ \"continue\" --pane %3 --socket /tmp/agents/tmux.sock\n\n# Nudge a live session on another box (resolved on the device)\nagents sessions inject 214edaae \"continue\" --device yosemite-s0\n\n# Address a known remote pane directly (skips lookup, sends over SSH)\nagents sessions inject _ \"continue\" --pane %122 --socket $SOCK --device yosemite-s0",
+          "examples": "# Nudge a stalled agent by session id (canonical: agents send --channel session)\nagents send --channel session --to a1b2c3d4 --text \"continue\"\n\n# Target a tmux pane directly (what a watchdog already holds)\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"continue\"\n\n# Nudge a live session on another box (resolved on the device)\nagents send --channel session --to 214edaae --text \"continue\" --device yosemite-s0\n\n# This legacy spelling takes the same id and text positionally\nagents sessions inject a1b2c3d4 \"continue\"",
           "notes": "- Ink-TUI Enter semantics: by default the text and Enter are two separate\n  writes, which is what Claude's Ink TUI needs. --combined fuses them.\n- A session is addressable by id when it resolves to a precise split —\n  tmux, iTerm, or a VSCodium/Cursor/VS Code integrated terminal\n  (resolveInjectTargetForSession). Use --pane for direct targeting.\n- The id may be the session id (short or full) OR the '<shortid>' suffix of\n  a tmux target (ag-<agent>-<shortid>) — the only selector a live tmux\n  session whose id column shows '-' exposes.\n- Built on the Terminal Engine (src/lib/terminal): with --pane, --device\n  runs the tmux send-keys spec over SSH; with a bare id, --device re-runs\n  the lookup on that box (its tmux panes live there, not here).",
           "subcommands": []
         },
@@ -17775,7 +17775,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -17903,8 +17903,8 @@
               "negate": false
             }
           ],
-          "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents sessions insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
-          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents insights` is the top-level alias of `agents sessions insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
+          "examples": "# Behavioural report — last 30 days, split by Claude account (default)\nagents insights\n\n# Which repo is eating the time\nagents insights --by project --since 90d\n\n# Counter mix board (harness/model/token/secrets recipes) — former agents trends\nagents insights mix\nagents insights mix --days 30\nagents insights mix harness-mix --json\nagents insights query --kind secret --days 7\n\n# One account only, all of its history\nagents insights --account \"Turing Labs\" --all\n\n# Machine-readable, for a dashboard or a slash command\nagents insights --agent claude --agent codex --json\n\n# Add a written read on what to change\nagents insights --narrative",
+          "notes": "Two paths under one verb:\n  bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n  `agents insights mix`      — cheap counters from sessions.db + usage.db\nLatency is `agents insights perf` (not mix). Quota is `agents view`. Spend is\n`agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\nis `agents insights resources`. Former top-level `agents trends` is `agents insights mix`.\nOne recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\nThe behavioural report parses in-scope transcripts once and caches facets; later runs\nre-read only files that changed. `--refresh` forces a full re-read.\n\n`agents sessions insights` is the legacy spelling of `agents insights`.\nRepeat `--agent` to compare several harnesses in one report.\n\nEverything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "mix",
@@ -17960,7 +17960,7 @@
                 }
               ],
               "examples": "# Auto recipe board (7d)\nagents insights mix\n\n# Last 30 days\nagents insights mix --days 30\n\n# One recipe as JSON\nagents insights mix harness-mix --json\n\n# List baked recipe ids\nagents insights mix --list\n\n# Raw usage events\nagents insights query --kind secret --days 7",
-              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\nEmpty recipes are skipped on the default mix board. Pass one recipe id\n(`agents insights mix harness-mix`) for just that section; `--list` names them.\nThis is the cheap counter path. Behavioural report (transcript content, account split)\nis bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\nSkill/slash-command popularity is `agents sessions stats`.",
+              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\nEmpty recipes are skipped on the default mix board. Pass one recipe id\n(`agents insights mix harness-mix`) for just that section; `--list` names them.\nThis is the cheap counter path. Behavioural report (transcript content, account split)\nis bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\nSkill/slash-command popularity is `agents insights resources`.",
               "subcommands": []
             },
             {
@@ -18287,7 +18287,7 @@
               "negate": false
             }
           ],
-          "examples": "# Preview by the 8-character ID shown in agents sessions\nagents sessions preview 407b8dd5\n\n# A full UUID resolves on the first device that owns it\nagents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n# Stay on this machine or restrict the authoritative lookup to one peer\nagents sessions preview 407b8dd5 --local\nagents sessions preview 407b8dd5 --device zion\n\n# Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch\nagents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh",
+          "examples": "# Preview by the 8-character ID shown in the sessions list\nsessions preview 407b8dd5\n\n# A full UUID resolves on the first device that owns it\nagents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n# Stay on this machine or restrict the authoritative lookup to one peer\nagents sessions preview 407b8dd5 --local\nagents sessions preview 407b8dd5 --device zion\n\n# Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch\nagents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh",
           "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n- Short IDs wait for every selected device so ambiguity is never hidden.\n- Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.\n- A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's \"cache\" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.",
           "subcommands": []
         },
@@ -18346,8 +18346,8 @@
               "negate": false
             }
           ],
-          "examples": "# Render one redacted session for a confidential gist\nagents sessions render a1b2c3d4 -o session.md\n\n# Combine several sessions into one Markdown document\nagents sessions render a1b2c3d4 d4c3b2a1 -o delivery-sessions.md\n\n# Keep reasoning locally in collapsible sections and opt out of redaction\nagents sessions render a1b2c3d4 --reasoning fold --no-redact",
-          "notes": "Markdown is redacted by default, including credential-shaped values and local home paths.\nThe preview at the top is the same preview shown by 'agents sessions'. Tool output is truncated\nwith an explicit note. Use --no-redact only for local output that will not be shared.",
+          "examples": "# Render one redacted session for a confidential gist\nsessions render a1b2c3d4 -o session.md\n\n# Combine several sessions into one Markdown document\nsessions render a1b2c3d4 d4c3b2a1 -o delivery-sessions.md\n\n# Keep reasoning locally in collapsible sections and opt out of redaction\nsessions render a1b2c3d4 --reasoning fold --no-redact",
+          "notes": "Markdown is redacted by default, including credential-shaped values and local home paths.\nThe preview at the top is the same preview shown by 'sessions preview'. Tool output is truncated\nwith an explicit note. Use --no-redact only for local output that will not be shared.",
           "subcommands": []
         },
         {
@@ -18585,8 +18585,8 @@
               "negate": false
             }
           ],
-          "examples": "# Strict resume by full id (former top-level agents resume)\nagents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897\nagents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 \"finish the tests\"\nagents sessions resume ag-codex-c1f3d813 --mode edit\n\n# Pick several sessions; each opens in its own tab\nagents sessions resume\n\n# Pre-filter the pool before selecting (space in the filter → use [query])\nagents sessions resume \"auth middleware\"\n\n# Reopen one session from any device by UUID prefix or tmux alias\nagents sessions resume 019fd114\nagents sessions resume ag-codex-c1f3d813\n\n# Attach a living pane only — never resume a copy (the old go)\nagents sessions resume 019fd114 --attach-only\n\n# Force a backend / side-by-side splits / a remote host\nagents sessions resume --ghostty\nagents sessions resume --vscodium\nagents sessions resume --splits\nagents sessions resume --device zion --tmux",
-          "notes": "- Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.\n- Attach a live pane without forking: agents sessions focus <id>.\n- This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n- A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n- Going the other way (foreground -> background) is 'agents sessions detach <id>'.\n- With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n- Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n- Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n- --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n- --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n- Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.\n- Local picks without transcripts are skipped before opening a tab. Remote picks are validated on their origin device.\n- agents run claude --resume opens this same picker; claude#work filters it with --account work.",
+          "examples": "# Continue one session by id (canonical: agents run --resume; auto infers the harness)\nagents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897\nagents run claude --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 \"finish the tests\"\n\n# Attach a living pane, or recover an ended one (canonical: agents ps focus)\nagents ps focus 019fd114\nagents ps focus 019fd114 --attach-only\n\n# Pick several sessions; each opens in its own tab\nagents sessions resume\n\n# Pre-filter the pool before selecting (space in the filter → use [query])\nagents sessions resume \"auth middleware\"\n\n# Strict resume by tmux alias, overriding the recorded mode\nagents sessions resume ag-codex-c1f3d813 --mode edit\n\n# Force a backend / side-by-side splits / a remote host\nagents sessions resume --ghostty\nagents sessions resume --vscodium\nagents sessions resume --splits\nagents sessions resume --device zion --tmux",
+          "notes": "- Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. `agents run <agent|auto> --resume <id>` is the canonical spelling.\n- Attach a live pane without forking: agents ps focus <id> --attach-only.\n- This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.\n- A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.\n- Going the other way (foreground -> background) is 'agents ps detach <id>'.\n- With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.\n- Layout: one tab per session by default. --splits packs session pairs side by side in each tab.\n- Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.\n- --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).\n- --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.\n- Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.\n- Local picks without transcripts are skipped before opening a tab. Remote picks are validated on their origin device.\n- agents run claude --resume opens this same picker; claude#work filters it with --account work.",
           "subcommands": []
         },
         {
@@ -18678,7 +18678,7 @@
               "negate": false
             }
           ],
-          "examples": "# Share a session — prints an unlisted, redacted link\nagents sessions share a1b2c3d4\n\n# Put it in your public gallery at share.getrush.ai/<you>\nagents sessions share a1b2c3d4 --public --label \"How the retry bug got fixed\"\n\n# Keep the model's reasoning in collapsible sections\nagents sessions share a1b2c3d4 --reasoning fold\n\n# A link that does not decay\nagents sessions share a1b2c3d4 --expire never",
+          "examples": "# Share a session — prints an unlisted, redacted link\nsessions share a1b2c3d4\n\n# Put it in your public gallery at share.getrush.ai/<you> (agents-only flags)\nagents sessions share a1b2c3d4 --public --label \"How the retry bug got fixed\"\n\n# Keep the model's reasoning in collapsible sections\nsessions share a1b2c3d4 --reasoning fold\n\n# A link that does not decay\nsessions share a1b2c3d4 --expire never",
           "notes": "Publishes through the standalone artifacts CLI — install it with\n'npm i -g @phnx-labs/artifacts-cli'. Sign in with\n'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure\nyour own bucket with 'artifacts share setup' / 'artifacts share join <baseUrl>'.\n\nUnlisted by default — the URL is world-readable but the page stays out of your public\ngallery and out of 'artifacts share list'. Pass --public to list it.\n\nSecrets are redacted and 'artifacts share' runs its own pre-publish scan on the page,\nso a transcript carrying emails or credential-shaped strings is refused unless you pass\n--force. --no-redact (the sessions-level flag) disables redaction and is a bad idea for\nanything you publish.\n\nRe-running with the same session updates the same URL and keeps the prior version\nas a revision ('artifacts share revisions <slug>').\n\nManage published sessions with 'artifacts share list' and 'artifacts share delete <slug>'.",
           "subcommands": []
         },
@@ -18792,8 +18792,8 @@
               "negate": false
             }
           ],
-          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents sessions stats\n\n# Just the dead weight — installed but never explicitly invoked\nagents sessions stats --zero\n\n# Skills only, last 30 days, machine-readable\nagents sessions stats --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents sessions stats --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents sessions backfill resources",
-          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` and `agents sessions stats` are the same report; --json keeps `kind: \"sessions-stats\"` under either spelling.",
+          "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\nagents sessions stats\n\n# Just the dead weight — installed but never explicitly invoked\nagents sessions stats --zero\n\n# Skills only, last 30 days, machine-readable\nagents sessions stats --kind skill --since 30d --json\n\n# One plugin's resources, least-used first\nagents sessions stats --plugin rush --bottom\n\n# Backfill historical sessions first if coverage is low\nagents daemon index backfill resources",
+          "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n- Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n- Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents daemon index backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n- --plugin filters the resource rows (this plugin's skills/commands), distinct from `sessions --plugin`, which filters SESSIONS.\n- The window is all time unless --since narrows it. `agents insights resources` is the canonical spelling of this report (`agents sessions stats` is the legacy one); --json keeps `kind: \"sessions-stats\"` under either spelling.",
           "subcommands": []
         },
         {
@@ -18831,7 +18831,7 @@
             }
           ],
           "examples": "# Stop a live session by a short id prefix\nagents sessions stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents sessions stop 4b2f1a9c --local",
-          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents sessions detach <id>`, and bring it back\nwith `agents sessions resume <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents sessions detach <id>`, and bring it back\nwith `agents ps focus <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
           "subcommands": []
         },
         {
@@ -18987,8 +18987,8 @@
               "negate": false
             }
           ],
-          "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# What the agent said it was doing, step by step — the sidebar's timeline as text\nagents sessions trace a1b2c3d4 --steps\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents sessions trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents sessions trace a1b2c3d4 e5f6a7b8 --text\n\n# The team an orchestrator spawned, as a graph (one selector + --tree)\nagents sessions trace a1b2c3d4 --tree\n\n# The same lineage as an indented tree an agent can read\nagents sessions trace a1b2c3d4 --tree --text",
-          "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff); one selector with --tree renders its lineage —\nthe session and every session it spawned, with the edges read from the teams records\n(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript\nand has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract\nconsumers read so nothing re-parses a transcript.\n\nLineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.\nThree or more selectors, and --tree with more than one selector, fail loud.",
+          "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context (standalone sessions CLI)\nsessions trace a1b2c3d4\n\n# Just the failures and their neighbours — for a triaging agent\nsessions trace a1b2c3d4 --errors-only\n\n# What the agent said it was doing, step by step — the sidebar's timeline as text\nagents trace a1b2c3d4 --steps\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents trace a1b2c3d4 e5f6a7b8 --text\n\n# The team an orchestrator spawned, as a graph (one selector + --tree)\nagents trace a1b2c3d4 --tree\n\n# The same lineage as an indented tree an agent can read\nagents trace a1b2c3d4 --tree --text",
+          "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as a 'sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff); one selector with --tree renders its lineage —\nthe session and every session it spawned, with the edges read from the teams records\n(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript\nand has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract\nconsumers read so nothing re-parses a transcript.\n\nLineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.\nThree or more selectors, and --tree with more than one selector, fail loud.",
           "subcommands": []
         },
         {
@@ -19301,7 +19301,7 @@
           "name": "browser",
           "path": "setup browser",
           "aliases": [],
-          "description": "Set up `agents browser` — install the Browser CLI, seed profiles, and pick this machine's default.",
+          "description": "Set up the standalone `browser` CLI — install it, seed profiles, and pick this machine's default.",
           "args": [],
           "options": [
             {
@@ -20363,7 +20363,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -20696,7 +20696,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -20793,7 +20793,7 @@
         }
       ],
       "examples": "# Create a team for a coordinated task\nagents teams create pricing-page\n\n# Add a teammate — name them so you can refer to them later\nagents teams add pricing-page claude \"Rewrite /v2/pricing endpoint\" --name backend\n\n# Parallel work — frontend stubs API while backend lands\nagents teams add pricing-page codex \"Build /pricing route with three-tier layout\" --name frontend\n\n# DAG dependency — QA waits for backend AND frontend to finish\nagents teams add pricing-page claude \"Run Playwright suite, fix flakes\" --name qa --after backend,frontend\n\n# Start everyone (respects --after dependencies) and watch live\nagents teams start pricing-page --watch\n\n# Delta-poll status without rereading everything\nagents teams status pricing-page --since 2026-04-24T09:00:00-07:00\n\n# Nudge a teammate that stopped with more to do — resumes its own session\nagents teams resume pricing-page backend \"Review's in — rebase-merge the PR, then release\"\n\n# Steer a still-running teammate mid-flight (delivered at its next tool call)\nagents teams message pricing-page qa \"Skip the flaky screenshot test for now\"\n\n# Wind everyone down when shipped\nagents teams disband pricing-page",
-      "notes": "A team is a named group of agents working in the background on a shared task.\nTeammate sessions show in 'agents sessions --teams' tagged [team/name · mode].\n\nTeammate syntax:\n  'claude'           the default Claude version on this machine\n  'claude@2.1.112'   a specific installed version (see 'agents view')\n  '<profile>'        a profile from 'agents view' — runs through 'agents\n                     run <profile>' with the profile's host harness\n\nPlacement & repos (the part people get wrong):\n  --remote-cwd does NOT place a teammate or set its repo — it is ignored on\n  'teams add' (and rejected, so you find out immediately). A teammate's\n  directory is the team's repo plus its --worktree:\n    --device <host>     run THIS teammate on <host>\n    create --repo <r>   ONE repo for the whole team (defaults to this\n                        checkout's origin). Work spanning repos → one team\n                        per repo — don't build a cross-repo team then rebuild.\n  With --enable-worktrees each teammate gets its own worktree + branch:\n    local teammate      forks from your CURRENT local HEAD — no fetch, so\n                        pull/sync the checkout first or it forks stale\n    remote (--device)   forks from the freshly-fetched origin/<default> on\n                        the host (no manual sync needed)\n\nShort aliases:\n  teams c  = create    teams a  = add       teams s  = status\n  teams rm = remove    teams d  = disband   teams ls = list",
+      "notes": "A team is a named group of agents working in the background on a shared task.\nTeammate sessions show in 'sessions --teams' tagged [team/name · mode].\n\nTeammate syntax:\n  'claude'           the default Claude version on this machine\n  'claude@2.1.112'   a specific installed version (see 'agents view')\n  '<profile>'        a profile from 'agents view' — runs through 'agents\n                     run <profile>' with the profile's host harness\n\nPlacement & repos (the part people get wrong):\n  --remote-cwd does NOT place a teammate or set its repo — it is ignored on\n  'teams add' (and rejected, so you find out immediately). A teammate's\n  directory is the team's repo plus its --worktree:\n    --device <host>     run THIS teammate on <host>\n    create --repo <r>   ONE repo for the whole team (defaults to this\n                        checkout's origin). Work spanning repos → one team\n                        per repo — don't build a cross-repo team then rebuild.\n  With --enable-worktrees each teammate gets its own worktree + branch:\n    local teammate      forks from your CURRENT local HEAD — no fetch, so\n                        pull/sync the checkout first or it forks stale\n    remote (--device)   forks from the freshly-fetched origin/<default> on\n                        the host (no manual sync needed)\n\nShort aliases:\n  teams c  = create    teams a  = add       teams s  = status\n  teams rm = remove    teams d  = disband   teams ls = list",
       "subcommands": [
         {
           "name": "active",
@@ -20854,7 +20854,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21062,7 +21062,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21270,7 +21270,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21470,7 +21470,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21552,7 +21552,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21729,7 +21729,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21811,7 +21811,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -21926,7 +21926,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -22054,7 +22054,7 @@
           "options": [
             {
               "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
               "short": "-D",
               "long": "--device",
               "required": true,
@@ -22855,8 +22855,8 @@
           "negate": false
         }
       ],
-      "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# What the agent said it was doing, step by step — the sidebar's timeline as text\nagents sessions trace a1b2c3d4 --steps\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents sessions trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents sessions trace a1b2c3d4 e5f6a7b8 --text\n\n# The team an orchestrator spawned, as a graph (one selector + --tree)\nagents sessions trace a1b2c3d4 --tree\n\n# The same lineage as an indented tree an agent can read\nagents sessions trace a1b2c3d4 --tree --text",
-      "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff); one selector with --tree renders its lineage —\nthe session and every session it spawned, with the edges read from the teams records\n(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript\nand has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract\nconsumers read so nothing re-parses a transcript.\n\nLineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.\nThree or more selectors, and --tree with more than one selector, fail loud.",
+      "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context (standalone sessions CLI)\nsessions trace a1b2c3d4\n\n# Just the failures and their neighbours — for a triaging agent\nsessions trace a1b2c3d4 --errors-only\n\n# What the agent said it was doing, step by step — the sidebar's timeline as text\nagents trace a1b2c3d4 --steps\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents trace a1b2c3d4 e5f6a7b8 --text\n\n# The team an orchestrator spawned, as a graph (one selector + --tree)\nagents trace a1b2c3d4 --tree\n\n# The same lineage as an indented tree an agent can read\nagents trace a1b2c3d4 --tree --text",
+      "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as a 'sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff); one selector with --tree renders its lineage —\nthe session and every session it spawned, with the edges read from the teams records\n(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript\nand has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract\nconsumers read so nothing re-parses a transcript.\n\nLineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.\nThree or more selectors, and --tree with more than one selector, fail loud.",
       "subcommands": []
     },
     {
@@ -23426,7 +23426,7 @@
       "options": [
         {
           "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,
@@ -23991,7 +23991,7 @@
           "options": [
             {
               "flags": "--secrets-bundle <name>",
-              "description": "agents secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET",
+              "description": "secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET",
               "long": "--secrets-bundle",
               "required": true,
               "optional": false,

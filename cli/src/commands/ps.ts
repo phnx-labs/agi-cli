@@ -57,7 +57,7 @@ export function registerPsCommand(program: Command): void {
     .option('--local', 'Only this machine; skip the fleet fan-out')
     .option('-D, --device <target...>', 'Only these devices (alias from `agents devices`, user@host, or `all`; repeatable)')
     .option('--status <state...>', `Only these live states: ${PS_STATUSES.join(', ')} (repeatable or comma-separated)`)
-    .option('--bookmarks', 'Only bookmarked sessions (bookmark one with `agents sessions bookmark <id>`)')
+    .option('--bookmarks', 'Only bookmarked sessions (bookmark one with `sessions bookmark <id>`)')
     .option('--routines, --routine [name]', 'Only routine-run sessions; pass a name to narrow to one routine (fuzzy name matching)')
     .option('--no-interactive', 'Print the roster instead of opening the picker on a TTY');
 
@@ -92,7 +92,7 @@ export function registerPsCommand(program: Command): void {
       - On a TTY with no --status, ps opens the session picker filtered to running
         sessions: r toggles that filter, f focuses, enter resumes, y copies the command.
       - Type into a running agent with: agents send --channel session --to <id> --text "continue"
-      - Resume an ended session with: agents run --resume <id>
+      - Resume an ended session with: agents run auto --resume <id>
       - A session on another device is stopped, detached, or focused there over SSH.
       - Put -D and --status after the verb or after the roster flags, never before a
         verb: they take several values, so 'ps -D box stop <id>' reads 'stop' as a device.

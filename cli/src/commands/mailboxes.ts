@@ -464,7 +464,7 @@ export function registerMailboxesCommand(program: Command): void {
     `,
     notes: `
       A box is considered dead when no live session (the same source
-      \`agents sessions --active\` uses) owns it. Pending messages in dead boxes
+      \`agents ps\` uses) owns it. Pending messages in dead boxes
       are archived as \`dropped: dead\`; expired messages in live boxes are
       archived as \`dropped: expired\'. Both surfaces a failure receipt back to
       the feed store when the message carried a blockId.

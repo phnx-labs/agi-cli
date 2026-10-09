@@ -611,7 +611,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--secrets <bundle>',
-      'Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `agents secrets`.',
+      'Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `secrets --help`.',
       (val: string, prev: string[]) => [...prev, val],
       []
     )
@@ -651,12 +651,12 @@ export function registerRunCommand(program: Command): void {
     .option('--since <time>', 'With a bare --resume: only sessions newer than this (default 30d; e.g. 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'With a bare --resume: maximum sessions loaded into the picker (default 200)')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `sessions` and resolves by it instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option('--no-trace-sync', 'Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).')
     .option(
       '--terminal [backend]',
-      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
+      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents ps` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
     )
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Keep this interactive run direct when the device has opted into tmux wrapping. A no-op under the default tmux-off configuration; equivalent to AGENTS_NO_TMUX=1.')
@@ -722,7 +722,7 @@ export function registerRunCommand(program: Command): void {
       'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or "interactive" for the machine pinned as interactive.host (the box a human is sitting at). Naming this machine runs locally, no SSH. Same as --where device:<name>. See `agents devices`.',
     )
     .option('--remote-cwd <dir>', "Explicit device working directory for --device runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
-    .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents devices ps` and `agents logs <id>`).')
     .option('--any', 'With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.')
     .option(
       '--copy-creds',
@@ -900,15 +900,15 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
       Cloud placement: --cloud sends the run to the agent's native vendor cloud
-        (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the
+        (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) — the
         same dispatch as agents cloud run --agent <agent>, tracked by agents
         cloud list/status/logs/cancel/message. --provider overrides the routing;
         --repo/--branch/--cloud-env refine the task. Agents without a native
-        cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is
+        cloud (kimi, grok, opencode, …) fail loud unless --provider is
         given. --cloud is mutually exclusive with --device/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. With auto as the agent (agents run auto --resume <id>) the harness is inferred from the session; a named agent must match it. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value

@@ -124,17 +124,17 @@ export function registerSessionsInjectCommand(sessionsCmd: Command): void {
 
   setHelpSections(injectCmd, {
     examples: `
-      # Nudge a stalled agent by session id (resolves its tmux pane)
-      agents sessions inject a1b2c3d4 "continue"
+      # Nudge a stalled agent by session id (canonical: agents send --channel session)
+      agents send --channel session --to a1b2c3d4 --text "continue"
 
       # Target a tmux pane directly (what a watchdog already holds)
-      agents sessions inject _ "continue" --pane %3 --socket /tmp/agents/tmux.sock
+      agents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text "continue"
 
       # Nudge a live session on another box (resolved on the device)
-      agents sessions inject 214edaae "continue" --device yosemite-s0
+      agents send --channel session --to 214edaae --text "continue" --device yosemite-s0
 
-      # Address a known remote pane directly (skips lookup, sends over SSH)
-      agents sessions inject _ "continue" --pane %122 --socket $SOCK --device yosemite-s0
+      # This legacy spelling takes the same id and text positionally
+      agents sessions inject a1b2c3d4 "continue"
     `,
     notes: `
       - Ink-TUI Enter semantics: by default the text and Enter are two separate

@@ -48,7 +48,7 @@ export function registerWebhooksCommand(program: Command): void {
   webhooks
     .command('serve')
     .description('Receive signed GitHub/Linear/Slack webhooks on /hooks/<source> and fire matching routines and handlers.')
-    .requiredOption('--secrets-bundle <name>', 'agents secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET')
+    .requiredOption('--secrets-bundle <name>', 'secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET')
     .option('--bind <addr>', `Bind address (default ${DEFAULT_HOST})`, DEFAULT_HOST)
     .option('-p, --port <n>', `Local port (default ${DEFAULT_PORT})`, String(DEFAULT_PORT))
     .option('--rate-limit <n>', 'Accepted deliveries per source per minute', '60')

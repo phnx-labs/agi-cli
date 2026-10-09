@@ -11,7 +11,7 @@ export function registerOpenCommand(program: Command): void {
   const callback = program
     .command('_callback [url]', { hidden: true })
     .alias('open')
-    .description('OS callback that resumes a session from an agents:// deep link (machine-only; humans use `agents sessions resume`).')
+    .description('OS callback that resumes a session from an agents:// deep link (machine-only; humans use `agents run auto --resume <id>`).')
     .action(async (url: string | undefined) => {
       if (!url) {
         callback.help();

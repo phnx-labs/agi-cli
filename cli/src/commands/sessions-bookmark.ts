@@ -37,19 +37,19 @@ export function registerSessionsBookmarkCommand(sessionsCmd: Command): void {
   setHelpSections(cmd, {
     examples: `
       # Bookmark a session by its short id (the 8 chars the listing prints)
-      agents sessions bookmark 26c27162
+      sessions bookmark 26c27162
 
       # See what is bookmarked
-      agents sessions bookmark --list
+      sessions bookmark --list
 
       # Browse only the bookmarked ones
-      agents sessions --bookmarks
+      sessions --bookmarks
 
       # Remove it from bookmarks again
-      agents sessions bookmark 26c27162 --remove
+      sessions bookmark 26c27162 --remove
     `,
     notes: `
-      In the interactive browser (\`agents sessions\`), \`*\` bookmarks the highlighted
+      In the interactive browser (\`sessions\`), \`*\` bookmarks the highlighted
       session and \`b\` filters the list down to the bookmarked ones.
 
       Bookmarks live in ~/.agents/.history/bookmarks.json, keyed by session id, so

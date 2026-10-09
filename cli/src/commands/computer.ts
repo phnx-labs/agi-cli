@@ -123,7 +123,7 @@ export function registerComputerCommand(program: Command): void {
   setHelpSections(computer, {
     examples: `
       # One-time: install the engine, the helper, and the TCC grants
-      npm i -g @phnx-labs/computer-cli
+      agents clis install computer
       agents setup computer
 
       # Allow an app, then reload so the daemon picks it up
@@ -138,7 +138,7 @@ export function registerComputerCommand(program: Command): void {
       # A remote Windows device over the fleet
       agents computer setup --device win-mini
       agents computer start --device win-mini
-      agents computer screenshot --device win-mini -o /tmp/win.png
+      agents computer screenshot --device win-mini --out /tmp/win.png
       agents computer stop  --device win-mini
     `,
     notes: `
@@ -151,8 +151,8 @@ export function registerComputerCommand(program: Command): void {
       Computer(<bundle-id>) rule in ~/.agents/permissions/groups/. Edit a group,
       then \`agents computer reload\`.
 
-      \`agents computer sessions\` is the engine's own run history
-      (\`computer sessions --help\`); the feed stream reads the same rows.
+      Run history is the engine's own: \`computer sessions\` (\`agents computer
+      sessions\` forwards to it); the feed stream reads the same rows.
     `,
   });
 }

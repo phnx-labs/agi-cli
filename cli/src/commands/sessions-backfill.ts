@@ -359,7 +359,7 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
       ${invocation} resources --json
     `,
     notes: `
-      - Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by \`agents sessions stats\`.
+      - Populates session_resource_usage for sessions indexed before the usage signal shipped. New/changed sessions are recorded on their normal scan; this is the one-shot catch-up read by \`agents insights resources\`.
       - Local-only: the signal is derived per machine from its own transcripts. Run it on each box (or over \`agents ssh <host> ${invocation} resources\`).
       - Reruns skip transcripts already current (resource_scan_ledger); bump the extractor version to force a full re-derive.
       - Only slash commands and \`Skill\` tool calls are recorded — auto-triggered skills emit no signal.

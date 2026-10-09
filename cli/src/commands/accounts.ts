@@ -355,7 +355,7 @@ agents accounts list --fleet`,
     .option('--provider <provider>', `Provider form: credential provider (${listAccountProviders().join(', ')})`)
     .option('--auth <type>', 'Provider form: api-key | setup-token | bearer-token')
     .option('--base-url <url>', 'Provider form: optional endpoint override stored with the account')
-    .option('--from-secrets <bundle:key>', 'Provider form: import from an existing agents secrets entry')
+    .option('--from-secrets <bundle:key>', 'Provider form: import from an existing `secrets` bundle entry')
     .option('--json', 'Machine-readable result (never includes a credential)')
     .action(async (target: string, name: string | undefined, o: {
       apiKey?: string; perDevice?: boolean; workerToken?: boolean;
@@ -530,7 +530,7 @@ agents accounts migrate --dry-run --device worker-1`,
 
   accounts.command('set-key <name>')
     .description('Rotate an account credential without changing its identity')
-    .option('--from-secrets <bundle:key>', 'Import from an existing agents secrets entry')
+    .option('--from-secrets <bundle:key>', 'Import from an existing `secrets` bundle entry')
     .action(async (name: string, o: { fromSecrets?: string }, command: Command) => {
       await runAccountsAction(command, async () => {
         const account = findAccount(name);
