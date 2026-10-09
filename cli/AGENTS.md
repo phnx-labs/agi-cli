@@ -1548,18 +1548,18 @@ device to wrap eligible local launches in the shared-socket tmux session and giv
 each agent an exact `%pane` address for `agents message`, injection, and
 `agents ps focus`. The setting is machine-local and cannot be set for a peer.
 
-**It does not govern a run dispatched here over `--device` (RUSH-3125).** That
-run's stdio is an ssh link, so without the wrap a blink SIGHUPs the agent and the
-in-flight turn is lost — and `lib/hosts/reconnect.ts` re-attaches on the premise
-that it survived. Durability is not the local operator's mouse/clipboard/
-scrollback preference, so the two are separate concerns: the interactive
-dispatcher exports `AGENTS_REMOTE_INTERACTIVE=1` (`REMOTE_INTERACTIVE_ENV`,
-[`src/lib/types.ts`](src/lib/types.ts)) and the peer wraps on it regardless of
-`tmux.enabled`. A remote interactive run on a box with **no tmux installed** is
-refused (`undurable`) rather than started as something a blink would kill.
+**It also governs a followed run dispatched here over `--device` (PHNX-3316).**
+The interactive dispatcher exports `AGENTS_REMOTE_INTERACTIVE=1`
+(`REMOTE_INTERACTIVE_ENV`, [`src/lib/types.ts`](src/lib/types.ts)), but with
+`tmux.enabled` off a followed run with a TTY spawns bare: a dropped link loses the
+in-flight turn and `lib/hosts/reconnect.ts` resumes the harness session from disk
+rather than reattaching a pane. The wrap is forced only when the dispatched run has
+no TTY, since the detached pane is then its only interface. A remote run that wants
+the wrap on a box with **no tmux installed** is refused (`undurable`) rather than
+started as something a blink would kill.
 
 `--no-tmux`, `--raw`, and `AGENTS_NO_TMUX=1` remain per-run opt-outs and beat the
-durability rule too, so the escape hatch keeps working over `--device`. The gate
+forced wrap too, so the escape hatch keeps working over `--device`. The gate
 is `resolveTmuxWrap` ([`src/lib/exec.ts`](src/lib/exec.ts)) — three outcomes
 (`wrap` / `bare` / `undurable`), reading `isTmuxEnabled()` and the marker.
 
