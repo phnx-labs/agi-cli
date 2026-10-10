@@ -36,7 +36,8 @@ npm 11.5.1 or newer, and carries no npm token. Stable versions publish on `lates
 versions publish on `next`, leaving CLI auto-update on the stable channel. The npm
 package's Trusted Publisher record must name canonical repository `phnx-labs/agi-cli` and
 workflow `release.yml`, scoped to environment `npm-publish`. That GitHub environment limits
-deployment branches to `release/**` and requires its owner reviewer.
+deployment branches to `release/**` and has no required reviewer, so publishing needs no
+manual approval (owner decision 2026-10-10).
 
 The job verifies that remote `release/<version>` still names the event commit before
 tag/release creation and immediately before npm publication. A later push of the same
