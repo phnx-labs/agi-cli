@@ -314,8 +314,9 @@ function kickstartDetached(target: string): Promise<{ code: number | null; stder
     const child = spawn('launchctl', ['kickstart', '-k', target], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-    child.on('error', (error) => resolve({ code: null, stderr: error.message }));
-    child.on('close', (code) => resolve({ code, stderr: stderr.trim() }));
+    const timer = setTimeout(() => { stderr = `${stderr}timed out after 10 s`; child.kill('SIGKILL'); }, 10_000);
+    child.on('error', (error) => { clearTimeout(timer); resolve({ code: null, stderr: error.message }); });
+    child.on('close', (code) => { clearTimeout(timer); resolve({ code, stderr: stderr.trim() }); });
   });
 }
 

@@ -946,6 +946,13 @@ describe('restartMenubarHelper', () => {
     expect(r.detail).toMatch(/kickstart -k .* failed: Could not find service/);
   });
 
+  it('fails when two new processes come up instead of one', async () => {
+    sandbox({ serviceInstalled: true });
+    const { deps: d } = deps([[101], [202, 203]]);
+    const r = await restartMenubarHelper(d);
+    expect(r).toMatchObject({ outcome: 'failed', previousPids: [101], pids: [202, 203] });
+  });
+
   it('fails when the old process never goes away', async () => {
     sandbox({ serviceInstalled: true });
     const { deps: d } = deps([[101]]);
