@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 61,
-  "commands": 485,
+  "commands": 486,
   "root": {
     "name": "agents",
     "path": "",
@@ -9091,6 +9091,37 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "restart",
+          "path": "menubar restart",
+          "aliases": [],
+          "description": "Restart the running AGI Menu through its login item",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable restart result",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents menubar restart\nagents menubar restart --json",
+          "notes": "Restarts AGI Menu with launchctl kickstart -k and waits up to 15 seconds\nfor exactly one new process. The kickstart runs in its own session, so\nthe restart completes even when AGI Menu itself requested it. A turned-off\nAGI Menu is refused rather than started; `agents menubar setup` turns it on.",
           "subcommands": []
         },
         {

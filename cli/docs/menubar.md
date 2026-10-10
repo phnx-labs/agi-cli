@@ -238,6 +238,18 @@ SQLite contention is limited to 250 milliseconds per cache operation. A cache
 write failure preserves the returned content and reports that offline storage
 failed. Cached results omit live activity, which remains owned by the feed.
 
+## Restart
+
+`agents menubar restart [--json]` restarts the running app through its login item
+(`launchctl kickstart -k`) and waits up to 15 seconds for exactly one new process.
+The kickstart runs in its own session, because launchd ends the menu's whole process
+group: the restart completes even when the menu requested it and is killed before
+the command prints. JSON is `{outcome, previousPids, pids, detail}` with `outcome`
+`restarted` or `failed`; every failure (turned off, kickstart error, no new process)
+exits 1 with its reason. It never starts a turned-off menu: `agents menubar setup`
+does that. AGI Menu's Restart controls call this command and stay disabled, naming
+the CLI version they need, when the installed CLI predates it.
+
 ## App updates
 
 `agents menubar update --check --json` checks the published AGI Menu release without

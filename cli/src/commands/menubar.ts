@@ -7,6 +7,7 @@ import {
   enableMenubarService,
   disableMenubarService,
   getMenubarStatus,
+  restartMenubarHelper,
   runMenubarSetup,
   buildMenubarDoctorReport,
   type MenubarStatus,
@@ -28,7 +29,7 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
   console.log(`  running            ${yn(s.running)}`);
   console.log(`  service installed  ${yn(s.serviceInstalled)}`);
   if (opts.brief) {
-    console.log(chalk.gray('\n  setup | enable | disable | status'));
+    console.log(chalk.gray('\n  setup | restart | enable | disable | status'));
     return;
   }
   console.log(`  app installed      ${s.installedApp ? chalk.gray(s.installedApp) : chalk.gray('no')}`);
@@ -133,6 +134,29 @@ export function registerMenubarCommands(program: Command): void {
       Manual updates work with automatic updates off. JSON reports lookup and
       installation errors; a successful install hands off a bounded app restart
       after this command exits. Check-only never installs or restarts the app.
+    `,
+  });
+
+  const restart = menubar.command('restart')
+    .description('Restart the running AGI Menu through its login item')
+    .option('--json', 'Emit machine-readable restart result')
+    .action(async (options: { json?: boolean }) => {
+      const result = await restartMenubarHelper();
+      if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
+      else console.log(result.outcome === 'failed' ? chalk.red(result.detail) : chalk.green(result.detail));
+      if (result.outcome === 'failed') process.exitCode = 1;
+    });
+
+  setHelpSections(restart, {
+    examples: `
+      agents menubar restart
+      agents menubar restart --json
+    `,
+    notes: `
+      Restarts AGI Menu with launchctl kickstart -k and waits up to 15 seconds
+      for exactly one new process. The kickstart runs in its own session, so
+      the restart completes even when AGI Menu itself requested it. A turned-off
+      AGI Menu is refused rather than started; \`agents menubar setup\` turns it on.
     `,
   });
 
