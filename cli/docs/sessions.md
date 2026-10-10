@@ -45,7 +45,7 @@ group itself leaves agents-cli in a later release.
 |---|---|
 | `--json` | One row per live session (the `sessions --active --json` shape) |
 | `--local` | This machine only; no SSH fan-out |
-| `-D, --device <name...>` | Only these devices. Peers answer `agents sessions --active --json`, so a peer on an older release still works |
+| `-D, --device <name...>` | Only these devices. Peers answer `agents ps --local --json`, so each peer needs agents 1.22.121 or newer |
 | `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
 | `--bookmarks` | Only bookmarked sessions (`sessions --active --bookmarks`) |
 | `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag (`sessions --active --routine`) |

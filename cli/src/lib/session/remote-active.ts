@@ -42,7 +42,7 @@ export async function gatherRemoteActive(
   },
 ): Promise<RemoteActiveResult> {
   const result = await gatherRemoteAgentsJson({
-    args: ['sessions', '--active', '--json'],
+    args: ['ps', '--local', '--json'],
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
     parse: parseRemoteActive,

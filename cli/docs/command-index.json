@@ -3066,7 +3066,7 @@
                     }
                   ],
                   "examples": "# Backfill this machine once; reruns resume and skip completed transcripts\nagents daemon index backfill tools\n\n# Backfill every online compute device, keeping each index local\nagents daemon index backfill tools --fleet --json\n\n# Narrow the historical work\nagents daemon index backfill tools --agent codex --since 7d",
-                  "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents sessions backfill tools --local`, which every released CLI understands.",
+                  "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents daemon index backfill tools --local`, so each peer needs agents 1.22.123 or newer.",
                   "subcommands": []
                 }
               ]
@@ -17326,7 +17326,7 @@
                 }
               ],
               "examples": "# Backfill this machine once; reruns resume and skip completed transcripts\nagents sessions backfill tools\n\n# Backfill every online compute device, keeping each index local\nagents sessions backfill tools --fleet --json\n\n# Narrow the historical work\nagents sessions backfill tools --agent codex --since 7d",
-              "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents sessions backfill tools --local`, which every released CLI understands.",
+              "notes": "- This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.\n- New and changed sessions are indexed during their normal incremental scan.\n- No embeddings, vector database, network model, or semantic processing is used.\n- Peers are driven with `agents daemon index backfill tools --local`, so each peer needs agents 1.22.123 or newer.",
               "subcommands": []
             }
           ]
