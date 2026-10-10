@@ -237,15 +237,11 @@ describe('isActiveSessionsJournalReaderRecent', () => {
 
 describe('runUsageRefreshTick — every host is its own publisher (RUSH-3193 #15)', () => {
   it('runs the local refresh unconditionally, with no primary/subscriber envelope in its report', async () => {
-    const logs: string[] = [];
-    const originalLog = console.log;
-    console.log = (msg: string) => { logs.push(String(msg)); };
-    try {
-      await runUsageRefreshTick();
-    } finally {
-      console.log = originalLog;
-    }
-    const line = logs.find((l) => l.startsWith('usage refresh:'));
+    const logs: Array<{ message: string; fields?: Record<string, unknown> }> = [];
+    await runUsageRefreshTick(undefined, (_level, message, fields) => { logs.push({ message, fields }); });
+    const entry = logs.find((l) => l.message.startsWith('usage refresh:'));
+    expect(entry?.fields).toMatchObject({ event: 'usage.refresh', refreshed: expect.any(Number), failed: expect.any(Number) });
+    const line = entry?.message;
     expect(line).toBeDefined();
     expect(line).not.toMatch(/imported \d+ account\(s\) from primary host/);
     expect(line).not.toMatch(/published \d+ account\(s\)/);

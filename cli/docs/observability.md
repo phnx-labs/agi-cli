@@ -19,6 +19,18 @@ block clears, preventing stale session reads from resurrecting answered asks. Th
 publishes one versioned stream; thin clients replace state on reset and apply monotonic
 increments.
 
+## Daemon log
+
+The daemon writes one JSON line per event to its log (`agents daemon status`
+prints the path) and `agents daemon logs` reads it, filtered with `--level
+debug|info|warn|error` and `--since`. At the default `info` level the daemon
+records a `vitals` line every minute (event-loop delay, CPU, memory, load, the
+busiest sections), slow ticks and slow synchronous sections as warnings, and every
+restart as an error carrying a snapshot of what was running. `agents daemon logs
+level debug` adds a line for every service tick and every instrumented section
+until it is set back to `info`; it applies without a restart. The event names and
+fields are in [`src/lib/daemon/AGENTS.md`](../src/lib/daemon/AGENTS.md#diagnosing-the-daemon-levels-ticks-spans-vitals).
+
 ## Feed broadcast routing
 
 `agents feed post` records the complete event first, then mirrors it through the

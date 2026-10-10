@@ -27,7 +27,7 @@ export class SessionStateService extends BasePeriodicService {
     this.stopReaderWatch = null;
   }
 
-  protected async onTick(_ctx: DaemonContext): Promise<void> {
-    await runActiveSessionsWarmTick();
+  protected async onTick(ctx: DaemonContext): Promise<void> {
+    await runActiveSessionsWarmTick({ log: ctx.log });
   }
 }

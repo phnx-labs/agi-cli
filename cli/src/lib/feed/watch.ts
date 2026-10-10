@@ -1,4 +1,5 @@
 import { SessionProjection } from '../session/projection.js';
+import { span, spanSync } from '../daemon/diagnostics.js';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -224,7 +225,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   const activityTimer = setInterval(() => {
     pending = pending.then(async () => {
       const nowMs = Date.now();
-      const events = activity.read(activityCursor + 1, nowMs).reverse();
+      const events = spanSync('feed.activity.read', () => activity.read(activityCursor + 1, nowMs).reverse());
       for (const event of events) {
         activityCursor = Math.max(activityCursor, Date.parse(event.ts));
         options.emit(state.emit({ type: 'activity.append', scope: options.scope, event }));
@@ -232,7 +233,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
       if (!attentionDirty && nowMs - lastReconcileMs < reconcileMs) return;
       attentionDirty = false;
       lastReconcileMs = nowMs;
-      await reconcileRows();
+      await span('feed.attention.reconcile', reconcileRows, () => ({ rows: agents.size }));
     });
   }, options.activityPollMs ?? 500);
   const toolWatch = watchToolActivity({
@@ -263,7 +264,7 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
         for (const row of event.rows) agents.set(row.rowKey, row);
       } else if (event.type === 'upsert') agents.set(event.rowKey, event.row);
       else if (event.type === 'remove') { agents.delete(event.rowKey); attention.delete(event.rowKey); prStatus.delete(event.rowKey); }
-      pending = pending.then(() => projectSessionEnvelope(event, state, options.gh, toolRows, setupRows)).then((events) => {
+      pending = pending.then(() => span('feed.sessions.project', () => projectSessionEnvelope(event, state, options.gh, toolRows, setupRows), () => ({ type: event.type }))).then((events) => {
         for (const projected of events) {
           if (projected.type === 'reset') {
             attention.clear();
@@ -327,7 +328,9 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
   const coordinator = new FeedWatchState();
   const projection = new FeedSessionProjection(coordinator);
   const forward = (event: FeedWatchEnvelope) => {
-    for (const projected of projection.apply(event)) options.emit(projected);
+    spanSync('feed.fleet.apply', () => {
+      for (const projected of projection.apply(event)) options.emit(projected);
+    }, () => ({ type: event.type, scope: 'scope' in event ? event.scope : undefined }));
   };
   const local = subscribeSharedLocalFeed({ signal: options.signal, emit: forward });
   let devices: Awaited<ReturnType<typeof loadDevices>>;

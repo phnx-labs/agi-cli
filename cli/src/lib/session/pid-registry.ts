@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { spanSync } from '../daemon/diagnostics.js';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { hostProcessView, writerProcessView } from './process-view.js';
@@ -45,9 +46,11 @@ function pidExists(pid: number): boolean | undefined {
 }
 
 function darwinStartTime(pid: number): string | undefined {
-  try {
-    return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
-  } catch { return undefined; }
+  return spanSync('proc.ps-start-time', () => {
+    try {
+      return execFileSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
+    } catch { return undefined; }
+  });
 }
 
 function processStartTimeMs(value: string | undefined): number {

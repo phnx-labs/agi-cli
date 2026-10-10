@@ -3,12 +3,15 @@ import { recordSubsystemOk, recordSubsystemError, recordSubsystemState, recordDa
 import type { DaemonServiceId } from '../daemon-services.js';
 import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, ServiceState } from './service.js';
 import { isPeriodicService } from './service.js';
+import { syncSpansBetween, type LogFields } from './diagnostics.js';
+import { performance } from 'perf_hooks';
 
 const DEADLINE_EXIT_CODE = 70;
 
 interface ServiceSupervisorOptions {
   lifecycleDeadlineMs?: number;
   exit?: (code: number) => never;
+  diagnostics?: () => LogFields;
 }
 
 interface RegisteredService {
@@ -25,6 +28,7 @@ interface RegisteredService {
   timer?: ReturnType<typeof setInterval>;
   startupTimer?: ReturnType<typeof setTimeout>;
   deadlineTimer?: ReturnType<typeof setTimeout>;
+  tickStartedAt?: number;
 }
 
 interface RegisterServiceOptions {
@@ -38,10 +42,20 @@ export class ServiceSupervisor {
   private ctx: DaemonContext | null = null;
   private readonly lifecycleDeadlineMs: number;
   private readonly exit: (code: number) => never;
+  private readonly diagnostics?: () => LogFields;
 
   constructor(opts: ServiceSupervisorOptions = {}) {
     this.lifecycleDeadlineMs = opts.lifecycleDeadlineMs ?? DEFAULT_LIFECYCLE_DEADLINE_MS;
     this.exit = opts.exit ?? ((code: number) => process.exit(code));
+    this.diagnostics = opts.diagnostics;
+  }
+
+  inFlightTicks(now = performance.now()): Array<{ service: DaemonServiceId; elapsedMs: number }> {
+    const out: Array<{ service: DaemonServiceId; elapsedMs: number }> = [];
+    for (const [id, entry] of this.registry) {
+      if (entry.inFlight && entry.tickStartedAt !== undefined) out.push({ service: id, elapsedMs: Math.round(now - entry.tickStartedAt) });
+    }
+    return out.sort((a, b) => b.elapsedMs - a.elapsedMs);
   }
 
   private async withDeadline<T>(op: () => Promise<T>, ms: number, label: string): Promise<T> {
@@ -230,9 +244,12 @@ export class ServiceSupervisor {
     if (!isPeriodicService(entry.service)) return;
     const periodicService = entry.service;
     entry.inFlight = true;
+    const startedAt = performance.now();
+    entry.tickStartedAt = startedAt;
     const controller = new AbortController();
     entry.activeController = controller;
     let timedOut = false;
+    ctx.log('DEBUG', `service '${id}' tick start`, { event: 'tick.start', service: id });
     const tickPromise = periodicService.tick(ctx, controller.signal);
     entry.activeTick = tickPromise;
     try {
@@ -246,6 +263,13 @@ export class ServiceSupervisor {
         );
       });
       await Promise.race([tickPromise, deadline]);
+      const durMs = Math.round(performance.now() - startedAt);
+      const tickFields = { service: id, durMs, deadlineMs: periodicService.deadlineMs };
+      if (durMs * 2 > periodicService.deadlineMs) {
+        ctx.log('WARN', `service '${id}' tick took ${durMs}ms, over half its ${periodicService.deadlineMs}ms deadline`, { event: 'tick.slow', ...tickFields, inFlight: this.inFlightTicks() });
+      } else {
+        ctx.log('DEBUG', `service '${id}' tick ok in ${durMs}ms`, { event: 'tick.ok', ...tickFields });
+      }
       entry.consecutiveFailures = 0;
       entry.lastError = undefined;
       entry.lastRunMs = Date.now();
@@ -254,27 +278,46 @@ export class ServiceSupervisor {
       const stoppedDuringTick = this.registry.get(id)?.state === 'stopped';
       if (timedOut && !stoppedDuringTick) {
         controller.abort();
-        this.exitForRestart(id, err);
+        this.exitForRestart(id, err, startedAt);
         return;
       }
-      if (!timedOut) this.recordFailure(entry, id, err);
+      if (!timedOut) this.recordFailure(entry, id, err, Math.round(performance.now() - startedAt));
     } finally {
       if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
       entry.activeTick = undefined;
       entry.activeController = undefined;
+      entry.tickStartedAt = undefined;
       this.clearInFlight(entry);
     }
   }
 
-  private recordFailure(entry: RegisteredService, id: DaemonServiceId, err: unknown): void {
+  private recordFailure(entry: RegisteredService, id: DaemonServiceId, err: unknown, durMs: number): void {
     const message = err instanceof Error ? err.message : String(err);
     entry.consecutiveFailures += 1;
     entry.lastError = message;
     recordSubsystemError(id, message);
-    this.ctx?.log('WARN', `service '${id}' failed: ${message}`);
+    this.ctx?.log('WARN', `service '${id}' failed: ${message}`, {
+      event: 'tick.failed', service: id, durMs, consecutiveFailures: entry.consecutiveFailures, error: message,
+    });
   }
 
-  private exitForRestart(id: DaemonServiceId, err: unknown): void {
+  private breachSnapshot(id: DaemonServiceId, startedAt: number | undefined): LogFields {
+    const now = performance.now();
+    const blockers = startedAt === undefined ? [] : syncSpansBetween(startedAt, now)
+      .sort((a, b) => b.durMs - a.durMs)
+      .slice(0, 8)
+      .map((r) => ({ span: r.name, durMs: Math.round(r.durMs), ...r.fields }));
+    return {
+      event: 'tick.breach',
+      service: id,
+      elapsedMs: startedAt === undefined ? undefined : Math.round(now - startedAt),
+      inFlight: this.inFlightTicks(now),
+      syncSpansDuringTick: blockers,
+      ...this.diagnostics?.(),
+    };
+  }
+
+  private exitForRestart(id: DaemonServiceId, err: unknown, startedAt?: number): void {
     const cause = err instanceof Error ? err.message : String(err);
     const entry = this.registry.get(id);
     if (entry) {
@@ -283,7 +326,7 @@ export class ServiceSupervisor {
     }
     recordSubsystemError(id, cause);
     recordDaemonRestart(id, cause);
-    this.ctx?.log('ERROR', `service '${id}' breached its deadline (${cause}); exiting (code ${DEADLINE_EXIT_CODE}) for a supervised restart`);
+    this.ctx?.log('ERROR', `service '${id}' breached its deadline (${cause}); exiting (code ${DEADLINE_EXIT_CODE}) for a supervised restart`, this.breachSnapshot(id, startedAt));
     this.freezeTimers();
     this.exit(DEADLINE_EXIT_CODE);
   }

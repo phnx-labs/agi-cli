@@ -25,8 +25,9 @@ import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, re
 import { ServiceSupervisor } from './supervisor.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
-import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
+import { readDaemonServicesConfig, readDaemonLogLevel, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 import { sleepSync } from '../fs-atomic.js';
+import { DaemonVitals, installSpanLog, levelEnabled, topSpansSinceReport, type LogFields, type LogLevel } from './diagnostics.js';
 
 let activeServiceSupervisor: ServiceSupervisor | null = null;
 
@@ -428,14 +429,47 @@ function rotateLogsIfNeeded(logPath: string): void {
   } catch {}
 }
 
-export function log(level: string, message: string): void {
+let logThreshold: LogLevel = 'INFO';
+
+export function setDaemonLogLevel(level: LogLevel): void {
+  logThreshold = level;
+}
+
+export function getDaemonLogLevel(): LogLevel {
+  return logThreshold;
+}
+
+function redactFields(value: unknown): unknown {
+  if (typeof value === 'string') return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactFields);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactFields(v)]));
+  }
+  return value;
+}
+
+function applyConfiguredLogLevel(): void {
+  const before = logThreshold;
+  try {
+    logThreshold = readDaemonLogLevel();
+  } catch (err) {
+    log('WARN', `daemon log level unchanged (${before.toLowerCase()}): ${(err as Error).message}`);
+    return;
+  }
+  if (logThreshold !== before) log('INFO', `daemon log level ${before.toLowerCase()} -> ${logThreshold.toLowerCase()}`, { event: 'log.level', from: before, to: logThreshold });
+}
+
+export function log(level: string, message: string, fields?: LogFields): void {
+  if (!levelEnabled(level, logThreshold)) return;
   const logPath = getDaemonLogPath();
   rotateLogsIfNeeded(logPath);
-  const entry = { ts: new Date().toISOString(), level: level.toUpperCase(), message: redactSecrets(message) };
+  const lvl = level.toUpperCase();
+  const entry: Record<string, unknown> = { ts: new Date().toISOString(), level: lvl, message: redactSecrets(message) };
+  if (fields && Object.keys(fields).length > 0) entry.data = redactFields(fields);
   fs.appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
   try { fs.chmodSync(logPath, 0o600); } catch {  }
+  if (lvl === 'DEBUG') return;
   try {
-    const lvl = level.toUpperCase();
     const event =
       lvl === 'ERROR' || lvl === 'FATAL' ? 'daemon.error' as const
       : lvl === 'START' || /starting|started/i.test(message) ? 'daemon.start' as const
@@ -577,7 +611,10 @@ export async function runDaemon(): Promise<void> {
   const lifetimePath = path.join(getDaemonDir(), LIFETIME_FILE);
   const lifetimeToken = `${process.pid}:${Date.now()}`;
   fs.writeFileSync(lifetimePath, lifetimeToken, 'utf-8');
-  log('INFO', `Daemon started (PID: ${process.pid})`);
+  applyConfiguredLogLevel();
+  log('INFO', `Daemon started (PID: ${process.pid})`, {
+    event: 'daemon.start', pid: process.pid, node: process.version, logLevel: getDaemonLogLevel().toLowerCase(),
+  });
 
   anchorDaemonCwd();
   warnEphemeralDaemonRoot();
@@ -615,7 +652,12 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
-  const supervisor = new ServiceSupervisor();
+  let supervisorRef: ServiceSupervisor | null = null;
+  const vitals = new DaemonVitals({ log, extra: () => ({ inFlight: supervisorRef?.inFlightTicks() ?? [] }) });
+  installSpanLog(log);
+  vitals.start();
+  const supervisor = new ServiceSupervisor({ diagnostics: () => ({ vitals: vitals.snapshot(), topSpansSinceReport: topSpansSinceReport(8) }) });
+  supervisorRef = supervisor;
 
   if (isEnabled('session-state')) {
     supervisor.register(new SessionStateService(() => supervisor.runNow('session-state')));
@@ -827,6 +869,7 @@ export async function runDaemon(): Promise<void> {
 
   const handleReload = () => {
     log('INFO', 'Reloading jobs (SIGHUP)');
+    applyConfiguredLogLevel();
     const reloadedConfig = readDaemonServicesConfig();
     const reloadedEnabled = (id: DaemonServiceId): boolean => reloadedConfig.services[id] !== false;
     for (const id of Object.keys(servicesConfig.services) as DaemonServiceId[]) {
@@ -885,6 +928,8 @@ export async function runDaemon(): Promise<void> {
   // Cleanup removes lifetime, pid, heartbeat, and registry state only when each still belongs to this instance.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
+    vitals.report();
+    vitals.stop();
     await supervisor.stopAll();
     activeServiceSupervisor = null;
     stopScheduler();

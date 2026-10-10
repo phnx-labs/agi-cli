@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 61,
-  "commands": 484,
+  "commands": 485,
   "root": {
     "name": "agents",
     "path": "",
@@ -2573,7 +2573,7 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Host a signed webhook receiver here, supervised and restarted on crash\nagents daemon webhooks add --secrets-bundle linear-webhook\nagents daemon webhooks list\n\n# Manage public ingress for daemon-world webhook receivers\nagents daemon funnel status yosemite-s0\nagents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
+      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Host a signed webhook receiver here, supervised and restarted on crash\nagents daemon webhooks add --secrets-bundle linear-webhook\nagents daemon webhooks list\n\n# Manage public ingress for daemon-world webhook receivers\nagents daemon funnel status yosemite-s0\nagents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# Trace every service tick and slow section while diagnosing (applies live)\nagents daemon logs level debug\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
       "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\nalways. Use 'agents routines stats' for per-routine failure detail.\n\n'disable' is a persisted kill switch: it stops routines/add,\nroutines/start, routines/catchup, and webhook triggers from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. The inline scheduler re-evaluates its toggle on every reload as\nwell. A boot-disabled service other than webhook-receiver still needs\nan operator 'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
       "subcommands": [
         {
@@ -3130,7 +3130,7 @@
           "name": "logs",
           "path": "daemon logs",
           "aliases": [],
-          "description": "Read the daemon's own log (lifecycle + subsystem errors — not routine run output).",
+          "description": "Read the daemon's own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals (not routine run output).",
           "args": [],
           "options": [
             {
@@ -3156,7 +3156,7 @@
             },
             {
               "flags": "--level <level>",
-              "description": "Minimum level to show: info | warn | error",
+              "description": "Minimum level to show: debug | info | warn | error",
               "long": "--level",
               "required": true,
               "optional": false,
@@ -3192,7 +3192,46 @@
               "negate": false
             }
           ],
-          "subcommands": []
+          "examples": "# Why did it restart? Errors carry a snapshot: in-flight ticks, slow sections, vitals\nagents daemon logs --level error --since 1h\n\n# Event-loop stalls and slow synchronous sections, as they happen\nagents daemon logs -f --level warn\n\n# Turn on per-tick and per-span tracing while you diagnose, then turn it back off\nagents daemon logs level debug\nagents daemon logs -f --level debug\nagents daemon logs level info\n\n# Machine-readable, with each line's structured data\nagents daemon logs --since 10m --json",
+          "notes": "Every line is JSON in the daemon log file (agents daemon status shows the path), with\nan optional data object. Event names: tick.slow, tick.failed, tick.breach, loop.stall,\nspan.slow, vitals (once a minute), and at debug tick.start, tick.ok, span.\nThe level is stored as logLevel in the daemon's services.yaml; AGENTS_DAEMON_LOG_LEVEL\noverrides it for one daemon process.",
+          "subcommands": [
+            {
+              "name": "level",
+              "path": "daemon logs level",
+              "aliases": [],
+              "description": "Show or set what the daemon writes: debug (every tick and span) | info (default) | warn | error. Applies live.",
+              "args": [
+                {
+                  "name": "level",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Emit as JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "reload",

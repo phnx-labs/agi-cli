@@ -5,6 +5,7 @@ import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { getBrowserRuntimeDir, getCacheDir } from '../state.js';
 import { getEventsDir } from './events.js';
 import { readRecentActivity } from './activity.js';
+import { span, spanSync } from '../daemon/diagnostics.js';
 import { invocation as browserInvocation, resolveBrowserBin } from '../browser-client.js';
 import { invocation as computerInvocation, resolveComputerBin } from '../computer-client.js';
 import { getSessionById } from '../session/db.js';
@@ -88,6 +89,10 @@ export async function readStandaloneComputerRows(): Promise<ComputerRunRow[]> {
 }
 
 function buildLaunchSessionIndex(): Map<string, string> {
+  return spanSync('feed.tools.launch-index', buildLaunchSessionIndexNow);
+}
+
+function buildLaunchSessionIndexNow(): Map<string, string> {
   const byLaunchId = new Map<string, string>();
   for (const event of readRecentActivity({ maxBytesPerSession: 64 * 1024 })) {
     if (event.launchId && event.sessionId) byLaunchId.set(event.launchId, event.sessionId);
@@ -103,6 +108,10 @@ function buildLaunchSessionIndex(): Map<string, string> {
 
 /** The tools record a session or launch id; only agents-cli's index can say which agent session that was. */
 export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[]): T[] {
+  return spanSync('feed.tools.link-sessions', () => linkToolSessionsNow(rows), () => ({ rows: rows.length }));
+}
+
+function linkToolSessionsNow<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[]): T[] {
   let byLaunchId: Map<string, string> | undefined;
   return rows.map((row) => {
     let linked = row.sessionId ? getSessionById(row.sessionId) : null;
@@ -147,7 +156,7 @@ export async function collectToolRows(scope: string, sources: ToolSources = {}):
 
   const [bindingList, liveTaskList, browserRows, computerRows] = await Promise.all([
     read('browser', sources.bindings ?? (() => []), []),
-    read('browser', sources.liveTasks ?? (() => readLiveBrowserTasks()), []),
+    read('browser', sources.liveTasks ?? (() => spanSync('feed.tools.live-tasks', () => readLiveBrowserTasks())), []),
     read('browser', sources.browserRows ?? (async () => linkToolSessions(await readStandaloneBrowserRows())), [] as BrowserSessionRow[]),
     read('computer', sources.computerRows ?? (async () => linkToolSessions(await readStandaloneComputerRows())), [] as ComputerRunRow[]),
   ]);
@@ -304,10 +313,10 @@ export function watchToolActivity(options: ToolWatchOptions): { armed: () => boo
   const reproject = async () => {
     projecting = true;
     try {
-      const snapshot = await collectToolRows(options.scope, options.sources);
+      const snapshot = await span('feed.tools.collect', () => collectToolRows(options.scope, options.sources));
       if (stopped) return;
       if (snapshot.retry) dirty = true;
-      const diff = set.diff(snapshot.rows, snapshot.incomplete);
+      const diff = spanSync('feed.tools.diff', () => set.diff(snapshot.rows, snapshot.incomplete), () => ({ rows: snapshot.rows.length }));
       if (diff.upserts.length > 0 || diff.removes.length > 0) options.onDiff(diff);
     } finally { projecting = false; }
   };

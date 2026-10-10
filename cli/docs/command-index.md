@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_61 command groups · 484 commands._
+_61 command groups · 485 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -176,7 +176,8 @@ agents daemon index backfill titles       Generate the session-row headline (a s
 agents daemon index backfill tools        Parse historical tool calls once into the local SQLite index.
 agents daemon index optimize              Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents daemon index roots                 Print the on-disk directories scanned for session transcripts, per agent, as JSON (for external watchers)
-agents daemon logs                        Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
+agents daemon logs                        Read the daemon's own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals (not routine run output).
+agents daemon logs level [level]          Show or set what the daemon writes: debug (every tick and span) | info (default) | warn | error. Applies live.
 agents daemon reload                      Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
 agents daemon restart                     Stop then start the daemon.
 agents daemon services                    Every registered daemon service: live health, enabled state, and live enable/disable/restart.
