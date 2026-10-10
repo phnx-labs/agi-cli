@@ -478,13 +478,19 @@ describe('restartMenubarLaunchAgent', () => {
         return Buffer.alloc(0);
       };
 
-      restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
+      restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', (cmd, args) => {
+        exec(cmd, args);
+        if (args[0] === 'print') throw new Error('Could not find service');
+        return Buffer.alloc(0);
+      }, () => {});
 
       const target = `gui/501/${serviceLabel()}`;
-      expect(calls).toHaveLength(3);
-      expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', target] });
-      expect(calls[1]).toEqual({ cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] });
-      expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', target] });
+      expect(calls).toEqual([
+        { cmd: 'launchctl', args: ['bootout', target] },
+        { cmd: 'launchctl', args: ['print', target] },
+        { cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] },
+        { cmd: 'launchctl', args: ['kickstart', target] },
+      ]);
     } finally {
       if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
       else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
@@ -506,6 +512,29 @@ describe('restartMenubarLaunchAgent', () => {
     }
   });
 
+  it('waits for the booted-out job to leave before bootstrapping, and retries a refused bootstrap', () => {
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const calls: string[] = [];
+      let printsLeft = 3;
+      let bootstrapsRefused = 1;
+      const exec = (_cmd: string, args: readonly string[]) => {
+        calls.push(args[0]);
+        if (args[0] === 'print' && printsLeft-- <= 0) throw new Error('Could not find service');
+        if (args[0] === 'bootstrap' && bootstrapsRefused-- > 0) throw new Error('Bootstrap failed: 5: Input/output error');
+        return Buffer.alloc(0);
+      };
+      const slept: number[] = [];
+      restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec, (ms) => slept.push(ms));
+      expect(calls).toEqual(['bootout', 'print', 'print', 'print', 'print', 'bootstrap', 'bootstrap', 'kickstart']);
+      expect(slept).toEqual([100, 100, 100, 500]);
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
+  });
+
   it('continues through launchctl errors so a partially-loaded job still gets restarted', () => {
     const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
     process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
@@ -516,8 +545,14 @@ describe('restartMenubarLaunchAgent', () => {
         throw new Error('launchctl failed');
       };
 
-      expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec)).not.toThrow();
-      expect(calls).toHaveLength(3);
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      try {
+        expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec, () => {})).not.toThrow();
+        expect(calls.map((c) => c.args[0])).toEqual(['bootout', 'print', 'bootstrap', 'bootstrap', 'bootstrap', 'kickstart']);
+        expect(stderr.mock.calls.map((c) => String(c[0])).join('')).toMatch(/could not be registered.*agents menubar setup/);
+      } finally {
+        stderr.mockRestore();
+      }
     } finally {
       if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
       else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
