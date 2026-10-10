@@ -298,8 +298,13 @@ describe('menubarPlistNeedsRepoint', () => {
       plistNodeExists: true,
       activeEntry: bun,
       activeNode: bunNode,
+      plistRelaunchesCleanExit: false,
       ...overrides,
     });
+
+  it('re-points a plist whose KeepAlive relaunches the menu after Quit', () => {
+    expect(check({ plistRelaunchesCleanExit: true })).toBe(true);
+  });
 
   it('re-points when the plist entry differs from the active install', () => {
     expect(check({ plistEntry: nvm, plistNode: nvmNode })).toBe(true);
@@ -605,8 +610,8 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
     expect(seconds).toBeGreaterThanOrEqual(30);
   });
 
-  it('still keeps the helper alive and starts it at load', () => {
-    expect(plist).toContain('<key>KeepAlive</key>');
+  it('relaunches the helper only after a crash, so Quit lasts until the next login', () => {
+    expect(plist).toMatch(/<key>KeepAlive<\/key>\s*<dict>\s*<key>SuccessfulExit<\/key>\s*<false\/>\s*<\/dict>/);
     expect(plist).toContain('<key>RunAtLoad</key>');
   });
 

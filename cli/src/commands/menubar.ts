@@ -201,7 +201,8 @@ export function registerMenubarCommands(program: Command): void {
       Configures, in order: every running helper ended, AGI Menu at
       ~/Library/Application Support/agents-cli/MenubarHelper.app, its code
       signature, the launchd login item (com.phnx-labs.agents-menubar —
-      RunAtLoad + KeepAlive), then verifies exactly one helper came back up.
+      RunAtLoad, relaunched after a crash but not after Quit), then verifies
+      exactly one helper came back up.
 
       Every running helper is ended and launchd restarts one, so the survivor is
       always the login-managed copy. Exits nonzero if it cannot reach that state.

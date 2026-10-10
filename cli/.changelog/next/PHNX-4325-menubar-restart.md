@@ -5,3 +5,7 @@
   and `detail`; a turned-off AGI Menu, a failed kickstart, or no new process exits 1 with
   the reason. AGI Menu's Settings and right-click menu call it. Source:
   `cli/src/lib/menubar/install-menubar.ts`, `cli/src/commands/menubar.ts`.
+- **Quitting AGI Menu now lasts until the next login (PHNX-4325).** The login item's
+  `KeepAlive` is `{SuccessfulExit: false}`: launchd relaunches AGI Menu after a crash but
+  not after a clean Quit, which previously came back within 30 seconds. The startup repair
+  rewrites an older plist once. Source: `cli/src/lib/menubar/install-menubar.ts`.

@@ -235,7 +235,10 @@ export function generateServicePlist(execPath: string): string {
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
   <key>ThrottleInterval</key>
   <integer>${MENUBAR_THROTTLE_SECONDS}</integer>
   <key>ProcessType</key>
@@ -493,9 +496,11 @@ export function menubarPlistNeedsRepoint(opts: {
   plistNodeExists: boolean;
   activeEntry: string | null;
   activeNode: string | null;
+  plistRelaunchesCleanExit: boolean;
 }): boolean {
   if (!opts.activeEntry) return false;
   if (opts.plistEntry !== opts.activeEntry) return true;
+  if (opts.plistRelaunchesCleanExit) return true;
   if (opts.activeNode && (!opts.plistNode || !opts.plistNodeExists)) return true;
   return false;
 }
@@ -518,7 +523,18 @@ function menubarSetupNeedsRepoint(): boolean {
     plistNodeExists: Boolean(plistNode) && fs.existsSync(plistNode as string),
     activeEntry: resolveCliEntry(),
     activeNode: process.execPath,
+    plistRelaunchesCleanExit: plistRelaunchesCleanExit(),
   });
+}
+
+// A plist written before PHNX-4325 has KeepAlive=true, which relaunches the menu
+// after Quit; the current one relaunches only after a crash.
+function plistRelaunchesCleanExit(): boolean {
+  try {
+    return /<key>KeepAlive<\/key>\s*<true\/>/.test(fs.readFileSync(servicePlistPath(), 'utf-8'));
+  } catch {
+    return false;
+  }
 }
 
 export function disableMenubarService(): void {
