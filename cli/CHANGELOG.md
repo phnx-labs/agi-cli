@@ -1,5 +1,77 @@
 # Changelog
 
+## 1.23.0
+
+### Removed
+
+- `agents sessions tail` is gone; use `sessions tail <id>` from the standalone
+  sessions CLI. `agents logs -f <id>` runs it for a session.
+- Tool-call search moved to the standalone CLI: `sessions --include tools
+  --query <clause> [--count] [--host <target>] --json`. It reads the same index
+  agents writes (`agents sessions backfill tools` still fills it).
+  A tool search through `agents sessions --include tools` (no session id, or a
+  `--query` clause) now exits 2 and names that command; reading one session's
+  tool calls, `agents sessions <id> --include tools [--json|--markdown]`, is
+  unchanged. `--fleet` / `--count` are no longer `agents sessions` flags. `--query` is a
+  single search-text flag.
+
+### Changed
+
+- A read query (`agents sessions <query> [--json]`) no longer falls back to an
+  in-process read when the `sessions` bin cannot be resolved. It exits 1 with an
+  error naming the install.
+
+- **Browser and computer history come from the standalone tools (PHNX-4227).**
+  `agents sessions --browser` and `agents sessions --computer` are removed: run
+  `browser sessions` / `computer sessions` (or `agents browser sessions` /
+  `agents computer sessions`) instead. `agents browser sessions` and
+  `agents computer sessions` now run the standalone tool's own picker, so their
+  flags are the engine's (`--since`, `--until`, `--search`, `--tasks`, `--open`, …).
+  The fleet-wide `--device` listing of computer runs went with the alias; run
+  `computer sessions` on that box (`agents ssh <box> computer sessions`). The
+  browser and computer rows on `agents feed watch --json` are read from
+  `browser sessions --tasks --json` and `computer sessions --json`; agents-cli adds
+  only the agent-session link, and a missing tool, a failed run, or unreadable
+  output keeps the rows already on the stream instead of removing them. The
+  `computer` floor in `agents setup tools` is now 0.1.7, the first release whose
+  `computer sessions --json` honors `--limit`. A computer row's `agent` now comes
+  from the linked session only, since the engine records no harness name.
+  agents-cli no longer writes `browser_sessions` / `computer_sessions` rows (the
+  engines keep their own history and adopted those tables once) and no longer
+  opens the browser events pipe; the tables and migrations stay. `agents computer
+  sessions` also runs off macOS, since listing history drives nothing. Source:
+  `cli/src/lib/feed/tool-activity.ts`, `cli/src/lib/feed/tools.ts`,
+  `cli/src/commands/browser.ts`, `cli/src/commands/computer.ts`,
+  `cli/src/commands/sessions.ts`, `cli/src/lib/standalone-tools.ts`,
+  `cli/src/lib/browser-client.ts`, `cli/src/lib/computer/record.ts`, `cli/src/lib/session/db.ts`.
+
+- **`agents projects prs` with no project lists every open PR across your GitHub account and orgs, needs-me first (PHNX-4269).** One REST search per owner (you plus every org you belong to; `--org` narrows it) and one for review requests from you, then each PR's REST detail and checks, cached like the project read; never GraphQL. Each PR carries `needsMe`: `review` (a review is requested from you), `failing` (your PR, CI red) or `conflicts` (your PR, conflicts with its base), and each repository names the projects that attach it. Every `prs` verb (`comment`, `review`, `merge` including `--admin`, `ready`, `automerge`, `failure`, `rerun`) now takes the project name optionally, so they act on any repo. This is the read behind AGI Menu's new GitHub tab, which joins `menubar.menu.tabOrder`/`hiddenTabs` as `github` (shown by default) and scopes itself with `menubar.menu.githubHidden`, `githubDrafts` and `githubBots`. Repositories are ordered by their most urgent PR. A free-plan private repo's branch-protection read (HTTP 403 "Upgrade to GitHub Pro") now reads as unprotected instead of failing the repo's `merge` facts. Source: `cli/src/lib/github/open-prs.ts`, `cli/src/commands/projects.ts`, `cli/src/lib/device-config.ts`.
+
+- **Ship AGI Menu update settings (PHNX-4323).** Raise the signed menu helper floor to 1.15.19, which shows the app version and update status, manual check/update controls, and the synced automatic-update switch. Source: `cli/src/lib/helper-versions.ts`; helper release: `menubar/v1.15.19`.
+
+- **Control AGI Menu updates separately (PHNX-4323).** Add `agents menubar update --check --json` and `agents menubar update --json`, an app-specific snapshot status, and the synced `menubar.autoUpdate` preference. Automatic updates default on and check about every 12 hours; turning them off suppresses all automatic update paths while preserving manual installation. Checks expose network errors, and self-updates finish their response before restarting the menu. Source: `cli/src/lib/menubar/install-menubar.ts`.
+
+- **`menubar.menu.tabOrder` and `menubar.menu.hiddenTabs` know AGI Menu's Secrets tab (PHNX-4269).**
+  AGI Menu 1.15.13 adds a Secrets tab that lists this Mac's secrets bundles with their lock
+  state and unlocks or locks them with Touch ID. The menu only offers the tab once the CLI
+  accepts its id, so `secrets` joins the tab list. It starts hidden (`hiddenTabs` defaults to
+  `secrets`), and an order saved before it existed reads back with `secrets` appended.
+  Source: `cli/src/lib/device-config.ts`.
+
+- **Owner iMessages come from Rush's number, with no Mac required (PHNX-4267).** rush/api now
+  sends owner iMessages itself from Rush's SendBlue number to the phone number you confirm in the
+  console Settings page, so the macOS-only `owner-device-delivery` daemon service and its
+  `/me/device-deliveries` client are gone. A notification that reaches your account now reads
+  "Rush is sending slack, imessage" instead of "delivered ... / queued imessage". A leftover
+  `owner-device-delivery` key in `services.yaml` is ignored. `agents send --channel imessage --to
+  <number>` still sends from this Mac's Messages app. Source: `cli/src/lib/owner-notify.ts`.
+
+- **Claude routines run on worker devices again.** Before launching, a routine checked
+  each candidate account with `claude auth status` in an environment that left out the
+  setup-token a worker launch injects. Every account on a worker read as signed out, so
+  every Claude routine there failed with "found no authenticated Claude account". The
+  check now uses the same environment as the launch. Source: `cli/src/lib/daemon/runner.ts`.
+
 ## 1.22.127
 
 - **A peer's fleet-state reply now arrives whole over ssh.** `agents __usage-ingest --reply`
