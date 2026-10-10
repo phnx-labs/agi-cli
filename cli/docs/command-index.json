@@ -9161,7 +9161,7 @@
             }
           ],
           "examples": "# Configure AGI Menu end-to-end (idempotent — safe to re-run)\nagents menubar setup\n\n# Two agents marks in the menu bar? This ends the duplicate.\nagents menubar setup\n\n# See the current state without changing anything\nagents menubar setup --check",
-          "notes": "Configures, in order: every running helper ended, AGI Menu at\n~/Library/Application Support/agents-cli/MenubarHelper.app, its code\nsignature, the launchd login item (com.phnx-labs.agents-menubar —\nRunAtLoad + KeepAlive), then verifies exactly one helper came back up.\n\nEvery running helper is ended and launchd restarts one, so the survivor is\nalways the login-managed copy. Exits nonzero if it cannot reach that state.\n\nSetup clears a previous `agents menubar disable`. To turn AGI Menu off\nagain, run `agents menubar disable`.",
+          "notes": "Configures, in order: every running helper ended, AGI Menu at\n~/Library/Application Support/agents-cli/MenubarHelper.app, its code\nsignature, the launchd login item (com.phnx-labs.agents-menubar —\nRunAtLoad, relaunched after a crash but not after Quit), then verifies\nexactly one helper came back up.\n\nEvery running helper is ended and launchd restarts one, so the survivor is\nalways the login-managed copy. Exits nonzero if it cannot reach that state.\n\nSetup clears a previous `agents menubar disable`. To turn AGI Menu off\nagain, run `agents menubar disable`.",
           "subcommands": []
         },
         {

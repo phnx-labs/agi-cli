@@ -247,7 +247,13 @@ group: the restart completes even when the menu requested it and is killed befor
 the command prints. JSON is `{outcome, previousPids, pids, detail}` with `outcome`
 `restarted` or `failed`; every failure (turned off, kickstart error, no new process)
 exits 1 with its reason. It never starts a turned-off menu: `agents menubar setup`
-does that. AGI Menu's Restart controls call this command and stay disabled, naming
+does that.
+
+The login item starts AGI Menu at login and relaunches it after a crash
+(`KeepAlive` = `{SuccessfulExit: false}`), but not after a clean exit, so the menu's
+Quit lasts until the next login. A plist written by an older CLI (`KeepAlive` =
+`true`, which relaunched a quit menu within 30 seconds) is rewritten once by the
+startup repair. AGI Menu's Restart controls call this command and stay disabled, naming
 the CLI version they need, when the installed CLI predates it.
 
 ## App updates
