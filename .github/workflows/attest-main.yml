@@ -17,7 +17,7 @@ concurrency:
 jobs:
   attest:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     permissions:
       contents: write
     defaults:
