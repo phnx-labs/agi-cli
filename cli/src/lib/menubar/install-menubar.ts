@@ -27,6 +27,7 @@ export function serviceLabel(): string {
 }
 
 const MENUBAR_THROTTLE_SECONDS = 30;
+const MENUBAR_BOOTOUT_WAIT_TRIES = 50;
 
 function onDarwin(): boolean {
   return process.platform === 'darwin';
@@ -259,6 +260,7 @@ export function restartMenubarLaunchAgent(
   uid: number,
   plist: string,
   exec: (cmd: string, args: readonly string[], opts: { stdio: ['ignore', 'ignore', 'ignore'] }) => Buffer = execFileSync,
+  sleep: (ms: number) => void = sleepSync,
 ): void {
   const reg = serviceManagerRegistrationAllowed();
   if (!reg.allowed) {
@@ -268,9 +270,20 @@ export function restartMenubarLaunchAgent(
 
   const serviceTarget = `gui/${uid}/${serviceLabel()}`;
   const opts: { stdio: ['ignore', 'ignore', 'ignore'] } = { stdio: ['ignore', 'ignore', 'ignore'] };
-  try { exec('launchctl', ['bootout', serviceTarget], opts); } catch {  }
-  try { exec('launchctl', ['bootstrap', `gui/${uid}`, plist], opts); } catch {  }
-  try { exec('launchctl', ['kickstart', serviceTarget], opts); } catch {  }
+  const succeeds = (args: string[]): boolean => {
+    try { exec('launchctl', args, opts); return true; } catch { return false; }
+  };
+  succeeds(['bootout', serviceTarget]);
+  for (let i = 0; i < MENUBAR_BOOTOUT_WAIT_TRIES && succeeds(['print', serviceTarget]); i++) sleep(100);
+  let bootstrapped = false;
+  for (let attempt = 0; attempt < 3 && !bootstrapped; attempt++) {
+    if (attempt > 0) sleep(500);
+    bootstrapped = succeeds(['bootstrap', `gui/${uid}`, plist]);
+  }
+  if (!bootstrapped) {
+    process.stderr.write(`[agents] AGI Menu login item could not be registered (launchctl bootstrap gui/${uid} ${plist} failed 3 times); run \`agents menubar setup\`\n`);
+  }
+  succeeds(['kickstart', serviceTarget]);
 }
 
 export function restartMenubarHelperAfterSwap(
