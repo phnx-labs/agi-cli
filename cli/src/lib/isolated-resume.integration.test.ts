@@ -26,7 +26,7 @@ describe.skipIf(process.platform === 'win32')('resuming an isolated session', ()
 
   function resumeCmd(version?: string): string[] | null {
     const script = `
-      import { buildResumeCommand } from ${JSON.stringify(path.resolve(process.cwd(), 'src/commands/sessions.ts'))};
+      import { buildResumeCommand } from ${JSON.stringify(path.resolve(process.cwd(), 'src/lib/session/resume-command.ts'))};
       console.log('__R__' + JSON.stringify(buildResumeCommand(
         { agent: 'codex', id: 'sess-123', version: ${version ? JSON.stringify(version) : 'undefined'} }
       )));
