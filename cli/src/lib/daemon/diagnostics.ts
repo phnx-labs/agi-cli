@@ -39,29 +39,36 @@ export interface SpanAggregate {
   maxMs: number;
 }
 
-const SPAN_RING_SIZE = 512;
+const SPAN_RING_SIZE = 256;
+const SYNC_RING_FLOOR_MS = 5;
 const SLOW_SYNC_SPAN_MS = 250;
 
 interface SpanState {
-  ring: SpanRecord[];
+  syncRing: SpanRecord[];
   window: Map<string, SpanAggregate>;
   log: DiagnosticLog | null;
   slowSyncMs: number;
 }
 
-const spans: SpanState = { ring: [], window: new Map(), log: null, slowSyncMs: SLOW_SYNC_SPAN_MS };
+const spans: SpanState = { syncRing: [], window: new Map(), log: null, slowSyncMs: SLOW_SYNC_SPAN_MS };
 
 export function installSpanLog(log: DiagnosticLog | null, opts: { slowSyncMs?: number } = {}): void {
   spans.log = log;
   spans.slowSyncMs = opts.slowSyncMs ?? SLOW_SYNC_SPAN_MS;
-  spans.ring = [];
+  spans.syncRing = [];
   spans.window = new Map();
+}
+
+function safeLog(level: LogLevel, message: string, fields?: LogFields): void {
+  try { spans.log?.(level, message, fields); } catch { }
 }
 
 function record(rec: SpanRecord): void {
   if (!spans.log) return;
-  spans.ring.push(rec);
-  if (spans.ring.length > SPAN_RING_SIZE) spans.ring.shift();
+  if (rec.kind === 'sync' && rec.durMs >= SYNC_RING_FLOOR_MS) {
+    spans.syncRing.push(rec);
+    if (spans.syncRing.length > SPAN_RING_SIZE) spans.syncRing.splice(0, spans.syncRing.length - SPAN_RING_SIZE);
+  }
   const key = `${rec.kind}:${rec.name}`;
   const agg = spans.window.get(key) ?? { name: rec.name, kind: rec.kind, count: 0, totalMs: 0, maxMs: 0 };
   agg.count += 1;
@@ -70,9 +77,9 @@ function record(rec: SpanRecord): void {
   spans.window.set(key, agg);
   const fields = { span: rec.name, kind: rec.kind, durMs: Math.round(rec.durMs), ...rec.fields };
   if (rec.kind === 'sync' && rec.durMs >= spans.slowSyncMs) {
-    spans.log('WARN', `slow synchronous section '${rec.name}' blocked the event loop for ${Math.round(rec.durMs)}ms`, { event: 'span.slow', ...fields });
+    safeLog('WARN', `slow synchronous section '${rec.name}' blocked the event loop for ${Math.round(rec.durMs)}ms`, { event: 'span.slow', ...fields });
   } else {
-    spans.log('DEBUG', `span '${rec.name}' ${Math.round(rec.durMs)}ms`, { event: 'span', ...fields });
+    safeLog('DEBUG', `span '${rec.name}' ${Math.round(rec.durMs)}ms`, { event: 'span', ...fields });
   }
 }
 
@@ -97,7 +104,7 @@ export async function span<T>(name: string, fn: () => Promise<T>, fields?: () =>
 }
 
 export function syncSpansBetween(fromMs: number, toMs: number): SpanRecord[] {
-  return spans.ring.filter((r) => r.kind === 'sync' && r.startMs + r.durMs >= fromMs && r.startMs <= toMs);
+  return spans.syncRing.filter((r) => r.startMs + r.durMs >= fromMs && r.startMs <= toMs);
 }
 
 export function topSpansSinceReport(limit: number): SpanAggregate[] {
@@ -193,6 +200,10 @@ export class DaemonVitals {
     };
   }
 
+  private safe(level: LogLevel, message: string, fields?: LogFields): void {
+    try { this.log(level, message, fields); } catch { }
+  }
+
   private probe(): void {
     const now = performance.now();
     const stalledMs = now - this.lastProbe - this.probeMs;
@@ -201,7 +212,7 @@ export class DaemonVitals {
     if (stalledMs < this.stallMs) return;
     const blockers = syncSpansBetween(from, now).sort((a, b) => b.durMs - a.durMs).slice(0, 5);
     const named = blockers.length ? blockers.map((b) => `${b.name} ${Math.round(b.durMs)}ms`).join(', ') : 'no instrumented section (uninstrumented code or the process was descheduled)';
-    this.log('WARN', `event loop stalled ${Math.round(stalledMs)}ms; ran: ${named}`, {
+    this.safe('WARN', `event loop stalled ${Math.round(stalledMs)}ms; ran: ${named}`, {
       event: 'loop.stall',
       stalledMs: Math.round(stalledMs),
       blockers: blockers.map(summarizeSpan),
@@ -215,7 +226,7 @@ export class DaemonVitals {
     this.histogram?.reset();
     this.lastCpu = process.cpuUsage();
     this.lastCpuAt = performance.now();
-    this.log('INFO', `vitals: loop p99 ${snap.loop.p99Ms}ms max ${snap.loop.maxMs}ms, cpu ${snap.cpuPct}%, rss ${snap.rssMb}MB, load ${snap.load1}/${snap.cores}`, {
+    this.safe('INFO', `vitals: loop p99 ${snap.loop.p99Ms}ms max ${snap.loop.maxMs}ms, cpu ${snap.cpuPct}%, rss ${snap.rssMb}MB, load ${snap.load1}/${snap.cores}`, {
       event: 'vitals',
       ...snap,
       topSpans: top,

@@ -384,9 +384,10 @@ crash loop is diagnosed from, so it explains *why*, not just *that*. Every line
 is `{ts, level, message, data?}`; `data` carries the structured fields below.
 Levels are `debug < info < warn < error`; the daemon writes at or above its
 level (`info` by default), set live with `agents daemon logs level <level>` (stored as
-`logLevel` in `services.yaml`, re-read on SIGHUP; `AGENTS_DAEMON_LOG_LEVEL`
-overrides it for one process). `log()` in `daemon.ts` redacts every string in
-`data` the same way it redacts the message.
+`logLevel` in `services.yaml`, re-read on SIGHUP). `log()` in `daemon.ts` redacts
+every string in `data` the same way it redacts the message. Every `log()` is a
+synchronous append, so `debug` (a line per tick and per span) adds load of its own:
+leave it on only while diagnosing, and read a stall at `debug` with that in mind.
 
 | Event | Level | Written by | What it answers |
 |---|---|---|---|

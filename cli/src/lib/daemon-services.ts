@@ -205,15 +205,18 @@ export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
   atomicWriteFileSync(filePath, out, 'utf-8');
 }
 
-export function readDaemonLogLevel(): LogLevel {
-  const fromEnv = parseLogLevel(process.env.AGENTS_DAEMON_LOG_LEVEL);
-  if (fromEnv) return fromEnv;
-  let raw: string;
+function readServicesConfigText(): string | undefined {
   try {
-    raw = fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8');
-  } catch {
-    return 'INFO';
+    return fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
   }
+}
+
+export function readDaemonLogLevel(): LogLevel {
+  const raw = readServicesConfigText();
+  if (raw === undefined) return 'INFO';
   const parsed = yaml.parse(raw) as Record<string, unknown> | null;
   if (!parsed || parsed.logLevel === undefined) return 'INFO';
   const level = parseLogLevel(parsed.logLevel);
@@ -225,12 +228,12 @@ export function writeDaemonLogLevel(level: LogLevel): void {
   const dir = getDaemonConfigDir();
   fs.mkdirSync(dir, { recursive: true });
   const filePath = getDaemonServicesConfigPath();
-  let doc: Record<string, unknown> = {};
-  try {
-    const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown> | null;
-    if (parsed && typeof parsed === 'object') doc = parsed;
-  } catch {
+  const raw = readServicesConfigText();
+  const parsed = raw === undefined ? null : yaml.parse(raw) as unknown;
+  if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+    throw new Error(`${filePath} is not a YAML mapping; fix it before setting the log level`);
   }
+  const doc: Record<string, unknown> = { ...(parsed as Record<string, unknown> | null) };
   doc.logLevel = level.toLowerCase();
   atomicWriteFileSync(filePath, yaml.stringify(doc, { sortMapEntries: false }), 'utf-8');
 }

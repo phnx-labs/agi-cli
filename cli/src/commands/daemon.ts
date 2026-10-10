@@ -484,7 +484,7 @@ function assertLogLevelOption(level: string | undefined): void {
 function runLogLevel(level: string | undefined, opts: { json?: boolean }): void {
   if (level === undefined) {
     const current = readDaemonLogLevel().toLowerCase();
-    if (opts.json) console.log(JSON.stringify({ level: current, source: process.env.AGENTS_DAEMON_LOG_LEVEL ? 'env' : 'config' }));
+    if (opts.json) console.log(JSON.stringify({ level: current }));
     else console.log(current);
     return;
   }
@@ -1060,8 +1060,8 @@ export function registerDaemonCommand(program: Command): void {
       Every line is JSON in the daemon log file (agents daemon status shows the path), with
       an optional data object. Event names: tick.slow, tick.failed, tick.breach, loop.stall,
       span.slow, vitals (once a minute), and at debug tick.start, tick.ok, span.
-      The level is stored as logLevel in the daemon's services.yaml; AGENTS_DAEMON_LOG_LEVEL
-      overrides it for one daemon process.
+      The level is stored as logLevel in the daemon's services.yaml. Debug writes a line per
+      tick and per section synchronously, so leave it on only while diagnosing.
     `,
   });
 
