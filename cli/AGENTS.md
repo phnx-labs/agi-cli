@@ -2106,7 +2106,8 @@ group with cancellation disabled.
 
 **npm authentication is OIDC only.** Only the job protected by GitHub environment
 `npm-publish` grants `id-token: write`; that environment limits deployment branches to
-`release/**` and requires its owner reviewer. The workflow requires
+`release/**`; it has no required reviewer, so a release publishes without a manual
+approval (owner decision 2026-10-10: release latency R2 comes first). The workflow requires
 npm 11.5.1 or newer (installing 12.2 when the runner is older), and supplies no
 `NODE_AUTH_TOKEN`, `NPM_TOKEN`, repository secret, or local secrets bundle.
 `release.sh --ci-publish` refuses a live publish outside Actions, without the OIDC
