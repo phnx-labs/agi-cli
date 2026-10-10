@@ -42,6 +42,7 @@ export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;
 export type MenubarSection = 'menu' | 'statusbar';
 
 export const MENUBAR_CONFIG_KEYS: readonly string[] = [
+  'menubar.autoUpdate',
   ...MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`),
   ...MENUBAR_STATUSBAR_PROPERTIES.map((p) => `menubar.statusbar.${p}`),
 ];
@@ -94,7 +95,7 @@ export interface ParsedUpdatesConfigKey {
 
 export interface ParsedMenubarConfigKey {
   scope: 'menubar';
-  section: MenubarSection;
+  section?: MenubarSection;
   property: string;
 }
 
@@ -206,6 +207,8 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
+  if (raw === 'menubar.autoUpdate') return { scope: 'menubar', property: 'autoUpdate' };
+
   const menubarMatch = raw.match(/^menubar\.(menu|statusbar)\.(.+)$/);
   if (menubarMatch) {
     if (!MENUBAR_CONFIG_KEYS.includes(raw)) {
@@ -301,7 +304,7 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
     case 'updates':
       return parsed.agent ? `updates.${parsed.agent}.auto` : 'updates.auto';
     case 'menubar':
-      return `menubar.${parsed.section}.${parsed.property}`;
+      return parsed.section ? `menubar.${parsed.section}.${parsed.property}` : `menubar.${parsed.property}`;
   }
 }
 
@@ -401,6 +404,6 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
     case 'menubar':
-      return `config.menubar${parsed.section === 'menu' ? 'Menu' : 'Statusbar'}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
+      return `config.menubar${parsed.section === 'menu' ? 'Menu' : parsed.section === 'statusbar' ? 'Statusbar' : ''}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
   }
 }

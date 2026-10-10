@@ -327,7 +327,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   if (process.platform === 'darwin') {
     try {
       const { updateMenubarHelperIfNewer } = await import('./lib/menubar/install-menubar.js');
-      await updateMenubarHelperIfNewer({ force: true });
+      await updateMenubarHelperIfNewer();
     } catch {
     }
   }
@@ -822,8 +822,9 @@ if (helpAllRequested) {
 
 const isReadOnlyUpdatePreview =
   !isDocumentationRequest &&
-  passedArgs.find((arg) => !arg.startsWith('-')) === 'update' &&
-  passedArgs.includes('--check');
+  ((passedArgs.find((arg) => !arg.startsWith('-')) === 'update' && passedArgs.includes('--check')) ||
+   passedArgs.find((arg) => !arg.startsWith('-')) === 'menubar' ||
+   (passedArgs[0] === 'config' && passedArgs.includes('menubar.autoUpdate')));
 
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');

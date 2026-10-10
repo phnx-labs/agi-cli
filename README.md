@@ -1537,6 +1537,11 @@ duplicate icon. `agents menubar setup` is the recovery command when a machine is
 already wrong -- it ends any duplicate, installs the bundle, wires the login
 item, and verifies exactly one helper came back up.
 
+AGI Menu has its own update controls: `agents menubar update --check` checks the
+app release, `agents menubar update` installs it, and
+`agents config set menubar.autoUpdate false` disables the default twice-daily
+automatic checks. See [AGI Menu updates](cli/docs/menubar.md#app-updates).
+
 The helper itself is AGI Menu, developed in
 [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) and published as a
 signed, notarized build on this repo's `menubar/v<x.y.z>` releases; the CLI

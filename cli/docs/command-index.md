@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_61 command groups · 482 commands._
+_61 command groups · 483 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -367,6 +367,7 @@ agents menubar doctor   Diagnose AGI Menu: install path, version skew, signing i
 agents menubar enable   Install and start AGI Menu (launches at login)
 agents menubar setup    Configure AGI Menu end-to-end: one instance, started at login
 agents menubar status   Show whether AGI Menu is installed and running
+agents menubar update   Check for or install the newest AGI Menu release
 ```
 
 ## message: Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).

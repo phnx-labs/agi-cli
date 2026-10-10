@@ -635,6 +635,14 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
   },
   {
+    name: 'menubar.autoUpdate',
+    yamlKey: 'menubarAutoUpdate',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description: 'Automatically check and install AGI Menu releases about every 12 hours while this Mac is awake.',
+  },
+  {
     name: 'menubar.menu.hiddenTabs',
     yamlKey: 'menubarMenuHiddenTabs',
     scope: 'user',
