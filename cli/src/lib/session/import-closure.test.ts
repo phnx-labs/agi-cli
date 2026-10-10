@@ -78,12 +78,29 @@ describe.each(extracted)('runtime import closure of %s', (root) => {
   });
 });
 
+describe('the preview receiver in commands/ps.ts', () => {
+  it('reaches no part of the retiring commands/sessions.ts, statically or through a dynamic import', () => {
+    const psCommand = path.join(srcRoot, 'commands', 'ps.ts');
+    const seen = new Set<string>();
+    const stack = [psCommand];
+    while (stack.length) {
+      const file = stack.pop()!;
+      if (seen.has(file) || !fs.existsSync(file)) continue;
+      seen.add(file);
+      stack.push(...runtimeImports(file).map(({ dep }) => dep));
+    }
+    expect(seen.size).toBeGreaterThan(5);
+    expect(seen.has(sessionsCommand)).toBe(false);
+  });
+});
+
 describe('commands/sessions.ts no longer serves extracted selectors, rows, picker or resume helpers', async () => {
   const movedExports = [
     ...Object.keys(await import('./selection.js')),
     ...Object.keys(await import('./resume-command.js')),
     ...Object.keys(await import('./presentation.js')),
     ...Object.keys(await import('../../commands/sessions-picker.js')),
+    ...Object.keys(await import('../../commands/ps.js')),
   ];
 
   it('does not re-export the selection, resume-command or picker modules', () => {

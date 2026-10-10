@@ -1890,7 +1890,12 @@ rides the existing streams — the watch row spread and the PHNX-3792 session
 mirror — so remote rows show the same title with no per-row SSH and no client
 generates one itself.
 
-`agents sessions preview <uuid-or-prefix>` uses the same card without the picker.
+`agents ps preview <uuid-or-prefix>` uses the same card without the picker; the
+renderer and its registration live in `commands/ps.ts` and the detail block in
+`lib/session/presentation.ts`. `agents sessions preview` and `agents sessions
+--preview` are the same command until the old group is removed, and both outbound
+peer calls still send the old `sessions preview` argv so an older receiver answers
+(PHNX-4227 R1).
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the
 transcript's actual mtime + size. Live status is deliberately outside that durable

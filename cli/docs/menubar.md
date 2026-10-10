@@ -207,7 +207,9 @@ notification ledger, the screenshot OCR index) are documented in agi-menu.
 
 The Menu requests `agents sessions preview <full-id> --device <owner> --json`
 only for an expanded session. The CLI owns transport and the durable requester
-cache; the Menu never reads a peer's files directly. A known owner means one
+cache; the Menu never reads a peer's files directly. `agents ps preview` is the
+same receiver with the same envelope; the Menu switches to it only after an
+installed CLI that has it is verified. A known owner means one
 peer request, without fleet discovery.
 
 `--revision <cursor>` carries the caller's observed activity revision. A

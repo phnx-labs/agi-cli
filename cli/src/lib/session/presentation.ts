@@ -15,21 +15,38 @@ import {
   renderSummary,
   renderSummaryHeader,
   safeTeamText,
+  foldTimeline,
+  emptyTimelineState,
+  projectTimeline,
+  projectSessionFiles,
+  readSessionTail,
   sessionDisplayAgent,
   shortenModel,
+  type FileChange,
   type FilterOptions,
+  type SessionAgentId,
+  type SessionEvent,
   type SessionMeta,
   type TodoProgress,
   type ViewMode,
+} from '@phnx-labs/sessions-cli/reader';
+import type {
+  changeCounts,
+  detectTestResult,
+  extractArtifacts,
+  extractHooks,
+  extractLinks,
+  extractSkills,
+  toolHistogram,
 } from '@phnx-labs/sessions-cli/reader';
 import { colorAgent } from '../agents.js';
 import { padRight, truncate } from '../format.js';
 import { renderMarkdown } from '../markdown.js';
 import { homeDir, toComparablePath } from '../platform/index.js';
-import { redactSecrets } from '../redact.js';
+import { redactSecrets, sanitizeForTerminal } from '../redact.js';
 import type { ActiveSession } from './active.js';
 import { listBookmarks } from './bookmarks.js';
-import { readArchivedSessionPreview, readSessionContent } from './db.js';
+import { readArchivedSessionPreview, readSessionContent, readSessionTimelineAny } from './db.js';
 import { formatRelativeTime, sessionAgeParts, type SessionAgeParts } from './relative-time.js';
 import { ticketLabel } from './selection.js';
 import { sessionHeadline } from './title.js';
@@ -770,4 +787,122 @@ export function formatPickerTip(sessions: SessionMeta[]): string {
 export function formatTeamHiddenFooter(hiddenCount: number): string {
   const noun = hiddenCount === 1 ? 'team session' : 'team sessions';
   return `(${hiddenCount} ${noun} hidden — use --teams to show, or \`agents teams status\`)`;
+}
+
+export function notFoundByIdMessage(query: string): string[] {
+  return [chalk.red(`No session with id ${query.trim()} on this machine.`)];
+}
+
+export interface SessionPreviewDigest {
+  schemaVersion: 1;
+  firstUser: string;
+  lastAssistant: string;
+  filesRead: number;
+  toolCalls: number;
+  planFile: string;
+  todos?: TodoProgress;
+  subAgentCount: number;
+  backgroundShellCount?: number;
+  toolTags: string[];
+  changes: ReturnType<typeof changeCounts>;
+  changedFiles: FileChange[];
+  dirs: string[];
+  repos: string[];
+  artifacts: ReturnType<typeof extractArtifacts>;
+  skills: ReturnType<typeof extractSkills>;
+  plugins: string[];
+  hooks: ReturnType<typeof extractHooks>;
+  links: ReturnType<typeof extractLinks>;
+  errorCount: number;
+  firstError?: string;
+  toolHistogram: ReturnType<typeof toolHistogram>;
+  test: ReturnType<typeof detectTestResult>;
+  partial?: boolean;
+  partialReason?: string;
+}
+
+const SESSION_DETAIL_MAX_MESSAGES = 8;
+const SESSION_DETAIL_MESSAGE_MAX_CHARS = 4_000;
+
+export interface SessionDetailMessage {
+  role: 'user' | 'assistant';
+  text: string;
+  at: string | null;
+}
+
+export function sessionTranscriptStamp(session: SessionMeta): { fileMtimeMs: number; fileSize: number } | undefined {
+  try {
+    if (!session.filePath) return undefined;
+    const stat = fs.statSync(session.filePath);
+    return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
+  } catch { return undefined; }
+}
+
+export function buildSessionDetailBlock(
+  session: SessionMeta,
+  digest: SessionPreviewDigest | undefined,
+  events: SessionEvent[],
+  sourceStamp?: { fileMtimeMs: number; fileSize: number },
+): {
+  request: unknown;
+  timeline: unknown;
+  files: unknown;
+  messages: SessionDetailMessage[];
+  sourceRevision: string | null;
+  partial: boolean;
+  reason: string | null;
+} {
+  const bound = (text: string): string => redactSecrets(sanitizeForTerminal(text)).slice(0, SESSION_DETAIL_MESSAGE_MAX_CHARS);
+  const stamp = sourceStamp ?? sessionTranscriptStamp(session);
+  const canDateEvents = sourceStamp !== undefined || events.length === 0;
+  const daemonProjection = stamp ? readSessionTimelineAny(session.id, stamp) : undefined;
+
+  let foldEvents = events;
+  if (foldEvents.length === 0 && session.filePath) {
+    foldEvents = readSessionTail(session.filePath, session.agent as SessionAgentId);
+  }
+
+  let projection: { request?: unknown; timeline: unknown; files?: unknown } | undefined = daemonProjection;
+  let onDemand = false;
+  if (!projection && foldEvents.length > 0) {
+    const state = foldTimeline(foldEvents, emptyTimelineState());
+    projection = {
+      request: state.request,
+      timeline: projectTimeline(state, undefined),
+      files: projectSessionFiles(state),
+    };
+    onDemand = true;
+  }
+
+  let messages: SessionDetailMessage[];
+  if (foldEvents.length > 0) {
+    messages = foldEvents
+      .filter((e): e is SessionEvent & { role: 'user' | 'assistant'; content: string } =>
+        e.type === 'message' && !e._synthetic && Boolean(e.content) && (e.role === 'user' || e.role === 'assistant'))
+      .slice(-SESSION_DETAIL_MAX_MESSAGES)
+      .map(e => ({ role: e.role, text: bound(e.content), at: e.timestamp ?? null }));
+  } else {
+    messages = [];
+    if (digest?.firstUser) messages.push({ role: 'user', text: bound(digest.firstUser), at: session.timestamp ?? null });
+    if (digest?.lastAssistant) messages.push({ role: 'assistant', text: bound(digest.lastAssistant), at: session.lastActivity ?? null });
+  }
+
+  const endStamp = sessionTranscriptStamp(session);
+  const unchanged = canDateEvents && stamp !== undefined && endStamp !== undefined
+    && stamp.fileMtimeMs === endStamp.fileMtimeMs && stamp.fileSize === endStamp.fileSize;
+  const partial = Boolean(digest?.partial) || !daemonProjection || !unchanged;
+  const reason = digest?.partialReason
+    ?? (onDemand
+      ? 'background timeline pass has not reached this session yet; request/timeline/files below are an on-demand bounded fold, not the full-history daemon projection'
+      : (!projection ? 'no transcript available to fold request/timeline/files for this session' : null));
+
+  return {
+    request: projection?.request ?? null,
+    timeline: projection?.timeline ?? null,
+    files: projection?.files ?? null,
+    messages,
+    sourceRevision: unchanged ? new Date(stamp.fileMtimeMs).toISOString() : null,
+    partial,
+    reason,
+  };
 }

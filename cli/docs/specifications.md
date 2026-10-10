@@ -218,7 +218,8 @@ SSH access (§7); rendering sessions that no harness produced.
   (`sessions-cli/src/lib/session/digest.ts:1-9`). No preview path may make a network/LLM call or
   block on async I/O.
 
-- **SES-9a (MUST).** `sessions preview <id-or-prefix>` MUST resolve ID-shaped
+- **SES-9a (MUST).** `ps preview <id-or-prefix>` (and its retiring alias
+  `sessions preview`) MUST resolve ID-shaped
   selectors through the SQLite ID index across the selected fleet. A full UUID
   MAY return on its first exact **locally-definitive** hit — one this box can
   actually answer for, meaning a transcript on this disk or a genuine non-self
