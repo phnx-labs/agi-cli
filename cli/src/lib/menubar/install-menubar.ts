@@ -307,8 +307,6 @@ export interface MenubarRestartDeps {
   deadlineMs: number;
 }
 
-// The kickstart runs in its own session: launchd ends the helper's whole process
-// group, so a restart requested from AGI Menu itself must outlive its caller.
 function kickstartDetached(target: string): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn('launchctl', ['kickstart', '-k', target], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
@@ -528,8 +526,6 @@ function menubarSetupNeedsRepoint(): boolean {
   });
 }
 
-// A plist written before PHNX-4325 has KeepAlive=true, which relaunches the menu
-// after Quit; the current one relaunches only after a crash.
 function plistRelaunchesCleanExit(): boolean {
   try {
     return /<key>KeepAlive<\/key>\s*<true\/>/.test(fs.readFileSync(servicePlistPath(), 'utf-8'));
