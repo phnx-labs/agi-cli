@@ -1,1 +1,0 @@
-- **Ship AGI Menu update settings (PHNX-4323).** Raise the signed menu helper floor to 1.15.19, which shows the app version and update status, manual check/update controls, and the synced automatic-update switch. Source: `cli/src/lib/helper-versions.ts`; helper release: `menubar/v1.15.19`.
