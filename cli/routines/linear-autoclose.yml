@@ -83,7 +83,7 @@ command: |
     PR_STATE=$(echo "$PR_JSON" | jq -r '.state')
     MERGED_AT=$(echo "$PR_JSON" | jq -r '.mergedAt // ""')
 
-    # ── decision: mirrors shouldCloseIssue() in linear-autoclose.ts ─────────
+    # ── decision ────────────────────────────────────────────────────────────
     if [ "$PR_STATE" != "MERGED" ] || [ -z "$MERGED_AT" ]; then
       continue
     fi
