@@ -1416,6 +1416,8 @@ agents daemon services disable browser-ipc  # stop hosting browser IPC without s
 agents browser stop --service               # browser-scoped alias; next browser action requiring IPC re-enables it
 agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
+agents daemon logs --level error --since 1h # each restart, with what was running when it happened
+agents daemon logs level debug              # trace every tick and slow section, live; `level info` turns it off
 agents daemon doctor                        # one-shot health check; non-zero exit on problems
 
 agents daemon index roots                   # transcript directories the indexer scans (JSON)

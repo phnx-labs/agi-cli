@@ -32,7 +32,10 @@ import {
   setDaemonServiceEnabled,
   getDaemonServicesConfigPath,
   queueDaemonServiceRestart,
+  readDaemonLogLevel,
+  writeDaemonLogLevel,
 } from '../lib/daemon-services.js';
+import { LOG_LEVELS, levelRank, parseLogLevel } from '../lib/daemon/diagnostics.js';
 import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
@@ -445,6 +448,7 @@ interface DaemonLogEntry {
   ts: string;
   level: string;
   message: string;
+  data?: Record<string, unknown>;
 }
 
 function parseLogLines(raw: string): DaemonLogEntry[] {
@@ -459,14 +463,8 @@ function parseLogLines(raw: string): DaemonLogEntry[] {
   return out;
 }
 
-const LEVEL_RANK: Record<string, number> = { INFO: 0, WARN: 1, ERROR: 2 };
-
 function passesFilters(entry: DaemonLogEntry, minLevel: string | undefined, sinceMs: number | undefined): boolean {
-  if (minLevel) {
-    const min = LEVEL_RANK[minLevel.toUpperCase()] ?? 0;
-    const level = LEVEL_RANK[entry.level.toUpperCase()] ?? 0;
-    if (level < min) return false;
-  }
+  if (minLevel && levelRank(entry.level) < levelRank(minLevel)) return false;
   if (sinceMs !== undefined && Date.parse(entry.ts) < sinceMs) return false;
   return true;
 }
@@ -474,9 +472,37 @@ function passesFilters(entry: DaemonLogEntry, minLevel: string | undefined, sinc
 function printLogEntry(entry: DaemonLogEntry): void {
   const color = entry.level === 'ERROR' ? chalk.red : entry.level === 'WARN' ? chalk.yellow : chalk.gray;
   console.log(`${chalk.gray(entry.ts)} ${color(entry.level.padEnd(5))} ${entry.message}`);
+  if (entry.data && (entry.level === 'ERROR' || entry.level === 'WARN')) console.log(chalk.gray(`      ${JSON.stringify(entry.data)}`));
+}
+
+function assertLogLevelOption(level: string | undefined): void {
+  if (level !== undefined && !parseLogLevel(level)) {
+    throw new Error(`--level must be one of ${LOG_LEVELS.join(', ').toLowerCase()} (got '${level}')`);
+  }
+}
+
+function runLogLevel(level: string | undefined, opts: { json?: boolean }): void {
+  if (level === undefined) {
+    const current = readDaemonLogLevel().toLowerCase();
+    if (opts.json) console.log(JSON.stringify({ level: current, source: process.env.AGENTS_DAEMON_LOG_LEVEL ? 'env' : 'config' }));
+    else console.log(current);
+    return;
+  }
+  const parsed = parseLogLevel(level);
+  if (!parsed) throw new Error(`log level must be one of ${LOG_LEVELS.join(', ').toLowerCase()} (got '${level}')`);
+  writeDaemonLogLevel(parsed);
+  const applied = signalDaemonReload();
+  if (opts.json) {
+    console.log(JSON.stringify({ level: parsed.toLowerCase(), applied }));
+    return;
+  }
+  console.log(applied
+    ? chalk.green(`Daemon log level set to ${parsed.toLowerCase()}.`) + chalk.gray(' Applied live. Follow it: agents daemon logs -f')
+    : chalk.yellow(`Daemon log level set to ${parsed.toLowerCase()} in ${getDaemonServicesConfigPath()}, but the reload signal was not delivered; it applies on the next daemon start.`));
 }
 
 async function runLogs(opts: { lines?: string; follow?: boolean; level?: string; since?: string; json?: boolean }): Promise<void> {
+  assertLogLevelOption(opts.level);
   const sinceMs = opts.since ? Date.now() - (parseDuration(opts.since) ?? 0) * 1000 : undefined;
   const lineCount = opts.lines ? parseInt(opts.lines, 10) : 50;
 
@@ -750,6 +776,9 @@ export function registerDaemonCommand(program: Command): void {
       # Tail the daemon's own log, warnings and up, from the last hour
       agents daemon logs -f --level warn --since 1h
 
+      # Trace every service tick and slow section while diagnosing (applies live)
+      agents daemon logs level debug
+
       # One-shot health check for scripts (non-zero exit on problems)
       agents daemon doctor
 
@@ -992,17 +1021,49 @@ export function registerDaemonCommand(program: Command): void {
   registerFunnelCommand(cmd);
   registerDaemonIndexCommand(cmd);
 
-  cmd.command('logs')
-    .description('Read the daemon\'s own log (lifecycle + subsystem errors — not routine run output).')
+  const logsCmd = cmd.command('logs')
+    .description('Read the daemon\'s own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals (not routine run output).')
     .option('-n, --lines <number>', 'Show this many recent lines', '50')
     .option('-f, --follow', 'Stream new lines as they are written (like tail -f)')
-    .option('--level <level>', 'Minimum level to show: info | warn | error')
+    .option('--level <level>', 'Minimum level to show: debug | info | warn | error')
     .option('--since <dur>', 'Only lines newer than this (e.g. 1h, 30m)')
     .option('--json', 'Emit each line as JSON')
     .action(async (opts, command) => {
       const merged = command.optsWithGlobals();
       await runLogs({ lines: opts.lines, follow: opts.follow, level: opts.level, since: opts.since, json: merged.json === true || opts.json === true });
     });
+
+  logsCmd.command('level [level]')
+    .description('Show or set what the daemon writes: debug (every tick and span) | info (default) | warn | error. Applies live.')
+    .option('--json', 'Emit as JSON')
+    .action((level: string | undefined, opts, command) => {
+      runLogLevel(level, { json: command.optsWithGlobals().json === true || opts.json === true });
+    });
+
+  setHelpSections(logsCmd, {
+    examples: `
+      # Why did it restart? Errors carry a snapshot: in-flight ticks, slow sections, vitals
+      agents daemon logs --level error --since 1h
+
+      # Event-loop stalls and slow synchronous sections, as they happen
+      agents daemon logs -f --level warn
+
+      # Turn on per-tick and per-span tracing while you diagnose, then turn it back off
+      agents daemon logs level debug
+      agents daemon logs -f --level debug
+      agents daemon logs level info
+
+      # Machine-readable, with each line's structured data
+      agents daemon logs --since 10m --json
+    `,
+    notes: `
+      Every line is JSON in the daemon log file (agents daemon status shows the path), with
+      an optional data object. Event names: tick.slow, tick.failed, tick.breach, loop.stall,
+      span.slow, vitals (once a minute), and at debug tick.start, tick.ok, span.
+      The level is stored as logLevel in the daemon's services.yaml; AGENTS_DAEMON_LOG_LEVEL
+      overrides it for one daemon process.
+    `,
+  });
 
   cmd.command('doctor')
     .description('One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.')

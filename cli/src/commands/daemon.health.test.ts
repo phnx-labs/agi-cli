@@ -39,6 +39,38 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     expect(res.status).toBe(0);
     expect(JSON.parse(res.stdout.trim())).toEqual([]);
   });
+  it('logs level sets and reads back the daemon log level, and --level debug shows debug lines with their data', () => {
+    const home = makeHome();
+    const set = run(home, ['logs', 'level', 'debug', '--json']);
+    expect(set.status).toBe(0);
+    expect(JSON.parse(String(set.stdout).trim())).toMatchObject({ level: 'debug' });
+    expect(fs.readFileSync(path.join(home, '.agents', 'daemon', 'services.yaml'), 'utf-8')).toContain('logLevel: debug');
+    expect(String(run(home, ['logs', 'level']).stdout).trim()).toBe('debug');
+
+    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    fs.writeFileSync(path.join(daemonDir, 'logs.jsonl'), [
+      JSON.stringify({ ts: new Date().toISOString(), level: 'DEBUG', message: 'tick ok', data: { event: 'tick.ok', durMs: 4 } }),
+      JSON.stringify({ ts: new Date().toISOString(), level: 'INFO', message: 'vitals', data: { event: 'vitals' } }),
+    ].join('\n') + '\n');
+    const all = JSON.parse(String(run(home, ['logs', '--json']).stdout).trim());
+    expect(all.map((e: { level: string }) => e.level)).toEqual(['DEBUG', 'INFO']);
+    const debug = JSON.parse(String(run(home, ['logs', '--level', 'debug', '--json']).stdout).trim());
+    expect(debug[0]).toMatchObject({ level: 'DEBUG', data: { event: 'tick.ok', durMs: 4 } });
+    const infoUp = JSON.parse(String(run(home, ['logs', '--level', 'info', '--json']).stdout).trim());
+    expect(infoUp.map((e: { level: string }) => e.level)).toEqual(['INFO']);
+  });
+
+  it('logs rejects an unknown --level and logs level rejects an unknown level, instead of guessing', () => {
+    const home = makeHome();
+    const filter = run(home, ['logs', '--level', 'verbose']);
+    expect(filter.status).not.toBe(0);
+    expect(String(filter.stderr)).toContain('--level must be one of debug, info, warn, error');
+    const set = run(home, ['logs', 'level', 'verbose']);
+    expect(set.status).not.toBe(0);
+    expect(String(set.stderr)).toContain('log level must be one of debug, info, warn, error');
+  });
+
   it('doctor exits non-zero and names the problem when the daemon should be running but is not', () => {
     const res = run(makeHome(), ['doctor']);
     expect(res.status).toBe(1);

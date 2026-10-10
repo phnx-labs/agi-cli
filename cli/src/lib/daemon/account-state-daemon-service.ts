@@ -55,9 +55,9 @@ export class AccountUsageService extends BasePeriodicService {
   readonly intervalMs = USAGE_STATE_TICK_MS;
   readonly deadlineMs = REFRESH_DEADLINE_MS;
 
-  private readonly refresh: (signal: AbortSignal) => Promise<void>;
+  private readonly refresh: (signal: AbortSignal, log: DaemonContext['log']) => Promise<void>;
 
-  constructor(refresh: (signal: AbortSignal) => Promise<void> = runUsageRefreshTick) {
+  constructor(refresh: (signal: AbortSignal, log: DaemonContext['log']) => Promise<void> = runUsageRefreshTick) {
     super();
     this.refresh = refresh;
   }
@@ -65,9 +65,9 @@ export class AccountUsageService extends BasePeriodicService {
   protected async onStart(): Promise<void> {}
   protected async onStop(): Promise<void> {}
 
-  protected async onTick(_ctx: DaemonContext, signal: AbortSignal): Promise<void> {
+  protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {
     await Promise.race([
-      this.refresh(signal),
+      this.refresh(signal, ctx.log),
       abortRejection(signal, 'usage refresh aborted at deadline'),
     ]);
   }

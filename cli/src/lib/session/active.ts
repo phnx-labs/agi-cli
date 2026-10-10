@@ -1,4 +1,5 @@
 import { writerProcessView } from './process-view.js';
+import { span, spanSync } from '../daemon/diagnostics.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -1486,11 +1487,12 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
     const { loadLocalActiveSessions } = await import('./session-cache.js');
     return (await loadLocalActiveSessions()).sessions;
   }
+  const count = (rows: ActiveSession[]) => () => ({ rows: rows.length });
   const [tmuxAgents, teams, terminals, cloud] = await Promise.all([
-    listTmuxAgentSessions().catch(() => [] as ActiveSession[]),
-    listTeamsActive({ localOnly: opts.localOnly }).catch(() => [] as ActiveSession[]),
-    listTerminalsActive().catch(() => [] as ActiveSession[]),
-    Promise.resolve(listCloudActive()),
+    span('active.tmux', () => listTmuxAgentSessions().catch(() => [] as ActiveSession[])),
+    span('active.teams', () => listTeamsActive({ localOnly: opts.localOnly }).catch(() => [] as ActiveSession[])),
+    span('active.terminals', () => listTerminalsActive().catch(() => [] as ActiveSession[])),
+    Promise.resolve(spanSync('active.cloud', () => listCloudActive())),
   ]);
 
   const knownPids = new Set<number>();
@@ -1498,18 +1500,20 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   for (const s of teams) if (s.pid) knownPids.add(s.pid);
   for (const s of terminals) if (s.pid) knownPids.add(s.pid);
 
-  const unattributed = opts.skipHeadless ? [] : await listUnattributedActive(knownPids);
+  const unattributed = opts.skipHeadless ? [] : await span('active.unattributed', () => listUnattributedActive(knownPids));
 
   const merged = dedupeBySession([...tmuxAgents, ...teams, ...terminals, ...cloud, ...unattributed]);
-  await enrichProvenance(merged);
-  await resolveOrigins(merged);
-  foldPresence(merged);
-  await foldTmuxClients(merged);
-  foldHostLink(merged);
-  foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
-  annotateOrchestratorLabels(merged);
-  foldRecap(merged);
-  foldPhase(merged);
+  await span('active.provenance', () => enrichProvenance(merged), count(merged));
+  await span('active.origins', () => resolveOrigins(merged), count(merged));
+  spanSync('active.fold-presence', () => foldPresence(merged), count(merged));
+  await span('active.tmux-clients', () => foldTmuxClients(merged));
+  spanSync('active.fold', () => {
+    foldHostLink(merged);
+    foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
+    annotateOrchestratorLabels(merged);
+    foldRecap(merged);
+    foldPhase(merged);
+  }, count(merged));
   return merged;
 }
 

@@ -34,6 +34,7 @@ import { blockIdForSession, readBlock, readResolution } from '../feed/feed.js';
 import { reconcileAttention, harnessOf, type AttentionItem, type AttentionKind } from '../feed/attention.js';
 import { notifyDesktop, type DesktopNotification } from '../menubar/notify-desktop.js';
 import { BasePeriodicService, type DaemonContext } from './service.js';
+import { span, spanSync } from './diagnostics.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 
 const ATTENTION_NOTIFY_TICK_MS = 5_000;
@@ -117,27 +118,30 @@ export class AttentionNotifyService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    const sessions = await this.getSessions();
+    const sessions = await span('attention.sessions', () => this.getSessions(), () => ({}));
     const host = machineId();
+    let posted = 0;
     for (const session of sessions) {
       if (!session.sessionId) continue;
       const projected: ActiveSession = { ...session, host };
       const blockId = blockIdForSession(session.sessionId);
-      const item = reconcileAttention({
+      const item = spanSync('attention.reconcile', () => reconcileAttention({
         block: readBlock(blockId, this.feedRoot),
         session: projected,
         resolution: readResolution(blockId, this.feedRoot),
         nowMs: this.now(),
-      });
+      }));
       if (!item || !BANNER_KINDS[item.kind]) continue;
       if (await this.hasNotified(item.key)) continue;
       const notification = buildAttentionNotification(item, projected);
       if (!notification) continue;
       this.notify(notification);
       await this.markNotified(item.key);
-      ctx.log('INFO', `attention-notify: posted ${item.kind} banner for ${item.key}`);
+      posted += 1;
+      ctx.log('INFO', `attention-notify: posted ${item.kind} banner for ${item.key}`, { event: 'attention.posted', kind: item.kind, key: item.key });
     }
     await this.pruneLedger();
+    ctx.log('DEBUG', `attention-notify: ${sessions.length} session(s) reconciled, ${posted} banner(s) posted`, { event: 'attention.tick', sessions: sessions.length, posted });
   }
 
   private ledgerPath(key: string): string {

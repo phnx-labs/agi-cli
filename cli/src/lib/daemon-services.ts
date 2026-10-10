@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getDaemonConfigDir } from './state.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
+import { LOG_LEVELS, parseLogLevel, type LogLevel } from './daemon/diagnostics.js';
 
 export type DaemonServiceId =
   | 'scheduler'
@@ -202,6 +203,36 @@ export function writeDaemonServicesConfig(cfg: DaemonServicesConfig): void {
 
   const out = yaml.stringify({ ...preserved, services }, { sortMapEntries: false });
   atomicWriteFileSync(filePath, out, 'utf-8');
+}
+
+export function readDaemonLogLevel(): LogLevel {
+  const fromEnv = parseLogLevel(process.env.AGENTS_DAEMON_LOG_LEVEL);
+  if (fromEnv) return fromEnv;
+  let raw: string;
+  try {
+    raw = fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8');
+  } catch {
+    return 'INFO';
+  }
+  const parsed = yaml.parse(raw) as Record<string, unknown> | null;
+  if (!parsed || parsed.logLevel === undefined) return 'INFO';
+  const level = parseLogLevel(parsed.logLevel);
+  if (!level) throw new Error(`${getDaemonServicesConfigPath()}: logLevel '${String(parsed.logLevel)}' is not one of ${LOG_LEVELS.join(', ').toLowerCase()}`);
+  return level;
+}
+
+export function writeDaemonLogLevel(level: LogLevel): void {
+  const dir = getDaemonConfigDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const filePath = getDaemonServicesConfigPath();
+  let doc: Record<string, unknown> = {};
+  try {
+    const parsed = yaml.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown> | null;
+    if (parsed && typeof parsed === 'object') doc = parsed;
+  } catch {
+  }
+  doc.logLevel = level.toLowerCase();
+  atomicWriteFileSync(filePath, yaml.stringify(doc, { sortMapEntries: false }), 'utf-8');
 }
 
 export function isDaemonServiceEnabled(id: DaemonServiceId): boolean {

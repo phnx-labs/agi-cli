@@ -377,6 +377,38 @@ and others) — so roughly 3 of ~31 cache-like constructs
 in this area route through the shared bounded cache. State this as it is:
 most daemon-adjacent caching has no shared eviction policy today.
 
+## Diagnosing the daemon: levels, ticks, spans, vitals
+
+The daemon log (`logs.jsonl`, read with `agents daemon logs`) is the record a
+crash loop is diagnosed from, so it explains *why*, not just *that*. Every line
+is `{ts, level, message, data?}`; `data` carries the structured fields below.
+Levels are `debug < info < warn < error`; the daemon writes at or above its
+level (`info` by default), set live with `agents daemon logs level <level>` (stored as
+`logLevel` in `services.yaml`, re-read on SIGHUP; `AGENTS_DAEMON_LOG_LEVEL`
+overrides it for one process). `log()` in `daemon.ts` redacts every string in
+`data` the same way it redacts the message.
+
+| Event | Level | Written by | What it answers |
+|---|---|---|---|
+| `tick.start`, `tick.ok` | debug | `ServiceSupervisor.runTick` | every supervised tick and its duration |
+| `tick.slow` | warn | `runTick` | a tick that used over half its deadline, with the other in-flight ticks |
+| `tick.failed` | warn | `recordFailure` | a thrown tick: error, duration, consecutive failures |
+| `tick.breach` | error | `exitForRestart` | the restart cause: elapsed time, every in-flight tick, the synchronous sections that ran during the tick, span totals since the last vitals line, and a vitals snapshot |
+| `span.slow` | warn | `diagnostics.ts` `spanSync` | one synchronous section that held the event loop past 250 ms |
+| `span` | debug | `spanSync` / `span` | every instrumented section and its duration |
+| `loop.stall` | warn | `DaemonVitals` | the event loop did not run for over 1 s, and which instrumented sections ran in that window (or that none did: uninstrumented code, or the process was descheduled) |
+| `vitals` | info | `DaemonVitals.report`, once a minute | event-loop delay p50/p99/max, process CPU %, RSS, heap, load average, in-flight ticks, and the top sections by total time |
+
+**A deadline breach is usually starvation, not a slow service.** The supervisor's
+deadline is a timer on the same event loop as every other service and the feed
+hub, so a tick that does almost no work still breaches when something else holds
+the loop. That is why the breach line carries what *else* was running rather than
+only naming the service whose timer fired. Code that runs outside the supervisor
+(the feed hub, `getActiveSessions`, the fleet projection) is attributed through
+spans: wrap a new hot path in `spanSync(name, fn)` when it is synchronous and
+`span(name, fn)` when it is not. Both are passthroughs outside the daemon, where
+no span log is installed.
+
 ## Service ownership status
 
 **Shipped:** the `DaemonService`/`PeriodicService` contract and

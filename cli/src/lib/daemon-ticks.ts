@@ -1,4 +1,5 @@
 
+import { span, spanSync, type DiagnosticLog } from './daemon/diagnostics.js';
 import type { FleetStatusRow } from './fleet-status.js';
 import { AUTH_PROBE_MAX_AGE_MS, authTargetKey, type AuthProbeRow } from './auth-health.js';
 export { AUTH_PROBE_MAX_AGE_MS } from './auth-health.js';
@@ -83,12 +84,14 @@ export async function runFleetCacheWarmTick(signal?: AbortSignal): Promise<void>
   console.log(`fleet cache warm: ${authCount} auth row(s) refreshed, ${row.agents.running} running agent(s) on ${row.host}`);
 }
 
-export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
+const noLog: DiagnosticLog = () => {};
+
+export async function runUsageRefreshTick(signal?: AbortSignal, log: DiagnosticLog = noLog): Promise<void> {
   const { runUsageRefresh, buildLocalUsageAccounts } = await import('./usage-refresh.js');
   const { writeClaudeUsageCache, readClaudeUsageCache } = await import('./accounting/usage.js');
   const { usageRateLimitedUntil } = await import('./usage-backoff.js');
   const { machineId } = await import('./machine-id.js');
-  const r = await runUsageRefresh({
+  const r = await span('usage.refresh', () => runUsageRefresh({
     listAccounts: buildLocalUsageAccounts,
     writeUsageCache: writeClaudeUsageCache,
     backoffUntil: (agentId, usageKey) => usageRateLimitedUntil(agentId, Date.now(), usageKey),
@@ -99,40 +102,48 @@ export async function runUsageRefreshTick(signal?: AbortSignal): Promise<void> {
       const { publishUsageSnapshotToSharedStore } = await import('./accounting/usage-sync.js');
       await publishUsageSnapshotToSharedStore();
     },
-  });
+  }));
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');
-  const byok = await refreshDueByokUsage(listProfiles());
-  console.log(
+  const byok = await span('usage.refresh-byok', () => refreshDueByokUsage(listProfiles()));
+  log(
+    r.failed > 0 ? 'WARN' : 'INFO',
     `usage refresh: ${r.refreshed} refreshed, ${r.failed} failed, ${r.skippedNotDue} not-due, ${r.skippedBackoff} backed-off, ${r.skippedCap} capped, ${r.skippedBudget} over-budget, ${r.skippedFresh} statusline-fresh; BYOK ${byok.refreshed} refreshed, ${byok.skipped} not-due`,
+    {
+      event: 'usage.refresh', refreshed: r.refreshed, failed: r.failed, notDue: r.skippedNotDue, backedOff: r.skippedBackoff,
+      capped: r.skippedCap, overBudget: r.skippedBudget, statuslineFresh: r.skippedFresh, byokRefreshed: byok.refreshed, byokNotDue: byok.skipped,
+    },
   );
 }
 
 export async function runActiveSessionsWarmTick(
-  opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]>; nowMs?: number } = {},
+  opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]>; nowMs?: number; log?: DiagnosticLog } = {},
 ): Promise<{ sessions: number }> {
+  const log = opts.log ?? noLog;
   const { publishLocalActiveSessions, isActiveSessionsJournalReaderRecent } = await import('./session/session-cache.js');
   const nowMs = opts.nowMs ?? Date.now();
   if (!isActiveSessionsJournalReaderRecent(nowMs)) {
-    console.log('active-sessions warm: idle (no recent reader), skipping gather');
+    log('DEBUG', 'active-sessions warm: idle (no recent reader), skipping gather', { event: 'sessions.warm', skipped: 'no-reader' });
     return { sessions: 0 };
   }
   const gather = opts.gather ?? (async () => {
     const { getActiveSessions } = await import('./session/active.js');
     return getActiveSessions({ localOnly: true });
   });
-  const gathered = await gather();
+  const gathered = await span('sessions.warm.gather', gather, () => ({}));
   const { runTimelinePassSync } = await import('./session/timeline-pass.js');
   let timeline = { computed: 0, reused: 0, skipped: 0 };
   try {
-    timeline = runTimelinePassSync({ sessions: gathered, nowMs });
+    timeline = spanSync('sessions.timeline-pass', () => runTimelinePassSync({ sessions: gathered, nowMs }), () => ({ sessions: gathered.length }));
   } catch (err) {
-    console.log(`active-sessions warm: timeline pass failed: ${(err as Error).message}`);
+    log('WARN', `active-sessions warm: timeline pass failed: ${(err as Error).message}`, { event: 'sessions.timeline-pass.failed', error: (err as Error).message });
   }
-  const r = await publishLocalActiveSessions({ gather: async () => gathered, nowMs });
-  console.log(
+  const r = await span('sessions.warm.publish', () => publishLocalActiveSessions({ gather: async () => gathered, nowMs }));
+  log(
+    'DEBUG',
     `active-sessions warm: ${r.sessions.length} session(s) published; `
     + `timeline ${timeline.computed} folded, ${timeline.reused} current, ${timeline.skipped} skipped`,
+    { event: 'sessions.warm', sessions: r.sessions.length, ...timeline },
   );
   return { sessions: r.sessions.length };
 }

@@ -11,7 +11,7 @@ export interface ServiceHealth {
 }
 
 export interface DaemonContext {
-  log: (level: string, message: string) => void;
+  log: (level: string, message: string, fields?: Record<string, unknown>) => void;
 }
 
 export interface DaemonService {
