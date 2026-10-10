@@ -5,7 +5,6 @@ import { spawn } from 'child_process';
 import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import { truncate, padRight, humanDuration, formatBytes } from '../lib/format.js';
-import { sanitizeForTerminal } from '../lib/redact.js';
 import { resolveProjectKey } from '../lib/project-key.js';
 import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../lib/projects.js';
 import ora from 'ora';
@@ -26,7 +25,6 @@ import { gatherRemoteList, runOnPeer, shouldIncludeLocal } from '../lib/session/
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, countSessionsInScope, resolveSessionById, looksLikeSessionId, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
-import { findSessionsById, querySessions, getSessionById } from '../lib/session/db.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import {
   filterTeamSessions,
