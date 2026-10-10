@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { AgentId } from '../types.js';
 import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import { SESSION_AGENTS, isAgentTmuxAlias, resolveRoutineName } from '@phnx-labs/sessions-cli/reader';
+import { SESSION_AGENTS, isAgentTmuxAlias, resolveRoutineName, safeTeamText } from '@phnx-labs/sessions-cli/reader';
 import { shortIdFromName, type ActiveSession } from './active.js';
 import { machineId } from './sync/config.js';
 import { loadLocalActiveSessions, readActiveSessionsCache } from './session-cache.js';
@@ -571,4 +571,13 @@ export async function resolveSessionMetadataValue(
   } catch (error: any) {
     return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] }, selector);
   }
+}
+
+export function matchesTeam(session: SessionMeta, team: string): boolean {
+  const want = safeTeamText(team)?.trim().toLowerCase();
+  if (!want) return true;
+  return (
+    safeTeamText(session.spawnedTeam)?.toLowerCase() === want ||
+    safeTeamText(session.teamOrigin?.team)?.toLowerCase() === want
+  );
 }

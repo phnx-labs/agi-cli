@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { foldHostLink, type ActiveSession } from './active';
-import { isAwaitingUser } from '../../commands/ps-roster.js';
+import { isAwaitingUser } from './presentation.js';
 import { HOST_HEARTBEAT_STALE_MS } from './host-link';
 
 const staleWindow = Date.now() - HOST_HEARTBEAT_STALE_MS - 1;

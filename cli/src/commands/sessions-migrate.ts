@@ -12,7 +12,7 @@ import { AGENTS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { getActiveSessions } from '../lib/session/active.js';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
-import { buildResumeCommand } from './sessions.js';
+import { buildResumeCommand } from '../lib/session/resume-command.js';
 import { injectTargetFromReplyRail } from '../lib/session/inject.js';
 import { injectIntoTerminal, iLoginShell, shellQuote as quoteArg } from '../lib/terminal/index.js';
 import { killSession } from '../lib/tmux/session.js';

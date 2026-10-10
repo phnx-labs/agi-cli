@@ -12,7 +12,7 @@ import {
   flatSessionRow,
   linkTicketCell,
   linkCwdCell,
-} from '../sessions.js';
+} from '../../lib/session/presentation.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { stringWidth } from '../../lib/session/width.js';
 

@@ -1928,7 +1928,8 @@ touching any of it.
 Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
 (+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich
 `runSessionBrowser` ([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts));
-a query/filter falls through to `pickSessionInteractive` → `sessionPicker`.
+a query/filter falls through to `pickSessionInteractive` → `sessionPicker`
+(both in [`src/commands/sessions-picker.ts`](src/commands/sessions-picker.ts)).
 `--flat`/`--tree`/`--json`/`--no-interactive` print non-interactive views with no
 preview. `PICKER_RECENT_COUNT = 15` caps the picker's list rows.
 
@@ -1963,7 +1964,7 @@ canonical `agents sessions resume <id>` (`lib/session/resume-command.ts`), whose
 already promised source-device routing — this is what makes that true. Its
 no-tab-backend path (`inplace`, which any Linux box in a plain ssh shell lands on)
 never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
-`resumeSessionInPlace` is the LOCAL takeover and **fails loud** if it is handed a
+`resumeSessionInPlace` ([`src/lib/session/resume-command.ts`](src/lib/session/resume-command.ts)) is the LOCAL takeover and **fails loud** if it is handed a
 peer-owned session, since reaching it with one means a caller skipped its routing
 step.
 

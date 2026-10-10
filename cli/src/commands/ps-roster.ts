@@ -1,7 +1,6 @@
 import * as path from 'path';
 import chalk from 'chalk';
 import { sessionDisplayAgent, linkUrl } from '@phnx-labs/sessions-cli/reader';
-import { toComparablePath, homeDir } from '../lib/platform/index.js';
 import {
   getActiveSessions,
   describeActiveDiscoveryHealth,
@@ -23,8 +22,8 @@ import { formatCompactAge } from '../lib/session/relative-time.js';
 import { colorAgent } from '../lib/agents.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { listBookmarks } from '../lib/session/bookmarks.js';
-import { signalBadges } from '../lib/session/presentation.js';
-import { formatTodoCompact, githubRepoUrlFromCwd } from './sessions-picker.js';
+import { cleanPreview, formatTodoCompact, isAwaitingUser, shortCwd, signalBadges, statusColor } from '../lib/session/presentation.js';
+import { githubRepoUrlFromCwd } from './sessions-picker.js';
 import { isInteractiveTerminal } from './utils.js';
 
 export interface LiveStatusFlags {
@@ -38,60 +37,6 @@ export interface LiveStatusFlags {
   abandoned?: boolean;
   queued?: boolean;
   unknown?: boolean;
-}
-
-function shortCwd(cwd?: string): string {
-  if (!cwd) return '-';
-  const home = homeDir();
-  return toComparablePath(cwd).startsWith(toComparablePath(home))
-    ? '~' + cwd.slice(home.length)
-    : cwd;
-}
-
-export function statusColor(status: ActiveSession['status']): (s: string) => string {
-  switch (status) {
-    case 'running': return chalk.green;
-    case 'idle': return chalk.gray;
-    case 'queued': return chalk.blue;
-    case 'input_required': return chalk.yellow;
-    case 'closed': return chalk.dim;
-    case 'abandoned': return chalk.red;
-    case 'crashed': return chalk.redBright;
-    case 'orphaned': return chalk.yellow;
-    case 'unknown': return chalk.magenta;
-  }
-}
-
-export function cleanPreview(text: string): string {
-  // eslint-disable-next-line no-control-regex
-  return text
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '')
-    .replace(/<\/?(?:local-command-stdout|command-name|command-message|command-args|task-notification|system-reminder)>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function buildSessionDescription(s: ActiveSession): string {
-  const todo = formatTodoCompact(s.todos);
-  if (s.context === 'cloud') {
-    const base = s.preview || `${s.cloudProvider ?? ''}${s.cloudTaskId ? ` · ${s.cloudTaskId.slice(0, 12)}` : ''}`;
-    return cleanPreview([todo, base].filter(Boolean).join(' · '));
-  }
-  if (s.context === 'teams') {
-    const parts = [s.teamName];
-    if (s.label && s.label !== s.teamName) parts.push(s.label);
-    const orch = s.orchestratorLabel || (s.orchestratorSessionId ? s.orchestratorSessionId.slice(0, 8) : '');
-    if (orch) parts.push(`by ${orch}`);
-    if (todo) parts.push(todo);
-    const target = s.preview || s.assignedTask || s.topic;
-    if (target) parts.push(target);
-    return cleanPreview(parts.filter(Boolean).join(' · '));
-  }
-
-  // ladder-exempt: compact live preview base, not the row's headline.
-  const base = s.preview || s.label || s.topic || '';
-  return cleanPreview([todo, base].filter(Boolean).join(' · '));
 }
 
 export function formatActiveRowDescription(s: ActiveSession): string {
@@ -135,44 +80,6 @@ export function indexActiveBySessionId(active: ActiveSession[]): Map<string, Act
     if (a.sessionId) byId.set(a.sessionId, a);
   }
   return byId;
-}
-
-
-export function liveGlyphAndPreview(a: ActiveSession | undefined): { glyph: string; preview: string } {
-  if (!a) return { glyph: '', preview: '' };
-  if (a.status === 'abandoned') return { glyph: statusColor(a.status)('⊘'), preview: buildSessionDescription(a) };
-  if (a.status === 'closed') return { glyph: statusColor(a.status)('×'), preview: buildSessionDescription(a) };
-  if (a.status === 'crashed') return { glyph: statusColor(a.status)('✗'), preview: buildSessionDescription(a) };
-  if (a.status === 'orphaned') return { glyph: statusColor(a.status)('◍'), preview: buildSessionDescription(a) };
-
-  const waiting = a.status === 'input_required' || a.activity === 'waiting_input';
-  const running = a.status === 'running' || a.activity === 'working';
-  const unknown = a.status === 'unknown';
-  const shape =
-    waiting ? '◐'
-      : running ? '●'
-        : unknown ? '◌'
-          : '○';
-  return { glyph: statusColor(a.status)(shape), preview: buildSessionDescription(a) };
-}
-
-export function liveStatusWord(a: ActiveSession | undefined): string {
-  if (!a) return '';
-  if (a.status === 'closed' || a.status === 'abandoned') return a.status;
-  if (a.status === 'crashed') return 'crashed';
-  if (a.status === 'orphaned') return 'orphan';
-  if (a.status === 'input_required' || a.activity === 'waiting_input') return 'waiting';
-  if (a.status === 'running' || a.activity === 'working') return 'working';
-  if (a.status === 'idle' || a.activity === 'idle') return 'idle';
-  if (a.status === 'queued') return 'queued';
-  return '';
-}
-
-export function isAwaitingUser(s: ActiveSession): boolean {
-  if (s.status === 'crashed' || s.status === 'closed') return false;
-
-  if (s.status === 'abandoned' && s.pidAlive !== true) return false;
-  return s.status === 'input_required' || s.activity === 'waiting_input';
 }
 
 function locatorBadge(s: ActiveSession): string {

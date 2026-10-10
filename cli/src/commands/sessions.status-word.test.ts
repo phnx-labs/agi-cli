@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { liveStatusWord } from './ps-roster.js';
+import { liveStatusWord } from '../lib/session/presentation.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function row(partial: Partial<ActiveSession>): ActiveSession {

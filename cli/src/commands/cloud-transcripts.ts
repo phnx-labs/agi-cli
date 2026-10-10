@@ -14,8 +14,7 @@ const DEFAULT_LIMIT = '50';
 
 export async function runCloudTranscripts(query: string | undefined, options: CloudTranscriptsOptions): Promise<void> {
   const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
-  const { buildFilterOptions, resolveViewMode, renderSession } = await import('../lib/session/presentation.js');
-  const { printSessionTable } = await import('./sessions.js');
+  const { buildFilterOptions, printSessionTable, resolveViewMode, renderSession } = await import('../lib/session/presentation.js');
 
   let filterOpts: FilterOptions;
   try {

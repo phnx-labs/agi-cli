@@ -200,7 +200,7 @@ SSH access (§7); rendering sessions that no harness produced.
 
 - **SES-8 (MUST).** Every list-row renderer MUST show a non-empty preview cell.
   The fallback chain is: live preview (the current turn) → `label` → first-prompt
-  `topic` → `'-'` (`buildSessionDescription`, `commands/sessions.ts:343-356`). A
+  `topic` → `'-'` (`buildSessionDescription`, `lib/session/presentation.ts:286`). A
   row MUST NOT render a blank preview cell.
   - `--active` rows satisfy this: `buildSessionDescription(s) || '-'`
     (`commands/sessions.ts:485`).
@@ -1653,8 +1653,8 @@ normative — a change that widens/narrows a cell is a spec change.
   on an actual miss AND either raising the bound past a realistic scan or acting
   on that `false`. Raised by the RUSH-2691 review.
 - **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
-  both feed `renderTopicCell` (~`commands/sessions.ts:1500`, `:2071` →
-  `:1862`) without the `'-'` fallback the other renderers use, so a session with
+  both feed `renderTopicCell` (`lib/session/presentation.ts:490`, `:752` →
+  `:572`) without the `'-'` fallback the other renderers use, so a session with
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
   untested. Directly contradicts "always show a preview" (SES-8).
 - **SES-GAP-2.** Metadata coverage is uneven. PR/ticket extractors are agent-agnostic
