@@ -1,6 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { applyScopeFilters, artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, teamBadge } from '../sessions.js';
+import { applyScopeFilters } from '../../lib/session/selection.js';
+import { artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, formatPickerLabel, hasNoBrowserDisqualifyingFlags, matchesTeam, teamBadge } from '../sessions.js';
 import { resolveRoutineName } from '../ps-roster.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';

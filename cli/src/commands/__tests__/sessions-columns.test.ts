@@ -3,8 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ActiveSession } from '../../lib/session/active.js';
 import chalk from 'chalk';
 import { stripVTControlCharacters } from 'node:util';
+import { ticketLabel } from '../../lib/session/selection.js';
 import {
-  ticketLabel,
   machineLabeler,
   formatPickerLabel,
   formatPickerTip,

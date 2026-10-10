@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, resolveSessionById } from '../lib/session/discover.js';
-import { parseAgentFilter } from './sessions.js';
+import { parseAgentFilter } from '../lib/session/selection.js';
 import { renderSessionLog, renderSessionLogJson } from '../lib/session/presentation.js';
 import { runSessions } from '../lib/sessions-client.js';
 import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';

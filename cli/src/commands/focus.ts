@@ -8,7 +8,8 @@ import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type Active
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '@phnx-labs/sessions-cli/reader';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 export { looksLikeTmuxAlias, resolveTmuxAliasState, shouldAttachLocalTmuxAliasBeforeFleet, type TmuxAliasState } from '../lib/session/local-tmux-attach.js';
-import { buildSessionRecoveryCommand, filterSessionsByQuery, formatLiveStatusHeadline, formatPickerLabel, isRunningLiveSession, pickerColumnsFor, resumeSessionInPlace, resolveSessionMetadataValue, resolveSessionAgentName } from './sessions.js';
+import { buildSessionRecoveryCommand, formatLiveStatusHeadline, formatPickerLabel, isRunningLiveSession, pickerColumnsFor, resumeSessionInPlace } from './sessions.js';
+import { filterSessionsByQuery, resolveSessionMetadataValue, resolveSessionAgentName } from '../lib/session/selection.js';
 import { requestedLiveStatuses, type LiveStatusFilter } from './ps-roster.js';
 import { resolveBackend, CONFIRM_THRESHOLD } from './sessions-resume.js';
 import { runOnPeer } from '../lib/session/remote-list.js';

@@ -1146,7 +1146,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         delete process.env.AGENTS_RESUME_SOURCE_JSON;
         const outcome = injectedSource
           ? { kind: 'resolved' as const, session: injectedSource }
-          : await (await import('./sessions.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
+          : await (await import('../lib/session/selection.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
         if (outcome.kind === 'partial') {
           const offline = outcome.failedPeers;
           console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));

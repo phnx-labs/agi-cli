@@ -12,10 +12,10 @@ import ora from 'ora';
 import { interruptibleSpinner } from '../lib/spinner.js';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionEvent, SessionMeta, ViewMode } from '@phnx-labs/sessions-cli/reader';
-import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
+import { SESSION_AGENTS, sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '@phnx-labs/sessions-cli/reader';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, shortIdFromName, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
+import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
@@ -25,16 +25,14 @@ import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.
 import {
   loadFleetActiveSessions,
   loadLocalActiveSessions,
-  readActiveSessionsCache,
 } from '../lib/session/session-cache.js';
-import { gatherRemoteList, runOnPeer } from '../lib/session/remote-list.js';
+import { gatherRemoteList, runOnPeer, shouldIncludeLocal } from '../lib/session/remote-list.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
-import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, searchContentIndex, parseTimeFilter, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
+import { discoverSessions, countSessionsInScope, resolveSessionById, isCompleteSessionId, looksLikeSessionId, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { findSessionsById, querySessions, getSessionById, readSessionTimelineAny } from '../lib/session/db.js';
 import { foldTimeline, emptyTimelineState, projectTimeline, projectSessionFiles } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTail } from '@phnx-labs/sessions-cli/reader';
-import { liveSessionMetas, fleetExecutionMachineById, reconcileLiveMetaMachine } from '../lib/session/live-metadata.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import {
   filterTeamSessions,
@@ -49,14 +47,11 @@ import { formatRelativeTime, formatCompactAge, sessionAgeParts, type SessionAgeP
 import { linkPath, linkUrl, shortenModel, formatTokenCount, type FilterOptions } from '@phnx-labs/sessions-cli/reader';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionOwnerDevice, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
-import { AGENTS, colorAgent, resolveAgentName } from '../lib/agents.js';
+import { AGENTS, colorAgent } from '../lib/agents.js';
 import { getShimsDir } from '../lib/state.js';
 import { listJobs, listJobsWithRuns, listRuns, getRunDir, type RunMeta } from '../lib/scheduling/routines.js';
 import { formatUsd } from '../lib/pricing/cost.js';
-import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { itemPicker } from '../lib/picker.js';
-import { resolveSessionAlias } from '../lib/session/actor-sidecar.js';
-import { listInstalledVersions, resolveVersionAliasLoose } from '../lib/installations/versions.js';
 import { getAgentsInvocation } from '../lib/daemon/daemon.js';
 import { sessionAgentSupportsResume, sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
@@ -81,7 +76,6 @@ import {
   requestedLiveStatuses,
   resolveRoutineName,
   runLiveRoster,
-  shouldIncludeLocal,
   statusColor,
 } from './ps-roster.js';
 import {
@@ -101,6 +95,28 @@ export {
   resolveViewMode,
   type TranscriptRenderOptions,
 } from '../lib/session/presentation.js';
+import {
+  applyScopeFilters,
+  computeLocalMetadataMatches,
+  filterSessionsByQuery,
+  fleetCandidatesByQuery,
+  isDefinitiveMatch,
+  mergeLocalFirst,
+  metadataResolveOutcome,
+  parseAgentFilter,
+  parseInstalledAgentVersionQuery,
+  resolveSessionMetadataValue,
+  resolveSessionQuery,
+  scopedContentIndex,
+  selectorAllowsEarlyExit,
+  serializeResolvedSessionsJson,
+  ticketLabel,
+  type FleetResolveDeps,
+  type FleetSessionCandidate,
+  type LiveMetadataDeps,
+  type SessionFilterOptions,
+  type SessionSearchScope,
+} from '../lib/session/selection.js';
 import { registerSessionsResumeCommand } from './sessions-resume.js';
 import { registerSessionsForkCommand } from './fork.js';
 import { registerSessionsBookmarkCommand } from './sessions-bookmark.js';
@@ -128,18 +144,6 @@ function collectQueryClause(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
 
-interface SessionFilterOptions {
-  agent?: string;
-  version?: string;
-  sessionVersion?: string;
-  project?: string;
-  all?: boolean;
-  teams?: boolean;
-  inTeam?: string;
-  routine?: boolean | string;
-  since?: string;
-  until?: string;
-}
 
 interface SessionsOptions extends SessionFilterOptions, TranscriptRenderOptions {
   unmanaged?: boolean;
@@ -194,25 +198,6 @@ function applyAgentShorthands(options: SessionsOptions): void {
   if (hit) options.agent = hit;
 }
 
-type InstalledVersionsForAgent = (agent: SessionAgentId) => string[];
-
-export function parseInstalledAgentVersionQuery(
-  query: string | undefined,
-  installedVersions: InstalledVersionsForAgent = (agent) => (
-    agent in AGENTS ? listInstalledVersions(agent as AgentId) : []
-  ),
-): string | undefined {
-  const trimmed = query?.trim();
-  if (!trimmed) return undefined;
-  const at = trimmed.indexOf('@');
-  if (at <= 0 || at !== trimmed.lastIndexOf('@') || at === trimmed.length - 1) return undefined;
-
-  const agentName = trimmed.slice(0, at).toLowerCase();
-  if (!SESSION_AGENTS.includes(agentName as SessionAgentId)) return undefined;
-  const agent = agentName as SessionAgentId;
-  const version = trimmed.slice(at + 1);
-  return installedVersions(agent).includes(version) ? `${agent}@${version}` : undefined;
-}
 
 function applyVersionFilters(query: string | undefined, options: SessionsOptions): string | undefined {
   const explicitVersion = options.version ?? options.sessionVersion;
@@ -398,9 +383,6 @@ function liveStatusCell(live: ActiveSession | undefined): { cell: string; width:
   return { cell: statusColor(live.status)(padToWidth(word, LIVE_STATUS_W)), width: LIVE_STATUS_W };
 }
 
-export function ticketLabel(s: Pick<SessionMeta, 'ticketId' | 'prNumber'>): string {
-  return s.ticketId ?? (s.prNumber ? `PR#${s.prNumber}` : '');
-}
 
 function ticketUrl(s: Pick<SessionMeta, 'ticketId' | 'prNumber' | 'prUrl'>): string | undefined {
   if (s.ticketId) return linearIssueUrl(s.ticketId);
@@ -459,48 +441,8 @@ export function serializeSessionPickerRows(
   });
 }
 
-export function mergeLocalFirst(sessions: SessionMeta[], localMachine: string): SessionMeta[] {
-  const byMachine = new Map<string, SessionMeta[]>();
-  const seen = new Set<string>();
-  for (const s of sessions) {
-    const machine = s.machine || localMachine;
-    if (s.id) {
-      const dedupeKey = `${machine}:${s.id}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-    }
-    (byMachine.get(machine) ?? byMachine.set(machine, []).get(machine)!).push(s);
-  }
-  const keys = Array.from(byMachine.keys()).sort((a, b) => {
-    if (a === localMachine) return -1;
-    if (b === localMachine) return 1;
-    const ac = byMachine.get(a)!.length, bc = byMachine.get(b)!.length;
-    if (ac !== bc) return bc - ac;
-    return a.localeCompare(b);
-  });
-  return keys.flatMap((k) => byMachine.get(k)!);
-}
 
 
-// Peer resolution exposes launch identity only; paths, plans, costs, and content stay local.
-export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
-  const safe = sessions.map((session) => ({
-    id: session.id,
-    shortId: session.shortId,
-    agent: session.agent,
-    harness: session.harness,
-    origin: session.origin,
-    timestamp: session.timestamp,
-    lastActivity: session.lastActivity,
-    project: session.project,
-    version: session.version,
-    mode: session.mode,
-    label: session.label,
-    topic: session.topic,
-    machine: session.machine,
-  }));
-  return JSON.stringify(safe, null, 2) + '\n';
-}
 
 async function runRemoteSessionsJson(hosts: string[]): Promise<void> {
   const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(hosts)));
@@ -2290,33 +2232,6 @@ export function buildResumeCommand(session: SessionMeta): string[] | null {
 
 
 
-interface AgentFilter {
-  agent?: SessionAgentId;
-  version?: string;
-}
-
-export function resolveSessionAgentName(name: string): SessionAgentId | null {
-  const normalized = name.toLowerCase();
-  if (SESSION_AGENTS.includes(normalized as SessionAgentId)) {
-    return normalized as SessionAgentId;
-  }
-  const resolved = resolveAgentName(normalized);
-  if (resolved && SESSION_AGENTS.includes(resolved as SessionAgentId)) {
-    return resolved as SessionAgentId;
-  }
-  return fuzzyMatch(normalized, SESSION_AGENTS, FUZZY_PRESETS.agents);
-}
-
-export function parseAgentFilter(agentName?: string): AgentFilter {
-  if (!agentName) return {};
-  const [name, version] = agentName.split('@', 2);
-  const agent = resolveSessionAgentName(name);
-  if (!agent) {
-    console.error(chalk.red(`Unknown agent: ${name}. Use: ${SESSION_AGENTS.join(', ')}`));
-    process.exit(1);
-  }
-  return { agent, version };
-}
 
 function formatSearchMessage(options: SessionFilterOptions): string {
   const filters: string[] = [];
@@ -2326,34 +2241,6 @@ function formatSearchMessage(options: SessionFilterOptions): string {
   return `Search sessions (${filters.join(', ')}):`;
 }
 
-type SessionSearchScope = {
-  agent?: string;
-  project?: string;
-  routine?: boolean | string;
-};
-
-interface SessionQueryResolution {
-  matches: SessionMeta[];
-  byId: boolean;
-  completeId: boolean;
-}
-
-export function resolveSessionQuery(
-  pool: SessionMeta[],
-  query: string,
-  options: { indexFallback?: boolean; scope?: SessionSearchScope } = {},
-): SessionQueryResolution {
-  const normalized = query.trim();
-  const completeId = isCompleteSessionId(normalized);
-  const byIdMatches = resolveSessionById(pool, normalized);
-  if (byIdMatches.length > 0) return { matches: byIdMatches, byId: true, completeId };
-
-  if (looksLikeSessionId(normalized)) {
-    const matches = options.indexFallback === false ? [] : findSessionsById(normalized);
-    return { matches, byId: true, completeId };
-  }
-  return { matches: filterSessionsByQuery(pool, normalized, options.scope), byId: false, completeId };
-}
 
 function ambiguityHint(byId: boolean, completeId: boolean): string {
   if (completeId) return 'That is already a complete id — these rows share it as a prefix.';
@@ -2382,154 +2269,6 @@ export function fleetNotFoundMessage(query: string, deviceCount: number, unreach
   return lines;
 }
 
-export function filterSessionsByQuery(
-  sessions: SessionMeta[],
-  query: string | undefined,
-  scope?: SessionSearchScope,
-): SessionMeta[] {
-  const trimmed = query?.trim().toLowerCase() || '';
-  if (!trimmed) return sessions;
-
-  const installedAgentVersion = parseInstalledAgentVersionQuery(trimmed);
-  if (installedAgentVersion) {
-    const { agent, version } = parseAgentFilter(installedAgentVersion);
-    return sessions.filter((session) => session.agent === agent && session.version === version);
-  }
-
-  const terms = trimmed.split(/\s+/).filter(Boolean);
-  const contentIndex = scopedContentIndex(sessions, trimmed, scope);
-
-  const EXACT_LABEL_SCORE = 1_000_000;
-  const exactLabelHits = [...contentIndex.values()].filter(
-    s => (s._bm25Score ?? 0) >= EXACT_LABEL_SCORE,
-  );
-  if (exactLabelHits.length > 0) {
-    return exactLabelHits.sort(
-      (a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0),
-    );
-  }
-
-  const poolById = new Map(sessions.map(s => [s.id, s]));
-  for (const [id, hit] of contentIndex) {
-    if (!poolById.has(id)) poolById.set(id, hit);
-  }
-
-  return [...poolById.values()]
-    .map(session => ({ session, score: scoreSessionQuery(session, terms) }))
-    .filter(entry => {
-      if (entry.score > 0) return true;
-      const contentMatch = contentIndex.get(entry.session.id);
-      if (contentMatch && contentMatch._matchedTerms && contentMatch._matchedTerms.length > 0) {
-        return true;
-      }
-      return false;
-    })
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const cmA = contentIndex.get(a.session.id);
-      const cmB = contentIndex.get(b.session.id);
-      const bmA = cmA?._bm25Score ?? 0;
-      const bmB = cmB?._bm25Score ?? 0;
-      if (bmB !== bmA) return bmB - bmA;
-      return new Date(b.session.timestamp).getTime() - new Date(a.session.timestamp).getTime();
-    })
-    .map(entry => {
-      const cm = contentIndex.get(entry.session.id);
-      if (cm && cm._matchedTerms) {
-        return { ...cm };
-      }
-      return entry.session;
-    });
-}
-
-function scoreSessionQuery(session: SessionMeta, terms: string[]): number {
-  let score = 0;
-
-  for (const term of terms) {
-    const exactId = session.id.toLowerCase() === term || session.shortId.toLowerCase() === term;
-    const prefixId = session.id.toLowerCase().startsWith(term) || session.shortId.toLowerCase().startsWith(term);
-    const topic = session.topic?.toLowerCase() || '';
-    const project = session.project?.toLowerCase() || '';
-    const account = session.account?.toLowerCase() || '';
-    const cwd = session.cwd?.toLowerCase() || '';
-    const agent = session.agent.toLowerCase();
-    const version = session.version?.toLowerCase() || '';
-
-    let termScore = 0;
-    if (exactId) termScore = 1000;
-    else if (prefixId) termScore = 900;
-    else if (topic.startsWith(term)) termScore = 700;
-    else if (project.startsWith(term)) termScore = 600;
-    else if (account.startsWith(term)) termScore = 550;
-    else if (agent.startsWith(term) || version.startsWith(term)) termScore = 500;
-    else if (topic.includes(term)) termScore = 400;
-    else if (project.includes(term)) termScore = 300;
-    else if (account.includes(term)) termScore = 250;
-    else if (cwd.includes(term)) termScore = 200;
-    else if (version.includes(term) || agent.includes(term)) termScore = 150;
-    else return 0;
-
-    score += termScore;
-  }
-
-  return score;
-}
-
-export function applyScopeFilters(
-  sessions: SessionMeta[],
-  scope: SessionSearchScope,
-): SessionMeta[] {
-  let filtered = sessions;
-
-  if (scope.project) {
-    const projectQuery = scope.project.toLowerCase();
-    filtered = filtered.filter((s) => {
-      const project = (s.project || '').toLowerCase();
-      const cwd = (s.cwd || '').toLowerCase();
-      return project.includes(projectQuery) || cwd.includes(projectQuery);
-    });
-  }
-
-  if (scope.agent) {
-    const [wantAgent, rawVersion] = scope.agent.split('@');
-    const resolvedAgent = resolveAgentName(wantAgent);
-    const wantVersion = resolvedAgent ? resolveVersionAliasLoose(resolvedAgent, rawVersion) : rawVersion;
-    filtered = filtered.filter((s) => {
-      if (s.agent !== wantAgent) return false;
-      if (wantVersion && s.version !== wantVersion) return false;
-      return true;
-    });
-  }
-
-  if (scope.routine) {
-    filtered = filtered.filter((session) => session.origin === 'routine');
-    if (typeof scope.routine === 'string') {
-      const names = [...new Set(
-        filtered.map((session) => session.routineName).filter((name): name is string => !!name),
-      )];
-      const selected = resolveRoutineName(scope.routine, names);
-      filtered = selected
-        ? filtered.filter((session) => session.routineName === selected)
-        : [];
-    }
-  }
-
-  return filtered;
-}
-
-function scopedContentIndex(
-  sessions: SessionMeta[],
-  query: string,
-  scope?: SessionSearchScope,
-): Map<string, SessionMeta> {
-  const hits = searchContentIndex(sessions, query);
-  if (!scope || (!scope.agent && !scope.project && !scope.routine)) return hits;
-  const kept = new Map<string, SessionMeta>();
-  for (const [id, session] of hits) {
-    if (applyScopeFilters([session], scope).length > 0) kept.set(id, session);
-  }
-  return kept;
-}
 
 export function artifactLookupScope(
   agent?: string,
@@ -2738,254 +2477,6 @@ function modeFlag(mode: ViewMode): string | undefined {
   if (mode === 'markdown') return '--markdown';
   if (mode === 'json') return '--json';
   return undefined;
-}
-
-interface FleetResolveDeps {
-  gatherRemoteList: typeof gatherRemoteList;
-  runOnPeer: typeof runOnPeer;
-}
-
-interface FleetHit {
-  machine: string;
-  session: SessionMeta;
-}
-
-interface FleetSessionCandidate {
-  id: string;
-  hits: FleetHit[];
-}
-
-type MetadataResolveOutcome =
-  | { kind: 'resolved'; session: SessionMeta }
-  | { kind: 'not-found' }
-  | { kind: 'ambiguous'; candidates: FleetSessionCandidate[] }
-  | { kind: 'partial'; failedPeers: string[] };
-
-const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const SHORT_SESSION_ID_RE = /^[0-9a-f]{8}$/i;
-
-
-export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
-  const trimmed = selector.trim();
-  if (FULL_SESSION_ID_RE.test(trimmed)) {
-    return session.id.toLowerCase() === trimmed.toLowerCase();
-  }
-  const shortId = shortIdFromName(trimmed) ?? (SHORT_SESSION_ID_RE.test(trimmed) ? trimmed : undefined);
-  return !!shortId && session.shortId.toLowerCase() === shortId.toLowerCase();
-}
-
-export function selectorAllowsEarlyExit(selector: string): boolean {
-  const trimmed = selector.trim();
-  return FULL_SESSION_ID_RE.test(trimmed) || isAgentTmuxAlias(trimmed) || SHORT_SESSION_ID_RE.test(trimmed);
-}
-
-export function fleetCandidatesByQuery(rows: SessionMeta[], query: string, trustResolvedRows = false): FleetSessionCandidate[] {
-  const matched = !trustResolvedRows && looksLikeSessionId(query)
-    ? resolveSessionQuery(rows, query, { indexFallback: false }).matches
-    : rows;
-  const byId = new Map<string, Map<string, SessionMeta>>();
-  for (const session of matched) {
-    const machine = session.machine;
-    if (!machine) continue;
-    const logicalId = session.id.toLowerCase();
-    let byMachine = byId.get(logicalId);
-    if (!byMachine) {
-      byMachine = new Map();
-      byId.set(logicalId, byMachine);
-    }
-    if (!byMachine.has(machine)) byMachine.set(machine, session);
-  }
-
-  return Array.from(byId.values()).map(byMachine => {
-    const hits = Array.from(byMachine.entries()).map(([machine, session]) => ({ machine, session }));
-    return { id: hits[0].session.id, hits };
-  });
-}
-
-function resolveIndexedMetadataRows(
-  indexed: SessionMeta[],
-  selector: string,
-  scope?: SessionSearchScope,
-): SessionMeta[] {
-  const alias = resolveSessionAlias(selector);
-  if (alias.kind === 'resolved') {
-    return resolveSessionQuery(indexed, alias.sessionId, { indexFallback: false, scope }).matches;
-  }
-  if (alias.kind === 'ambiguous') {
-    const ids = new Set(alias.sessionIds.map(id => id.toLowerCase()));
-    return indexed.filter(session => ids.has(session.id.toLowerCase()));
-  }
-  return resolveSessionQuery(indexed, selector, { indexFallback: false, scope }).matches;
-}
-
-function indexedRowsForSelector(
-  selector: string,
-  scope: { agent?: string; project?: string },
-): SessionMeta[] {
-  const indexed = looksLikeSessionId(selector)
-    ? findSessionsById(selector)
-    : querySessions();
-  return applyScopeFilters(indexed, scope);
-}
-
-export function metadataResolveForwardedArgs(
-  selector: string,
-  scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
-): string[] {
-  const args = ['sessions', '--resolve-safe-v1', selector, '--json', '--all', '--local'];
-  if (scope.agent) args.push('--agent', scope.agent);
-  if (scope.project) args.push('--project', scope.project);
-  return args;
-}
-
-const SHORT_SESSION_ID_WIDTH = 8;
-
-export function isUniqueEnoughSelector(selector: string): boolean {
-  const trimmed = selector.trim();
-  if (isCompleteSessionId(trimmed)) return true;
-  return /^[0-9a-f-]+$/i.test(trimmed)
-    && trimmed.replace(/-/g, '').length >= SHORT_SESSION_ID_WIDTH;
-}
-
-export function metadataResolveOutcome(
-  localMatches: SessionMeta[],
-  remote: { sessions: SessionMeta[]; unreachable: string[] },
-  selector: string,
-): MetadataResolveOutcome {
-  const candidates = fleetCandidatesByQuery([...localMatches, ...remote.sessions], selector, true);
-  if (isUniqueEnoughSelector(selector) && candidates.length === 1) {
-    return { kind: 'resolved', session: candidates[0].hits[0].session };
-  }
-  if (remote.unreachable.length > 0) return { kind: 'partial', failedPeers: remote.unreachable };
-  if (candidates.length === 0) return { kind: 'not-found' };
-  if (candidates.length > 1) return { kind: 'ambiguous', candidates };
-  return { kind: 'resolved', session: candidates[0].hits[0].session };
-}
-
-export function isLocallyDefinitiveMatch(session: SessionMeta, self: string): boolean {
-  if (session.filePath) return true;
-  return !!session.machine && session.machine !== self;
-}
-
-export function preferOwnerAttribution(
-  localMatches: SessionMeta[],
-  remoteSessions: SessionMeta[],
-  self: string,
-): SessionMeta[] {
-  if (remoteSessions.length === 0) return localMatches;
-  const answeredByPeer = new Set(remoteSessions.map(session => session.id.toLowerCase()));
-  return localMatches.filter(session =>
-    isLocallyDefinitiveMatch(session, self) || !answeredByPeer.has(session.id.toLowerCase()));
-}
-
-type LiveMetadataDeps = {
-  loadActive?: typeof loadLocalActiveSessions;
-  loadFleetActive?: () => ActiveSession[];
-};
-
-export async function computeLocalMetadataMatches(
-  selector: string,
-  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] },
-  deps: LiveMetadataDeps = {},
-): Promise<SessionMeta[]> {
-  const localMachine = machineId();
-  const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
-  if (!includeLocal) return [];
-
-  let indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
-  if (!looksLikeSessionId(selector)) {
-    return indexed.map(session => ({ ...session, machine: session.machine || localMachine }));
-  }
-  const { hydrateSessionTranscript, findLocalSessionTranscripts } = await import('../lib/session/discover.js');
-  if (indexed.length === 0) {
-    const disk = await findLocalSessionTranscripts(selector, scope.agent as SessionMeta['agent'] | undefined);
-    const live = disk.length ? [] : await liveMetadataMatches(selector, scope, localMachine, deps);
-    if (disk.length > 0) indexed = resolveIndexedMetadataRows(disk, selector, scope);
-    else if (live.length > 0) indexed = live;
-    else if (scope.agent !== 'claude' && scope.agent !== 'codex') {
-      const { scanSessionsIncremental, waitForScanToSettle } = await import('../lib/session/discover.js');
-      const { claimed } = await scanSessionsIncremental({ agent: scope.agent as SessionMeta['agent'] | undefined });
-      if (!claimed) {
-        if (!await waitForScanToSettle()) throw new Error('Session lookup is incomplete: another index scan is still running. Retry when it finishes.');
-        const retry = await scanSessionsIncremental({ agent: scope.agent as SessionMeta['agent'] | undefined });
-        if (!retry.claimed) throw new Error('Session lookup is incomplete: the session index is busy. Retry when the scan finishes.');
-      }
-      indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
-    }
-  }
-  const hydrated: SessionMeta[] = [];
-  for (const session of indexed) {
-    hydrated.push(await hydrateSessionTranscript({ ...session, machine: session.machine || localMachine }));
-  }
-  return hydrated;
-}
-
-export async function liveMetadataMatches(
-  selector: string,
-  scope: { agent?: string; project?: string },
-  self: string,
-  deps: LiveMetadataDeps = {},
-): Promise<SessionMeta[]> {
-  const load = deps.loadActive ?? loadLocalActiveSessions;
-  const loadFleet = deps.loadFleetActive ?? (() => readActiveSessionsCache('fleet')?.sessions ?? []);
-  let fleetExecMachine: Map<string, string>;
-  try {
-    fleetExecMachine = fleetExecutionMachineById(loadFleet());
-  } catch {
-    fleetExecMachine = new Map();
-  }
-  const match = (metas: SessionMeta[]): SessionMeta[] =>
-    resolveIndexedMetadataRows(
-      applyScopeFilters(reconcileLiveMetaMachine(metas, fleetExecMachine, self), scope),
-      selector,
-      scope,
-    );
-  try {
-    const cached = liveSessionMetas((await load()).sessions, self, Date.now());
-    const hit = match(cached);
-    if (hit.length > 0) return hit;
-    const fresh = liveSessionMetas((await load({ forceRefresh: true })).sessions, self, Date.now());
-    return match(fresh);
-  } catch {
-    return [];
-  }
-}
-
-export async function resolveSessionMetadataValue(
-  selector: string,
-  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[] } = {},
-  deps: Pick<FleetResolveDeps, 'gatherRemoteList'> & LiveMetadataDeps = { gatherRemoteList },
-): Promise<MetadataResolveOutcome> {
-  const localMatches = await computeLocalMetadataMatches(selector, scope, deps);
-  const localMachine = machineId();
-
-  if (FULL_SESSION_ID_RE.test(selector)) {
-    const localOutcome = metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
-    if (localOutcome.kind === 'resolved' && isLocallyDefinitiveMatch(localOutcome.session, localMachine)) {
-      return localOutcome;
-    }
-  }
-
-  if (scope.local === true) return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [] }, selector);
-
-  try {
-    const forwarded = metadataResolveForwardedArgs(selector, scope);
-    const remote = await deps.gatherRemoteList(
-      forwarded,
-      scope.hosts,
-      selectorAllowsEarlyExit(selector)
-        ? { isDefinitive: (session) => isDefinitiveMatch(session, selector) }
-        : undefined,
-    );
-    return metadataResolveOutcome(
-      preferOwnerAttribution(localMatches, remote.sessions, localMachine),
-      remote,
-      selector,
-    );
-  } catch (error: any) {
-    return metadataResolveOutcome(localMatches, { sessions: [], unreachable: [error?.message ?? 'fleet fan-out'] }, selector);
-  }
 }
 
 export async function resolveSessionMetadata(

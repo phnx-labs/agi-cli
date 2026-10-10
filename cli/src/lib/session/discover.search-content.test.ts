@@ -10,7 +10,7 @@ process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, closeDB, ftsSearch } = await import('./db.js');
 const { searchContentIndex } = await import('./discover.js');
-const { filterSessionsByQuery } = await import('../../commands/sessions.js');
+const { filterSessionsByQuery } = await import('./selection.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {

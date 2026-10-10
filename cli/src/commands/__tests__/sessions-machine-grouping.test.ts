@@ -1,6 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { mergeLocalFirst, pickerColumnsFor } from '../sessions.js';
+import { pickerColumnsFor } from '../sessions.js';
+import { mergeLocalFirst } from '../../lib/session/selection.js';
 import { groupSessionsByMachine, dedupeByMachineSession } from '../ps-roster.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';

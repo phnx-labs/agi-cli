@@ -8,8 +8,8 @@ import pkg from 'ssh2';
 const { Server } = pkg;
 
 const mode = process.env.SRP_MODE;
-if (mode !== 'old-peer' && mode !== 'malformed') {
-  throw new Error(`SRP_MODE must be 'old-peer' or 'malformed', got ${JSON.stringify(mode)}`);
+if (mode !== 'old-peer' && mode !== 'malformed' && mode !== 'current') {
+  throw new Error(`SRP_MODE must be 'old-peer', 'malformed' or 'current', got ${JSON.stringify(mode)}`);
 }
 const hostKey = fs.readFileSync(process.env.SRP_HOST_KEY);
 const peerHome = process.env.SRP_PEER_HOME;
@@ -112,6 +112,12 @@ const server = new Server({ hostKeys: [hostKey] }, (client) => {
             }
             fs.writeFileSync(proofFile, `${process.env.SRP_OLD_VERSION}:${expectedError}\n`);
             stream.write(stdout);
+            stream.exit(code);
+            stream.end();
+          } else if (mode === 'current') {
+            fs.writeFileSync(proofFile, stdout);
+            stream.write(stdout);
+            stream.stderr.write(stderr);
             stream.exit(code);
             stream.end();
           } else {

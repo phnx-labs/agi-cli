@@ -222,7 +222,7 @@ SSH access (§7); rendering sessions that no harness produced.
   selectors through the SQLite ID index across the selected fleet. A full UUID
   MAY return on its first exact **locally-definitive** hit — one this box can
   actually answer for, meaning a transcript on this disk or a genuine non-self
-  `machine` attribution (`isLocallyDefinitiveMatch`, `commands/sessions.ts`). A
+  `machine` attribution (`isLocallyDefinitiveMatch`, `lib/session/selection.ts`). A
   transcript-less local row whose `machine` merely DEFAULTED to this box MUST NOT
   short-circuit the fan-out; see the launcher-shim rule under §Active sessions
   (PHNX-3890). When the sweep has completed and some peer
@@ -266,7 +266,7 @@ SSH access (§7); rendering sessions that no harness produced.
   writes the index), so a session started on THIS box is running before its
   transcript is indexed; the id resolver behind `preview`/`resume`/`focus` MUST
   union the indexed rows with the live registry on a cold id miss
-  (`computeLocalMetadataMatches`, `commands/sessions.ts`). The synthesized row
+  (`computeLocalMetadataMatches`, `lib/session/selection.ts`). The synthesized row
   parses no transcript and renders nothing; when the transcript is on disk its
   path rides across so the downstream preview renders the real digest, else the
   header plus a live note. The peer answering a fan-out (`--resolve-safe-v1`,
@@ -607,7 +607,7 @@ SSH access (§7); rendering sessions that no harness produced.
   transparently fall back to rehydrate, never a silent skip
   ([sessions.md](sessions.md):471-474).
 - **SES-21 (MUST).** `fork` MUST resolve the source session **across the fleet**
-  (the same resolver `preview` uses — `commands/sessions.ts` `resolveSessionMetadataValue`,
+  (the same resolver `preview` uses — `lib/session/selection.ts` `resolveSessionMetadataValue`,
   reached here via `sessions preview <id> --json`), then launch a **new same-harness
   session seeded with a recap** of the source (`agents run <harness> "<recap>" -i
   --strategy balanced`), leaving the original untouched. The recap is built from the
@@ -1171,7 +1171,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `sessions --project foo "phrase" --markdown` reports a multi-match ambiguity
   against a session the user already scoped out). An id-shaped query MUST still
   resolve by id only (SES-9a) and MUST NOT fall through to this content path.
-  (`lib/session/discover.ts` `searchContentIndex`; `commands/sessions.ts`
+  (`lib/session/discover.ts` `searchContentIndex`; `lib/session/selection.ts`
   `filterSessionsByQuery`/`scopedContentIndex`; tests
   `discover.search-content.test.ts`, `commands/sessions.render.test.ts`).
 - **SES-49 (MUST).** `session_text` MUST index the agent's own answer text
@@ -1454,9 +1454,10 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   or at least 8 hex characters wide and matches exactly one session on the
   reachable fleet MUST resolve and emit its row; a keyword, a shorter selector, or
   a label still MUST NOT be decided from partial rows
-  (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
+  (`lib/session/selection.ts` `serializeResolvedSessionsJson`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
-  `metadataResolveForwardedArgs`; tests
+  `metadataResolveForwardedArgs`; the `commands/sessions.ts` `resolveSessionMetadata`
+  wrapper; tests
   `commands/sessions.resolve.test.ts`, `commands/sessions.resolve-errors.test.ts`,
   `lib/session/remote/remote-list.test.ts`).
 

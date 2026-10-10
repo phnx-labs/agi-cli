@@ -16,7 +16,7 @@ const {
   resolveSessionMetadataValue,
   isLocallyDefinitiveMatch,
   preferOwnerAttribution,
-} = await import('./sessions.js');
+} = await import('../lib/session/selection.js');
 type ActiveSession = import('../lib/session/active.js').ActiveSession;
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 type LoadActive = typeof import('../lib/session/session-cache.js').loadLocalActiveSessions;

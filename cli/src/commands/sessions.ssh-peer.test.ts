@@ -4,10 +4,10 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
-import { metadataResolveForwardedArgs } from './sessions.js';
+import { metadataResolveForwardedArgs } from '../lib/session/selection.js';
 import { remoteAgentsJsonCommand } from '../lib/remote-agents-json.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
-import { repoRoot, cliEntry, tsxLoaderUrl, writeUpdateCache, runAgents } from './sessions.test-fixture.js';
+import { repoRoot, cliEntry, tsxLoaderUrl, writeUpdateCache, writeClaudeSession, runAgents } from './sessions.test-fixture.js';
 
 interface SessionResolverSshPeer {
   target: string;
@@ -20,8 +20,9 @@ interface SessionResolverSshPeer {
 const sshPeerTmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
 
 async function startSessionResolverSshPeer(
-  mode: 'old-peer' | 'malformed',
+  mode: 'old-peer' | 'malformed' | 'current',
   tempHome: string,
+  selector = 'abcd7777',
 ): Promise<SessionResolverSshPeer> {
   const hostKey = path.join(tempHome, 'fixture-host-key');
   const peerHome = path.join(tempHome, 'peer-home');
@@ -29,7 +30,7 @@ async function startSessionResolverSshPeer(
   const target = `${username}@127.0.0.1`;
   const proofFile = path.join(tempHome, `${mode}-proof.txt`);
   const expectedCommand = remoteAgentsJsonCommand(
-    metadataResolveForwardedArgs('abcd7777', {}),
+    metadataResolveForwardedArgs(selector, {}),
     NO_FANOUT_ENV,
   );
   const controlPathTemplate = path.join(tempHome, '.agents', '.cache', 'ssh', 'cm-%C');
@@ -159,4 +160,43 @@ describe('agents sessions --resolve against a real ssh peer', () => {
       rmTempHomeWithRetries(tempHome);
     }
   });
+
+  it.skipIf(process.platform === 'win32')('resolves a shared id on the owning peer without crossing its paths, and keeps the local copy when this box is in scope', async () => {
+    const tempHome = fs.mkdtempSync(path.join(sshPeerTmpBase, 'sr-'));
+    let peer: SessionResolverSshPeer | undefined;
+    const id = 'abcd7777-1111-4222-8333-444455556666';
+    try {
+      writeUpdateCache(tempHome);
+      const repoDir = path.join(tempHome, 'work');
+      fs.mkdirSync(repoDir, { recursive: true });
+      writeClaudeSession(tempHome, 'local-proj', id, path.join(tempHome, 'local-cwd'), 'local copy of the conversation', '2026-09-01T10:00:00.000Z');
+      peer = await startSessionResolverSshPeer('current', tempHome, id);
+      const peerHome = path.join(tempHome, 'peer-home');
+      writeClaudeSession(peerHome, 'peer-proj', id, path.join(peerHome, 'peer-private-cwd'), 'peer copy of the conversation', '2026-09-02T10:00:00.000Z');
+      const env = { AGENTS_SYNC_MACHINE_ID: 'this-box' };
+
+      const onPeer = runAgents(['sessions', '--resolve', id, '--json', '--device', peer.target], repoDir, tempHome, env);
+      expect(onPeer.status, onPeer.stderr).toBe(0);
+      const [row] = JSON.parse(onPeer.stdout);
+      expect(row).toMatchObject({ id, topic: 'peer copy of the conversation' });
+      expect(row.machine).not.toBe('this-box');
+      const safeFields = ['id', 'shortId', 'agent', 'harness', 'origin', 'timestamp', 'lastActivity', 'project', 'version', 'mode', 'label', 'topic', 'machine'];
+      expect(Object.keys(row).filter((key) => !safeFields.includes(key))).toEqual([]);
+      const peerWire = fs.readFileSync(peer.proofFile, 'utf-8');
+      expect(peerWire).toContain('peer copy of the conversation');
+      expect(peerWire).not.toContain(peerHome);
+      expect(onPeer.stdout).not.toContain(tempHome);
+
+      const withLocal = runAgents(['sessions', '--resolve', id, '--json', '--device', 'this-box', '--device', peer.target], repoDir, tempHome, env);
+      expect(withLocal.status, withLocal.stderr).toBe(0);
+      expect(JSON.parse(withLocal.stdout)[0]).toMatchObject({ id, machine: 'this-box', topic: 'local copy of the conversation' });
+
+      const withUnreachable = runAgents(['sessions', '--resolve', id, '--json', '--device', peer.target, '--device', 'nobody@192.0.2.1'], repoDir, tempHome, env);
+      expect(withUnreachable.status, withUnreachable.stderr).toBe(0);
+      expect(JSON.parse(withUnreachable.stdout)[0]).toMatchObject({ id, machine: row.machine, topic: 'peer copy of the conversation' });
+    } finally {
+      if (peer) await stopSessionResolverSshPeer(peer);
+      rmTempHomeWithRetries(tempHome);
+    }
+  }, 90_000);
 });

@@ -274,3 +274,17 @@ export async function runOnPeer(
     });
   });
 }
+
+export function hostToken(h: string): string {
+  return normalizeHost(h.split('@').pop() || h);
+}
+
+export function shouldIncludeLocal(hosts: string[] | undefined, self: string): boolean {
+  if (!hosts || hosts.length === 0) return true;
+  return hosts.some(h => hostToken(h) === self);
+}
+
+export function remoteHostsToDial(hosts: string[] | undefined, self: string): string[] | undefined {
+  if (!hosts || hosts.length === 0) return undefined;
+  return hosts.filter(h => hostToken(h) !== self);
+}

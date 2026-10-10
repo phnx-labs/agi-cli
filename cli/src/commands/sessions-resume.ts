@@ -6,13 +6,8 @@ import { discoverSessions } from '../lib/session/discover.js';
 import { filterTeamSessions } from '@phnx-labs/sessions-cli/reader';
 import { multiItemPicker, itemPicker } from '../lib/picker.js';
 import { buildPreview } from './sessions-picker.js';
-import {
-  formatPickerLabel,
-  pickerColumnsFor,
-  resolveSessionMetadataValue,
-  parseAgentFilter,
-} from './sessions.js';
-import { sessionMatchesQuery } from './sessions-browser.js';
+import { formatPickerLabel, pickerColumnsFor } from './sessions.js';
+import { parseAgentFilter, resolveSessionMetadataValue, sessionMatchesQuery } from '../lib/session/selection.js';
 import {
   openSurfaces,
   availableBackends,

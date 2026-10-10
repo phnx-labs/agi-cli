@@ -16,6 +16,7 @@ import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { hostToken, remoteHostsToDial, shouldIncludeLocal } from '../lib/session/remote-list.js';
 import { loadFleetActiveSessions, loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import { formatCompactAge } from '../lib/session/relative-time.js';
@@ -502,20 +503,6 @@ async function enrichTmuxLocators(local: ActiveSession[], surfaces: GhosttySurfa
       }
     }
   } catch {  }
-}
-
-function hostToken(h: string): string {
-  return normalizeHost(h.split('@').pop() || h);
-}
-
-export function shouldIncludeLocal(hosts: string[] | undefined, self: string): boolean {
-  if (!hosts || hosts.length === 0) return true;
-  return hosts.some(h => hostToken(h) === self);
-}
-
-export function remoteHostsToDial(hosts: string[] | undefined, self: string): string[] | undefined {
-  if (!hosts || hosts.length === 0) return undefined;
-  return hosts.filter(h => hostToken(h) !== self);
 }
 
 export async function gatherActiveSessions(
