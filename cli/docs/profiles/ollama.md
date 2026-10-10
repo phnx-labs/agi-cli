@@ -9,8 +9,8 @@ Local models served by Ollama on `127.0.0.1:11434`. **Recommended host: `codex`*
 ollama serve &
 ollama pull qwen3-coder:30b
 
-agents harness create
-# pick ollama, fill prompts, run smoke test
+agents harness add
+# wizard: pick the ollama preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 

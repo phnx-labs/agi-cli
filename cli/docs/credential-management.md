@@ -39,7 +39,7 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    not for fleet sync, not for account selection. It is never written to the keychain
    by us and never copied across devices. It stays on the box that minted it and
    refreshes itself there. Enforced on the transfer paths too (RUSH-2527): neither
-   `agents run --host --copy-creds` nor `agents run --lease` serializes a native
+   `agents run --device <box> --copy-creds` nor `agents run --lease` serializes a native
    login (Claude OAuth + codex/grok/gemini `auth.json`) to another device — both
    **refuse** and steer to a portable provider account, sharing the one
    `isNativeOAuthRuntime` predicate (`src/lib/hosts/credentials.ts` →
@@ -54,20 +54,20 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    logouts, no revocation cascade.** That safety property is the whole reason it, and
    only it, is shareable.
 
-4. **Shipped (RUSH-2470): each provider account is its own named `agents secrets`
+4. **Shipped (RUSH-2470): each provider account is its own named `secrets`
    bundle.** `agents accounts add <name> --provider <p>
    --auth <type>` creates a bundle named after the account, with secrets policy
    `never` set unconditionally — never the OS keychain's biometry ACL, so reading
    it raises no Touch ID prompt. A user can
    hold as many named provider accounts as they need, and only the accounts they explicitly
-   `agents accounts sync <name> --device <device>` cross the fleet.
+   `agents accounts sync <name> <device>` cross the fleet.
    **Reserved names are the exception (PHNX-3940):** a harness's durable *worker*
    credential lives in a per-harness reserved store `__<harness>__`
    (`RESERVED_STORES`), and `auth` is the reserved legacy alias for `__claude__`
    (the claude setup-token store). A user-created bundle can never take a
    `__`-prefixed or `auth` name — the secrets layer refuses it. See
    [§Slots and reserved stores](#slots-and-reserved-stores-phnx-3940). That sync (and
-   every `agents secrets` transport that moves credential bytes) rides a hardened
+   every `secrets` transport that moves credential bytes) rides a hardened
    SSH posture (RUSH-2527): the destination is verified against the CLI-managed
    known_hosts store — a **changed** host key is refused — and the credential
    connection is never multiplexed, so it leaves no reusable authenticated control
@@ -163,7 +163,8 @@ reads the store as a bundle and imports it remotely as one; the standalone accep
 the `__<name>__` shape from secrets-cli 0.1.1. The push names the remote state root
 (`remoteSecretsHome: '~/.agents'`, filled in by the client wrapper — secrets-cli
 0.1.2), so the receiving `secrets` writes the same `~/.agents` root the worker's
-daemon reads instead of its own default `~/.secrets`. A user-created bundle whose name
+daemon reads instead of the standalone's own default root (`~/.secrets` before
+secrets-cli 0.2.0, `~/.agents/.secrets` since). A user-created bundle whose name
 starts with `__` — or the reserved `auth` alias — is refused (`isReservedStoreName`).
 A key written by 1.22.84–1.22.89 as a bare file item (no bundle record) is adopted
 into its bundle by the next `auth-sync` tick (`adoptLegacyReservedStoreItems`);
@@ -446,13 +447,13 @@ credential transport is owned by the credential-transport track.
 |---|---|---|---|
 | Interactive OAuth login | the box that minted it, in that account's slot / the harness's own keychain item | **No — never touched by us** | rotates/revokes on cross-use; leaving it alone is the fix |
 | Setup-token / API key (durable worker credential) | reserved store `__<harness>__`, key `<ENV>_<accountId>` (legacy `auth` alias for `__claude__`) | **Yes — daemon, per key, workers only** | non-rotating, revoke-only; reuse never invalidates another holder |
-| Named provider account (API key / setup-token / bearer) | a user-named `agents secrets` bundle, policy `never` | **Yes — explicit `accounts sync`** | same safety property; a different namespace from reserved stores |
+| Named provider account (API key / setup-token / bearer) | a user-named `secrets` bundle, policy `never` | **Yes — explicit `accounts sync`** | same safety property; a different namespace from reserved stores |
 | Owner-notify device token (PHNX-4267) | reserved store `__notify-<worker>__`, key `PHOENIX_DEVICE_TOKEN`, one bundle per worker | **Yes — daemon, that worker only** | minted by Phoenix ID with scope `notify`; can call only the three owner-notify routes; revoke-only, re-minting for a device replaces it |
 | daemon / CLI | — | — | hold nothing |
 
 Nothing rotating is ever copied. A native account's worker credential crosses
 to workers through the daemon's per-key reserved-store push; a provider account
-crosses only when the user runs `agents accounts sync <name> --device <device>`.
+crosses only when the user runs `agents accounts sync <name> <device>`.
 
 ## How each surface changes
 
@@ -493,23 +494,23 @@ crosses only when the user runs `agents accounts sync <name> --device <device>`.
 ## Per-harness credential map (evidence-based, verified)
 
 macOS keychain-ACL (→ Touch ID when we read it) is **claude + antigravity only**
-(`auth-sync.ts:47`). Every other harness reads its login from a plain file and
+(`KEYCHAIN_BOUND_ON_MAC`, `fleet/auth-sync.ts`). Every other harness reads its login from a plain file and
 **never triggers Touch ID** (`usage.ts` per-provider reads). Setup-token env vars
-are already mapped in `profiles.ts:324-329` for BYOK profiles.
+are already mapped in `profiles.ts:365-367` for BYOK profiles.
 
 | harness | macOS login store | setup-token / API-key env var | wired in agents-cli? |
 |---|---|---|---|
 | claude | **keychain-ACL** | `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`, 1yr) / `ANTHROPIC_API_KEY` | daemon-inject removed (PR1); `ANTHROPIC_AUTH_TOKEN` via profiles; Linux shim reads `.oauth_token` |
-| codex | file (`.codex/auth.json`) | `OPENAI_API_KEY` | yes (`profiles.ts:326`) |
-| grok | file | `XAI_API_KEY` (API credits); subscription seat via per-box `grok login --device-auth` | yes (`profiles.ts:328`); `accounts login grok#<name> --per-device` |
-| opencode | file | `OPENCODE_API_KEY` | yes (`profiles.ts:329`) |
+| codex | file (`.codex/auth.json`) | `OPENAI_API_KEY` | yes (`profiles.ts:365`) |
+| grok | file | `XAI_API_KEY` (API credits); subscription seat via per-box `grok login --device-auth` | yes (`profiles.ts:366`); `accounts login grok#<name> --per-device` |
+| opencode | file | `OPENCODE_API_KEY` | yes (`profiles.ts:367`) |
 | droid | file (locally-decrypted, no keychain) | `FACTORY_API_KEY` (`fk-…`) | **no** — unwired anywhere |
 | kimi | file (`.kimi-code/…`) | **none** — Kimi reads only `config.toml`, not env | **no** (not possible via env) |
 | antigravity | **keychain-ACL** | `ANTIGRAVITY_API_KEY` (agents-cli claims; upstream issue #78 says unsupported — unresolved) | preset only |
 
 Resolved open items:
 - **Touch ID is Claude-only in practice.** Only claude routes usage/probe through
-  the ACL keychain (`usage.ts:1305-1306`, `loadClaudeOauth`→`getKeychainToken`).
+  the ACL keychain (`accounting/usage.ts`, `loadClaudeOauth`→`getKeychainTokenSync`).
   Antigravity is keychain-bound but has NO usage read, so it doesn't hit the `ag
   view` storm. Droid & Kimi are already file-based → **no Touch ID to fix**.
 - **Kimi has no env-var auth** (config.toml only) — a real limitation; its
@@ -625,23 +626,23 @@ The setup-token is not a file you hand-copy; a worker gets one because the lapto
 (re-run by `agents accounts login claude#<name>`) drives `claude setup-token` through its
 device-code OAuth flow and seeds the result as a named account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
 The *authorize* step still needs a browser pointed at the right account: the fleet's
-logins accumulate in **browser profiles** (`agents browser profiles logins`), so
+logins accumulate in **browser profiles** (`browser profiles logins`), so
 minting for a specific account means authorizing in the profile signed into that
 account — the profile-switch friction is real and lives here, at mint time, not at
-run time. Once minted and synced (`agents accounts sync <name> --device <worker>`),
+run time. Once minted and synced (`agents accounts sync <name> <worker>`),
 every run on that worker authenticates from it with zero Touch ID and no human.
 
 ## The Touch ID fix (concrete)
 
 Only the **token-acquisition step** changes — no endpoint/header change (the usage
-endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
+endpoint takes any `sk-ant-oat01-` bearer, `accounting/usage.ts`):
 
 - In `loadClaudeOauth` (and its callers `probeClaudeStatus` / `getClaudeUsageInfo`,
-  `usage.ts:604,938`), **resolve `CLAUDE_CODE_OAUTH_TOKEN` from the named account
-  bundle (or env) BEFORE the keychain-ACL read** (`usage.ts:1348-1353`). If a
+  `accounting/usage.ts`), **resolve `CLAUDE_CODE_OAUTH_TOKEN` from the named account
+  bundle (or env) BEFORE the keychain-ACL read**. If a
   setup-token is present → use it as the bearer and skip `getKeychainToken`
   entirely → no ACL-gated `/usr/bin/security` call → no Touch ID.
-- Same for the daemon's every-3-min `probeLocalFleetAuth` (`auth-health.ts:391-410`)
+- Same for the daemon's every-3-min `probeLocalFleetAuth` (`auth-health.ts`)
   — the real storm source — so its warm loop reads the account bundle's
   setup-token, never the ACL-bound keychain login.
 - The setup-token lives in a bundle written by `agents accounts add`, which
@@ -670,7 +671,7 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
    `{ claudeAiOauth.accessToken }`.
 3. `apply` stops copying rotating login files (Gap B).
 4. **Shipped (RUSH-2470):** `agents accounts add <name>` creates a named,
-   policy-`never` bundle per account; `agents accounts sync <name> --device
+   policy-`never` bundle per account; `agents accounts sync <name>
    <device>` copies it explicitly to a worker device (encrypted file backend on
    Linux, Credential Manager on Windows). Each provider **account** the user
    creates is independently named and synced; a harness's durable worker

@@ -13,8 +13,8 @@ python -m vllm.entrypoints.anthropic \
   --enable-expert-parallel
 
 # 2. Create the profile
-agents harness create
-# pick vllm, fill prompts, run smoke test
+agents harness add
+# wizard: pick the vllm preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 

@@ -52,10 +52,10 @@ agents auth space role <email> <role>  Change a member's role (owner only for ad
 agents auth whoami                     Show the signed-in account
 ```
 
-## browser: Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
+## browser: Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture. Legacy passthrough: call the standalone `browser` CLI directly
 
 ```
-agents browser                 Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
+agents browser                 Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture. Legacy passthrough: call the standalone `browser` CLI directly
 agents browser click           Click an element by ref, or raw coordinates with --at X,Y
 agents browser console         Read console logs from a tab
 agents browser devices         List available device emulation presets
@@ -91,7 +91,7 @@ agents browser tabs            List tabs open for the current task; --all shows 
 agents browser tasks           List all browser tasks
 agents browser type            Type text into an element by ref
 agents browser upload          Upload file(s) — hidden inputs, drag-drop targets, and OS chooser interception
-agents browser use             Pick the profile `agents browser start` uses when no --profile is passed
+agents browser use             Pick the profile `browser start` uses when no --profile is passed
 agents browser wait            Wait for a condition
 agents browser waitdownload    Wait for a download to complete
 ```
@@ -323,7 +323,7 @@ agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub
 
 ```
 agents logs [id]    Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
-agents logs audit   Alias for `agents events audit`
+agents logs audit   Operational and audit events without the agent-activity lane (`agents events` minus activity)
 agents logs rotate  Apply event retention and the storage ceiling immediately
 agents logs stats   Show aggregate audit statistics
 ```
@@ -545,7 +545,7 @@ agents routines scheduler-logs    Read scheduler log output (for debugging why a
 agents routines start             Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.
 agents routines stats [name]      Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
 agents routines status            Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.
-agents routines stop              Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.
+agents routines stop              Stop only the scheduler service. The shared daemon and its other services (usage sync, session index, watchdog, and the rest) stay running.
 agents routines sync [path]       Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).
 agents routines view [name]       Show the full YAML configuration for a routine
 agents routines webhook           Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.
@@ -574,10 +574,10 @@ agents run [agent] [prompt]  Execute an agent. Pass a prompt for headless runs; 
 agents search <query>  Find packages (MCP servers, skills) across configured registries
 ```
 
-## secrets: Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
+## secrets: Named bundles of env variables — legacy passthrough to the standalone `secrets` CLI. Call `secrets` directly (`secrets --help`); install it with `agents setup secrets`.
 
 ```
-agents secrets  Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
+agents secrets  Named bundles of env variables — legacy passthrough to the standalone `secrets` CLI. Call `secrets` directly (`secrets --help`); install it with `agents setup secrets`.
 ```
 
 ## send: Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
@@ -586,10 +586,10 @@ agents secrets  Named bundles of env variables — passthrough to the standalone
 agents send [text]  Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
 ```
 
-## sessions: Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
+## sessions: Find, browse, and read agent conversation transcripts. Legacy group: search and read with the standalone `sessions` CLI; live roster: `agents ps`.
 
 ```
-agents sessions [query]                    Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
+agents sessions [query]                    Find, browse, and read agent conversation transcripts. Legacy group: search and read with the standalone `sessions` CLI; live roster: `agents ps`.
 agents sessions backfill                   Populate derived session data explicitly.
 agents sessions backfill resources         Derive historical skill/slash-command usage once into the local SQLite index.
 agents sessions backfill titles            Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.
@@ -630,7 +630,7 @@ agents setup beta                             Enable or disable preview features
 agents setup beta disable <features...>       Disable one or more beta features.
 agents setup beta enable <features...>        Enable one or more beta features.
 agents setup beta list                        Show available beta features and whether they are enabled.
-agents setup browser                          Set up `agents browser` — install the Browser CLI, seed profiles, and pick this machine's default.
+agents setup browser                          Set up the standalone `browser` CLI — install it, seed profiles, and pick this machine's default.
 agents setup computer                         Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
 agents setup fleet                            Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
 agents setup mine                             White-label the CLI — mint your own personally-named binary (e.g. `jack`).

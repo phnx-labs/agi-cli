@@ -606,7 +606,7 @@ function registerWebhooksSubcommand(parent: Command): void {
     `,
     notes: `
       The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET
-      ('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it
+      ('secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it
       headlessly through the standalone 'secrets' CLI, so a hosted receiver needs
       no AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver
       loud in 'agents daemon logs' rather than binding unverified ingress.
@@ -627,7 +627,7 @@ function registerWebhooksSubcommand(parent: Command): void {
   webhooks
     .command('add')
     .description('Declare a receiver on this box. Replaces any receiver already on the same port.')
-    .requiredOption('--secrets-bundle <name>', 'agents secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET')
+    .requiredOption('--secrets-bundle <name>', 'secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET')
     .option('-p, --port <n>', `Local bind port (default ${DEFAULT_WEBHOOK_PORT})`)
     .option('--rate-limit <n>', `Accepted deliveries per source per minute (default ${DEFAULT_WEBHOOK_RATE_LIMIT})`)
     .option('--funnel-port <n>', 'Expose publicly on this Tailscale Funnel port (443 | 8443 | 10000)')

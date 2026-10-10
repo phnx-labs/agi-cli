@@ -451,7 +451,7 @@ Examples:
   # Copy an existing harness and swap only the model
   agents harness fork deepseek deepseek-chat --model deepseek/deepseek-chat-v3
 
-  # Attach an account whose credential came from agents secrets
+  # Attach an account whose credential came from a secrets bundle
   agents harness fork claude corp --model gpt-x --account corp
 
   # No args, in an interactive terminal: walks through source, preset/model, name, key

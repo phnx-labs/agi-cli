@@ -1,7 +1,7 @@
 # Tool setup
 
 AGI Menu receives standalone tool installation metadata through the shared feed.
-Browser CLI, Computer CLI and Secrets CLI are detected independently. A legacy
+Browser CLI, Computer CLI, Secrets CLI and the `term` CLI are detected independently. A legacy
 `browser` alias pointing into agents-cli is not a standalone installation.
 
 Read the cached metadata without starting a tool or checking other devices:

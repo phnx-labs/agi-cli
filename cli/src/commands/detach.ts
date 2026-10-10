@@ -30,7 +30,7 @@ export function registerDetachCommand(program: Command, group: 'sessions' | 'ps'
       agents ${group} detach 4b2f1a9c
 
       # Bring it back into a terminal later
-      agents sessions resume 4b2f1a9c
+      agents ps focus 4b2f1a9c
     `,
   });
 }

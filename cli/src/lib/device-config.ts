@@ -164,7 +164,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'machine',
     type: 'string',
     description:
-      'Browser profile `agents browser start` resolves to without --profile (set via `agents browser use`).',
+      'Browser profile `browser start` resolves to without --profile (set via `browser use`).',
   },
   {
     name: 'computer.host',
@@ -194,7 +194,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'user',
     type: 'string',
     description:
-      'Fleet browser hub: the device whose browser `agents browser` drive verbs target by default, with no --device. ' +
+      'Fleet browser hub: the device whose browser `browser` drive verbs target by default, with no --device. ' +
       'The hub itself runs locally; every other box forwards to it. Unset = each box drives its own browser.',
     validate: (v) => {
       try {
@@ -258,7 +258,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session — local runs and ' +
       'followed `--device` runs alike (PHNX-3316). Off, the default, spawns the agent directly; a remote run left bare ' +
       'is protected by reconnect-and-resume, not a pane. Turn it on to give every agent an addressable pane for ' +
-      '`agents message`, injection, and `agents focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
+      '`agents message`, injection, and `agents ps focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
   },
   {
     name: 'browser.remote-control',
@@ -269,7 +269,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: false,
     description:
       "Whether other fleet machines may drive THIS device's browser over `browser --device <this-device>` or `agents ssh <this-device> …` (`agents browser` / `ag browser` / standalone `browser`). " +
-      'Default off — a fleet-remote drive is refused until the owner runs `agents browser remote-control on`.',
+      'Default off — a fleet-remote drive is refused until the owner runs `browser remote-control on`.',
   },
   {
     name: 'browser.task-idle-minutes',
@@ -282,7 +282,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Minutes a browser task may sit with no IPC action (navigate, click, type, screenshot, …) before the daemon\'s ' +
       'abandoned-task reaper closes its tabs and marks it done (RUSH-2622). 0 disables idle reaping — the reaper still ' +
       "closes a task whose owning agent session has exited, whatever this is set to. Read only on THIS box's own " +
-      'reaper tick and `agents browser prune`, so it never applies to a peer.',
+      'reaper tick and `browser prune`, so it never applies to a peer.',
     validate: (v) =>
       (v as number) >= 0 ? null : 'browser.task-idle-minutes must be >= 0 (0 disables idle reaping).',
   },

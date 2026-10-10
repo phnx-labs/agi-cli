@@ -26,11 +26,11 @@ at which address, and what each side must not change.
 | Bundle id | `com.phnx-labs.agents-menubar` (a dev build signs as `….dev`) | `MENUBAR_HELPER_BUNDLE_ID`, `SERVICE_LABEL_BASE` |
 | Signer | Developer ID, Team `2HTP252L87`, notarized + stapled | `EXPECTED_TEAM_ID` in `src/lib/helper-download.ts` |
 | Designated requirement | `identifier "com.phnx-labs.agents-menubar" … certificate leaf[subject.OU] = "2HTP252L87"` | `verifyDesignatedRequirement`; `scripts/verify-menubar-helper.sh` |
-| Snapshot feed | `agents menubar snapshot --json` (read-only; same rows and status words as `agents sessions --active --local --json`) | `src/lib/menubar/snapshot.ts`, `src/commands/menubar.ts` |
+| Snapshot feed | `agents menubar snapshot --json` (read-only; same rows and status words as `agents ps --json --local`) | `src/lib/menubar/snapshot.ts`, `src/commands/menubar.ts` |
 | Preferences | `snapshot.menuPreferences` — every `menubar.menu.*` and `menubar.statusbar.*` key's effective value; written one at a time with `agents config set/unset`. A key with no registered default (`defaultProject`, `headlessAgent`, `headlessFallbackAgent`) is OMITTED when unset, so the menu keeps its own default. `menubar.statusbar.goalCountdown` (bool, default `false`) rides this map too. The list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`, `githubHidden`) are NOT in this map: they ride `snapshot.menuListPreferences` (same keys, JSON arrays, same default rule), because shipped menus decode `menuPreferences` as scalars and one array would fail the whole snapshot. The menu writes one as a JSON array argument (`agents config set menubar.menu.pinnedProjects '["Rush"]'`), so any project name round-trips | `MENUBAR_CONFIG_KEYS` in `src/lib/config-keys.ts`; the specs in `src/lib/device-config.ts` |
 | Device facts | each `snapshot.devices[]` row: `name`, `platform`, `formFactor`, `interactive`, `isLocal`, `preferred`, `role`, `autoEligible`, and `stats` (`null` when never measured) | `src/lib/menubar/snapshot.ts` |
 | Signed-in person | `snapshot.me`: `{name, email, github, avatarUrl, avatarSource}` or `null` when neither source knows anyone. One person, never a blend: with a Phoenix ID session (`agents auth login`) the session supplies `name`, `email` and the picture (https only), and the `gh` account adds `github` (plus a fallback name and picture) only when its public profile email equals the session email; without a session the `gh` account supplies everything but `email`. No picture → `avatarUrl: null` (draw initials); `avatarSource` is `phoenix` \| `github` \| `null`. Local reads only: the Phoenix session file and the `gh api user` record at `~/.agents/.cache/github-viewer.json` (no email; a SHA-256 of the public one). The snapshot spawns `gh` only when that record is stale (a day after a success, an hour after a failure, which keeps the last good viewer), capped at 5 s, inside the menu's 30 s snapshot deadline. `email` exists only in this local JSON | `resolveMenubarMe` in `src/lib/menubar/snapshot.ts`; `cachedViewer` in `src/lib/github/viewer.ts` |
-| Project grouping | `confirmedProject` on every session row (`feed watch --json`, `sessions watch --json`, `sessions --active --json`): the registered project, or `null` for Uncategorized | `confirmedProjectForCwd` in `src/lib/projects.ts` |
+| Project grouping | `confirmedProject` on every session row (`feed watch --json`, `sessions watch --json`, `ps --json`): the registered project, or `null` for Uncategorized | `confirmedProjectForCwd` in `src/lib/projects.ts` |
 | GitHub tab | `agents projects prs --json` with no project name: every open PR across the viewer's account and orgs (`owners[]`), grouped per repository with the `projects` that attach it, each PR with `reviewRequested` and `needsMe` (`review`, `failing`, `conflicts`, or null). The card's actions are the same `projects prs` verbs with the project name left out (`comment`, `review --approve`, `merge`, and `merge --admin` for "Merge past checks…", offered only where `merge.viewerIsAdmin` and `merge.adminBypass`). The tab is `github` in `tabOrder`/`hiddenTabs`; what it watches is `menubar.menu.githubHidden` (org logins or `owner/repo` slugs), `githubDrafts` and `githubBots` | `src/lib/github/open-prs.ts`; `prs` in `src/commands/projects.ts` |
 
 The **designated requirement is load-bearing**: macOS keys the helper's
@@ -57,7 +57,7 @@ flowchart LR
 ```
 
 1. **Publish** (in agi-menu, on a Mac with the signing identity):
-   `agents secrets exec apple.com -- scripts/release.sh <x.y.z>`. Helper releases
+   `secrets exec apple.com -- scripts/release.sh <x.y.z>`. Helper releases
    are immutable — the script refuses an already-published tag.
 2. **Pin** (here): bump `menubar` in `src/lib/helper-versions.ts` to `<x.y.z>`.
    The tag makes the build downloadable; the floor is what makes a CLI ask for
@@ -184,7 +184,7 @@ runs the stage on its selected signing Mac and pulls the result back.
 
 `agents menubar setup` (configure end-to-end: one instance, started at login),
 `enable`, `disable`, `status`, `doctor`, and the read-only `snapshot --json` the
-helper polls. Full flag reference: [command-index.md](command-index.md#menubar--manage-agi-menu-running-sessions-agents-awaiting-input-routines).
+helper polls. Full flag reference: [command-index.md](command-index.md#menubar-manage-agi-menu-running-sessions-agents-awaiting-input-routines).
 
 ## Files the CLI owns
 

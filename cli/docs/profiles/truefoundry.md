@@ -8,8 +8,8 @@ TrueFoundry LLM Gateway — a corporate gateway that forwards Anthropic-shaped r
 ## Quick start
 
 ```bash
-agents harness create
-# pick truefoundry, fill prompts, run smoke test
+agents harness add
+# wizard: pick the truefoundry preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 

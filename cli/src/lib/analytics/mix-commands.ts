@@ -132,7 +132,7 @@ export function registerMixCommands(parent: Command): void {
       (\`agents insights mix harness-mix\`) for just that section; \`--list\` names them.
       This is the cheap counter path. Behavioural report (transcript content, account split)
       is bare \`agents insights\`. Latency is \`agents insights perf\`; quota is \`agents view\`.
-      Skill/slash-command popularity is \`agents sessions stats\`.
+      Skill/slash-command popularity is \`agents insights resources\`.
     `,
   });
 

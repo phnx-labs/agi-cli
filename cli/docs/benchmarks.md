@@ -96,6 +96,6 @@ When you add a row, include machine, node version, vitest version, and a commit 
 Tracked as work, not as a dump of numbers:
 
 1. Fold `command.start` into `command.end` (~98 µs/command) if losing crash-start audit lines is acceptable.
-2. Decompose `emit()` (`events.ts`) — that is where 99.7% of the hook tax lives. `events.bench.ts` is the harness.
+2. Decompose `emit()` (`src/lib/feed/events.ts`) — that is where 99.7% of the hook tax lives. `events.bench.ts` is the harness.
 3. Do not restructure `index.ts` construct/option/hook registration — measured 0.0007% of cold `--version`.
 4. Commander module load (11–13 ms) is the one real startup slice in this family; lazy import is blocked by the current graph.

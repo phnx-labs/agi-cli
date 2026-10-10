@@ -3096,7 +3096,7 @@ export function registerSessionsCommands(program: Command): void {
     .addOption(new Option('--resolve-safe-v1 <selector>').hideHelp())
     .addOption(new Option('--resolve-launch-id <id>').hideHelp())
     .description(
-      'Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.',
+      'Find, browse, and read agent conversation transcripts. Legacy group: search and read with the standalone `sessions` CLI; live roster: `agents ps`.',
     )
     .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
     .addOption(
@@ -3110,7 +3110,7 @@ export function registerSessionsCommands(program: Command): void {
     .option('--grok', 'Shorthand for --agent grok')
     .option('--opencode', 'Shorthand for --agent opencode')
     .option('--all', 'Widen every non-status filter to "all": every directory (not just this project) and all time (no window cap). Status filters like --active still compose; -a/--device/--since still narrow their axis.')
-    .option('--bookmarks', 'Show only bookmarked sessions — bookmark them with `*` in the browser or `agents sessions bookmark <id>`')
+    .option('--bookmarks', 'Show only bookmarked sessions — bookmark them with `*` in the browser or `sessions bookmark <id>`')
     .option('--unmanaged', "Also show sessions from your own ~/.<agent> installs (hidden once agents-cli manages that agent)")
     .option('--team, --teams', 'Show team-spawned sessions (hidden by default), grouped by team — each team names its spawner and spawn time, teammates show their mode + handle, and team-flagged spawns with no teammate record sink into a (no team) bucket. --flat/--tree keep the plain inline table')
     .option('--in-team <name>', "Only this team: the session that spawned it plus (with --teams) its teammates. Spans every directory and all time, since a team's worktrees and history sit outside the default window.")
@@ -3157,89 +3157,77 @@ export function registerSessionsCommands(program: Command): void {
   setHelpSections(sessionsCmd, {
     examples: `
       # Search indexed transcripts by topic, file path, or command
-      agents sessions "add auth middleware"
+      sessions "add auth middleware"
 
       # Read a session as markdown (user + assistant + thinking + tools)
-      agents sessions a1b2c3d4 --markdown
+      sessions a1b2c3d4 --markdown
 
       # Just the user turns — useful for recalling intent
-      agents sessions a1b2c3d4 --include user
+      sessions a1b2c3d4 --include user
 
-      # Show only what's running right now (terminals, teams, cloud, headless)
-      agents sessions --active
+      # What is running right now (terminals, teams, cloud, headless)
+      agents ps
 
       # Filter the live fleet by the status word shown in the roster
-      agents sessions --working
-      agents sessions --idle
-      agents sessions --orphan
-      agents sessions --crashed
+      agents ps --status working
+      agents ps --status idle,orphaned,crashed
 
       # --- Session lifecycle ---
-      # Get back into a session — attaches a live pane, or recovers an ended one
-      agents sessions resume a1b2c3d4
-      # Same, by the tmux name shown in: agents tmux ls
-      agents sessions resume ag-claude-a1b2c3d4
+      # Get back into a session: attach a live pane, or recover an ended one
+      agents ps focus a1b2c3d4
       # Attach only — never fork a copy
-      agents sessions resume a1b2c3d4 --attach-only
-      # Multi-select history and open each in a tab
-      agents sessions resume
+      agents ps focus a1b2c3d4 --attach-only
+      # Continue an ended session by id (auto infers the harness)
+      agents run auto --resume a1b2c3d4
       # The other direction: interactive → headless (keep working unattended)
-      agents sessions detach a1b2c3d4
+      agents ps detach a1b2c3d4
 
-      # The interactive list folds in other online machines automatically,
-      # labelled by host with this machine first. Stay local with --local:
-      agents sessions --local
+      # Search across every directory and all time, not just this project
+      sessions "topic" --all
 
-      # Search across every directory, not just this project
-      agents sessions "topic" --all
+      # Filter one installed harness version
+      sessions --agent claude@2.1.181
 
-      # Filter one installed harness version (equivalent forms)
-      agents sessions claude@2.1.181
-      agents sessions --agent claude --version 2.1.181
-
-      # Team-spawned sessions, grouped by team (spawner + spawn time per team,
-      # teammate mode/handle per row; team-flagged spawns with no team record
-      # in a trailing (no team) bucket)
-      agents sessions --teams
-
-      # Who spawned which team: an orchestrator row carries team:<name>, and a
-      # teammate row [<team>/<handle>]. --in-team narrows to one team's lineage.
-      agents sessions --in-team redesign --teams
+      # Include team-spawned sessions; narrow to one team's lineage
+      sessions --teams
+      sessions --in-team redesign --teams
 
       # Pick a routine across every directory, then open one of its run sessions
-      agents sessions --routine
-      agents sessions --routine nightly-review
-      agents sessions 2026-07-21T10-30-00-000Z
+      sessions --routine
+      sessions --routine nightly-review
+      sessions 2026-07-21T10-30-00-000Z
 
       # Export for analysis
-      agents sessions --since 30d --limit 200 --json > sessions.json
+      sessions --since 30d --limit 200 --json > sessions.json
 
-      # Populate historical tool rows once on every device (search them with
-      # the standalone CLI: sessions --include tools --query 'program:git')
-      agents sessions backfill tools --fleet
+      # Search indexed tool calls; populate historical rows once per device
+      sessions --include tools --query 'program:git input:merge' --since 7d
+      agents daemon index backfill tools --fleet
 
-      # Resolve one historical selector to metadata only, across the fleet
-      agents sessions --resolve d3470b57 --json
+      # Resolve one selector to safe metadata only
+      sessions --resolve d3470b57 --json
 
-      # Search another machine's sessions live over SSH (no sync needed)
-      agents sessions "auth bug" --last 3 --device yosemite-s1
-
-      # Fan the same query out across several machines
-      agents sessions --all "deploy script" --device box-a --device box-b
+      # Search other machines' indexes live over SSH (no sync needed)
+      sessions "auth bug" --host yosemite-s1
+      sessions --all "deploy script" --host box-a,box-b
     `,
     notes: `
-      Session lifecycle — ONE verb gets you back in, it detects the state:
-        resume <id|alias>       live pane -> attach; headless -> foreground; ended -> recover
-        resume <id> --attach-only  attach only; never fork a copy
-        resume                  multi-select history -> open tabs
-        detach <id>             the other direction: interactive -> headless
-      - The interactive listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local.
-      - --all is not a device flag: it widens historical directory and time filters. Fleet collection is already the default. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
+      Canonical homes (this group is legacy, PHNX-4227):
+        search, read, export, bookmark   sessions …
+        live roster and status           agents ps [--status <state>]
+        attach or recover                agents ps focus <id>
+        continue an ended session        agents run <agent|auto> --resume <id>
+        type into a running agent        agents send --channel session --to <id> --text "…"
+        fork                             agents fork <id>
+        index maintenance                agents daemon index roots | optimize | backfill
+        skill and command usage          agents insights resources
+      - This group's own listing and every live-status flag fold in your other online machines automatically (live over SSH, no sync) — each row is labelled by host, this machine first. Use --local to skip the fan-out; single-id lookups stay local. The standalone \`sessions\` reads this machine unless you pass --host.
+      - --all is not a device flag: it widens historical directory and time filters. A status flag (--working/--idle/--waiting/--orphan/--crashed/--closed/--abandoned/--queued/--unknown) implies --active; combine status flags for a union.
       - --version <version> requires --agent and is equivalent to --agent <agent@version>.
       - --device runs the query on the remote's own index over SSH (host alias or user@host); repeat or pass several to fan out. SSH access is the only auth.
       - --in-team matches both ends of the lineage: the session that ran 'agents teams create/add', and (with --teams) that team's teammates. In the interactive list, 't' cycles the same filter over the teams in view.
       - --include and --exclude are mutually exclusive.
-      - Tool-call search and --count run in the standalone \`sessions\` CLI (\`sessions --include tools --query <clause>\`). agents indexes the calls: run 'agents sessions backfill tools' once for historical transcripts; normal scans index new and changed sessions.
+      - Tool-call search and --count run in the standalone \`sessions\` CLI (\`sessions --include tools --query <clause>\`). agents indexes the calls: run 'agents daemon index backfill tools' once for historical transcripts; normal scans index new and changed sessions.
       - --first and --last are mutually exclusive.
       - A filter flag (--include/--exclude/--first/--last) without --markdown/--json defaults to --markdown output.
       - --cloud sources from Rush Cloud captured runs instead of local disk.
@@ -3266,8 +3254,8 @@ export function registerSessionsCommands(program: Command): void {
 
   setHelpSections(previewCmd, {
     examples: `
-      # Preview by the 8-character ID shown in agents sessions
-      agents sessions preview 407b8dd5
+      # Preview by the 8-character ID shown in the sessions list
+      sessions preview 407b8dd5
 
       # A full UUID resolves on the first device that owns it
       agents sessions preview c70ecdea-6210-4039-9845-246a3a7a9942

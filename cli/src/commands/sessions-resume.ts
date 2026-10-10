@@ -90,10 +90,13 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
 
   setHelpSections(cmd, {
     examples: `
-      # Strict resume by full id (former top-level agents resume)
-      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897
-      agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 "finish the tests"
-      agents sessions resume ag-codex-c1f3d813 --mode edit
+      # Continue one session by id (canonical: agents run --resume; auto infers the harness)
+      agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897
+      agents run claude --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 "finish the tests"
+
+      # Attach a living pane, or recover an ended one (canonical: agents ps focus)
+      agents ps focus 019fd114
+      agents ps focus 019fd114 --attach-only
 
       # Pick several sessions; each opens in its own tab
       agents sessions resume
@@ -101,12 +104,8 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       # Pre-filter the pool before selecting (space in the filter → use [query])
       agents sessions resume "auth middleware"
 
-      # Reopen one session from any device by UUID prefix or tmux alias
-      agents sessions resume 019fd114
-      agents sessions resume ag-codex-c1f3d813
-
-      # Attach a living pane only — never resume a copy (the old go)
-      agents sessions resume 019fd114 --attach-only
+      # Strict resume by tmux alias, overriding the recorded mode
+      agents sessions resume ag-codex-c1f3d813 --mode edit
 
       # Force a backend / side-by-side splits / a remote host
       agents sessions resume --ghostty
@@ -115,11 +114,11 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
       agents sessions resume --device zion --tmux
     `,
     notes: `
-      - Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. Replaces the former top-level agents sessions resume.
-      - Attach a live pane without forking: agents sessions focus <id>.
+      - Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. \`agents run <agent|auto> --resume <id>\` is the canonical spelling.
+      - Attach a live pane without forking: agents ps focus <id> --attach-only.
       - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.
       - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.
-      - Going the other way (foreground -> background) is 'agents sessions detach <id>'.
+      - Going the other way (foreground -> background) is 'agents ps detach <id>'.
       - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.
       - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.
       - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.

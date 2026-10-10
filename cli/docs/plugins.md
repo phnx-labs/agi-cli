@@ -7,7 +7,7 @@ Distributable bundles that package skills, commands, hooks, MCP servers, and per
 
 A plugin is a directory in `~/.agents/plugins/` containing a `.claude-plugin/plugin.json` manifest. When you install or sync a plugin, agents-cli copies its contents into a synthetic per-user marketplace inside the agent version home and enables it via `enabledPlugins` in `settings.json`. Plugins are a superset of individual resources: a single plugin can ship skills, slash commands, subagent definitions, hooks, MCP servers, LSP servers, monitors, bin scripts, and permission sets — installed atomically as a unit.
 
-Only agents with `plugins: true` (or a version-gated `since`) in the capability matrix participate — today Claude, OpenClaw, Antigravity, Grok, Kimi, Cursor, Goose, Droid, and Codex >= 0.128.0 (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins can narrow further by declaring `agents: [...]` in their manifest. Plugins that ship executable surfaces (hooks, `.mcp.json`, `bin/`, `scripts/`, `settings.json`, `permissions/`) require explicit consent via `--allow-exec-surfaces` to be enabled after installation.
+Only agents with `plugins: true` (or a version-gated `since`) in the capability matrix participate — today Claude, Cursor, OpenCode, OpenClaw, Copilot, Goose, Antigravity, Grok, Kimi, Droid, Hermes, Muse, and Codex >= 0.128.0 (`capableAgents('plugins')` in `src/lib/agents.ts`). Plugins can narrow further by declaring `agents: [...]` in their manifest. Plugins that ship executable surfaces (hooks, `.mcp.json`, `bin/`, `scripts/`, `settings.json`, `permissions/`) require explicit consent via `--allow-exec-surfaces` to be enabled after installation.
 
 For the layered resource model that governs plugin resolution, see [resource-sync.md](resource-sync.md).
 
@@ -46,7 +46,8 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 
 | Command | Description |
 |---------|-------------|
-| `agents plugins list` | Table view of all plugins with sync status across agent versions |
+| `agents plugins list [--json]` | Table view of all plugins with sync status across agent versions |
+| `agents plugins marketplaces [--json]` | List plugin marketplaces, one per DotAgents repo with a `plugins/` directory |
 | `agents plugins view <name>` | Metadata, resources, and installation status for one plugin |
 | `agents plugins info <name>` | Alias for `view` |
 | `agents plugins add <spec>` | Install from a git URL or local path |
@@ -62,11 +63,12 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 |---------|------|--------|
 | `add` | `--allow-exec-surfaces` | Enable the plugin even when it ships hooks, MCP, bin, scripts, settings, or permissions |
 | `sync` | `--allow-exec-surfaces` | Same gate override for the sync path |
+| `update` | `--allow-exec-surfaces` | Consent to an update that introduces new executable surfaces |
 | `remove` | `--keep-source` | Unsync from agents but leave `~/.agents/plugins/<name>/` on disk |
 
 ## Manifest Schema
 
-`.claude-plugin/plugin.json` is the required entry point. Every field maps directly to `PluginManifest` in `src/lib/types.ts:378`.
+`.claude-plugin/plugin.json` is the required entry point. Every field maps directly to `PluginManifest` in `src/lib/types.ts:445`.
 
 ```json
 {
@@ -124,18 +126,15 @@ my-plugin/
 
 Plugins that ship any of `hooks/`, `.mcp.json`, `bin/`, `scripts/`, a non-permissions `settings.json`, or `permissions/` are **installed** (copied to the marketplace) but **not enabled** unless you pass `--allow-exec-surfaces`.
 
-The gate is implemented at `src/commands/plugins.ts:68`:
+The gate is implemented at `src/commands/plugins.ts:65`:
 
 ```typescript
-export function shouldRefusePluginInstall(
-  capabilities: PluginCapabilities,
-  allowExecSurfaces: boolean
-): boolean {
+export function shouldRefusePluginInstall(capabilities: PluginCapabilities, allowExecSurfaces: boolean): boolean {
   return hasPluginExecSurfaces(capabilities) && !allowExecSurfaces;
 }
 ```
 
-`PluginCapabilities` maps each surface to a boolean flag (`hasHooks`, `hasMcp`, `hasBin`, `hasScripts`, `hasSettings`, `hasPermissions`). `hasPluginExecSurfaces()` returns true if any flag is true.
+`PluginCapabilities` (`src/lib/plugins/plugins.ts`) maps each surface to a boolean flag (`hasHooks`, `hasMcp`, `hasBin`, `hasScripts`, `hasSettings`, `hasPermissions`). `hasPluginExecSurfaces()` returns true if any flag is true.
 
 Without the flag, the plugin is placed in the marketplace and listed in `known_marketplaces.json`, but `enabledPlugins["<name>@agents-cli"]` is never set to `true` in `settings.json`. The plugin is present but inert until you re-run with consent.
 
@@ -185,13 +184,8 @@ agents plugins remove rush-toolkit
 agents plugins remove rush-toolkit --keep-source
 ```
 
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/plugins.mp4"></video>
-
 ## See Also
 
 - [resource-sync.md](resource-sync.md) — how plugins participate in the layered resource sync model
 - [docs/subagents.md](subagents.md) — subagent definitions that plugins can bundle
 - [docs/hooks.md](hooks.md) — hook manifests that plugins can ship
-- docs/workflows.md — workflow bundles that can reference plugins

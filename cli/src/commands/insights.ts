@@ -564,7 +564,7 @@ function configureInsightsCommand(cmd: Command): void {
       agents insights --account "Turing Labs" --all
 
       # Machine-readable, for a dashboard or a slash command
-      agents sessions insights --agent claude --agent codex --json
+      agents insights --agent claude --agent codex --json
 
       # Add a written read on what to change
       agents insights --narrative
@@ -581,7 +581,7 @@ function configureInsightsCommand(cmd: Command): void {
       The behavioural report parses in-scope transcripts once and caches facets; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.
 
-      \`agents insights\` is the top-level alias of \`agents sessions insights\`.
+      \`agents sessions insights\` is the legacy spelling of \`agents insights\`.
       Repeat \`--agent\` to compare several harnesses in one report.
 
       Everything except \`--narrative\` is local and makes no network calls.

@@ -42,7 +42,7 @@ export async function handleSessionsBackupSetup(opts: BackupSetupOptions): Promi
 }
 
 const BACKUP_SETUP_EXAMPLES = `
-  $ agents secrets exec cloudflare -- agents sessions backup-setup
+  $ secrets exec cloudflare -- agents sessions backup-setup
   Provision the managed session-backup Worker + R2 bucket (creds from the bundle).
 
   $ agents sessions backup-setup --account <id> --domain sessions.example.com

@@ -85,9 +85,9 @@ stable installation label unless it explicitly describes an upstream release.
         node_modules/.bin/claude        # Installed CLI binary
         home/
           .claude/                      # Isolated config for this installation
-            commands/  -> ~/.agents/commands/   (symlink)
-            skills/    -> ~/.agents/skills/     (symlink)
-            CLAUDE.md  -> ~/.agents/rules/AGENTS.md (symlink)
+            commands/                   # copied from ~/.agents/commands/
+            skills/                     # copied from ~/.agents/skills/
+            CLAUDE.md                   # compiled from the rules layers
       2.1.112/                          # An expert --isolated second copy (optional)
         node_modules/.bin/claude
         home/.claude/
@@ -98,10 +98,10 @@ stable installation label unless it explicitly describes an upstream release.
   .history/accounts/                    # Account credential slots (PHNX-3940) —
     claude/<accountId>/                 # HOME-shaped, NO binary, never listed as
       .claude/                          # installations
-  shims/
+  .cache/shims/
     claude                              # Version-resolving wrapper script
     codex
-  backups/
+  .history/backups/
     claude/
       1709856000000/                    # Timestamped backup of original ~/.claude/
 ```
@@ -113,17 +113,20 @@ User runs: claude --help
            │
            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  ~/.agents-system/shims/claude (bash script)                               │
+│  ~/.agents/.cache/shims/claude (bash script)                        │
 │                                                                     │
 │  1. Walk up from $PWD looking for project agents.yaml               │
 │     └─ Parse agents.claude: "2.0.70" (skips ~/.agents/agents.yaml)  │
 │                                                                     │
-│  2. If not found, read ~/.agents/agents.yaml (user default)         │
+│  2. If not found, read the machine's global default:                │
+│     ~/.agents/.history/devices/pins-<machine>.json, then the        │
+│     legacy devices/<machine>/agents.yaml and ~/.agents/agents.yaml  │
 │     └─ Parse: agents.claude = "2.0.65"                              │
 │                                                                     │
 │  3. If version not installed, auto-install (project versions only)  │
 │                                                                     │
-│  4. exec ~/.agents-system/versions/claude/{version}/node_modules/.bin/claude │
+│  4. exec ~/.agents/.history/versions/claude/{version}/              │
+│          node_modules/.bin/claude                                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -198,8 +201,8 @@ agents add claude
 │     a. Create ~/.agents/.history/versions/claude/main/              │
 │     b. npm install @anthropic-ai/claude-code@<release>              │
 │     c. Create home dir: versions/claude/main/home/.claude/          │
-│     d. syncResourcesToVersion() - symlink central resources         │
-│     e. createShim() - generate ~/.agents/shims/claude               │
+│     d. syncResourcesToVersion() - copy central resources            │
+│     e. createShim() - generate ~/.agents/.cache/shims/claude        │
 │     f. createVersionedAlias() - generate shims/claude@main          │
 │     g. createInstallation() - freeze identity in installation.json  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -223,8 +226,8 @@ BEFORE (first use):
   CLAUDE.md
 
 AFTER:
-~/.claude/ -> ~/.agents-system/versions/claude/2.0.65/home/.claude/   (symlink)
-~/.agents-system/backups/claude/1709856000000/                        (backup)
+~/.claude/ -> ~/.agents/.history/versions/claude/2.0.65/home/.claude/   (symlink)
+~/.agents/.history/backups/claude/1709856000000/                        (backup)
   settings.json
   commands/
   CLAUDE.md
@@ -289,9 +292,9 @@ Guarantees:
 - `uninstall` is exempt from the setup gate, so it runs even from a broken or
   half-initialized state.
 
-Note: with `--purge`, macOS Keychain items created by `agents secrets` are not
-removed (they are managed by the signed helper app); remove those with
-`agents secrets` before uninstalling if you want them gone.
+Note: with `--purge`, macOS Keychain items created by `secrets` are not
+removed (they are managed by the standalone `secrets` CLI's signed helper app);
+remove those with `secrets` before uninstalling if you want them gone.
 
 ## Isolated Installs
 
@@ -319,7 +322,7 @@ agents add claude@2.1.112 --isolated
            │
            ▼
   installVersion()                 # same npm install into versions/claude/2.1.112/
-  createVersionedAlias()           # ~/.agents-system/shims/claude@2.1.112
+  createVersionedAlias()           # ~/.agents/.cache/shims/claude@2.1.112
   markVersionIsolated()            # writes versions/claude/2.1.112/.isolated
 ```
 
@@ -510,7 +513,7 @@ shell is idle at prompt.
 
 ### Why this matters
 
-Any consumer that drives an agent terminal programmatically — Companion's VS
+Any consumer that drives an agent terminal programmatically — the AGI EXT VS
 Code extension is the primary one today — relies on these two guarantees to
 observe lifecycle transitions via `pgrep`/`ps` without hooking the terminal's
 pty output. Specifically:
@@ -587,10 +590,10 @@ stay inside the moved home on this device and are never copied onto a worker.
 |----------|------|---------|
 | `ensureHarnessInstallation()` | installations/store.ts | Return the one managed installation, installing into `main` when absent |
 | `resolveManagedInstallation()` | installations/store.ts | Resolve the single managed installation (`main` → default → sole non-isolated) |
-| `installVersion()` | versions.ts | Install agent CLI version |
-| `removeVersion()` | versions.ts | Remove installed version |
-| `resolveVersion()` | store.ts | Find version from project/global config |
-| `syncResourcesToVersion()` | versions.ts | Symlink resources into version home |
+| `installVersion()` | installations/versions.ts | Install agent CLI version |
+| `removeVersion()` | installations/versions.ts | Remove installed version |
+| `resolveVersion()` | installations/store.ts | Find version from project/global config |
+| `syncResourcesToVersion()` | installations/versions.ts | Copy/compile resources into version home |
 | `switchConfigSymlink()` | installations/shims.ts | Replace ~/.{agent} with symlink |
 | `createShim()` | installations/shims.ts | Generate version-resolving wrapper |
-| `setGlobalDefault()` | versions.ts | Set default in agents.yaml |
+| `setGlobalDefault()` | installations/versions.ts | Set default in agents.yaml |

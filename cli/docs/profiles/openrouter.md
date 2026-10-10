@@ -6,8 +6,8 @@ Single API key, many open-weight models. `agents-cli` ships built-in OpenRouter 
 ## Quick start
 
 ```bash
-agents harness create
-# pick openrouter, fill prompts, run smoke test
+agents harness add
+# wizard: pick an OpenRouter preset (kimi-chat, qwen, ...), fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 
@@ -17,7 +17,7 @@ Or use the built-in presets directly:
 agents accounts add openrouter --provider openrouter --auth api-key   # store key once
 agents harness add kimi                 # reasoning model, interactive
 agents harness add kimi-chat            # non-reasoning sibling, print-safe
-agents run kimi-chat --print "summarize the diff"
+agents run kimi-chat "summarize the diff"   # a prompt runs headless
 ```
 
 ## Required values
@@ -56,7 +56,7 @@ auth:
 
 ## Known caveats
 
-**Print-safe vs reasoning models.** Claude Code's `--print` consolidator returns empty stdout when the response contains `thinking` or `redacted_thinking` blocks. That's why running a reasoning model (`kimi`, `minimax`, `glm`) under `agents run --print` looks "silent" — the model is replying, but its top-level blocks are reasoning, and the consolidator strips them.
+**Print-safe vs reasoning models.** Claude Code's `--print` consolidator returns empty stdout when the response contains `thinking` or `redacted_thinking` blocks. That's why running a reasoning model (`kimi`, `minimax`, `glm`) headless (`agents run <profile> "<prompt>"`, which drives Claude Code's `--print`) looks "silent" — the model is replying, but its top-level blocks are reasoning, and the consolidator strips them.
 
 The fix: use `kimi-chat` (non-reasoning) for scripting and pipelines, and `kimi` (reasoning) for interactive use. The same rule applies to any reasoning model you wire up manually — if `--print` returns empty, switch to a non-reasoning sibling.
 
@@ -64,7 +64,7 @@ The fix: use `kimi-chat` (non-reasoning) for scripting and pipelines, and `kimi`
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `agents run kimi --print "..."` prints nothing | Reasoning model; `--print` consolidator drops thinking blocks | Use `kimi-chat` (or any print-safe preset) for scripted use |
+| headless `agents run kimi "..."` prints nothing | Reasoning model; `--print` consolidator drops thinking blocks | Use `kimi-chat` (or any print-safe preset) for scripted use |
 | 401 / `Invalid API key` | Stale or wrong key in Keychain | `agents accounts set-key openrouter` to rotate |
 | `model not found` | Slug typo or model retired | Look up the current slug at openrouter.ai/models |
 | 429 / rate limit | OpenRouter per-key cap | Add credits or slow down |

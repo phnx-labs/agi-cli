@@ -89,16 +89,16 @@ export function registerSessionsShareCommand(sessionsCmd: Command): void {
 
   setHelpSections(cmd, {
     examples: `# Share a session — prints an unlisted, redacted link
-agents sessions share a1b2c3d4
+sessions share a1b2c3d4
 
-# Put it in your public gallery at share.getrush.ai/<you>
+# Put it in your public gallery at share.getrush.ai/<you> (agents-only flags)
 agents sessions share a1b2c3d4 --public --label "How the retry bug got fixed"
 
 # Keep the model's reasoning in collapsible sections
-agents sessions share a1b2c3d4 --reasoning fold
+sessions share a1b2c3d4 --reasoning fold
 
 # A link that does not decay
-agents sessions share a1b2c3d4 --expire never`,
+sessions share a1b2c3d4 --expire never`,
     notes: `Publishes through the standalone artifacts CLI — install it with
 'npm i -g @phnx-labs/artifacts-cli'. Sign in with
 'artifacts auth login' for the managed endpoint (zero Cloudflare setup), or configure

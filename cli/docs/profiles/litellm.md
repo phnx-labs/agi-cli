@@ -6,8 +6,8 @@ Generic LLM gateway that fronts 100+ providers behind a single OpenAI-style API,
 ## Quick start
 
 ```bash
-agents harness create
-# pick litellm, fill prompts, run smoke test
+agents harness add
+# wizard: pick the litellm preset, fill the prompts, name it my-profile, run the connection test
 agents run my-profile "hello"
 ```
 
