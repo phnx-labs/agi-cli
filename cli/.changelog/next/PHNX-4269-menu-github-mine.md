@@ -1,1 +1,0 @@
-- **AGI Menu 1.15.20: the GitHub tab gets a Mine chip and a folded Other repos (PHNX-4269).** Mine lists only the pull requests you opened. Other repos (repositories no project links) folds under its header while Needs me or a project group leads. Titles no longer stay slid sideways after the pointer leaves a row. Source: `cli/src/lib/helper-versions.ts`.
