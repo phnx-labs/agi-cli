@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.23.1
+
+- **`agents ps preview <id>` shows the rich session card (PHNX-4227).** It is the
+  same command as `agents sessions preview` with the same flags, JSON envelope,
+  durable remote-preview cache and exit codes; `sessions preview` and
+  `sessions --preview` keep working unchanged, and peers are still asked with the
+  old `sessions preview` argv so a not-yet-upgraded device answers. Source:
+  `cli/src/commands/ps.ts`, `cli/src/lib/session/presentation.ts`.
+
+- **AGI Menu 1.15.20: the GitHub tab gets a Mine chip and a folded Other repos (PHNX-4269).** Mine lists only the pull requests you opened. Other repos (repositories no project links) folds under its header while Needs me or a project group leads. Titles no longer stay slid sideways after the pointer leaves a row. Source: `cli/src/lib/helper-versions.ts`.
+
+- **`agents menubar restart [--json]` restarts the running AGI Menu (PHNX-4325).** It runs
+  `launchctl kickstart -k` on the AGI Menu login item in its own session, so the restart
+  finishes even when AGI Menu itself asked for it, then waits up to 15 seconds for exactly
+  one new process. JSON reports `outcome` (`restarted` or `failed`), `previousPids`, `pids`
+  and `detail`; a turned-off AGI Menu, a failed kickstart, or no new process exits 1 with
+  the reason. AGI Menu's Settings and right-click menu call it. Source:
+  `cli/src/lib/menubar/install-menubar.ts`, `cli/src/commands/menubar.ts`.
+- **Quitting AGI Menu now lasts until the next login (PHNX-4325).** The login item's
+  `KeepAlive` is `{SuccessfulExit: false}`: launchd relaunches AGI Menu after a crash but
+  not after a clean Quit, which previously came back within 30 seconds. The startup repair
+  rewrites an older plist once. Source: `cli/src/lib/menubar/install-menubar.ts`.
+
+- **The daemon log says why it restarted (PHNX-4225).** `agents daemon logs` now
+  carries levels (`debug`, `info`, `warn`, `error`) and structured `data` on each
+  line. Every supervised tick is timed: a tick over half its deadline logs
+  `tick.slow`, and a deadline breach logs `tick.breach` with every in-flight tick,
+  the synchronous sections that ran during it, and the daemon's CPU, memory,
+  event-loop delay and load. A once-a-minute `vitals` line and `loop.stall` /
+  `span.slow` warnings attribute event-loop blocking to named sections, including
+  the feed hub and active-session discovery, which run outside the supervisor.
+  `agents daemon logs level debug` traces every tick and section and applies live;
+  `agents daemon logs level info` turns it back off. The usage-refresh and
+  active-sessions summaries are now structured log lines instead of raw stdout.
+  Source: `cli/src/lib/daemon/diagnostics.ts`, `cli/src/lib/daemon/supervisor.ts`.
+
 ## 1.23.0
 
 ### Removed
