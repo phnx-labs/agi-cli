@@ -433,7 +433,7 @@ function renderCard(
     warnings.push({
       severity: crashed >= 10 ? 'critical' : 'continue',
       text: `${crashed} crashed session${crashed === 1 ? '' : 's'} on this project`,
-      remediation: 'inspect with agents sessions --active / clean up stuck worktrees',
+      remediation: 'inspect with agents ps --status crashed / clean up stuck worktrees',
     });
   }
   for (const line of formatProjectWarnings(warnings)) console.log(line);
