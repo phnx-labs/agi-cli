@@ -2,23 +2,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { getDaemonLogPath, log, setDaemonLogLevel } from './daemon.js';
+import { applyConfiguredLogLevel, getDaemonLogLevel, getDaemonLogPath, log, setDaemonLogLevel } from './daemon.js';
 import { readDaemonLogLevel, writeDaemonLogLevel, getDaemonServicesConfigPath } from '../daemon-services.js';
 
 let root = '';
-const saved = { dir: process.env.AGENTS_DAEMON_DIR, config: process.env.AGENTS_DAEMON_CONFIG_DIR, level: process.env.AGENTS_DAEMON_LOG_LEVEL };
+const saved = { dir: process.env.AGENTS_DAEMON_DIR, config: process.env.AGENTS_DAEMON_CONFIG_DIR };
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-loglevel-'));
   process.env.AGENTS_DAEMON_DIR = path.join(root, 'daemon');
   process.env.AGENTS_DAEMON_CONFIG_DIR = path.join(root, 'config');
-  delete process.env.AGENTS_DAEMON_LOG_LEVEL;
   fs.mkdirSync(process.env.AGENTS_DAEMON_DIR, { recursive: true });
 });
 
 afterEach(() => {
   setDaemonLogLevel('INFO');
-  for (const [key, value] of [['AGENTS_DAEMON_DIR', saved.dir], ['AGENTS_DAEMON_CONFIG_DIR', saved.config], ['AGENTS_DAEMON_LOG_LEVEL', saved.level]] as const) {
+  for (const [key, value] of [['AGENTS_DAEMON_DIR', saved.dir], ['AGENTS_DAEMON_CONFIG_DIR', saved.config]] as const) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
@@ -47,15 +46,35 @@ describe('daemon log levels and structured fields', () => {
     expect(lines()[0].data?.event).toBe('tick.failed');
   });
 
-  it('stores the level in services.yaml without touching the service toggles, and the env var overrides it', () => {
+  it('stores the level in services.yaml without touching the service toggles', () => {
     fs.mkdirSync(process.env.AGENTS_DAEMON_CONFIG_DIR!, { recursive: true });
     fs.writeFileSync(getDaemonServicesConfigPath(), 'services:\n  watchdog: false\n');
     expect(readDaemonLogLevel()).toBe('INFO');
     writeDaemonLogLevel('DEBUG');
     expect(readDaemonLogLevel()).toBe('DEBUG');
     expect(fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8')).toMatch(/watchdog: false[\s\S]*logLevel: debug/);
-    process.env.AGENTS_DAEMON_LOG_LEVEL = 'warn';
-    expect(readDaemonLogLevel()).toBe('WARN');
+  });
+
+  it('refuses to set the level over a services.yaml it cannot parse, leaving the file untouched', () => {
+    fs.mkdirSync(process.env.AGENTS_DAEMON_CONFIG_DIR!, { recursive: true });
+    const broken = 'services:\n  watchdog: false\n  : [unclosed\n';
+    fs.writeFileSync(getDaemonServicesConfigPath(), broken);
+    expect(() => writeDaemonLogLevel('DEBUG')).toThrow();
+    expect(fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8')).toBe(broken);
+  });
+
+  it('the daemon applies a stored level on reload and logs the change; a bad file keeps the current level and says why', () => {
+    fs.mkdirSync(process.env.AGENTS_DAEMON_CONFIG_DIR!, { recursive: true });
+    writeDaemonLogLevel('DEBUG');
+    applyConfiguredLogLevel();
+    expect(getDaemonLogLevel()).toBe('DEBUG');
+    expect(lines().find((l) => l.data?.event === 'log.level')?.data).toMatchObject({ from: 'INFO', to: 'DEBUG' });
+
+    fs.writeFileSync(getDaemonServicesConfigPath(), 'logLevel: verbose\n');
+    applyConfiguredLogLevel();
+    expect(getDaemonLogLevel()).toBe('DEBUG');
+    expect(lines().at(-1)).toMatchObject({ level: 'WARN' });
+    expect(lines().at(-1)?.message).toContain('daemon log level unchanged (debug)');
   });
 
   it('an unknown stored level fails loud instead of silently logging at some other level', () => {

@@ -3193,7 +3193,7 @@
             }
           ],
           "examples": "# Why did it restart? Errors carry a snapshot: in-flight ticks, slow sections, vitals\nagents daemon logs --level error --since 1h\n\n# Event-loop stalls and slow synchronous sections, as they happen\nagents daemon logs -f --level warn\n\n# Turn on per-tick and per-span tracing while you diagnose, then turn it back off\nagents daemon logs level debug\nagents daemon logs -f --level debug\nagents daemon logs level info\n\n# Machine-readable, with each line's structured data\nagents daemon logs --since 10m --json",
-          "notes": "Every line is JSON in the daemon log file (agents daemon status shows the path), with\nan optional data object. Event names: tick.slow, tick.failed, tick.breach, loop.stall,\nspan.slow, vitals (once a minute), and at debug tick.start, tick.ok, span.\nThe level is stored as logLevel in the daemon's services.yaml; AGENTS_DAEMON_LOG_LEVEL\noverrides it for one daemon process.",
+          "notes": "Every line is JSON in the daemon log file (agents daemon status shows the path), with\nan optional data object. Event names: tick.slow, tick.failed, tick.breach, loop.stall,\nspan.slow, vitals (once a minute), and at debug tick.start, tick.ok, span.\nThe level is stored as logLevel in the daemon's services.yaml. Debug writes a line per\ntick and per section synchronously, so leave it on only while diagnosing.",
           "subcommands": [
             {
               "name": "level",

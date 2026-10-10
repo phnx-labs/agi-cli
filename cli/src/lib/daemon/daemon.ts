@@ -448,7 +448,7 @@ function redactFields(value: unknown): unknown {
   return value;
 }
 
-function applyConfiguredLogLevel(): void {
+export function applyConfiguredLogLevel(): void {
   const before = logThreshold;
   try {
     logThreshold = readDaemonLogLevel();

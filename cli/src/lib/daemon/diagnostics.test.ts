@@ -49,6 +49,13 @@ describe('spans', () => {
     expect(c.lines.map((l) => [l.level, l.fields?.span])).toEqual([['DEBUG', 'test.fast'], ['DEBUG', 'test.async']]);
   });
 
+  it('a failing log sink never changes what the instrumented code returns or throws', async () => {
+    installSpanLog(() => { throw new Error('ENOSPC'); }, { slowSyncMs: 0 });
+    expect(spanSync('test.value', () => 7)).toBe(7);
+    expect(() => spanSync('test.throws', () => { throw new Error('real failure'); })).toThrow('real failure');
+    await expect(span('test.async', async () => 'ok')).resolves.toBe('ok');
+  });
+
   it('records nothing and returns the value unchanged when no daemon log is installed', () => {
     expect(spanSync('test.none', () => 42)).toBe(42);
   });
