@@ -923,7 +923,6 @@ export function getMenubarUpdateStatus(): MenubarUpdateResult {
 }
 
 function handoffMenubarRestart(checkedAt: string | null): void {
-  // The menu reaps its CLI children on launch. Finish this command before restarting it.
   const child = spawn(process.execPath, ['--input-type=module', '-e', `
     import { execFileSync } from 'node:child_process';
     import * as fs from 'node:fs';
