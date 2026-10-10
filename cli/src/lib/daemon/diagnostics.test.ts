@@ -10,7 +10,7 @@ function collector(): { lines: Line[]; log: (level: LogLevel, message: string, f
 
 function blockFor(ms: number): void {
   const until = Date.now() + ms;
-  while (Date.now() < until) { /* hold the event loop */ }
+  while (Date.now() < until);
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
