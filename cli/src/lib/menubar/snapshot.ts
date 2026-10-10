@@ -1,3 +1,4 @@
+import { getMenubarUpdateStatus, type MenubarUpdateResult } from './install-menubar.js';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -78,6 +79,7 @@ interface MenubarSnapshot {
   version: 1;
   capturedAt: string;
   cliVersion: string;
+  menubarUpdate: MenubarUpdateResult;
   routines: Record<string, unknown>[];
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
@@ -189,6 +191,7 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     version: 1,
     capturedAt: new Date().toISOString(),
     cliVersion: getCliVersion(),
+    menubarUpdate: getMenubarUpdateStatus(),
     routines,
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],

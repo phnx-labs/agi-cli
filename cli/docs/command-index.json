@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 61,
-  "commands": 482,
+  "commands": 483,
   "root": {
     "name": "agents",
     "path": "",
@@ -9121,6 +9121,46 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "update",
+          "path": "menubar update",
+          "aliases": [],
+          "description": "Check for or install the newest AGI Menu release",
+          "args": [],
+          "options": [
+            {
+              "flags": "--check",
+              "description": "Check only; do not download, install, or restart the app",
+              "long": "--check",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable update status",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents menubar update --check --json\nagents menubar update --json\nagents config set menubar.autoUpdate false",
+          "notes": "Checks and updates only AGI Menu, independently of agents-cli.\nAutomatic updates default on and check about every 12 hours while awake.\nManual updates work with automatic updates off. JSON reports lookup and\ninstallation errors; a successful install hands off a bounded app restart\nafter this command exits. Check-only never installs or restarts the app.",
           "subcommands": []
         }
       ]

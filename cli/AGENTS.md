@@ -2576,3 +2576,16 @@ The normative contract
 alongside the reference docs ([sessions.md](docs/sessions.md),
 [secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference
 for the how-to.
+
+### AGI Menu update preference (PHNX-4323)
+
+`menubar.autoUpdate` is a synced user boolean, default true. The CLI owns app update
+checks and installation through `updateMenubarHelperIfNewer`; all automatic entry
+points share `update-state.ts`'s persisted 12-hour attempt gate and install lock.
+`menubar update --check --json` only checks; `menubar update --json` manually
+installs even when auto updates are off. Their status object also rides
+`snapshot.menubarUpdate`; see `docs/menubar.md`. Menu commands and preference writes
+bypass bootstrap updates. Do not add an app-owned timer or restore cached-bundle
+startup upgrades around the preference gate. Same-version CLI path repair remains
+allowed. Manual self-update responds before the bounded restart handoff, avoiding
+the menu's child-process reaper. Lookup/restart errors remain explicit status.

@@ -9,7 +9,7 @@ import { MENUBAR_HELPER_ASSET } from './download-menubar.js';
 
 const MENUBAR_RELEASES_API = 'https://api.github.com/repos/phnx-labs/agi-cli/releases?per_page=100';
 
-const MENUBAR_RESOLVE_TTL_MS = 24 * 60 * 60 * 1000;
+const MENUBAR_RESOLVE_TTL_MS = 12 * 60 * 60 * 1000;
 
 export interface ReleaseCandidate {
   tagName: string;
@@ -96,6 +96,7 @@ export async function resolveMenubarVersion(opts: {
   now?: number;
   ttlMs?: number;
   force?: boolean;
+  strict?: boolean;
   fetchImpl?: FetchLike;
 } = {}): Promise<string> {
   const floor = opts.floor ?? helperFloor('menubar');
@@ -110,7 +111,8 @@ export async function resolveMenubarVersion(opts: {
     const version = pickNewestMenubarVersion(await fetchMenubarReleaseCandidates(opts.fetchImpl), floor);
     writeMenubarResolveCache(file, { checkedAt: now, version });
     return version;
-  } catch {
+  } catch (error) {
+    if (opts.strict) throw error;
     return cached && compareVersions(cached.version, floor) >= 0 ? cached.version : floor;
   }
 }

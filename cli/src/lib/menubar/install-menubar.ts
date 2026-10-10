@@ -1,6 +1,6 @@
 
 import { fileURLToPath } from 'url';
-import { execFileSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -11,6 +11,8 @@ import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
 import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { downloadMenubarHelperApp, menubarHelperCacheDir } from './download-menubar.js';
+import lockfile from 'proper-lockfile';
+import { readUpdateState, saveUpdateState, updateStatePath, menubarAutoUpdateEnabled, menubarAutomaticUpdateDue, MENUBAR_AUTO_UPDATE_INTERVAL_MS, type MenubarUpdateState } from './update-state.js';
 import { helperFloor } from '../helper-versions.js';
 import { cachedMenubarVersion, resolveMenubarVersion } from './resolve-version.js';
 
@@ -402,6 +404,8 @@ export function menubarHelperPrefetchNeeded(opts: {
 }
 
 export async function prefetchMenubarHelper(): Promise<string | null> {
+  if (!menubarAutoUpdateEnabled()) return null;
+  if (menubarServiceInstalled()) { await updateMenubarHelperIfNewer(); return null; }
   const needed = menubarHelperPrefetchNeeded({
     darwin: onDarwin(),
     disabledByUser: menubarDisabledByUser(),
@@ -550,6 +554,14 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
   try {
     if (!onDarwin()) return;
     if (menubarDisabledByUser()) return;
+    if (menubarServiceInstalled() && fs.existsSync(installedExecutablePath()) && hasDeveloperIdSignature(installedAppPath())) {
+      if (menubarSetupNeedsRepoint() && mayHealMenubar(false, installedAppPath())) {
+        const stamp = readInstalledMenubarStamp();
+        if (stamp) installAndStartService(installedExecutablePath(), stamp);
+      }
+      return;
+    }
+    if (!menubarAutoUpdateEnabled()) return;
     if (!sourceAppPath()) return;
     if (!menubarServiceInstalled()) {
       startMenubarServiceFromSource({ clearOptOut: false });
@@ -876,12 +888,7 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
   };
 }
 
-interface MenubarUpdateResult {
-  outcome: 'updated' | 'current' | 'skipped' | 'failed';
-  installed: string | null;
-  available: string;
-  detail: string;
-}
+export type MenubarUpdateResult = MenubarUpdateState;
 
 export function menubarUpdateSkipReason(opts: {
   darwin: boolean;
@@ -904,37 +911,102 @@ export function menubarUpdateOutcome(installed: string, available: string): 'cur
   return compareVersions(available, installed) > 0 ? 'updated' : 'current';
 }
 
-export async function updateMenubarHelperIfNewer(opts: { dryRun?: boolean; force?: boolean } = {}): Promise<MenubarUpdateResult> {
-  const installedStamp = readInstalledMenubarStamp();
-  const installed = stampVersionLabel(installedStamp);
-  const skip = (detail: string, available = cachedMenubarVersion()): MenubarUpdateResult =>
-    ({ outcome: 'skipped', installed, available, detail });
-  const reason = menubarUpdateSkipReason({
-    darwin: onDarwin(),
-    disabledByUser: menubarDisabledByUser(),
-    serviceInstalled: menubarServiceInstalled(),
-    shipped: Boolean(shippedAppPath()),
-    installed: installedStamp,
+export function getMenubarUpdateStatus(): MenubarUpdateResult {
+  const saved = readUpdateState();
+  const autoUpdate = menubarAutoUpdateEnabled();
+  return {
+    outcome: saved.outcome ?? 'unknown', installed: stampVersionLabel(readInstalledMenubarStamp()),
+    available: saved.available ?? null, checkedAt: saved.checkedAt ?? null,
+    nextCheckAt: autoUpdate && saved.checkedAt ? new Date(Date.parse(saved.checkedAt) + MENUBAR_AUTO_UPDATE_INTERVAL_MS).toISOString() : null,
+    autoUpdate, detail: saved.detail ?? 'Not checked yet',
+  };
+}
+
+function handoffMenubarRestart(checkedAt: string | null): void {
+  // The menu reaps its CLI children on launch. Finish this command before restarting it.
+  const child = spawn(process.execPath, ['--input-type=module', '-e', `
+    import { execFileSync } from 'node:child_process';
+    import * as fs from 'node:fs';
+    const stateFile = ${JSON.stringify(updateStatePath())};
+    const fail = (detail) => {
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      if (state.checkedAt !== ${JSON.stringify(checkedAt)}) process.exit(1);
+      state.outcome = 'failed'; state.detail = detail;
+      const tmp = stateFile + '.' + process.pid + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(state)); fs.renameSync(tmp, stateFile);
+      process.exit(1);
+    };
+    const deadline = Date.now() + 15000;
+    const timer = setInterval(() => {
+      try { process.kill(${process.pid}, 0); if (Date.now() < deadline) return; fail('AGI Menu installed, but its updater did not exit before the restart deadline'); }
+      catch {
+        clearInterval(timer);
+        try { execFileSync('launchctl', ['kickstart', '-k', ${JSON.stringify(`gui/${process.getuid?.() ?? 0}/${serviceLabel()}`)}], { timeout: 10000, stdio: 'ignore' }); }
+        catch (error) { fail('AGI Menu installed, but restart failed: ' + error.message); }
+      }
+    }, 100);
+  `], { detached: true, stdio: 'ignore' });
+  child.on('error', (error) => {
+    saveUpdateState({ ...getMenubarUpdateStatus(), outcome: 'failed', detail: `AGI Menu installed, but restart could not start: ${error.message}` });
   });
-  if (reason) return skip(reason);
-  const release = installedStamp as { source: 'release'; helperVersion: string };
+  child.unref();
+}
 
-  const available = await resolveMenubarVersion({ force: opts.force });
-  if (menubarUpdateOutcome(release.helperVersion, available) === 'current') {
-    return { outcome: 'current', installed, available, detail: `AGI Menu ${installed} is the newest published build` };
+export async function updateMenubarHelperIfNewer(opts: {
+  dryRun?: boolean; manual?: boolean; deferRestart?: boolean;
+} = {}): Promise<MenubarUpdateResult> {
+  const previous = getMenubarUpdateStatus();
+  const result = (outcome: MenubarUpdateResult['outcome'], detail: string,
+    available = previous.available): MenubarUpdateResult => ({ ...previous, outcome, detail, available });
+  const registration = serviceManagerRegistrationAllowed();
+  if (!opts.dryRun && !registration.allowed) return result('skipped', registration.reason);
+  const reason = menubarUpdateSkipReason({
+    darwin: onDarwin(), disabledByUser: menubarDisabledByUser(), serviceInstalled: menubarServiceInstalled(),
+    shipped: Boolean(shippedAppPath()), installed: readInstalledMenubarStamp(),
+  });
+  if (reason) return result('skipped', reason);
+  if (!opts.manual && (!previous.autoUpdate || !menubarAutomaticUpdateDue(previous.checkedAt))) {
+    return result('skipped', previous.autoUpdate ? 'Next automatic check is not due' : 'Automatic updates are off');
   }
-  if (opts.dryRun) return { outcome: 'updated', installed, available, detail: `would update AGI Menu ${installed} → ${available}` };
-
+  fs.mkdirSync(path.dirname(updateStatePath()), { recursive: true });
+  let releaseLock: () => Promise<void>;
+  try { releaseLock = await lockfile.lock(updateStatePath(), { realpath: false, stale: 600000, retries: 0 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOCKED') return result('skipped', 'An update check is already running');
+    throw error;
+  }
   try {
-    const src = await downloadMenubarHelperApp(available);
-    if (!mayHealMenubar(false, src)) return skip(`another install owns the helper; it will update on its own cooldown`, available);
-    const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
-    if (!exec) return { outcome: 'failed', installed, available, detail: 'the verified bundle could not be installed' };
-    try { fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src))); } catch {  }
-    stampMenubarHeal();
-    restartMenubarHelperAfterSwap(process.getuid?.() ?? 0, liveMenubarProcesses().own);
-    return { outcome: 'updated', installed, available, detail: `AGI Menu ${installed} → ${available}` };
-  } catch (e) {
-    return { outcome: 'failed', installed, available, detail: (e as Error).message };
-  }
+    const current = getMenubarUpdateStatus();
+    if (!opts.manual && (!current.autoUpdate || !menubarAutomaticUpdateDue(current.checkedAt))) return result('skipped', 'Automatic update check is not due');
+    previous.checkedAt = new Date().toISOString();
+    previous.nextCheckAt = previous.autoUpdate ? new Date(Date.now() + MENUBAR_AUTO_UPDATE_INTERVAL_MS).toISOString() : null;
+    saveUpdateState(result('unknown', 'Checking for AGI Menu updates'));
+    let available = previous.available;
+    try {
+      available = await resolveMenubarVersion({ force: true, strict: true });
+      if (menubarUpdateOutcome(previous.installed!, available) === 'current') {
+        const running = buildMenubarDoctorReport();
+        const needsRestart = !running.running || running.staleRunningProcess.some((p) => p.stale);
+        if (needsRestart && opts.dryRun) return saveUpdateState(result('available', `AGI Menu ${previous.installed} is installed; restart needed to run it`, available));
+        if (needsRestart && opts.manual) {
+          const pending = saveUpdateState(result('updated', `AGI Menu ${previous.installed} is installed; restarting the older running app`, available));
+          handoffMenubarRestart(previous.checkedAt);
+          return pending;
+        }
+        return saveUpdateState(result('current', `AGI Menu ${previous.installed} is up to date`, available));
+      }
+      if (opts.dryRun) return saveUpdateState(result('available', `AGI Menu ${available} is available`, available));
+      const src = await downloadMenubarHelperApp(available);
+      if (!opts.manual && !menubarAutoUpdateEnabled()) return saveUpdateState({ ...result('available', 'Automatic updates were turned off', available), autoUpdate: false, nextCheckAt: null });
+      if (!mayHealMenubar(false, src)) return saveUpdateState(result('skipped', 'Another install owns the helper', available));
+      const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
+      if (!exec) return saveUpdateState(result('failed', 'The verified bundle could not be installed', available));
+      fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stampFor(src)));
+      stampMenubarHeal();
+      const updated = saveUpdateState({ ...result('updated', `AGI Menu updated to ${available}`, available), installed: available });
+      if (opts.deferRestart) handoffMenubarRestart(previous.checkedAt);
+      else execFileSync('launchctl', ['kickstart', '-k', `gui/${process.getuid?.() ?? 0}/${serviceLabel()}`], { timeout: 10000, stdio: 'ignore' });
+      return updated;
+    } catch (error) { return saveUpdateState({ ...result('failed', (error as Error).message, available), installed: stampVersionLabel(readInstalledMenubarStamp()) }); }
+  } finally { await releaseLock(); }
 }

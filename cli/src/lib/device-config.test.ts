@@ -462,6 +462,7 @@ describe('listConfig', () => {
       'description',
       'formFactor',
       'interactive.host',
+      'menubar.autoUpdate',
       'menubar.menu.bannerWhenNeedsYou',
       'menubar.menu.defaultProject',
       'menubar.menu.deviceSort',

@@ -65,16 +65,16 @@ flowchart LR
    bump is what makes `scripts/release-attestation-produce.sh --with-helpers`
    re-record the row from the published asset.
 3. **Install** (on a user's Mac): `agents menubar setup` / `enable` (and the
-   startup self-heal, from a bundled or cached copy only) download, verify, and
+   startup repair for a missing helper, from a bundled or cached copy only) download, verify, and
    install it. No build happens on any user machine.
 4. **Update, unattended.** Installed release helpers move to the newest
    published build on their own: `resolveMenubarVersion`
-   (`src/lib/menubar/resolve-version.ts`) reads the public release list once a
-   day (cached at `~/.agents/.cache/menubar/latest.json`, floor as the offline
-   answer, never below the floor), and `updateMenubarHelperIfNewer` downloads
+   (`src/lib/menubar/resolve-version.ts`) reads the public release list about twice a
+   day (cached at `~/.agents/.cache/menubar/latest.json`, never below the floor; update checks surface offline errors), and `updateMenubarHelperIfNewer` downloads
    and verifies that build, swaps it atomically at the same path and identity
    (bundle id + Team, so the Accessibility grant survives), and restarts the
-   helper. Two triggers: the daemon's periodic self-heal check `menubar-helper`
+   helper. Automatic attempts honor `menubar.autoUpdate` and one persistent 12-hour gate.
+   Triggers include the daemon's periodic self-heal check `menubar-helper`
    (every six hours; `agents doctor` shows it, `agents sync` runs it)
    and the end of `agents upgrade`. A local-build install, an opted-out Mac and
    a Mac that never enabled the menu bar are left alone; the multi-install
@@ -235,3 +235,30 @@ activity cursor is supplied. Failures use exponential backoff. A shared
 SQLite contention is limited to 250 milliseconds per cache operation. A cache
 write failure preserves the returned content and reports that offline storage
 failed. Cached results omit live activity, which remains owned by the feed.
+
+## App updates
+
+`agents menubar update --check --json` checks the published AGI Menu release without
+installing or restarting anything. `agents menubar update --json` installs a newer
+verified, signed release, even when automatic updates are off. Neither command
+upgrades agents-cli. A manual update finishes its JSON response before a bounded
+CLI-owned handoff restarts the menu; the new menu reads the persisted result.
+A restart failure remains visible, and a manual update retries a stale running app.
+
+`agents config set menubar.autoUpdate false` turns off automatic app updates;
+`true` restores them (the default). This user preference syncs across the fleet and
+rides `snapshot.menuPreferences`. Existing CLI self-heal/bootstrap paths share one
+persisted 12-hour attempt gate on each Mac: roughly twice daily while awake, with
+no menu timer and no exact wall-clock appointment. Startup may repair an obsolete
+CLI path using the already-installed app even when updates are off. Manual setup
+and enable remain explicit installation operations.
+
+`snapshot.menubarUpdate` and both update commands return the same object:
+`installed`, `available`, `checkedAt`, `nextCheckAt` (nullable strings), `autoUpdate`
+(boolean), `outcome` (`unknown`, `available`, `current`, `updated`, `skipped`, or
+`failed`), and `detail`. `installed` is the on-disk bundle version; the menu reads
+its own running version from its bundle. `checkedAt` records attempts, including
+failures, so an outage does not cause repeated checks. Network failures are never
+reported as up to date. Check and install operations serialize with a shared lock;
+automatic installation rechecks the preference after downloading. Release signature
+verification and no-downgrade rules remain mandatory.

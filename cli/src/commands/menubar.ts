@@ -3,6 +3,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import {
+  updateMenubarHelperIfNewer,
   enableMenubarService,
   disableMenubarService,
   getMenubarStatus,
@@ -108,6 +109,32 @@ export function registerMenubarCommands(program: Command): void {
   const menubar = program
     .command('menubar')
     .description('Manage AGI Menu (running sessions, agents awaiting input, routines)');
+
+  const update = menubar.command('update')
+    .description('Check for or install the newest AGI Menu release')
+    .option('--check', 'Check only; do not download, install, or restart the app')
+    .option('--json', 'Emit machine-readable update status')
+    .action(async (options: { check?: boolean; json?: boolean }) => {
+      const status = await updateMenubarHelperIfNewer({ manual: true, dryRun: options.check, deferRestart: true });
+      if (options.json) process.stdout.write(`${JSON.stringify(status)}\n`);
+      else console.log(status.detail);
+      if (status.outcome === 'failed') process.exitCode = 1;
+    });
+
+  setHelpSections(update, {
+    examples: `
+      agents menubar update --check --json
+      agents menubar update --json
+      agents config set menubar.autoUpdate false
+    `,
+    notes: `
+      Checks and updates only AGI Menu, independently of agents-cli.
+      Automatic updates default on and check about every 12 hours while awake.
+      Manual updates work with automatic updates off. JSON reports lookup and
+      installation errors; a successful install hands off a bounded app restart
+      after this command exits. Check-only never installs or restarts the app.
+    `,
+  });
 
   const setup = menubar
     .command('setup')
