@@ -288,6 +288,70 @@ export function restartMenubarHelperAfterSwap(
   }
 }
 
+export interface MenubarRestartResult {
+  outcome: 'restarted' | 'failed';
+  previousPids: number[];
+  pids: number[];
+  detail: string;
+}
+
+export const MENUBAR_RESTART_DEADLINE_MS = 15_000;
+
+export interface MenubarRestartDeps {
+  ownPids: () => number[];
+  kickstart: (target: string) => Promise<{ code: number | null; stderr: string }>;
+  sleep: (ms: number) => Promise<void>;
+  deadlineMs: number;
+}
+
+// The kickstart runs in its own session: launchd ends the helper's whole process
+// group, so a restart requested from AGI Menu itself must outlive its caller.
+function kickstartDetached(target: string): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve) => {
+    const child = spawn('launchctl', ['kickstart', '-k', target], { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: null, stderr: error.message }));
+    child.on('close', (code) => resolve({ code, stderr: stderr.trim() }));
+    child.unref();
+  });
+}
+
+const defaultRestartDeps: MenubarRestartDeps = {
+  ownPids: () => liveMenubarProcesses().own.map((p) => p.pid),
+  kickstart: kickstartDetached,
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  deadlineMs: MENUBAR_RESTART_DEADLINE_MS,
+};
+
+export async function restartMenubarHelper(deps: MenubarRestartDeps = defaultRestartDeps): Promise<MenubarRestartResult> {
+  const failed = (detail: string, previousPids: number[] = [], pids: number[] = []): MenubarRestartResult =>
+    ({ outcome: 'failed', previousPids, pids, detail });
+  if (!onDarwin()) return failed('AGI Menu is macOS only');
+  if (menubarDisabledByUser() || !menubarServiceInstalled()) {
+    return failed('AGI Menu is turned off; `agents menubar setup` turns it on');
+  }
+  const registration = serviceManagerRegistrationAllowed();
+  if (!registration.allowed) return failed(registration.reason);
+
+  const previousPids = deps.ownPids();
+  const target = `gui/${process.getuid?.() ?? 0}/${serviceLabel()}`;
+  const kick = await deps.kickstart(target);
+  if (kick.code !== 0) {
+    return failed(`launchctl kickstart -k ${target} failed${kick.stderr ? `: ${kick.stderr}` : ''}`, previousPids, deps.ownPids());
+  }
+  const deadline = Date.now() + deps.deadlineMs;
+  let pids = deps.ownPids();
+  while (!(pids.length === 1 && !previousPids.includes(pids[0]))) {
+    if (Date.now() >= deadline) {
+      return failed(`AGI Menu did not come back as one new process within ${Math.round(deps.deadlineMs / 1000)} s; \`agents menubar setup\` repairs it`, previousPids, pids);
+    }
+    await deps.sleep(200);
+    pids = deps.ownPids();
+  }
+  return { outcome: 'restarted', previousPids, pids, detail: `AGI Menu restarted (pid ${pids[0]})` };
+}
+
 function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppPath?: string } = {}): boolean {
   if (!onDarwin()) return false;
   const src = opts.sourceAppPath ?? sourceAppPath();

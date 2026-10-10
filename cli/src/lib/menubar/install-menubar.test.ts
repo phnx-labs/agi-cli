@@ -33,6 +33,7 @@ import {
   processesToEnd,
   resetMenubarAccessibilityTcc,
   restartMenubarHelperAfterSwap,
+  restartMenubarHelper,
   restartMenubarLaunchAgent,
   serviceLabel,
   shouldMigrateMenubarTcc,
@@ -870,5 +871,81 @@ describe('menubarGateVersion (R5: helpers auto-update)', () => {
 
   it('falls back to the cached source when no bundle is given', () => {
     expect(menubarGateVersion(null, () => '1.14.13')).toBe('1.14.13');
+  });
+});
+
+describe('restartMenubarHelper', () => {
+  const saved = { home: process.env.HOME, realHome: process.env.AGENTS_REAL_HOME, allow: process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME };
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  let home = '';
+
+  function sandbox(opts: { serviceInstalled: boolean }): void {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-menubar-restart-'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    process.env.HOME = home;
+    process.env.AGENTS_REAL_HOME = home;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    if (opts.serviceInstalled) {
+      const dir = path.join(home, 'Library', 'LaunchAgents');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${serviceLabel()}.plist`), '<plist/>');
+    }
+  }
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
+    for (const [key, value] of [['HOME', saved.home], ['AGENTS_REAL_HOME', saved.realHome], ['AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME', saved.allow]] as const) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+    if (home) fs.rmSync(home, { recursive: true, force: true });
+    home = '';
+  });
+
+  function deps(pidReads: number[][], kick = { code: 0 as number | null, stderr: '' }) {
+    const kicked: string[] = [];
+    let read = 0;
+    return {
+      kicked,
+      deps: {
+        ownPids: () => pidReads[Math.min(read++, pidReads.length - 1)],
+        kickstart: async (target: string) => { kicked.push(target); return kick; },
+        sleep: async () => {},
+        deadlineMs: 50,
+      },
+    };
+  }
+
+  it('refuses a turned-off AGI Menu without touching launchd', async () => {
+    sandbox({ serviceInstalled: false });
+    const { kicked, deps: d } = deps([[101]]);
+    const r = await restartMenubarHelper(d);
+    expect(r.outcome).toBe('failed');
+    expect(r.detail).toMatch(/turned off.*agents menubar setup/);
+    expect(kicked).toEqual([]);
+  });
+
+  it('kickstarts the login item and reports the one new pid', async () => {
+    sandbox({ serviceInstalled: true });
+    const { kicked, deps: d } = deps([[101], [101], [], [202]]);
+    const r = await restartMenubarHelper(d);
+    expect(kicked).toEqual([`gui/${process.getuid?.() ?? 0}/${serviceLabel()}`]);
+    expect(r).toEqual({ outcome: 'restarted', previousPids: [101], pids: [202], detail: 'AGI Menu restarted (pid 202)' });
+  });
+
+  it('fails loud with launchctl stderr when the kickstart fails', async () => {
+    sandbox({ serviceInstalled: true });
+    const { deps: d } = deps([[101]], { code: 113, stderr: 'Could not find service' });
+    const r = await restartMenubarHelper(d);
+    expect(r.outcome).toBe('failed');
+    expect(r.detail).toMatch(/kickstart -k .* failed: Could not find service/);
+  });
+
+  it('fails when the old process never goes away', async () => {
+    sandbox({ serviceInstalled: true });
+    const { deps: d } = deps([[101]]);
+    const r = await restartMenubarHelper(d);
+    expect(r).toMatchObject({ outcome: 'failed', previousPids: [101], pids: [101] });
+    expect(r.detail).toMatch(/did not come back/);
   });
 });
