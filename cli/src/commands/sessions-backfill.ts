@@ -311,7 +311,7 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
       - This command is the only historical transcript parse for tool indexing. Tool queries never trigger it.
       - New and changed sessions are indexed during their normal incremental scan.
       - No embeddings, vector database, network model, or semantic processing is used.
-      - Peers are driven with \`agents daemon index backfill tools --local\`, so each peer needs a CLI newer than 1.22.122.
+      - Peers are driven with \`agents daemon index backfill tools --local\`, so each peer needs agents 1.22.123 or newer.
     `,
   });
   tools.action(async (_options: unknown, command: Command) => {
