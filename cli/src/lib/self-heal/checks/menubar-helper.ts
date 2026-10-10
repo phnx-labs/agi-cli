@@ -11,6 +11,7 @@ export const menubarHelperCheck: HealCheck = {
     const { updateMenubarHelperIfNewer } = await import('../../menubar/install-menubar.js');
     const r = await updateMenubarHelperIfNewer({ dryRun: ctx.dryRun });
     switch (r.outcome) {
+      case 'available':
       case 'updated': return resultOf([r.detail], []);
       case 'failed': return resultOf([], [`AGI Menu ${r.installed ?? '?'} → ${r.available}: ${r.detail}`]);
       default: return resultOf([], []);
