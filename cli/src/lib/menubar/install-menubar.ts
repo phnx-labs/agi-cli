@@ -313,7 +313,6 @@ function kickstartDetached(target: string): Promise<{ code: number | null; stder
     child.stderr?.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
     child.on('error', (error) => resolve({ code: null, stderr: error.message }));
     child.on('close', (code) => resolve({ code, stderr: stderr.trim() }));
-    child.unref();
   });
 }
 
