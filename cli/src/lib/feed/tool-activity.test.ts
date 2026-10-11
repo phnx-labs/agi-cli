@@ -433,7 +433,7 @@ describe('rows read from the standalone tools (real processes printing fixture J
 
   it('links through a launch id from the activity logs, replaces a remapped id after the window, and drops a removed log', async () => {
     fs.mkdirSync(getSessionsDir(), { recursive: true });
-    for (const id of ['sess-launch-a', 'sess-launch-b']) {
+    for (const id of ['sess-launch-a', 'sess-launch-bb']) {
       const transcript = path.join(tempRoot(), `${id}.jsonl`);
       fs.writeFileSync(transcript, '');
       upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic: id } as unknown as Parameters<typeof upsertSession>[0], id);
@@ -450,9 +450,9 @@ describe('rows read from the standalone tools (real processes printing fixture J
     writeLog('sess-launch-a');
     expect(await link(t0)).toBe('sess-launch-a');
 
-    writeLog('sess-launch-b');
+    writeLog('sess-launch-bb');
     expect(await link(t0 + TOOL_LINK_TTL_MS - 1)).toBe('sess-launch-a');
-    expect(await link(t0 + 3 * TOOL_LINK_TTL_MS)).toBe('sess-launch-b');
+    expect(await link(t0 + 3 * TOOL_LINK_TTL_MS)).toBe('sess-launch-bb');
 
     fs.rmSync(log);
     expect(await link(t0 + 6 * TOOL_LINK_TTL_MS)).toBeUndefined();

@@ -164,7 +164,15 @@ async function refreshLaunchIndex(nowMs: number): Promise<void> {
     try { stat = await fs.promises.stat(file); } catch { linkCache.activity.delete(name); continue; }
     const stamp = `${stat.size}:${stat.mtimeMs}`;
     if (linkCache.activity.get(name)?.stamp === stamp) continue;
-    linkCache.activity.set(name, { stamp, pairs: await readLaunchPairs(file) });
+    let pairs: LaunchPairs;
+    try {
+      pairs = await readLaunchPairs(file);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      linkCache.activity.delete(name);
+      continue;
+    }
+    linkCache.activity.set(name, { stamp, pairs });
   }
   const earliest: LaunchPairs = new Map();
   for (const { pairs } of linkCache.activity.values()) {
