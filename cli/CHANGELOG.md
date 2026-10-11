@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.8
+
+- **AGI Menu config keys for the Linear tab, Sessions kinds and ticket grouping (PHNX-4326).** `tabOrder`/`hiddenTabs` accept `linear`; new `menubar.menu.showBrowserSessions` and `showComputerSessions` (default `true`) and `menubar.menu.ticketGroup` (default `none`; reads `milestone` while the superseded `groupTicketsByMilestone` is on). Source: `cli/src/lib/device-config.ts`, `cli/src/lib/menubar/snapshot.ts`.
+
 ## 1.23.7
 
 - **A tab watching a session names the workspace its editor window has open.** Each `observerTerminals` entry in `agents feed watch --json` now carries the tab's `workspaceDir`, so AGI EXT can group sessions by the window that holds their tab and label it `agents` or `agents-cli` instead of "Window 2". An entry that comes only from a session's origin terminal has no tab row and still carries none. Source: `cli/src/lib/session/projection.ts`.
