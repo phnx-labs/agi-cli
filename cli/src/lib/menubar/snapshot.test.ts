@@ -79,6 +79,9 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()['menubar.menu.ticketGroup']).toBe('status');
       setConfigValue('menubar.menu.showBrowserSessions', false);
       expect(buildMenuPreferences()['menubar.menu.showBrowserSessions']).toBe(false);
+      expect(buildMenuPreferences()).not.toHaveProperty('menubar.menu.sessionFilter');
+      setConfigValue('menubar.menu.sessionFilter', 'show=needs;which=tab;sort=newest;group=device');
+      expect(buildMenuPreferences()['menubar.menu.sessionFilter']).toBe('show=needs;which=tab;sort=newest;group=device');
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
         'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github'],

@@ -430,6 +430,12 @@ describe('validation', () => {
       expect(getConfigValue('menubar.menu.deviceSort').value).toBe(order);
     }
     expect(() => setConfigValue('menubar.menu.deviceSort', 'fastest')).toThrow(/must be one of/);
+    expect(getConfigValue('menubar.menu.sessionFilter').value).toBeUndefined();
+    setConfigValue('menubar.menu.sessionFilter', 'show=working,needs,idle;which=tab;sort=updated;group=status');
+    expect(getConfigValue('menubar.menu.sessionFilter').value).toBe('show=working,needs,idle;which=tab;sort=updated;group=status');
+    setConfigValue('menubar.menu.sessionFilter', 'show=;which=tab,background,closed');
+    expect(getConfigValue('menubar.menu.sessionFilter').value).toBe('show=;which=tab,background,closed');
+    expect(() => setConfigValue('menubar.menu.sessionFilter', 'working and idle')).toThrow(/"working and idle" is not a name=values part/);
   });
 
   it('groups open PRs flat and merged PRs by day unless told otherwise, and refuses an unknown grouping', async () => {
@@ -494,6 +500,7 @@ describe('listConfig', () => {
       'menubar.menu.projectPriorityFilter',
       'menubar.menu.projectScope',
       'menubar.menu.projectSort',
+      'menubar.menu.sessionFilter',
       'menubar.menu.sessionUpdates',
       'menubar.menu.showBrowserSessions',
       'menubar.menu.showComputerSessions',

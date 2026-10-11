@@ -1296,7 +1296,9 @@ neither engine has a fleet registry of its own — while `agents view --device
 `groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
 `projectScope` (cycle/all), `projectSort` (updated/priority/name),
 `ticketSort` (priority/updated/title), `showPullRequests`, `sessionUpdates` (the
-Home session-updates section), `deviceSort` (name/role/load/memory/disk), and the
+Home session-updates section), `deviceSort` (name/role/load/memory/disk),
+`sessionFilter` (the Sessions filter as one `;`-separated `name=values` string the
+menu owns; only that shape is validated, unset = the menu default), and the
 **Headless runs** defaults — `headlessAgent` and `headlessFallbackAgent` (each a
 registered agent id, validated at write time, unset = the menu's own default and no
 `--fallback`) plus `headlessPlacement` (`auto` | `local` | `interactive` | a device

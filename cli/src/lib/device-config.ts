@@ -725,6 +725,20 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'AGI Menu: show pull requests opened by bots (dependabot, CI bots) on the GitHub tab (default off).',
   },
   {
+    name: 'menubar.menu.sessionFilter',
+    yamlKey: 'menubarMenuSessionFilter',
+    scope: 'user',
+    type: 'string',
+    description:
+      'AGI Menu: the session filter Home and the Sessions tab share, as `;`-separated name=values parts ' +
+      '(`show=working,needs,idle;which=tab;sort=updated;group=status`). The menu owns the parts; ' +
+      'one it does not know reads as its default. Unset = the menu default (open tabs that are not done).',
+    validate: (v) => {
+      const bad = String(v).split(';').find((part) => part !== '' && !/^[A-Za-z]+=[A-Za-z0-9,-]*$/.test(part));
+      return bad === undefined ? null : `menubar.menu.sessionFilter: "${bad}" is not a name=values part (for example show=working,needs).`;
+    },
+  },
+  {
     name: 'menubar.menu.groupTicketsByMilestone',
     yamlKey: 'menubarMenuGroupTicketsByMilestone',
     scope: 'user',
