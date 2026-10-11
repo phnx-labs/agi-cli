@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.13
+
+- **`agents setup` without a terminal exits 0 when setup worked (PHNX-4227).** Outside a TTY it printed the onboarding checklist and exited 1 if any capability was unconfigured: browser, fleet, watchdog, preferences and so on. Every headless install, such as a Rush pod image build, has those unset by design, so the build had to tolerate a failing `agents setup`. It now exits 1 only when core setup (the system repo) is missing. `agents setup status` still exits 1 for any missing capability. Source: `cli/src/commands/setup.ts`.
+
 ## 1.23.12
 
 - **`agents add` works in containers without `ps` (PHNX-4227).** Before replacing an install, the CLI checks whether any process runs from it. On Linux it listed processes with `ps`, which `node:*-slim` images (every Rush pod) lack, and a failed scan counts as "in use", so `agents add` refused with "account home main is in use" on an idle install. On Linux it now reads `/proc/<pid>/cmdline`; macOS keeps `ps`, Windows keeps its CIM query, and an unreadable process table still refuses. Source: `cli/src/lib/installations/active-check.ts`.
