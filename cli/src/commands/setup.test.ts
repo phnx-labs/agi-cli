@@ -140,17 +140,27 @@ describe('agents setup command group', () => {
     }
   });
 
-  it('prints status, returns without prompting, and exits nonzero for missing phases outside a TTY', async () => {
+  it('outside a TTY prints status without prompting and exits nonzero only when core is missing', async () => {
+    const systemRepo = path.join(TEST_HOME, '.agents', '.system');
+    fs.mkdirSync(systemRepo, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
     let selected = false;
     try {
+      expect((await getSetupStatus()).find((row) => row.phase === 'browser')?.state).toBe('missing');
       await runSetupHub({
         interactive: false,
         selectPhase: async () => { selected = true; return 'exit'; },
       });
       expect(selected).toBe(false);
+      expect(process.exitCode).toBeUndefined();
+
+      fs.rmSync(systemRepo, { recursive: true, force: true });
+      await runSetupHub({ interactive: false });
       expect(process.exitCode).toBe(1);
     } finally {
       process.exitCode = undefined;
+      fs.mkdirSync(systemRepo, { recursive: true });
+      execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
     }
   });
 });

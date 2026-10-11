@@ -328,7 +328,7 @@ export async function runSetupHub(deps: {
   if (!interactive) {
     const rows = await getSetupStatus();
     renderSetupStatus(rows);
-    if (rows.some((row) => row.state === 'missing')) process.exitCode = 1;
+    if (rows.some((row) => row.phase === 'core' && row.state === 'missing')) process.exitCode = 1;
     return;
   }
   try {
