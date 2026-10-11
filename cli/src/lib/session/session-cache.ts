@@ -4,7 +4,8 @@ import * as path from 'path';
 
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
-import { backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { artifactKind, backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
+import { extractArtifacts, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { enrichGlanceFiles } from './glance-files.js';
 import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
 import { isSummarizerReady } from '../summarizer/config.js';
@@ -403,6 +404,18 @@ export function resolveStreamSummaryState(
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
+// The files a session created that a person looks at (images, videos, html and
+// markdown docs, under .agents/artifacts or elsewhere) are its artifacts, read from
+// the same ledger as files.changes. Paths are absolute on the row's own machine.
+export function withCreatedArtifacts(s: ActiveSession): ActiveSession {
+  const created = (s.files?.changes ?? [])
+    .filter((c) => c.op === 'created')
+    .map((c) => ({ path: path.isAbsolute(c.path) || !s.cwd ? c.path : path.resolve(s.cwd, c.path), op: c.op }));
+  const merged = created.length > 0 ? mergeArtifacts(extractArtifacts(created), s.artifacts ?? []) : (s.artifacts ?? []);
+  if (merged.length > 0) s.artifacts = merged.map((a) => ({ ...a, kind: artifactKind(a.path) }));
+  return s;
+}
+
 export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   try {
@@ -425,6 +438,10 @@ export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
 }
 
 export function applyImmutableMemo(s: ActiveSession): ActiveSession {
+  return withCreatedArtifacts(applyStoredFields(s));
+}
+
+function applyStoredFields(s: ActiveSession): ActiveSession {
   if (!s.sessionId) return s;
   mergeSessionSummary(s);
   mergeSessionTimeline(s);

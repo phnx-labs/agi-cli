@@ -45,7 +45,7 @@ function ackReader(nonce: string, host: string | undefined, resolveHost?: HostRe
 }
 
 function ackFailure(ack: SpawnAck | undefined, req: LaunchRequest, timeoutMs: number): string | undefined {
-  if (!ack) return `the editor extension never confirmed the tab (no spawn ack within ${Math.round(timeoutMs / 1000)}s)`;
+  if (!ack) return `VSCodium didn't confirm a tab within ${Math.round(timeoutMs / 1000)}s`;
   if (!ackLandedIn(ack, req.project)) {
     const where = ack.workspaceName ?? (ack.windowFolders.join(', ') || 'an unknown window');
     if (ack.status === 'failed') return `window "${where}" tried to open the tab but its process never started`;
@@ -125,4 +125,21 @@ export async function openSurfaces(items: SurfaceItem[], opts: OpenManyOptions):
     if (i < requests.length - 1) await sleep(stagger);
   }
   return results;
+}
+
+// What the terminal that ran the command is told about one launch. Only what was
+// confirmed is reported: an editor ack names the window and tab; a backend that gives
+// no confirmation is said to have been sent the request, never to have opened it.
+export function describeLaunch(result: LaunchResult, subject: { verb: string; label: string }): string {
+  const ack = result.ack;
+  if (!result.ok) return `Can't open ${subject.label}: ${result.error ?? 'unknown error'}.`;
+  if (ack) {
+    const window = ack.workspaceName ?? ack.windowFolders[0] ?? 'unknown';
+    const tab = ack.title ?? ack.terminalId ?? 'untitled';
+    return ack.status === 'focused-existing'
+      ? `Already open → focused tab "${tab}" in window "${window}"`
+      : `${subject.verb} ${subject.label}\n  → VSCodium window "${window}", new tab "${tab}"`;
+  }
+  const label = BACKENDS[result.request.backend]?.label ?? result.request.backend;
+  return `Sent ${subject.label} to ${label}. ${label} does not report back, so whether the tab opened is not confirmed.`;
 }

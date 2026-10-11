@@ -13,7 +13,7 @@ import type { SessionAgentId, SessionMeta, ViewMode } from '@phnx-labs/sessions-
 import { SESSION_AGENTS, sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '@phnx-labs/sessions-cli/reader';
 import { looksLikePath, toComparablePath } from '../lib/platform/index.js';
-import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
+import { getActiveSessions, listTerminalsActive, lastAgentLine, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
@@ -26,6 +26,8 @@ import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/
 import type { SessionActivity, AwaitingReason } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions, countSessionsInScope, resolveSessionById, looksLikeSessionId, getSessionRoots, type DiscoverOptions, type ScanProgress } from '../lib/session/discover.js';
 import { sessionHeadline } from '../lib/session/title.js';
+import { localProjectFolder } from '../lib/project-root.js';
+import { readLaunchFailure, type LaunchFailure } from '../lib/launch-log.js';
 import {
   filterTeamSessions,
   shouldShowTeamSessions,
@@ -363,19 +365,35 @@ interface SessionPickerJsonRow extends SessionMeta {
   lastActivityMs: number;
   pid: number | null;
   recovery: { command: 'agents'; args: string[]; cwd?: string } | null;
+  title: string | null;
+  // The folder on THIS machine the session belongs to (a peer's /home/<u>/x → $HOME/x).
+  localProject: string | null;
+  lastUserMessage?: string;
+  lastAgentLine: string | null;
+  // A live editor tab on this machine already showing the session.
+  editorTab: { terminalId: string; window: string | null } | null;
+  // The last tab/hop launch of this session that did not reach the agent, read on
+  // the machine that ran it: the cause and that machine's full launch log.
+  lastLaunch: LaunchFailure | null;
 }
 
 export function serializeSessionPickerRows(
   sessions: SessionMeta[],
   liveSessions: ActiveSession[],
   self: string = machineId(),
+  editorTabs: ActiveSession[] = [],
 ): SessionPickerJsonRow[] {
   const liveById = new Map(liveSessions.filter((row) => row.sessionId).map((row) => [row.sessionId!, row]));
+  const tabById = new Map(editorTabs
+    .filter((t) => t.sessionId && t.terminalId && t.pidAlive !== false)
+    .map((t) => [t.sessionId!, t]));
   return sessions.map((session) => {
     const live = liveById.get(session.id);
     const sourceDevice = live?.machine ?? session.machine ?? self;
     const viewingIn = live ? viewingInLabel(live) ?? null : null;
     const resumable = buildResumeCommand(session) !== null;
+    const tab = tabById.get(session.id);
+    const carried = session as SessionMeta & Partial<Pick<SessionPickerJsonRow, 'lastAgentLine' | 'lastLaunch'>>;
     return {
       ...session,
       state: live?.status ?? 'inactive',
@@ -388,6 +406,12 @@ export function serializeSessionPickerRows(
       recovery: resumable
         ? { command: 'agents', args: ['sessions', 'resume', session.id, '--device', sourceDevice], ...(session.cwd ? { cwd: session.cwd } : {}) }
         : null,
+      title: sessionHeadline(session) ?? null,
+      localProject: localProjectFolder(session.cwd) ?? null,
+      lastUserMessage: session.lastUserMessage ?? live?.lastUserMessage,
+      lastAgentLine: carried.lastAgentLine ?? live?.tail?.at(-1)?.trim() ?? lastAgentLine(session.agent, session.filePath) ?? null,
+      editorTab: tab ? { terminalId: tab.terminalId!, window: tab.workspaceDir ? path.basename(tab.workspaceDir) : null } : null,
+      lastLaunch: carried.lastLaunch ?? readLaunchFailure(session.id) ?? null,
     };
   });
 }
@@ -1100,7 +1124,8 @@ async function sessionsAction(
         local: forceLocalJson,
         hosts: options.host,
       });
-      process.stdout.write(serializeSessionsJson(serializeSessionPickerRows(filtered, live.sessions)));
+      const tabs = process.env[NO_FANOUT_ENV] === '1' ? [] : await listTerminalsActive().catch(() => []);
+      process.stdout.write(serializeSessionsJson(serializeSessionPickerRows(filtered, live.sessions, machineId(), tabs)));
       return;
     }
 

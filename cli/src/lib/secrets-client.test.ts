@@ -241,6 +241,25 @@ describe.skipIf(process.platform === 'win32')('synchronous status path is bounde
     expect(result.protocol).toBe(PROTOCOL_VERSION);
   });
 
+  it('the engine\'s stderr chatter goes to the log, not the caller\'s terminal (sync and async)', async () => {
+    const logs = path.join(dir, 'logs');
+    const savedLogs = process.env.AGENTS_LOGS_DIR;
+    process.env.AGENTS_LOGS_DIR = logs;
+    try {
+      plantServe(
+        `cat <&3 >/dev/null; echo '[secrets] using the encrypted file store at /x' >&2; ` +
+          `printf '%s' '{"v":1,"id":"x","ok":true,"result":{"protocol":1,"operations":{}}}' >&4`,
+      );
+      secretsRequestSync('handshake', []);
+      await secretsRequest('handshake', []);
+      const logged = fs.readFileSync(path.join(logs, 'secrets-serve.log'), 'utf8');
+      expect(logged.match(/using the encrypted file store/g)).toHaveLength(2);
+    } finally {
+      if (savedLogs === undefined) delete process.env.AGENTS_LOGS_DIR;
+      else process.env.AGENTS_LOGS_DIR = savedLogs;
+    }
+  });
+
   it('one request is one spawn — no handshake round trip precedes the first op', () => {
     const tally = path.join(dir, 'spawns');
     plantServe(

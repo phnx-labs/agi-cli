@@ -665,12 +665,14 @@ describe('custom harness names take precedence over native agent ids', () => {
         ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'claude', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
-          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, AGENTS_LAUNCH_LOG: path.join(root, 'launch.log') },
           encoding: 'utf8',
         },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).toContain("Resolved custom harness 'claude' -> opencode");
+      // --quiet keeps agents' own lines out of the terminal and in the launch log.
+      expect(result.stderr).toBe('');
+      expect(fs.readFileSync(path.join(root, 'launch.log'), 'utf8')).toContain("Resolved custom harness 'claude' -> opencode");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -710,12 +712,14 @@ describe('custom harness names take precedence over native agent ids', () => {
         ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'gemini', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
-          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}`, AGENTS_LAUNCH_LOG: path.join(root, 'launch.log') },
           encoding: 'utf8',
         },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      expect(result.stderr).toContain("Resolved custom harness 'gemini' -> opencode");
+      // --quiet keeps agents' own lines out of the terminal and in the launch log.
+      expect(result.stderr).toBe('');
+      expect(fs.readFileSync(path.join(root, 'launch.log'), 'utf8')).toContain("Resolved custom harness 'gemini' -> opencode");
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

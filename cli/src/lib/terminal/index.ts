@@ -24,6 +24,7 @@ export { makeVscodiumAgentBackend, spawnUri, EDITOR_VARIANTS, type EditorVariant
 export { planLayouts, type Packing } from './policy.js';
 export {
   specsForRequest,
+  describeLaunch,
   buildRequests,
   openSurface,
   openSurfaces,

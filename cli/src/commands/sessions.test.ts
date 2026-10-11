@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { fleetNotFoundMessage, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
 import { resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, resolveSessionAgentName, parseInstalledAgentVersionQuery } from '../lib/session/selection.js';
 import { buildSessionDescription } from '../lib/session/presentation.js';
@@ -38,6 +41,33 @@ describe('session picker JSON contract', () => {
     ]);
   });
 });
+describe('session picker JSON — what a VSCodium picker needs in one call', () => {
+  it('carries title, local folder, last user message, the agent\'s last line and the live editor tab', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'picker-row-'));
+    const file = path.join(dir, 's.jsonl');
+    const ts = new Date().toISOString();
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'user', uuid: 'u1', timestamp: ts, sessionId: 's', message: { role: 'user', content: 'ship it' } }),
+      JSON.stringify({ type: 'assistant', uuid: 'a1', timestamp: ts, sessionId: 's', message: { role: 'assistant', model: 'claude-opus-5-5', content: [{ type: 'text', text: 'All checks green.' }] } }),
+    ].join('\n') + '\n');
+    const session = {
+      id: 'cccccccc-1111-4222-8333-dddddddddddd', shortId: 'cccccccc', agent: 'claude',
+      timestamp: ts, lastActivity: ts, filePath: file, cwd: dir, label: 'Ship the fix',
+      lastUserMessage: 'ship it', machine: 'yosemite-m6',
+    } satisfies SessionMeta;
+    const tab = {
+      context: 'terminal', kind: 'claude', sessionId: session.id, terminalId: 'cl-1', pidAlive: true,
+      workspaceDir: '/Users/me/src/svatlas',
+    } satisfies ActiveSession;
+    const [row] = serializeSessionPickerRows([session], [], 'zion', [tab]);
+    expect(row).toMatchObject({
+      title: 'Ship the fix', localProject: dir, lastUserMessage: 'ship it', lastAgentLine: 'All checks green.',
+      editorTab: { terminalId: 'cl-1', window: 'svatlas' }, state: 'inactive', pid: null,
+    });
+    expect(serializeSessionPickerRows([session], [], 'zion', [])[0].editorTab).toBeNull();
+  });
+});
+
 describe('routine drilldown — run history + linked sessions (RUSH-2409)', () => {
   const run = (over: Partial<RunMeta> & { runId: string; status: RunMeta['status'] }): RunMeta => ({
     jobName: 'r', pid: null, startedAt: '2026-08-08T05:00:00.000Z', completedAt: null, exitCode: null,

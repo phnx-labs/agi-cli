@@ -426,3 +426,25 @@ describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader co
     stop();
   });
 });
+
+describe('artifacts on a live row — from the same ledger as files.changes', () => {
+  it('lists a created image, video and html doc with absolute path and kind, and leaves source churn out', () => {
+    const row = {
+      context: 'terminal', kind: 'claude', sessionId: 'art-1', cwd: '/Users/me/thumb-probe-live',
+      files: {
+        source: 'tools', total: 4, changes: [
+          { path: '/Users/me/thumb-probe-live/.agents/artifacts/2026-10-10/thumb-probe/fleet-bars-live.svg', op: 'created', edits: 1, at: '2026-10-11T00:00:00.000Z' },
+          { path: 'out/demo.mp4', op: 'created', edits: 1, at: '2026-10-11T00:00:00.000Z' },
+          { path: '/Users/me/thumb-probe-live/src/a.ts', op: 'created', edits: 1, at: '2026-10-11T00:00:00.000Z' },
+          { path: '/Users/me/thumb-probe-live/.agents/artifacts/2026-10-10/thumb-probe/report.html', op: 'modified', edits: 2, at: '2026-10-11T00:00:00.000Z' },
+        ],
+      },
+    } as ActiveSession;
+    const out = applyImmutableMemo(row);
+    expect(out.artifacts?.map((a) => [a.path, a.kind])).toEqual(expect.arrayContaining([
+      ['/Users/me/thumb-probe-live/.agents/artifacts/2026-10-10/thumb-probe/fleet-bars-live.svg', 'image'],
+      ['/Users/me/thumb-probe-live/out/demo.mp4', 'video'],
+    ]));
+    expect(out.artifacts?.some((a) => a.path.endsWith('a.ts'))).toBe(false);
+  });
+});

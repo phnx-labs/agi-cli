@@ -10,6 +10,7 @@ import { formatPickerLabel, pickerColumnsFor } from '../lib/session/presentation
 import { parseAgentFilter, resolveSessionMetadataValue, sessionMatchesQuery } from '../lib/session/selection.js';
 import {
   openSurfaces,
+  describeLaunch,
   availableBackends,
   detectCurrentBackend,
   currentContext,
@@ -26,10 +27,8 @@ import { spawn } from 'node:child_process';
 import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionRecoveryPeer, sessionTranscriptReadable } from '../lib/session/recovery.js';
-import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
+import { buildResumeRemoteArgs, runStrictResume, stillRunningNotice, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { localProjectFolder, toRemotePortable } from '../lib/project-root.js';
-import * as path from 'node:path';
-import type { LaunchResult } from '../lib/terminal/types.js';
 import { liveSessionProcesses } from '../lib/session/pid-registry.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 import { sessionHeadline } from '../lib/session/title.js';
@@ -304,7 +303,7 @@ export async function sessionsResumeAction(
         if (folder) Object.assign(it, { project: folder, cwd: fs.existsSync(it.cwd) && it.cwd !== process.cwd() ? it.cwd : folder });
       }
       if (!it.project) {
-        console.error(chalk.red(`Can't open ${it.session.shortId}: no local folder matches ${it.session.cwd ?? `project "${it.session.project ?? 'unknown'}"`}, so there is no VSCodium window to put it in.`));
+        console.error(chalk.red(`Can't open ${sessionLabel(it.session)}: no local folder matches ${it.session.cwd ?? `project "${it.session.project ?? 'unknown'}"`}, so there is no VSCodium window to put it in.`));
         console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${it.session.id}`));
         process.exitCode = 1;
         continue;
@@ -333,11 +332,9 @@ export async function sessionsResumeAction(
   }
 
   const packing = resolveResumePacking(options);
-  const where = options.device ? `${backend} on ${options.device}` : backend;
   if (backend === 'terminal' && packing === 'two-per-tab') {
     console.log(chalk.yellow('Terminal.app cannot split panes — opening one tab per session instead.'));
   }
-  console.log(chalk.gray(`Opening ${items.length} session${items.length === 1 ? '' : 's'} in ${where} (${packing})…`));
 
   const results = await openSurfaces(
     items.map((it) => ({
@@ -346,28 +343,27 @@ export async function sessionsResumeAction(
       agent: it.session.agent || undefined,
       sessionId: it.session.id || undefined,
       title: sessionHeadline(it.session),
+      project: it.project,
     })),
     { backend, host: options.device, packing },
   );
 
-  let opened = 0;
   results.forEach((r, i) => {
     const s = items[i].session;
-    if (r.ack) {
-      if (r.ok) opened++;
-      console.log(r.ok ? describeEditorLanding(s, r) : chalk.red(`Failed ${s.shortId}: ${r.error}.`));
-      if (!r.ok) console.log(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
-    } else if (r.ok) {
-      opened++;
-      const shape = r.request.layout === 'tab' ? 'tab' : 'split';
-      console.log(chalk.green(`  opened ${s.shortId}`) + chalk.gray(` — ${shape} — ${items[i].command.join(' ')}`));
-    } else {
-      console.log(chalk.red(`  failed ${s.shortId} — ${r.error}`));
-      if (backend === 'vscodium-agent') console.log(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
+    const line = describeLaunch(r, { verb: 'Resumed', label: sessionLabel(s) });
+    if (r.ok) {
+      console.log(line);
+      return;
     }
+    console.error(chalk.red(line));
+    console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
+    process.exitCode = 1;
   });
-  if (backend !== 'vscodium-agent') console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
-  if (opened !== items.length) process.exitCode = 1;
+}
+
+function sessionLabel(s: SessionMeta): string {
+  const headline = sessionHeadline(s);
+  return `${s.shortId}${headline ? ` "${headline}"` : ''}${s.machine ? ` (${s.machine})` : ''}`;
 }
 
 const RUN_RESUME_PICKER_SPECS: StripSpec[] = [
@@ -514,18 +510,8 @@ export function buildSelectedResumeSurface(
     session,
     cwd,
     project,
-    command: ['agents', ...buildSelectedResumeArgs(session.id, prompt, options)].map(shellQuote),
+    command: ['agents', ...inTabArgs(buildSelectedResumeArgs(session.id, prompt, options), options)].map(shellQuote),
   };
-}
-
-export function describeEditorLanding(session: SessionMeta, result: LaunchResult): string {
-  const ack = result.ack!;
-  const window = ack.workspaceName ?? path.basename(ack.windowFolders[0] ?? result.request.project ?? '');
-  const tab = ack.title ?? ack.terminalId ?? 'untitled';
-  if (ack.status === 'focused-existing') return `Already open → focused tab "${tab}" in VSCodium window "${window}".`;
-  const headline = sessionHeadline(session);
-  const where = session.machine ? ` (${session.machine})` : '';
-  return `Resumed ${session.shortId}${headline ? ` "${headline}"` : ''}${where} → VSCodium window "${window}", new tab "${tab}".`;
 }
 
 async function reportLiveProcesses(session: SessionMeta): Promise<void> {
@@ -541,11 +527,15 @@ async function reportLiveProcesses(session: SessionMeta): Promise<void> {
       .filter((a) => a.sessionId === session.id && a.pidAlive !== false && typeof a.pid === 'number')
       .map((a) => a.pid!);
   }
-  if (pids.length === 0) return;
-  console.log(chalk.yellow(
-    `${session.shortId} is already running on ${host ?? self} as pid ${pids.join(', ')}, with no editor tab here. `
-    + `The new tab resumes a second copy; the old process is left alone.`,
-  ));
+  for (const pid of pids) process.stdout.write(chalk.yellow(stillRunningNotice(session.shortId, pid, host ?? self)));
+}
+
+// The command a new tab runs must open straight into the agent: `--quiet` keeps
+// routing banners and startup notices out of it (attach-only keeps its own path).
+function inTabArgs(args: string[], options: Pick<ResumeOptions, 'attachOnly'>): string[] {
+  if (options.attachOnly || args.includes('--quiet')) return args;
+  const boundary = args.indexOf('--');
+  return boundary < 0 ? [...args, '--quiet'] : [...args.slice(0, boundary), '--quiet', ...args.slice(boundary)];
 }
 
 export function resumeHostMismatch(
