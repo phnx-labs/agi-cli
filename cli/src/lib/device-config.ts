@@ -51,9 +51,9 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'github', 'sessions', 'inbox'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox'] as const;
 
-const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'github'];
+const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
 
@@ -538,6 +538,26 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'only; the full list stays on the Sessions tab either way.',
   },
   {
+    name: 'menubar.menu.showBrowserSessions',
+    yamlKey: 'menubarMenuShowBrowserSessions',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'AGI Menu: list browser tasks on the Sessions tab (its Browser filter). Off removes them; with ' +
+      'showComputerSessions also off, Sessions lists agents only.',
+  },
+  {
+    name: 'menubar.menu.showComputerSessions',
+    yamlKey: 'menubarMenuShowComputerSessions',
+    scope: 'user',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'AGI Menu: list computer runs on the Sessions tab (its Computer filter). Off removes them; with ' +
+      'showBrowserSessions also off, Sessions lists agents only.',
+  },
+  {
     name: 'menubar.menu.deviceSort',
     yamlKey: 'menubarMenuDeviceSort',
     scope: 'user',
@@ -619,7 +639,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     defaultValue: [...MENUBAR_TABS],
     description:
       `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
-      'Settings is always last and is not listed. An order saved before Goals, Secrets or GitHub existed may omit them; ' +
+      'Settings is always last and is not listed. An order saved before Goals, Secrets, Linear or GitHub existed may omit them; ' +
       'they read back appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
     validate: (v) => {
       const tabs = v as string[];

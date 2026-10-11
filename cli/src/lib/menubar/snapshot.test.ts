@@ -55,7 +55,7 @@ describe('menubar snapshot', () => {
       });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
-        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'projects', 'github', 'sessions', 'inbox'],
+        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox'],
         'menubar.menu.hiddenTabs': ['secrets'],
         'menubar.menu.homeGoals': ['company'],
         'menubar.menu.githubHidden': [],
@@ -73,7 +73,7 @@ describe('menubar snapshot', () => {
       });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
-        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'github'],
+        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github'],
         'menubar.menu.hiddenTabs': ['inbox'],
         'menubar.menu.homeGoals': ['company', 'myDay'],
         'menubar.menu.githubHidden': [],
