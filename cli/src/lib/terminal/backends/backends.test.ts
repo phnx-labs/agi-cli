@@ -214,10 +214,14 @@ describe('spawn ack — the contract agi-ext writes back for a /spawn nonce', ()
     expect(spawnAckRelPath(full.nonce)).toBe(`.swarmify/agents/spawn-acks/${full.nonce}.json`);
   });
   it('reads the shared fixture field for field', () => {
-    expect(parseSpawnAck(fixture, full.nonce)).toEqual(full);
+    expect(parseSpawnAck(fixture, full.nonce)).toEqual({ ...full, reason: undefined });
     for (const status of ['opened', 'focused-existing', 'wrong-window', 'failed']) {
       expect(parseSpawnAck(JSON.stringify({ ...full, status }), full.nonce)?.status).toBe(status);
     }
+  });
+  it('carries the extension\'s reason for a failed ack', () => {
+    expect(parseSpawnAck(JSON.stringify({ ...full, status: 'failed', reason: "the tab's shell did not start" }), full.nonce)?.reason)
+      .toBe("the tab's shell did not start");
   });
   it('treats the extension\'s nulls as absent', () => {
     const ack = parseSpawnAck(JSON.stringify({ ...full, status: 'wrong-window', terminalId: null, title: null, sessionId: null, pid: null, workspaceName: null }), full.nonce)!;

@@ -189,12 +189,16 @@ export interface SpawnAck {
   title?: string;
   sessionId?: string;
   pid?: number;
+  // Why a failed / wrong-window ack happened, in the extension's words.
+  reason?: string;
   at: number;
 }
 
 const ACK_STATUSES: readonly SpawnAckStatus[] = ['opened', 'focused-existing', 'wrong-window', 'failed'];
 
-export const SPAWN_ACK_TIMEOUT_MS = 10_000;
+// Longer than the extension's own wait for the tab's process (10 s), so a `failed`
+// ack is read rather than reported as silence.
+export const SPAWN_ACK_TIMEOUT_MS = 15_000;
 const SPAWN_ACK_POLL_MS = 200;
 
 export function spawnAckRelPath(nonce: string): string {
@@ -223,6 +227,7 @@ export function parseSpawnAck(raw: string, nonce: string): SpawnAck | undefined 
     title: str(v.title),
     sessionId: str(v.sessionId),
     pid: typeof v.pid === 'number' ? v.pid : undefined,
+    reason: str(v.reason),
     at: typeof v.at === 'number' ? v.at : 0,
   };
 }
