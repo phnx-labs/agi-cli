@@ -31,6 +31,7 @@ export const MENUBAR_MENU_PROPERTIES = [
   'tabOrder',
   'hiddenTabs',
   'groupTicketsByMilestone',
+  'ticketGroup',
   'prGroupOpen',
   'prGroupMerged',
   'homeGoals',
