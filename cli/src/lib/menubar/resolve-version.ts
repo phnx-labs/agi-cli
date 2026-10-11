@@ -3,38 +3,66 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { getCacheDir } from '../state.js';
 import { compareVersions } from '../agent-spec/primitives.js';
+import { HELPER_RELEASE_REPO } from '../helper-download.js';
 import { helperFloor } from '../helper-versions.js';
 import { getCliVersion } from '../version.js';
-import { MENUBAR_HELPER_ASSET } from './download-menubar.js';
+import { menubarHelperAssetUrls } from './download-menubar.js';
 
-const MENUBAR_RELEASES_API = 'https://api.github.com/repos/phnx-labs/agi-cli/releases?per_page=100';
+// Plain github.com endpoints only: api.github.com allows 60 unauthenticated
+// requests per hour per IP, and a shared IP exhausts that (PHNX-4326).
+const MENUBAR_UPLOAD_PACK = `https://github.com/${HELPER_RELEASE_REPO}.git/git-upload-pack`;
+const MENUBAR_TAG_REF_PREFIX = 'refs/tags/menubar/';
 
 const MENUBAR_RESOLVE_TTL_MS = 12 * 60 * 60 * 1000;
-
-export interface ReleaseCandidate {
-  tagName: string;
-  assets: string[];
-  draft?: boolean;
-  prerelease?: boolean;
-}
 
 interface MenubarResolveCache {
   checkedAt: number;
   version: string;
 }
 
+// agi-menu's release.sh marks a release --prerelease exactly when its tag has a
+// -pre.N suffix, so the strict x.y.z shape is what excludes pre-releases.
 const TAG = /^menubar\/v(\d+\.\d+\.\d+)$/;
 
-export function pickNewestMenubarVersion(candidates: ReleaseCandidate[], floor: string): string {
-  let best = floor;
-  for (const c of candidates) {
-    if (c.draft || c.prerelease) continue;
-    const m = TAG.exec(c.tagName);
-    if (!m) continue;
-    if (!c.assets.includes(MENUBAR_HELPER_ASSET) || !c.assets.includes(`${MENUBAR_HELPER_ASSET}.sha256`)) continue;
-    if (compareVersions(m[1], best) > 0) best = m[1];
+function pktLine(payload: string): string {
+  return (Buffer.byteLength(payload) + 4).toString(16).padStart(4, '0') + payload;
+}
+
+export const MENUBAR_LS_REFS_REQUEST = `${pktLine('command=ls-refs\n')}0001${pktLine(`ref-prefix ${MENUBAR_TAG_REF_PREFIX}\n`)}0000`;
+
+export function parseLsRefsTags(body: Buffer): string[] {
+  const tags: string[] = [];
+  let at = 0;
+  while (at < body.length) {
+    const head = body.subarray(at, at + 4).toString('ascii');
+    const len = /^[0-9a-f]{4}$/.test(head) ? Number.parseInt(head, 16) : -1;
+    if (len < 0 || len === 3 || at + Math.max(len, 4) > body.length) {
+      throw new Error('tag list: malformed git protocol response');
+    }
+    if (len === 0) return tags;
+    if (len < 4) { at += 4; continue; }
+    const line = body.subarray(at + 4, at + len).toString('utf8').trimEnd();
+    if (line.startsWith('ERR ')) throw new Error(`tag list: ${line.slice(4)}`);
+    const ref = line.split(' ')[1] ?? '';
+    if (ref.startsWith('refs/tags/')) tags.push(ref.slice('refs/tags/'.length));
+    at += len;
   }
-  return best;
+  throw new Error('tag list: git protocol response ended without a flush packet');
+}
+
+export async function pickNewestMenubarVersion(
+  tags: string[],
+  floor: string,
+  hasPublishedAssets: (version: string) => Promise<boolean>,
+): Promise<string> {
+  const newer = tags
+    .map((t) => TAG.exec(t)?.[1])
+    .filter((v): v is string => v !== undefined && compareVersions(v, floor) > 0)
+    .sort((a, b) => compareVersions(b, a));
+  for (const version of new Set(newer)) {
+    if (await hasPublishedAssets(version)) return version;
+  }
+  return floor;
 }
 
 function menubarResolveCachePath(): string {
@@ -66,28 +94,47 @@ export function cachedMenubarVersion(opts: { floor?: string; cacheFile?: string 
   return cache && compareVersions(cache.version, floor) >= 0 ? cache.version : floor;
 }
 
-type FetchLike = (input: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{
-  ok: boolean; status: number; json(): Promise<unknown>;
-}>;
+type FetchLike = (input: string, init: {
+  method: 'GET' | 'HEAD' | 'POST';
+  headers: Record<string, string>;
+  body?: string;
+  redirect?: 'manual';
+  signal?: AbortSignal;
+}) => Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }>;
 
-async function fetchMenubarReleaseCandidates(fetchImpl: FetchLike = fetch as unknown as FetchLike): Promise<ReleaseCandidate[]> {
-  const res = await fetchImpl(MENUBAR_RELEASES_API, {
+function userAgent(): Record<string, string> {
+  return { 'User-Agent': `agents-cli/${getCliVersion()}` };
+}
+
+async function fetchMenubarTags(fetchImpl: FetchLike): Promise<string[]> {
+  const res = await fetchImpl(MENUBAR_UPLOAD_PACK, {
+    method: 'POST',
     headers: {
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': `agents-cli/${getCliVersion()}`,
+      ...userAgent(),
+      'Git-Protocol': 'version=2',
+      'Content-Type': 'application/x-git-upload-pack-request',
+      Accept: 'application/x-git-upload-pack-result',
     },
+    body: MENUBAR_LS_REFS_REQUEST,
     signal: AbortSignal.timeout(5_000),
   });
-  if (!res.ok) throw new Error(`release list: HTTP ${res.status}`);
-  const body = (await res.json()) as Array<{ tag_name?: string; draft?: boolean; prerelease?: boolean; assets?: Array<{ name?: string }> }>;
-  if (!Array.isArray(body)) throw new Error('release list: not an array');
-  return body.map((r) => ({
-    tagName: r.tag_name ?? '',
-    draft: r.draft,
-    prerelease: r.prerelease,
-    assets: (r.assets ?? []).map((a) => a.name ?? ''),
-  }));
+  if (!res.ok) throw new Error(`tag list: HTTP ${res.status}`);
+  return parseLsRefsTags(Buffer.from(await res.arrayBuffer()));
+}
+
+// A draft release serves no download, and a tag pushed before its upload
+// finished has none yet: both answer 404 here and are skipped.
+async function assetPublished(fetchImpl: FetchLike, url: string): Promise<boolean> {
+  const res = await fetchImpl(url, { method: 'HEAD', headers: userAgent(), redirect: 'manual', signal: AbortSignal.timeout(5_000) });
+  if (res.status === 404) return false;
+  if (res.ok || (res.status >= 300 && res.status < 400)) return true;
+  throw new Error(`release asset check: HTTP ${res.status}`);
+}
+
+async function menubarAssetsPublished(fetchImpl: FetchLike, version: string): Promise<boolean> {
+  const { zip, sha256 } = menubarHelperAssetUrls(version);
+  const [hasZip, hasSha] = await Promise.all([assetPublished(fetchImpl, zip), assetPublished(fetchImpl, sha256)]);
+  return hasZip && hasSha;
 }
 
 export async function resolveMenubarVersion(opts: {
@@ -103,12 +150,14 @@ export async function resolveMenubarVersion(opts: {
   const file = opts.cacheFile ?? menubarResolveCachePath();
   const now = opts.now ?? Date.now();
   const ttl = opts.ttlMs ?? MENUBAR_RESOLVE_TTL_MS;
+  const fetchImpl = opts.fetchImpl ?? (fetch as unknown as FetchLike);
   const cached = readMenubarResolveCache(file);
   if (cached && !opts.force && now - cached.checkedAt < ttl && compareVersions(cached.version, floor) >= 0) {
     return cached.version;
   }
   try {
-    const version = pickNewestMenubarVersion(await fetchMenubarReleaseCandidates(opts.fetchImpl), floor);
+    const tags = await fetchMenubarTags(fetchImpl);
+    const version = await pickNewestMenubarVersion(tags, floor, (v) => menubarAssetsPublished(fetchImpl, v));
     writeMenubarResolveCache(file, { checkedAt: now, version });
     return version;
   } catch (error) {

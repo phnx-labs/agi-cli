@@ -70,8 +70,17 @@ flowchart LR
    install it. No build happens on any user machine.
 4. **Update, unattended.** Installed release helpers move to the newest
    published build on their own: `resolveMenubarVersion`
-   (`src/lib/menubar/resolve-version.ts`) reads the public release list about twice a
-   day (cached at `~/.agents/.cache/menubar/latest.json`, never below the floor; update checks surface offline errors), and `updateMenubarHelperIfNewer` downloads
+   (`src/lib/menubar/resolve-version.ts`) finds it about twice a day over plain
+   github.com, never api.github.com, whose 60-requests-an-hour unauthenticated limit a
+   shared IP exhausts. One git protocol v2 `ls-refs` POST to
+   `github.com/phnx-labs/agi-cli.git/git-upload-pack` lists only the `menubar/v*` tags
+   (about 4.6 KB). Then the newest strict `x.y.z` tag above the floor is confirmed with a
+   HEAD of its `MenubarHelper.app.zip` and `.sha256` download URLs. A 404 on either one
+   (a draft, or a tag whose upload has not finished) moves on to the next tag. Pre-releases
+   are excluded by tag shape: agi-menu's `release.sh` marks a release `--prerelease`
+   exactly when its tag carries `-pre.N`. The answer is cached at
+   `~/.agents/.cache/menubar/latest.json` and never falls below the floor. Update checks
+   surface network errors. `updateMenubarHelperIfNewer` downloads
    and verifies that build, swaps it atomically at the same path and identity
    (bundle id + Team, so the Accessibility grant survives), and restarts the
    helper. Automatic attempts honor `menubar.autoUpdate` and one persistent 12-hour gate.
@@ -199,7 +208,7 @@ helper polls. Full flag reference: [command-index.md](command-index.md#menubar--
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.cache/menubar/mac-helper/v<x.y.z>/` | downloaded + verified release cache, one dir per tag |
-| `~/.agents/.cache/menubar/latest.json` | newest published helper version resolved from the release list, with the time it was read (day-old at most) |
+| `~/.agents/.cache/menubar/latest.json` | newest published helper version resolved from the `menubar/v*` tags and their release assets, with the time it was read (12 hours old at most) |
 
 The helper's own state files (`~/.agents/.history/menubar/…`, the feed
 notification ledger, the screenshot OCR index) are documented in agi-menu.
