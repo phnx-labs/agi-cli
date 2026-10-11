@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import chalk from 'chalk';
 import {
   SSH_OPTS,
@@ -253,6 +253,28 @@ export function peerHopCloseNotice(
 }
 
 
+// A login shell (what `bash -lc` gives) with the profile's own output (nvm's .npmrc
+// warning and the like) sent to a log, so what the caller sees starts with agents.
+export function quietLoginShell(inner: string): string {
+  const log = '"$HOME/.agents/.cache/logs/peer-login.log"';
+  const login = [
+    'mkdir -p "$HOME/.agents/.cache/logs"',
+    `exec 3>&1 4>&2 >>${log} 2>&1`,
+    '[ -r /etc/profile ] && . /etc/profile',
+    'for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do if [ -r "$f" ]; then . "$f"; break; fi; done',
+    'exec 1>&3 2>&4 3>&- 4>&-',
+  ].join('; ');
+  return `bash -c ${shellQuote(`${login}; ${inner}`)}`;
+}
+
+function spawnHop(sshArgs: string[]): Promise<number | null> {
+  return new Promise((resolve) => {
+    const child = spawn('ssh', sshArgs, { stdio: 'inherit' });
+    child.on('error', () => resolve(null));
+    child.on('close', (code) => resolve(code));
+  });
+}
+
 export async function runOnPeer(
   args: string[],
   machine: string,
@@ -272,7 +294,7 @@ export async function runOnPeer(
   const invocation = assignments.concat(['agents', ...args].map(shellQuote)).join(' ');
   const remoteCmd = remoteShellFor(peer.os) === 'powershell'
     ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined, remapExit255: true })
-    : `bash -lc ${shellQuote(`${invocation}; agents_rc=$?; if [ "$agents_rc" -eq 255 ]; then exit 254; fi; exit "$agents_rc"`)}`;
+    : quietLoginShell(`${invocation}; agents_rc=$?; if [ "$agents_rc" -eq 255 ]; then exit 254; fi; exit "$agents_rc"`);
 
   // A long-lived TTY session owns its connection: riding a shared master ties it to
   // that master's lifetime and to sshd's per-connection MaxSessions (default 10).
@@ -280,18 +302,30 @@ export async function runOnPeer(
   if (opts.tty) sshArgs.push('-tt');
   sshArgs.push(peer.target, remoteCmd);
 
-  return new Promise((resolve) => {
-    const child = spawn('ssh', sshArgs, { stdio: 'inherit' });
-    child.on('error', (err: any) => {
-      process.stderr.write(chalk.red(`Failed to reach ${machine}: ${err?.message ?? 'ssh failed to launch'}\n`));
-      resolve('unreachable');
+  const code = await spawnHop(sshArgs);
+  if (code === null) {
+    process.stderr.write(chalk.red(`Failed to reach ${machine}: ssh failed to launch\n`));
+    return 'unreachable';
+  }
+  if (code === SSH_CONN_FAILURE_CODE && opts.tty && opts.sessionId && peerAnswers(peer.target)) {
+    // The link dropped under a live session and the host still answers: go back in.
+    const { reconnectInteractiveSession } = await import('../../hosts/reconnect.js');
+    const rc = await reconnectInteractiveSession({
+      hostName: machine,
+      target: { kind: 'session', id: opts.sessionId },
+      initialExit: code,
+      reattach: () => {
+        if (!peerAnswers(peer.target)) return { code: SSH_CONN_FAILURE_CODE, connected: false, heldMs: 0 };
+        const startedAt = Date.now();
+        const res = spawnSync('ssh', sshArgs, { stdio: 'inherit' });
+        return { code: res.status ?? SSH_CONN_FAILURE_CODE, connected: true, heldMs: Date.now() - startedAt };
+      },
     });
-    child.on('close', (code) => {
-      const notice = peerHopCloseNotice(opts, machine, code);
-      if (notice) process.stderr.write(notice);
-      resolve(peerHopOutcome(code, () => peerAnswers(peer.target)));
-    });
-  });
+    return rc === SSH_CONN_FAILURE_CODE && !peerAnswers(peer.target) ? 'unreachable' : 'ok';
+  }
+  const notice = peerHopCloseNotice(opts, machine, code);
+  if (notice) process.stderr.write(notice);
+  return peerHopOutcome(code, () => peerAnswers(peer.target));
 }
 
 export function hostToken(h: string): string {

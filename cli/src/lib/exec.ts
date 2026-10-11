@@ -4,7 +4,8 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode, RunStrategy } from './types.js';
-import { ALL_MODES, REMOTE_INTERACTIVE_ENV } from './types.js';
+import { ALL_MODES, PEER_HOP_ENV, REMOTE_INTERACTIVE_ENV } from './types.js';
+import { LAUNCH_LOG_ENV } from './launch-log.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
@@ -339,6 +340,10 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   delete result.AGENTS_SESSION_ID;
   delete result.AGENTS_MAILBOX_DIR;
   delete result.AGENT_TERMINAL_ID;
+  // The launch that started this agent is over once it runs: commands the agent
+  // itself runs are not part of that hop or its quiet log.
+  delete result[PEER_HOP_ENV];
+  delete result[LAUNCH_LOG_ENV];
   const launchIdentity = launchIdentityEnv();
   Object.assign(result, launchIdentity);
 

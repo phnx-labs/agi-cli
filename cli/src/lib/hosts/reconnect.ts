@@ -178,7 +178,7 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
   return wrapRemoteExitCode(inner);
 }
 
-function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
+export function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
   const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
   const probe = sshExec(sshTarget, 'true', { multiplex: false, extraSshArgs });
@@ -205,10 +205,10 @@ async function waitOrInterrupt(ms: number): Promise<'elapsed' | 'interrupted'> {
 }
 
 interface ReconnectLoopOpts {
-  host: Host;
+  hostName: string;
   target: ReconnectTarget;
   initialExit: number;
-  reattach?: (host: Host, target: ReconnectTarget) => ReconnectOutcome;
+  reattach: () => ReconnectOutcome;
   wait?: (ms: number) => Promise<'elapsed' | 'interrupted'>;
   write?: (s: string) => void;
 }
@@ -216,7 +216,6 @@ interface ReconnectLoopOpts {
 export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Promise<number> {
   const write = opts.write ?? ((s: string) => process.stderr.write(s));
   const wait = opts.wait ?? waitOrInterrupt;
-  const reattach = opts.reattach ?? reattachRemoteSession;
 
   let state = initialReconnectState();
   let outcome: ReconnectOutcome = { code: opts.initialExit, connected: true, heldMs: 0 };
@@ -225,21 +224,21 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
     if (decision.action === 'stop') {
       if (decision.code === SSH_CONN_FAILURE) {
         write(outcome.connected
-          ? unstableNotice(opts.target, opts.host.name)
-          : exhaustedNotice(opts.target, opts.host.name));
+          ? unstableNotice(opts.target, opts.hostName)
+          : exhaustedNotice(opts.target, opts.hostName));
       } else if (decision.code === REMOTE_EXIT_255_REMAPPED) {
-        write(remoteExitNotice(opts.target, opts.host.name));
+        write(remoteExitNotice(opts.target, opts.hostName));
       } else {
-        write(connectionEndedNotice(opts.target, opts.host.name));
+        write(connectionEndedNotice(opts.target, opts.hostName));
       }
       return decision.code;
     }
-    write(reconnectNotice(opts.target, opts.host.name, decision.state.attempt, decision.waitMs, decision.remainingMs));
+    write(reconnectNotice(opts.target, opts.hostName, decision.state.attempt, decision.waitMs, decision.remainingMs));
     if (await wait(decision.waitMs) === 'interrupted') {
-      write(interruptedNotice(opts.target, opts.host.name));
+      write(interruptedNotice(opts.target, opts.hostName));
       return 130;
     }
     state = decision.state;
-    outcome = reattach(opts.host, opts.target);
+    outcome = opts.reattach();
   }
 }

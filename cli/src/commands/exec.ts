@@ -571,16 +571,14 @@ async function handleTerminalHandoff(
     cwd: cwd ?? process.cwd(),
     sessions,
     ctx: currentContext(),
+    label: prompt === undefined ? 'the session' : 'the run',
   });
 
   if (!result.ok) {
-    console.error(chalk.red(`Could not open a terminal: ${result.error ?? 'unknown error'}`));
+    console.error(chalk.red(result.description ?? `Could not open a terminal: ${result.error ?? 'unknown error'}`));
     process.exit(1);
   }
-  if (!options.quiet) {
-    const what = prompt === undefined ? 'session' : 'run';
-    console.log(chalk.gray(`Opened the ${what} in ${result.description}.`));
-  }
+  if (!options.quiet) console.log(result.description);
 }
 
 export function resumePickerOptionConflict(
@@ -1797,7 +1795,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
                 });
               }
             }
-            const { pickReconnectTarget, reconnectInteractiveSession, afterInteractiveRemoteExit, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
+            const { pickReconnectTarget, reconnectInteractiveSession, reattachRemoteSession, afterInteractiveRemoteExit, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
             const reconnectTarget = pickReconnectTarget({
               agent: runAgent,
               sessionId: hostSessionId,
@@ -1814,9 +1812,10 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
             if (next.reconnect && reconnectTarget) {
               process.exit(
                 await reconnectInteractiveSession({
-                  host,
+                  hostName: host.name,
                   target: reconnectTarget,
                   initialExit: exitCode,
+                  reattach: () => reattachRemoteSession(host, reconnectTarget),
                 }),
               );
             }

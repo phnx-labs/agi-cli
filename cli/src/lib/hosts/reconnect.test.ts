@@ -390,7 +390,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     const seq: ReconnectOutcome[] = [{ code: 0, connected: true, heldMs: MIN_HOLD_MS }];
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => seq.shift()!,
@@ -408,7 +408,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => {
@@ -429,7 +429,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => {
@@ -452,7 +452,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => (++calls <= 10 ? unreachable() : flapped()),
@@ -472,7 +472,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       { code: 0, connected: true, heldMs: MIN_HOLD_MS },
     ];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => seq.shift()!,
@@ -490,7 +490,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
       { code: 0, connected: true, heldMs: MIN_HOLD_MS },
     ];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => seq.shift()!,
@@ -504,7 +504,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     let calls = 0;
     const writes: string[] = [];
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => { calls++; return unreachable(); },
@@ -533,7 +533,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     const blinks = 40;
     let calls = 0;
     const rc = await reconnectInteractiveSession({
-      host: HOST,
+      hostName: HOST.name,
       target: SESSION_TARGET,
       initialExit: SSH_CONN_FAILURE,
       reattach: () => {

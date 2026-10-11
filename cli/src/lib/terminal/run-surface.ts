@@ -1,7 +1,7 @@
 import type { Backend, EngineContext } from './types.js';
 import type { ActiveSession } from '../session/active.js';
 import { BACKENDS } from './backends/index.js';
-import { openSurface } from './engine.js';
+import { openSurface, describeLaunch } from './engine.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { shellQuote } from './quote.js';
 import {
@@ -90,6 +90,8 @@ export interface OpenRunSurfaceParams {
   cwd: string;
   sessions: SessionHostSample[];
   ctx: EngineContext;
+  // What the terminal is told was started, e.g. "the run" or "agents setup browser".
+  label: string;
 }
 
 export interface OpenRunSurfaceResult {
@@ -120,10 +122,12 @@ export async function openRunInTerminal(params: OpenRunSurfaceParams): Promise<O
     layout: 'tab',
     cwd: params.cwd,
     command,
+    project: params.cwd,
   });
-  const ack = result.ack;
-  const landed = ack && result.ok
-    ? ` → window "${ack.workspaceName ?? ack.windowFolders[0] ?? 'unknown'}", ${ack.status === 'focused-existing' ? 'existing' : 'new'} tab "${ack.title ?? ack.terminalId ?? 'untitled'}"`
-    : '';
-  return { ok: result.ok, choice, description: describeBackendChoice(choice) + landed, error: result.error };
+  return {
+    ok: result.ok,
+    choice,
+    description: `${describeLaunch(result, { verb: 'Started', label: params.label })} (${describeBackendChoice(choice)})`,
+    error: result.error,
+  };
 }

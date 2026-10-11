@@ -17,6 +17,7 @@ import {
   peerHopCloseNotice,
   peerHopOutcome,
   peerAnswers,
+  quietLoginShell,
 } from './remote-list.js';
 import { SSH_CONN_FAILURE_CODE, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 import type { DeviceProfile } from '../../devices/registry.js';
@@ -361,5 +362,25 @@ describe('peerHopOutcome — offline-device fallback discriminator (PHNX-3626)',
   });
   it.skipIf(process.platform === 'win32')('peerAnswers is false for a host that does not exist', () => {
     expect(peerAnswers('nobody@host.invalid')).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('quietLoginShell — the peer\'s profile chatter never reaches the tab', () => {
+  it('sources the login profile, logs its output, and leaves the command\'s own output alone', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'quiet-login-'));
+    fs.writeFileSync(path.join(home, '.bash_profile'),
+      'echo "Your user\'s .npmrc file has a globalconfig setting"; echo nvm-warning >&2; export FROM_PROFILE=yes\n');
+    const cmd = quietLoginShell('echo "agent $FROM_PROFILE"; echo agent-err >&2; exit 7');
+    const res = spawnSync('sh', ['-c', cmd], { env: { PATH: process.env.PATH, HOME: home }, encoding: 'utf8' });
+    expect(res.stdout).toBe('agent yes\n');
+    expect(res.stderr).toBe('agent-err\n');
+    expect(res.status).toBe(7);
+    const log = fs.readFileSync(path.join(home, '.agents', '.cache', 'logs', 'peer-login.log'), 'utf8');
+    expect(log).toContain('.npmrc');
+    expect(log).toContain('nvm-warning');
   });
 });

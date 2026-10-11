@@ -246,7 +246,7 @@ describe('selected resume terminal surface', () => {
       ...surface.command.slice(1),
     ];
     const received = JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' }));
-    expect(received).toEqual(['sessions', 'resume', 'abc12345', prompt, '--headless']);
+    expect(received).toEqual(['sessions', 'resume', 'abc12345', prompt, '--headless', '--quiet']);
   });
 
   it('keeps raw run-picker argv until the terminal boundary', () => {
@@ -255,7 +255,7 @@ describe('selected resume terminal surface', () => {
     const surface = buildSelectedResumeSurface(session(), undefined, options);
     const command = [shellQuote(process.execPath), '-e', shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'), ...surface.command.slice(1)];
     expect(JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' })))
-      .toEqual(['run', 'claude', prompt, '--resume', 'abc12345']);
+      .toEqual(['run', 'claude', prompt, '--resume', 'abc12345', '--quiet']);
     expect(options.runArgs).toEqual(['run', 'claude', prompt, '--resume']);
   });
 
@@ -274,7 +274,7 @@ describe('selected resume terminal surface', () => {
     const runArgs = ['run', 'claude', '--resume', '--device', 'worker', '--cwd', '/local', '--remote-cwd', '/srv/repo'];
     const surface = buildSelectedResumeSurface(session(), undefined, { device: 'worker', cwd: '/srv/repo', runArgs });
     expect(surface.cwd).toBe('/srv/repo');
-    expect(surface.command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo'].map(shellQuote));
+    expect(surface.command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo', '--quiet'].map(shellQuote));
   });
 
   it('makes run cwd portable once and leaves native passthrough arguments unchanged', () => {
@@ -286,7 +286,15 @@ describe('selected resume terminal surface', () => {
   it('opens a remote surface in the explicit cwd even when the recorded directory is gone', () => {
     const surface = buildSelectedResumeSurface(session('/old/repo'), undefined, { device: 'worker', cwd: '/new/repo' });
     expect(surface.cwd).toBe('/new/repo');
-    expect(surface.command.slice(-2)).toEqual(['--cwd', '/new/repo'].map(shellQuote));
+    expect(surface.command.slice(-3)).toEqual(['--cwd', '/new/repo', '--quiet'].map(shellQuote));
+  });
+
+  it('the command a tab runs opens straight into the agent (--quiet), except attach-only and a native passthrough', () => {
+    expect(buildSelectedResumeSurface(session(), undefined, {}).command).toEqual(['agents', 'sessions', 'resume', 'abc12345', '--quiet'].map(shellQuote));
+    expect(buildSelectedResumeSurface(session(), undefined, { attachOnly: true }).command).not.toContain('--quiet');
+    const runArgs = ['run', 'claude', '--resume', '--', '--verbose'];
+    expect(buildSelectedResumeSurface(session(), undefined, { runArgs }).command)
+      .toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--quiet', '--', '--verbose'].map(shellQuote));
   });
 
   it("refuses a remote surface with no cwd instead of sending this machine's path", () => {

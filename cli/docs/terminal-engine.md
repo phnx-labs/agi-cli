@@ -269,9 +269,14 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
   prints the in-terminal command that works instead.
 - **A session that already has a tab is focused, not duplicated.** The extension
   finds its live tab for `sessionId`, focuses it and acks `focused-existing`; the
-  CLI prints `Already open → focused tab "…" in VSCodium window "…"`. Before
+  CLI prints `Already open → focused tab "…" in window "…"`. Before
   opening, `sessions resume --vscodium` also says when the session still has a live
   process on its host (host + pid).
+- **The tab opens straight into the agent.** The command a tab runs carries
+  `--quiet`: agents' own lines go to a per-launch log
+  (`~/.agents/.cache/logs/launches/`), and only a failed launch prints its cause
+  and that log's path. A remote session's tab reconnects to the same session by
+  itself when its SSH link drops and the host still answers.
 - **The payload is one base64url-encoded JSON param** (`{command, cwd, split?, agent?, sessionId?, title?, nonce?, project?}`),
   not one param per field. VS Code percent-*decodes* `uri.query` once before the
   extension parses it, so a `command`/`cwd` containing `&` or `=` would be

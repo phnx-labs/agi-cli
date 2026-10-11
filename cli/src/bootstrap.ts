@@ -180,6 +180,7 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
 
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 import { getUpdateCheckPath, getMigratedSentinelPath, getUserAgentsDir, getRuntimeStateDir } from './lib/state.js';
+import { LAUNCH_LOG_ENV, launchesAgent, startQuietLaunch } from './lib/launch-log.js';
 import { resolveBrandName, disabledCommandsForActiveBrand } from './lib/brand.js';
 import {
   readUpdateCache,
@@ -334,11 +335,11 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   }
 }
 
-async function promptUpgrade(latestVersion: string, peerHop: boolean): Promise<void> {
+async function promptUpgrade(latestVersion: string, mayPrompt: boolean): Promise<void> {
   const { default: ora } = await import('ora');
   const { confirm, select } = await import('@inquirer/prompts');
   const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
-  if (peerHop || !isInteractiveTerminal()) {
+  if (!mayPrompt || !isInteractiveTerminal()) {
     console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: agents upgrade --yes`));
     return;
   }
@@ -409,7 +410,7 @@ function refreshUpdateCacheInBackground(): void {
     });
 }
 
-async function checkForUpdates(peerHop: boolean): Promise<void> {
+async function checkForUpdates(mayPrompt: boolean): Promise<void> {
   if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE) return;
 
   maybeWarnMultiInstall();
@@ -422,7 +423,7 @@ async function checkForUpdates(peerHop: boolean): Promise<void> {
 
   if (shouldPromptUpgrade(cache, VERSION)) {
     try {
-      await promptUpgrade(cache!.latestVersion, peerHop);
+      await promptUpgrade(cache!.latestVersion, mayPrompt);
     } catch (err) {
       const { isPromptCancelled } = await import('./commands/utils.js');
       if (isPromptCancelled(err)) return;
@@ -434,8 +435,9 @@ async function maybeBootstrapShimIntegration(
   requestedCommand: string | undefined,
   isDocumentationRequest: boolean,
   verboseStartup: boolean,
+  quietStart: boolean,
 ): Promise<void> {
-  if (!verboseStartup && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+  if (quietStart || (!verboseStartup && (!process.stdin.isTTY || !process.stdout.isTTY))) {
     return;
   }
   if (isDocumentationRequest) {
@@ -827,12 +829,16 @@ const isReadOnlyUpdatePreview =
    passedArgs.find((arg) => !arg.startsWith('-')) === 'menubar' ||
    (passedArgs[0] === 'config' && passedArgs.includes('menubar.autoUpdate')));
 
-const peerHop = isPeerHop();
+// A hop the CLI made for itself, or a tab that must open straight into the agent
+// (`--quiet`), says nothing unless it fails: everything goes to a per-launch log.
+const quietStart = isPeerHop() || passedArgs.includes('--quiet') || Boolean(process.env[LAUNCH_LOG_ENV]);
+if (quietStart) startQuietLaunch(passedArgs);
 
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');
   if (!isReadOnlyUpdatePreview) {
-    await checkForUpdates(peerHop);
+    // A command that ends in a running agent never stops to ask about an upgrade.
+    await checkForUpdates(!quietStart && !launchesAgent(passedArgs));
 
     const { spawnDetachedSync } = await import('./lib/auto-pull.js');
     spawnDetachedSync();
@@ -924,7 +930,7 @@ if (passedArgs.length === 0) {
 
 try {
   if (!isReadOnlyUpdatePreview) {
-    await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
+    await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup, quietStart);
   }
   bootMark('bootstrap:pre-parse');
   await program.parseAsync();

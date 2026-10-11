@@ -205,6 +205,24 @@ export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'
   return s.context === 'cloud' ? 'cloud' : 'other';
 }
 
+export type ArtifactKind = 'image' | 'video' | 'html' | 'markdown' | 'pdf' | 'other';
+
+// What a gallery renders: the artifact, where it lives on the row's own machine, and
+// what kind of viewer it needs.
+export type SessionArtifactRow = import('@phnx-labs/sessions-cli/reader').ProducedArtifact & { kind?: ArtifactKind };
+
+const ARTIFACT_KINDS: ReadonlyArray<[RegExp, ArtifactKind]> = [
+  [/\.(png|jpe?g|gif|webp|svg|avif|heic)$/i, 'image'],
+  [/\.(mp4|mov|webm|m4v)$/i, 'video'],
+  [/\.html?$/i, 'html'],
+  [/\.(md|markdown)$/i, 'markdown'],
+  [/\.pdf$/i, 'pdf'],
+];
+
+export function artifactKind(file: string): ArtifactKind {
+  return ARTIFACT_KINDS.find(([re]) => re.test(file))?.[1] ?? 'other';
+}
+
 export function serializeActiveSessionsForJson(
   sessions: ActiveSession[],
 ): Array<Omit<ActiveSession, 'viewingIn'> & {
@@ -316,7 +334,7 @@ export interface ActiveSession {
   tokenCount?: number;
   durationMs?: number;
   subAgentCount?: number;
-  artifacts?: import('@phnx-labs/sessions-cli/reader').ProducedArtifact[];
+  artifacts?: SessionArtifactRow[];
   planFile?: string;
   sessionFile?: string;
   startedAtMs?: number;
@@ -754,6 +772,24 @@ export function computeLiveSignals(
 
   const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
   return { state, tokPerSec: tail.tokPerSec };
+}
+
+// The agent's latest line in a transcript on this machine, for pickers that show a
+// session without a live process.
+export function lastAgentLine(kind: string, sessionFile: string | undefined, nowMs: number = Date.now()): string | undefined {
+  if (!sessionFile) return undefined;
+  let mtimeMs: number | undefined;
+  try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { return undefined; }
+  const cacheKey = `${kind}\0${sessionFile}\0`;
+  let tail = liveTailCache.get(cacheKey);
+  if (!tail || tail.mtimeMs !== mtimeMs) {
+    tail = parseLiveTail(kind, sessionFile, mtimeMs);
+    if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
+    liveTailCache.set(cacheKey, tail);
+  }
+  if (tail.events.length === 0) return undefined;
+  const state = inferSessionState(tail.events, { pidAlive: false, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
+  return state.tail?.at(-1)?.trim() || undefined;
 }
 
 function statusFromActivity(activity: SessionActivity): ActiveStatus {

@@ -14,7 +14,8 @@ export async function openSetupTerminal(tool: SetupTool, terminal: boolean | str
     cwd: os.homedir(),
     sessions,
     ctx: currentContext(),
+    label: `agents setup ${tool}`,
   });
-  if (!result.ok) throw new Error(result.error ?? 'Could not open a terminal for setup.');
-  console.log(result.description ?? 'Setup opened in a terminal.');
+  if (!result.ok) throw new Error(result.description ?? result.error ?? 'Could not open a terminal for setup.');
+  console.log(result.description);
 }

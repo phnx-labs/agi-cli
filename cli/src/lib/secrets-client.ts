@@ -1,8 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { Readable, Writable } from 'node:stream';
 import { findInPath } from './agent-spec/agents.js';
 import { SECRETS_CLI_INSTALL_HINT } from './secrets-cli.js';
-import { getUserAgentsDir } from './state.js';
+import { getLogsDir, getUserAgentsDir } from './state.js';
 import type {
   SecretsBundle,
   SecretsBackend,
@@ -217,15 +219,30 @@ function parseResponse(raw: Buffer): unknown {
 }
 
 
+// The engine's stderr is diagnostics ("[secrets] using the encrypted file store at …",
+// once per serve process). Inherited, every lookup printed it into the caller's
+// terminal, including in front of an agent's TUI; failures still arrive as protocol
+// errors, so the chatter goes to a log.
+function logServeStderr(chunk: Buffer | string | undefined): void {
+  if (!chunk || chunk.length === 0) return;
+  try {
+    const file = path.join(getLogsDir(), 'secrets-serve.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, chunk);
+  } catch {
+  }
+}
+
 // Anonymous fd3/fd4 pipes keep secret bytes off disk; success waits for both response EOF and child exit.
 function serveOnce(op: string, args: unknown[], context?: SecretsContext): Promise<unknown> {
   const { command, prefix } = invocation(resolveSecretsBin());
   const request = Buffer.from(JSON.stringify(buildRequest(op, args, context)));
   return new Promise((resolve, reject) => {
     const child = spawn(command, [...prefix, '__serve'], {
-      stdio: ['ignore', 'ignore', 'inherit', 'pipe', 'pipe'],
+      stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'],
       env: buildServeEnv(),
     });
+    child.stderr!.on('data', logServeStderr);
     let settled = false;
     const fail = (error: SecretsClientError) => {
       if (settled) return;
@@ -297,11 +314,12 @@ function serveOnceSync(op: string, args: unknown[], context?: SecretsContext): u
   const script = `exec ${serve} 3<&0 4>&1 1>/dev/null`;
   const result = spawnSync('sh', ['-c', script], {
     input: request,
-    stdio: ['pipe', 'pipe', 'inherit'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: buildServeEnv(),
     timeout: syncServeTimeoutMs,
     maxBuffer: MAX_PROTOCOL_BYTES + 4096,
   });
+  logServeStderr(result.stderr as Buffer | undefined);
   if (result.error) {
     const err = result.error as NodeJS.ErrnoException;
     if (err.code === 'ETIMEDOUT') {

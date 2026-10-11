@@ -24,6 +24,7 @@ import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { shellQuote, assertValidSshTarget } from '../lib/ssh-exec.js';
 import {
   openSurfaces,
+  describeLaunch,
   currentContext,
   availableBackends,
   detectCurrentBackend,
@@ -653,7 +654,7 @@ export async function openFocusTabs(
   const resumeCommandFor = (s: ActiveSession): string[] | null => {
     if (deps.attachOnly) return null;
     const remote = !sessionProcessIsLocal(s, self);
-    return buildSessionRecoveryCommand(metaFor(s), remote);
+    return [...buildSessionRecoveryCommand(metaFor(s), remote), '--quiet'];
   };
 
   const planned = await Promise.all(targets.map(async (s) => {
@@ -684,7 +685,6 @@ export async function openFocusTabs(
     return;
   }
 
-  console.log(chalk.gray(`Opening ${openable.length} session${openable.length === 1 ? '' : 's'} in ${backend} (tabs)…`));
   const results = await open(
     openable.map((p) => ({
       cwd: cwdFor(p.s, byId),
@@ -694,17 +694,15 @@ export async function openFocusTabs(
     })),
     { backend, packing: 'tabs' },
   );
-  let opened = 0;
   results.forEach((r, i) => {
     const p = openable[i];
-    if (r.ok) {
-      opened++;
-      console.log(chalk.green(`  opened ${shortId(p.s)}`) + chalk.gray(` — tab — (${p.plan.note})`));
-    } else {
-      console.log(chalk.red(`  failed ${shortId(p.s)} — ${r.error}`));
+    const line = describeLaunch(r, { verb: 'Opened', label: `${shortId(p.s)} (${p.plan.note})` });
+    if (r.ok) console.log(line);
+    else {
+      console.error(chalk.red(line));
+      process.exitCode = 1;
     }
   });
-  console.log(chalk.gray(`\nOpened ${opened}/${openable.length} in ${backend}.`));
 }
 
 function cwdFor(s: ActiveSession, byId: Map<string, SessionMeta>): string {
@@ -754,7 +752,7 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   }
 
   const meta = (await richMetaById(id)) ?? metaFromActive(s);
-  const command = buildSessionRecoveryCommand(meta);
+  const command = [...buildSessionRecoveryCommand(meta), '--quiet'];
   const cwd = meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : process.cwd();
 
   const ctx = currentContext();
@@ -766,9 +764,11 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
 
   console.log(chalk.gray(`${shortId(s)} has no live terminal to attach — opening a new ${backend} tab and resuming a copy.`));
   const results = await openSurfaces([{ cwd, command }], { backend, packing: 'tabs' });
-  const r = results[0];
-  if (!r || !r.ok) {
-    console.log(chalk.red(`  failed to open — ${r?.error ?? 'unknown error'}`));
-    console.log(chalk.gray(`  try: agents sessions resume ${meta.shortId}`));
+  const line = describeLaunch(results[0], { verb: 'Resumed', label: shortId(s) });
+  if (results[0].ok) console.log(line);
+  else {
+    console.error(chalk.red(line));
+    console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${meta.id}`));
+    process.exitCode = 1;
   }
 };
