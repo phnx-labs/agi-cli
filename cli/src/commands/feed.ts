@@ -8,6 +8,7 @@ import {
   buildDeclaredBlock,
   deriveBlockState,
   publishBlock,
+  blockGeneration,
   type OpenBlock,
 } from '../lib/feed/feed.js';
 
@@ -137,8 +138,9 @@ export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
   return `${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${agents} agent${agents === 1 ? '' : 's'}`;
 }
 
-export function formatFeedReplyHint(mailboxId: string): string {
-  return `↳ ag message ${mailboxId} "…"`;
+export function formatFeedReplyHint(block: Pick<OpenBlock, 'host' | 'sessionId' | 'generation' | 'ts'>): string {
+  const key = `${block.host}/${block.sessionId}/${blockGeneration(block)}`;
+  return `↳ ag feed answer ${key} --text "…"`;
 }
 
 export function parseRemoteFeed(stdout: string, machine: string): OpenBlock[] {
@@ -302,7 +304,7 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   }
 
   if (!b.answer && !b.parkedAt && b.kind !== 'control') {
-    console.log(`${indent}  ${chalk.dim(formatFeedReplyHint(b.mailboxId))}`);
+    console.log(`${indent}  ${chalk.dim(formatFeedReplyHint(b))}`);
   }
   console.log();
 }

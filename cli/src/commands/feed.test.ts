@@ -254,9 +254,12 @@ describe('formatFeedMastheadRight', () => {
 });
 
 describe('formatFeedReplyHint', () => {
-  it('matches the shared fleet-comms reply line (↳ ag message …)', () => {
-    expect(formatFeedReplyHint('agent-1')).toBe(`↳ ag message agent-1 "…"`);
-    expect(formatFeedReplyHint('agent-1').startsWith('↳')).toBe(true);
+  it('points an open block at feed answer with its attention key', () => {
+    const hint = formatFeedReplyHint({
+      host: 'zion', sessionId: 'sess-1', generation: 'gen-9', ts: '2026-07-13T00:00:00Z',
+    });
+    expect(hint).toBe('↳ ag feed answer zion/sess-1/gen-9 --text "…"');
+    expect(hint.startsWith('↳')).toBe(true);
     expect(GLYPH.ask).toBe('▲');
     expect(GLYPH.delivered).toBe('✓');
   });
