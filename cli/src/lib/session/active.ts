@@ -774,24 +774,6 @@ export function computeLiveSignals(
   return { state, tokPerSec: tail.tokPerSec };
 }
 
-// The agent's latest line in a transcript on this machine, for pickers that show a
-// session without a live process.
-export function lastAgentLine(kind: string, sessionFile: string | undefined, nowMs: number = Date.now()): string | undefined {
-  if (!sessionFile) return undefined;
-  let mtimeMs: number | undefined;
-  try { mtimeMs = fs.statSync(sessionFile).mtimeMs; } catch { return undefined; }
-  const cacheKey = `${kind}\0${sessionFile}\0`;
-  let tail = liveTailCache.get(cacheKey);
-  if (!tail || tail.mtimeMs !== mtimeMs) {
-    tail = parseLiveTail(kind, sessionFile, mtimeMs);
-    if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
-    liveTailCache.set(cacheKey, tail);
-  }
-  if (tail.events.length === 0) return undefined;
-  const state = inferSessionState(tail.events, { pidAlive: false, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
-  return state.tail?.at(-1)?.trim() || undefined;
-}
-
 function statusFromActivity(activity: SessionActivity): ActiveStatus {
   return activity === 'working' ? 'running' : activity === 'waiting_input' ? 'input_required' : 'idle';
 }
