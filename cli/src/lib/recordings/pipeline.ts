@@ -252,7 +252,6 @@ export class RecordingPipeline {
     return promise;
   }
 
-  // One full-resolution encode at a time; all at once stalled the daemon's own ticks (PHNX-4225).
   async drain(options: { awaitUploads?: boolean; signal?: AbortSignal } = {}): Promise<RecordingLedgerRow[]> {
     if (this.active.size > 0) return [];
     const pending = await this.ledger.pending();

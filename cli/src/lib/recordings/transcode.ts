@@ -61,8 +61,6 @@ export async function transcodeRecording(
   }
 }
 
-// A daemon that exits mid-transcode leaves its detached ffmpeg running. Kill it only when the pid
-// still writes into that job's work dir (a reused pid never does), then delete the work dir.
 export async function reapTranscode(job: TranscodeJob): Promise<{ killed: boolean }> {
   if (!path.basename(job.workDir).startsWith(WORK_DIR_PREFIX)) {
     throw new Error(`Refusing to reap a transcode outside an ${WORK_DIR_PREFIX}* work dir: ${job.workDir}`);
