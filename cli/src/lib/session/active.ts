@@ -669,9 +669,6 @@ export function resolveFallbackStatus(
   nowMs: number = Date.now(),
 ): ActiveStatus {
   const { mtimeMs } = sessionFileTimes(sessionFile);
-  // A live process whose transcript could not be read says nothing about what the
-  // agent is doing. Calling it running put dozens of headless processes with no
-  // session, folder or title on every list as working.
   return lifecycleStatus(pidAlive, mtimeMs, nowMs) ?? 'unknown';
 }
 
@@ -706,8 +703,6 @@ const LIVE_STATE_MAX_EVENTS = 80;
 function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): SessionEvent[] {
   let events: SessionEvent[];
   try {
-    // Interrupts let the reader see that you stopped a turn; without them a call
-    // you pressed Esc on still looks in flight.
     events = parseSession(sessionFile, agent, { includeInterrupts: true });
   } catch {
     return [];
