@@ -391,18 +391,42 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   }
 }
 
+const failedPreviewDigests = new Map<string, string>();
+let previewDigestBuilds = 0;
+
+export function previewDigestBuildsForTest(): number {
+  return previewDigestBuilds;
+}
+
+function transcriptStamp(session: SessionMeta): string {
+  try {
+    const stat = fs.statSync(session.filePath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return 'missing';
+  }
+}
+
 async function fillPreviousCards(state: SessionWatchState, options: WatchLocalOptions, sessions: SessionMeta[]): Promise<void> {
   const accounts = sessions.length ? listNativeAccounts(readMeta()) : [];
   for (const session of sessions) {
     if (options.signal.aborted) return;
-    if (readCachedPreviewDigest(session)) continue;
+    const stamp = transcriptStamp(session);
+    if (failedPreviewDigests.get(session.id) === stamp || readCachedPreviewDigest(session)) continue;
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (options.signal.aborted) return;
     try {
-      if (!loadSessionPreviewDigest(session).digest) continue;
+      previewDigestBuilds++;
+      if (!loadSessionPreviewDigest(session).digest) {
+        failedPreviewDigests.set(session.id, stamp);
+        continue;
+      }
+      failedPreviewDigests.delete(session.id);
       const event = state.refreshPrevious(options.scope, session, accounts);
       if (event) options.emit(event);
-    } catch {  }
+    } catch {
+      failedPreviewDigests.set(session.id, stamp);
+    }
   }
 }
 

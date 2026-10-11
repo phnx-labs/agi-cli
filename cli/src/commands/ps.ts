@@ -369,7 +369,7 @@ async function liveSessionsById(): Promise<Map<string, ActiveSession>> {
   }
 }
 
-async function previewJsonFor(query: string, scope: PreviewScope, live: Promise<Map<string, ActiveSession>>): Promise<PreviewJson> {
+export async function previewJsonFor(query: string, scope: PreviewScope, live: Promise<Map<string, ActiveSession>>): Promise<PreviewJson> {
   const cached = await remoteCachedPreviewJson(query, scope);
   if (cached) return cached;
   const resolved = await resolvePreviewSession(query, scope);
@@ -384,31 +384,47 @@ async function previewJsonFor(query: string, scope: PreviewScope, live: Promise<
   return localPreviewJson(session, (await live).get(session.id));
 }
 
-export async function renderSessionPreviews(queries: string[], scope: PreviewScope): Promise<void> {
+export async function renderSessionPreviews(queries: string[], scope: PreviewScope, read: typeof previewJsonFor = previewJsonFor): Promise<void> {
   if (!scope.json) {
+    const shown: boolean[] = [];
     for (const [index, query] of queries.entries()) {
       if (index > 0) console.log('');
-      await renderSessionPreview(query, scope);
+      try {
+        shown.push(await printSessionPreview(query, scope));
+      } catch (err) {
+        console.error(chalk.red(`${query}: ${(err as Error).message}`));
+        shown.push(false);
+      }
     }
+    if (!shown.some(Boolean)) process.exitCode = 1;
     return;
   }
   const live = liveSessionsById();
-  const results: PreviewJson[] = await Promise.all(queries.map(async (query) => ({ query, ...await previewJsonFor(query, scope, live) })));
+  const results: PreviewJson[] = await Promise.all(queries.map(async (query) => {
+    try {
+      return { query, ...await read(query, scope, live) };
+    } catch (err) {
+      return { query, ...previewErrorJson((err as Error).message) };
+    }
+  }));
   console.log(JSON.stringify(results));
   if (results.every(result => result.session === null)) process.exitCode = 1;
 }
 
 export async function renderSessionPreview(query: string, scope: PreviewScope): Promise<void> {
+  if (!await printSessionPreview(query, scope)) process.exitCode = 1;
+}
+
+async function printSessionPreview(query: string, scope: PreviewScope): Promise<boolean> {
   const cached = await remoteCachedPreviewJson(query, scope);
   if (cached) {
     console.log(JSON.stringify(cached));
-    return;
+    return true;
   }
   const resolved = await resolvePreviewSession(query, scope);
   if ('errorLines' in resolved) {
     resolved.errorLines.forEach(line => console.error(line));
-    process.exitCode = 1;
-    return;
+    return false;
   }
   const { session } = resolved;
   const transcriptPeer = transcriptOnPeerOf(session);
@@ -418,17 +434,18 @@ export async function renderSessionPreview(query: string, scope: PreviewScope): 
     const rendered = await runOnPeer(args, transcriptPeer);
     if (rendered === 'no-target') {
       console.error(chalk.red(`Session ${session.id} is on ${transcriptPeer}, but that device is not reachable.`));
-      process.exitCode = 1;
+      return false;
     }
-    return;
+    return true;
   }
 
   const live = (await liveSessionsById()).get(session.id);
   if (scope.json) {
     console.log(JSON.stringify(localPreviewJson(session, live)));
-    return;
+    return true;
   }
   const headline = formatLiveStatusHeadline(live, isBookmarked(session.id));
   if (headline) console.log(headline);
   console.log(buildPreview(session));
+  return true;
 }

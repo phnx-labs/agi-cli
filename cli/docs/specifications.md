@@ -1139,15 +1139,18 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   sidecars) and `importantMessage`. They MUST come from the preview digest cached
   against the transcript's mtime and size, so a transcript is parsed at most once
   per change. The reset MUST NOT parse: it serves cached digests, and the stream
-  then builds each missing digest one per macrotask and upserts the row it fills
+  then builds each missing digest one per macrotask and upserts the row it fills.
+  A digest that fails to build MUST NOT be retried in that process until its
+  transcript's mtime or size changes
   (`lib/session/remote/watch.ts` `previousRowCard`, `fillPreviousCards`;
   `lib/session/remote/watch.test.ts`).
 - **SES-60 (MUST, PHNX-4326).** `sessions preview <id...> --json` with one id
   MUST print the single envelope object unchanged. With several ids it MUST print
   one JSON array in argument order whose elements are that envelope plus `query`
   (the id as given). An id that does not resolve MUST be an element with
-  `session: null` and `error` set, never a missing element, and the command MUST
-  exit 1 only when no id resolved (`commands/ps.ts` `renderSessionPreviews`;
+  `session: null` and `error` set, never a missing element, including when that
+  id's read throws. With or without `--json`, the command MUST exit 1 only when no
+  id resolved (`commands/ps.ts` `renderSessionPreviews`;
   `commands/ps.preview-batch.test.ts`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
