@@ -1705,7 +1705,7 @@ export class AgentManager {
     if (agent.cloudProvider) {
       throw new Error(
         `Teammate '${who}' is a ${agent.cloudProvider} cloud task — resume it with ` +
-        `\`agents cloud message ${agent.cloudSessionId ?? agent.agentId} "<message>"\` instead.`,
+        `\`agents message ${agent.cloudSessionId ?? agent.agentId} "<message>"\` instead.`,
       );
     }
 
