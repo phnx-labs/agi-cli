@@ -12,7 +12,10 @@
   trigger routines from a payload.
 - **`agents logs` is now `agents events logs`, and `agents trash` is now
   `agents prune trash list|restore|empty`.** The audit, stats and rotate verbs
-  were already under `events`.
+  were already under `events`. Output from a run dispatched with `--device` is
+  read with `agents events logs <id>` (or `--device <name>` to pick one, `-f` to
+  follow); `agents devices ps` lists those runs. Help, skills and docs that still
+  pointed at the long-gone `agents hosts ps|logs|stop` now name these commands.
 - **AGI Menu has no setup commands any more.** `agents menubar` is hidden and
   keeps only the `snapshot`, `update`, `restart` and `disable` verbs AGI Menu
   calls; `setup`, `enable`, `status` and `doctor` are gone. Any `agents` command

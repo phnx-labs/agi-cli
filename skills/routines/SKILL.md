@@ -150,7 +150,7 @@ agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" \
   --run-on gpu-box --run-cwd ~/proj
 ```
 
-The dispatched run tracks in `agents hosts ps` (named after the routine) and
+The dispatched run tracks in `agents devices ps` (named after the routine) and
 the run history finalizes from the remote exit code. Workflow-bundle and
 `loop:` routines can't cross SSH yet and refuse `--run-on` at add time.
 

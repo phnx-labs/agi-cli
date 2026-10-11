@@ -208,10 +208,10 @@ detaches and returns immediately.
 agents run claude "profile this build" --device gpu-box   # follows live
 agents run claude "..." --device gpu-box --no-follow       # detach
 
-agents hosts ps          # list dispatched runs
-agents hosts stop <id>   # terminate a hung/detached run (alias: kill)
-agents hosts logs --device gpu-box   # pick a host-dispatch run
-agents hosts logs <id> -f        # follow a host-task log
+agents devices ps          # list dispatched runs
+agents devices stop <id>   # terminate a hung/detached run (alias: kill)
+agents events logs --device gpu-box   # pick a host-dispatch run
+agents events logs <id> -f        # follow a host-task log
 agents sessions <id>             # session transcript
 ```
 
@@ -234,8 +234,8 @@ Hosts are also a task backend (`agents cloud run "…" --device <name>` — see 
 `cloud` skill) and a routines placement target (`agents routines add …
 --run-on <name>` — see the `routines` skill).
 
-`agents hosts logs <id>` shows host-dispatch stdout; `agents sessions <id>` shows a session transcript. `agents events logs <id>` views one dispatched run or session; `agents events` is the timeline.
-`agents hosts stop <id>` (alias `kill`) terminates the remote process group from
+`agents events logs <id>` shows a dispatched run's output or a session transcript; `agents events` is the timeline.
+`agents devices stop <id>` (alias `kill`) terminates the remote process group from
 this machine without deleting the remote log.
 
 ### Working directory on the host

@@ -710,8 +710,8 @@ agents run claude --device auto "…"                        # same — auto is 
 agents view kimi --device all                            # fan out across every registered device (grouped-by-OS roster)
 agents insights output --device all                      # per-device burn vs shipped output across the fleet
 agents view --device all --json                          # machine-readable fleet inventory
-agents hosts ps                         # list dispatched runs + terminal status
-agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
+agents devices ps                       # list dispatched runs + terminal status
+agents devices stop <id>                # terminate a hung/detached run (alias: kill)
 agents events logs --device gpu-box       # pick a dispatched run — concise summary by default
 agents events logs <id> --full          # the full raw transcript / stdout (token-heavy)
 agents events logs <id> -f              # re-attach to a running one and follow
@@ -851,7 +851,7 @@ evidence, so re-adding the same name needs `teams remove <team> <name>` first.
 
 ## Cloud
 
-Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud ps` and `agents hosts ps` alike).
+Some work shouldn't tie up your laptop. `agents cloud run` hands a task to a managed provider that clones the repo, plans, implements, tests, and opens a PR -- while your terminal stays free. The `host` provider dispatches the same way onto machines you own: `agents cloud run "…" --device gpu-box` (tasks track in `agents cloud ps` and `agents devices ps` alike).
 
 <p align="center">
   <img src="assets/cloud.svg" alt="agents cloud run dispatches one prompt to a managed provider (Rush, Codex, Cursor, Factory, or Antigravity) that runs while you keep working" width="100%" />
