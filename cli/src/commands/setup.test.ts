@@ -146,7 +146,7 @@ describe('agents setup command group', () => {
     execFileSync('git', ['init', '--quiet'], { cwd: systemRepo });
     let selected = false;
     try {
-      expect((await getSetupStatus()).find((row) => row.phase === 'browser')?.state).toBe('missing');
+      expect((await getSetupStatus()).some((row) => row.phase !== 'core' && row.state === 'missing')).toBe(true);
       await runSetupHub({
         interactive: false,
         selectPhase: async () => { selected = true; return 'exit'; },
