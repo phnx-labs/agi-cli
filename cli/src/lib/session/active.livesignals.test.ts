@@ -42,6 +42,20 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
     expect(state!.activity).toBe('working');
   });
 
+  it('a live Claude session stopped with Esc on a pending Bash call yields idle', () => {
+    const file = freshCopy('claude-interrupted-tool.jsonl', 'claude-interrupted-tool.jsonl');
+    const { state } = computeLiveSignals('claude', file, path.dirname(file), true);
+    expect(state!.activity).toBe('idle');
+  });
+
+  it('a live Claude session whose last record is a task-notification queued hours after its answer yields idle', () => {
+    const file = freshCopy('claude-stale-notification.jsonl', 'claude-stale-notification.jsonl');
+    const stale = new Date(Date.now() - 60 * 60_000);
+    fs.utimesSync(file, stale, stale);
+    const { state } = computeLiveSignals('claude', file, path.dirname(file), true);
+    expect(state!.activity).toBe('idle');
+  });
+
   it('an untracked/opaque kind yields no state (falls back to the live floor upstream)', () => {
     const file = freshCopy('grok-idle/chat_history.jsonl', 'chat_history.jsonl');
     expect(computeLiveSignals('amp', file, path.dirname(file), true)).toEqual({});

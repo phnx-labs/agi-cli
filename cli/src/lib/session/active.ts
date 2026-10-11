@@ -724,7 +724,7 @@ export function clearLiveSignalsCacheForTest(): void {
 
 function parseLiveTail(kind: string, sessionFile: string, mtimeMs: number | undefined): LiveTail {
   if (kind === 'claude' || kind === 'codex') {
-    const { events, content } = readSessionTailWithRaw(sessionFile, kind);
+    const { events, content } = readSessionTailWithRaw(sessionFile, kind, undefined, undefined, { includeInterrupts: true });
     const tokPerSec = events.length > 0 ? computeTokPerSec(content, kind) : 0;
     return { mtimeMs, events, tokPerSec: tokPerSec > 0 ? tokPerSec : undefined };
   }
