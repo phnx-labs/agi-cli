@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.23.14
+
+- **Removed dead and duplicate commands (PHNX-4227, owner decision 2026-10-11).**
+  The command index drops from 486 to 425 entries. Removed outright, with no
+  aliases: `agents route`/`routes` (and the `routers` resource kind), `registry`,
+  `packages` (incl. `packages materialize`), `search`, `install`, `tmux`,
+  `message`, `mailboxes`/`mailbox`, `traces` (and the trace auto-sync after runs,
+  important feed posts and owner sends, with `--no-trace-sync` and
+  `AGENTS_NO_TRACE_SYNC`), `webhooks serve`, `daemon webhooks`, and
+  `daemon funnel` (with the `webhook-receiver` daemon service and
+  `~/.agents/webhooks/*.yml` handlers). Replacements: `plugins add`, `skills add`
+  and `mcp add` install resources; `send --channel mailbox|session` reaches a
+  running agent and `cloud message` a cloud task; `routines webhook` fires
+  trigger routines from a payload.
+- **`agents logs` is now `agents events logs`, and `agents trash` is now
+  `agents prune trash list|restore|empty`.** The audit, stats and rotate verbs
+  were already under `events`. Output from a run dispatched with `--device` is
+  read with `agents events logs <id>` (or `--device <name>` to pick one, `-f` to
+  follow); `agents devices ps` lists those runs. Help, skills and docs that still
+  pointed at the long-gone `agents hosts ps|logs|stop` now name these commands.
+- **AGI Menu has no setup commands any more.** `agents menubar` is hidden and
+  keeps only the `snapshot`, `update`, `restart` and `disable` verbs AGI Menu
+  calls; `setup`, `enable`, `status` and `doctor` are gone. Any `agents` command
+  on a Mac installs or heals the login item, `agents doctor` reports duplicate,
+  stale, replaced or ad-hoc-signed helpers as `menubar` warnings with the fix,
+  and the new device-scoped `menubar.enabled` key (default true) replaces the
+  `menubar.disabled` sentinel. An existing sentinel migrates to
+  `menubar.enabled=false` on upgrade. Source: `cli/src/commands/menubar.ts`,
+  `cli/src/lib/menubar/install-menubar.ts`.
+
+- **`agents menubar update` no longer fails with "release list: HTTP 403" (PHNX-4326).** The newest AGI Menu build was found through `api.github.com`, whose unauthenticated limit is 60 requests an hour per IP. Once a shared IP used that up, update checks reported HTTP 403 even with a newer build published. The CLI now uses only plain github.com, which the asset download already used. One git `ls-refs` request lists the `menubar/v*` tags, then a HEAD of the newest tag's `MenubarHelper.app.zip` and `.sha256` confirms both are published, so a draft or a half-uploaded tag is never picked. The 12-hour cache and the floor behave as before. Source: `cli/src/lib/menubar/resolve-version.ts`.
+
+- **The npm package no longer ships test fixtures.** `dist/**/testdata/**` (12 files, including the
+  owner-notify fake API server) is excluded from the published tarball; nothing outside tests loads
+  them. Source: `cli/package.json`.
+
 ## 1.23.13
 
 - **`agents setup` without a terminal exits 0 when setup worked (PHNX-4227).** Outside a TTY it printed the onboarding checklist and exited 1 if any capability was unconfigured: browser, fleet, watchdog, preferences and so on. Every headless install, such as a Rush pod image build, has those unset by design, so the build had to tolerate a failing `agents setup`. It now exits 1 only when core setup (the system repo) is missing. `agents setup status` still exits 1 for any missing capability. Source: `cli/src/commands/setup.ts`.
