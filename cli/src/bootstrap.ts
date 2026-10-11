@@ -829,9 +829,6 @@ const isReadOnlyUpdatePreview =
    passedArgs.find((arg) => !arg.startsWith('-')) === 'menubar' ||
    (passedArgs[0] === 'config' && passedArgs.includes('menubar.autoUpdate')));
 
-// A command that launches an agent, on a hop the CLI made for itself or in a tab that
-// must open straight into the agent (`--quiet`), says nothing unless the launch fails:
-// everything goes to a per-launch log. Any other command keeps its own output.
 const quietStart = launchesAgent(passedArgs)
   && (isPeerHop() || passedArgs.includes('--quiet') || Boolean(process.env[LAUNCH_LOG_ENV]));
 if (quietStart) startQuietLaunch(passedArgs);
@@ -839,7 +836,6 @@ if (quietStart) startQuietLaunch(passedArgs);
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');
   if (!isReadOnlyUpdatePreview) {
-    // A command that ends in a running agent never stops to ask about an upgrade.
     await checkForUpdates(!quietStart && !launchesAgent(passedArgs));
 
     const { spawnDetachedSync } = await import('./lib/auto-pull.js');

@@ -22,8 +22,6 @@ export interface SurfaceMeta {
   agent?: string;
   sessionId?: string;
   title?: string;
-  // Editor backends: the local folder whose window must host the tab, and the
-  // token the extension echoes back in its spawn ack.
   project?: string;
   nonce?: string;
 }

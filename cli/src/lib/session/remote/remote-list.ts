@@ -227,9 +227,6 @@ export function parsePeerPreviewDigest(parsed: unknown): unknown | undefined {
 
 const PEER_PROBE_TIMEOUT_MS = 15_000;
 
-// ssh exits 255 both when it never connected and when the remote side died under a
-// running session (killed shell, sshd restart, a dropped link that is back). Only a
-// failed fresh connection means the host is unreachable.
 export function peerHopOutcome(code: number | null, hostAnswers: () => boolean): 'ok' | 'unreachable' {
   if (code === null) return 'unreachable';
   if (code !== SSH_CONN_FAILURE_CODE) return 'ok';
@@ -254,8 +251,6 @@ export function peerHopCloseNotice(
 }
 
 
-// A login shell (what `bash -lc` gives) with the profile's own output (nvm's .npmrc
-// warning and the like) sent to a log, so what the caller sees starts with agents.
 export function quietLoginShell(inner: string): string {
   const log = '"$HOME/.agents/.cache/logs/peer-login.log"';
   const login = [
@@ -297,13 +292,10 @@ export async function runOnPeer(
     ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined, remapExit255: true })
     : quietLoginShell(`${invocation}; agents_rc=$?; if [ "$agents_rc" -eq 255 ]; then exit 254; fi; exit "$agents_rc"`);
 
-  // A long-lived TTY session owns its connection: riding a shared master ties it to
-  // that master's lifetime and to sshd's per-connection MaxSessions (default 10).
   const sshArgs = [...SSH_OPTS, ...(opts.tty ? [] : controlOpts())];
   if (opts.tty) sshArgs.push('-tt');
   sshArgs.push(peer.target, remoteCmd);
 
-  // A TTY hop hands the launch to the peer, which reports its own failures.
   if (opts.tty) markAgentStarted();
   const code = await spawnHop(sshArgs);
   if (code === null) {
@@ -311,7 +303,6 @@ export async function runOnPeer(
     return 'unreachable';
   }
   if (code === SSH_CONN_FAILURE_CODE && opts.tty && opts.sessionId && peerAnswers(peer.target)) {
-    // The link dropped under a live session and the host still answers: go back in.
     const { reconnectInteractiveSession } = await import('../../hosts/reconnect.js');
     const rc = await reconnectInteractiveSession({
       hostName: machine,

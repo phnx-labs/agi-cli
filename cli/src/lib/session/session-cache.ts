@@ -404,9 +404,6 @@ export function resolveStreamSummaryState(
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
-// The files a session created that a person looks at (images, videos, html and
-// markdown docs, under .agents/artifacts or elsewhere) are its artifacts, read from
-// the same ledger as files.changes. Paths are absolute on the row's own machine.
 export function withCreatedArtifacts(s: ActiveSession): ActiveSession {
   const created = (s.files?.changes ?? [])
     .filter((c) => c.op === 'created')

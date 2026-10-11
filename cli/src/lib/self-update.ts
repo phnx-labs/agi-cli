@@ -84,8 +84,6 @@ export function dismissUpdateVersion(file: string, version: string): void {
   }
 }
 
-// Inherited on purpose: the agents run that a routed resume delegates to is the same
-// hop and must not prompt either.
 export function isPeerHop(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[PEER_HOP_ENV] === '1';
 }

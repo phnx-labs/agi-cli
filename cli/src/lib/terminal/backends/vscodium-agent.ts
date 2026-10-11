@@ -10,7 +10,6 @@ export interface EditorVariant {
   scheme: string;
   app: string;
   label: string;
-  // Folder under ~/Library/Application Support holding the editor's user data.
   dataDir?: string;
 }
 
@@ -45,8 +44,6 @@ function workspaceFolders(configPath: string): string[] {
   }
 }
 
-// The editor keeps its open windows in globalStorage/storage.json (windowsState):
-// each is a folder, or a workspace file whose roots are listed inside it.
 function openEditorRoots(storageJson: string | undefined): { target: string; root: string }[] {
   let state: any;
   try {
@@ -65,9 +62,6 @@ function openEditorRoots(storageJson: string | undefined): { target: string; roo
   return roots;
 }
 
-// What to pass to `codium` so the window already holding `folder` comes forward.
-// A folder that is one root of a multi-root workspace window only matches that
-// window through its workspace file; `codium <folder>` would open a new window.
 export function editorWindowFor(folder: string, storageJson: string | undefined): string {
   let best: { target: string; root: string } | undefined;
   for (const r of openEditorRoots(storageJson)) {
@@ -76,15 +70,11 @@ export function editorWindowFor(folder: string, storageJson: string | undefined)
   return best?.target ?? folder;
 }
 
-// An open window root named `project` — the only local trace of a peer session
-// whose resolver row carries a project name but no path.
 export function editorFolderNamed(project: string, storageJson: string | undefined): string | undefined {
   const roots = new Set(openEditorRoots(storageJson).map((r) => r.root).filter((r) => path.basename(r) === project));
   return roots.size === 1 ? [...roots][0] : undefined;
 }
 
-// A portable editor (VSCODE_PORTABLE, which the editor CLI also honours) keeps its
-// user data inside that folder instead of ~/Library/Application Support.
 export function storageJsonFor(variant: EditorVariant, env: NodeJS.ProcessEnv = process.env): string | undefined {
   const userData = env.VSCODE_PORTABLE
     ? path.join(env.VSCODE_PORTABLE, 'user-data')
@@ -139,7 +129,6 @@ export function focusUri(scheme: string, terminalId: string): string {
   return `${scheme}://${EXTENSION_AUTHORITY}/focus?terminalId=${encodeURIComponent(terminalId)}`;
 }
 
-// An --open-url lands in the last-focused window, so raise the folder's window first.
 function inFolderWindowSpecs(variant: EditorVariant, folder: string, url: string): LaunchSpec[] {
   const bundled = `${variant.app}/Contents/Resources/app/bin/${variant.cli}`;
   const cli = appExists(bundled) ? bundled : variant.cli;
@@ -174,11 +163,6 @@ export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBacken
 
 export const vscodiumAgentBackend = makeVscodiumAgentBackend(EDITOR_VARIANTS[0]);
 
-// The extension's answer to a /spawn carrying `nonce`: it writes
-// ~/.swarmify/agents/spawn-acks/<nonce>.json once it opened the tab, focused the one
-// already showing that session, or refused because the project is not its window's.
-// Contract shared with agi-ext `SpawnAck` (src/core/spawn.ts); both sides test the
-// same fixture, mirrored at testdata/spawn-ack.json.
 export type SpawnAckStatus = 'opened' | 'focused-existing' | 'wrong-window' | 'failed';
 
 export interface SpawnAck {
@@ -190,15 +174,12 @@ export interface SpawnAck {
   title?: string;
   sessionId?: string;
   pid?: number;
-  // Why a failed / wrong-window ack happened, in the extension's words.
   reason?: string;
   at: number;
 }
 
 const ACK_STATUSES: readonly SpawnAckStatus[] = ['opened', 'focused-existing', 'wrong-window', 'failed'];
 
-// Longer than the extension's own wait for the tab's process (10 s), so a `failed`
-// ack is read rather than reported as silence.
 export const SPAWN_ACK_TIMEOUT_MS = 15_000;
 const SPAWN_ACK_POLL_MS = 200;
 

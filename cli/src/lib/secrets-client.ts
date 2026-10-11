@@ -219,10 +219,6 @@ function parseResponse(raw: Buffer): unknown {
 }
 
 
-// The engine's stderr is diagnostics ("[secrets] using the encrypted file store at …",
-// once per serve process). Inherited, every lookup printed it into the caller's
-// terminal, including in front of an agent's TUI; failures still arrive as protocol
-// errors, so the chatter goes to a log.
 function logServeStderr(chunk: Buffer | string | undefined): void {
   if (!chunk || chunk.length === 0) return;
   try {

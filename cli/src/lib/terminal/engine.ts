@@ -61,8 +61,6 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
       }
       resolved = { ...req, cwd };
     }
-    // The extension opens a /spawn only in the window holding its project.
-    // The ack is a file on the machine running the editor; it is read here only.
     if (req.backend === 'vscodium-agent' && req.host && req.host !== 'local') {
       return { ok: false, request: req, error: `VSCodium tabs open on this machine only; run the command on ${req.host} instead of passing --device` };
     }
@@ -129,9 +127,6 @@ export async function openSurfaces(items: SurfaceItem[], opts: OpenManyOptions):
   return results;
 }
 
-// What the terminal that ran the command is told about one launch. Only what was
-// confirmed is reported: an editor ack names the window and tab; a backend that gives
-// no confirmation is said to have been sent the request, never to have opened it.
 export function describeLaunch(result: LaunchResult, subject: { verb: string; label: string }): string {
   const ack = result.ack;
   if (!result.ok) return `Can't open ${subject.label}: ${result.error ?? 'unknown error'}.`;

@@ -2,14 +2,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from './state.js';
 
-// The failure record (`launches/<session>.json`) is read by the standalone `sessions`
-// reader as a row's `lastLaunch`.
-// A launch that must open straight into the agent (a tab, a CLI-made SSH hop) keeps
-// everything agents itself says out of the terminal: it goes to a per-launch log on
-// the machine doing the work. Only a failed launch prints, naming the cause and the
-// log. Child processes of the same launch append to the same log
-// (LAUNCH_LOG_ENV); the agent's own TUI is untouched because it writes to the
-// terminal directly, not through this process's stderr.
 export const LAUNCH_LOG_ENV = 'AGENTS_LAUNCH_LOG';
 
 export interface LaunchFailure {
@@ -29,7 +21,6 @@ export function launchFailurePath(sessionId: string): string {
 }
 
 
-// `sessions resume <id>`, `sessions focus <id>`, `run … --resume <id>`.
 export function launchSessionId(argv: string[]): string | undefined {
   const resume = argv.indexOf('--resume');
   if (resume >= 0 && argv[resume + 1] && !argv[resume + 1].startsWith('-')) return argv[resume + 1];
@@ -38,9 +29,6 @@ export function launchSessionId(argv: string[]): string | undefined {
   return undefined;
 }
 
-// A command that ends in a running agent never stops to ask about anything else first:
-// `run`, `sessions resume|focus` (with or without an id, i.e. the pickers too), and the
-// top-level `focus` / `ps focus`.
 export function launchesAgent(argv: string[]): boolean {
   const words = argv.filter((a) => !a.startsWith('-'));
   return words[0] === 'run'
@@ -49,9 +37,6 @@ export function launchesAgent(argv: string[]): boolean {
     || (words[0] === 'sessions' && (words[1] === 'resume' || words[1] === 'focus'));
 }
 
-// Written to the launch log when the agent's process starts (or a hop to the machine
-// that starts it). After it, the agent owns the terminal and its exit code: a later
-// non-zero exit is the agent's, not a launch failure.
 const AGENT_STARTED = '[agents] launch handed to the agent';
 
 export function markAgentStarted(env: NodeJS.ProcessEnv = process.env): void {
@@ -65,7 +50,6 @@ export function markAgentStarted(env: NodeJS.ProcessEnv = process.env): void {
 
 const LAUNCH_LOG_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
 
-// Launch logs can hold prompts: owner-only, and dropped after two weeks.
 function pruneLaunchLogs(dir: string, nowMs: number): void {
   let files: string[];
   try {
@@ -84,14 +68,12 @@ function pruneLaunchLogs(dir: string, nowMs: number): void {
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
-// The cause is the last top-level line written (indented lines are hints under it).
 export function failureCause(log: string): string {
   const lines = log.replace(ANSI, '').split('\n').filter((l) => l.trim() && !/^\s/.test(l));
   return lines.at(-1)?.trim() || 'it exited before the agent started, without saying why';
 }
 
 export function startQuietLaunch(argv: string[], env: NodeJS.ProcessEnv = process.env): string {
-  // Only the first process of a launch on this machine reports; its children share the log.
   const outermost = !env[LAUNCH_LOG_ENV];
   const log = env[LAUNCH_LOG_ENV] || path.join(launchesDir(), `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}.log`);
   env[LAUNCH_LOG_ENV] = log;

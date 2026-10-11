@@ -90,7 +90,6 @@ export interface OpenRunSurfaceParams {
   cwd: string;
   sessions: SessionHostSample[];
   ctx: EngineContext;
-  // What the terminal is told was started, e.g. "the run" or "agents setup browser".
   label: string;
 }
 

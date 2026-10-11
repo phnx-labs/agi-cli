@@ -293,8 +293,6 @@ export async function sessionsResumeAction(
   if (backend === 'cancel') return;
 
   if (backend === 'vscodium-agent' && !options.device) {
-    // A tab already showing the session is the extension's call: it focuses that tab
-    // and acks focused-existing instead of opening a duplicate.
     const pending: typeof items = [];
     for (const it of items) {
       if (!it.project && it.session.project) {
@@ -530,8 +528,6 @@ async function reportLiveProcesses(session: SessionMeta): Promise<void> {
   for (const pid of pids) process.stdout.write(chalk.yellow(stillRunningNotice(session.shortId, pid, host ?? self)));
 }
 
-// The command a new tab runs must open straight into the agent: `--quiet` keeps
-// routing banners and startup notices out of it (attach-only keeps its own path).
 function inTabArgs(args: string[], options: Pick<ResumeOptions, 'attachOnly'>): string[] {
   if (options.attachOnly || args.includes('--quiet')) return args;
   const boundary = args.indexOf('--');

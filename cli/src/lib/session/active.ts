@@ -207,8 +207,6 @@ export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'
 
 export type ArtifactKind = 'image' | 'video' | 'html' | 'markdown' | 'pdf' | 'other';
 
-// What a gallery renders: the artifact, where it lives on the row's own machine, and
-// what kind of viewer it needs.
 export type SessionArtifactRow = import('@phnx-labs/sessions-cli/reader').ProducedArtifact & { kind?: ArtifactKind };
 
 const ARTIFACT_KINDS: ReadonlyArray<[RegExp, ArtifactKind]> = [
