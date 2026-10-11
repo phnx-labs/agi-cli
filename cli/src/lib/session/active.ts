@@ -110,7 +110,7 @@ export function filterCachedUnattributed(
   });
 }
 
-type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
+export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 export type BackfillMeta = Pick<SessionMeta,
   'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
@@ -1182,6 +1182,10 @@ const UI_HOSTS = new Set<string>([
   'tmux', 'screen',
 ]);
 
+export function unattributedContext(host: string | undefined, tty: string | undefined): ActiveContext {
+  return tty || (host && UI_HOSTS.has(host)) ? 'terminal' : 'headless';
+}
+
 export interface AgentCandidate { pid: number; kind: string; }
 
 export function readAncestorSessionEntry(
@@ -1323,7 +1327,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
     const host = detectHost(pid, procByPid);
-    const context: ActiveContext = host && UI_HOSTS.has(host) ? 'terminal' : 'headless';
+    const tty = procByPid.get(pid)?.tty;
+    const context = unattributedContext(host, tty);
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     const resolvedId = exactId ?? sessionIdFromFile(kind, sessionFile);
@@ -1334,7 +1339,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       kind,
       harness: entry?.harness,
       host,
-      tty: procByPid.get(pid)?.tty,
+      tty,
       pid,
       cwd,
       sessionId: resolvedId,

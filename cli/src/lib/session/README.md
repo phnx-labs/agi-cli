@@ -218,16 +218,21 @@ an acceptance criterion, not a nice-to-have.
 
 `detectHost` (`active.ts:882`) walks the process-ancestry chain and matches ancestor
 `comm` strings against `HOST_MATCHERS` (`active.ts:738`); the match becomes the row's
-`host` column. `undefined` falls through to `context: 'headless'` (`active.ts:1112`).
+`host` column. An unattributed row's `context` comes from `unattributedContext`
+(`active.ts`): a process with a controlling tty (`pts/N`, `ttysNNN`) or a UI-host
+ancestor is `terminal`; only a process with neither is `headless`. The tty rule is what
+keeps an interactive session opened over ssh (sshd owns the pty, no UI host) out of
+headless; detached runs (daemon jobs, teams) have no controlling tty. A
+`agents run --headless` typed into a terminal inherits that terminal and reads
+`terminal`, as it already did under a local UI host.
 
-**Known bug — Linux VS Code / Codium is mislabeled `headless`.** The editor rows of
+**Known bug — Linux VS Code / Codium has no `host`.** The editor rows of
 `HOST_MATCHERS` (`active.ts:740`) carry only macOS Electron-helper names and Windows
 image names (`'Code Helper'`, `'VSCodium Helper'`, `'Code.exe'`, …). On Linux `ps`
 reports the binary basename (`code`, `code-oss`, `node`), none of which match those
 tokens, so `detectHost` returns `undefined` and a bare agent launched in a Linux
-VS Code/Codium **Server** terminal (the common remote-dev case) is classified
-`headless` — or `terminal` with host `-` when the extension published the terminal
-(`active.ts:692`, which force-sets context but takes host only from `detectHost`).
+VS Code/Codium **Server** terminal (the common remote-dev case) shows host `-`. Its
+pty still makes it `terminal`.
 macOS/Windows editors and native Linux terminals/multiplexers
 (`alacritty`/`kitty`/`ghostty`/`tmux`, `active.ts:748`) detect correctly. Fix: add
 lowercase Linux tokens (`code`, `code-oss`, `codium`, `cursor`, `windsurf`, plus a

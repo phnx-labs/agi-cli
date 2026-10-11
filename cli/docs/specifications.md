@@ -344,7 +344,12 @@ SSH access (§7); rendering sessions that no harness produced.
     **absent from the JSON object entirely**. A consumer MUST test for the key's
     presence, not for `null`.
   - `context` — the launch context (`terminal`|`teams`|`cloud`|`headless`)
-    (`lib/session/active.ts:76`).
+    (`lib/session/active.ts:76`). An unattributed process with a controlling tty
+    (`pts/N`, `ttysNNN`) or a UI-host ancestor MUST be `terminal`, even with no
+    UI host (an interactive session opened over `ssh -tt` runs under sshd);
+    `headless` means neither (`unattributedContext`; enforced:
+    `lib/session/active.context.test.ts`). `presence: attached` follows from
+    `terminal` in `foldPresence`, so it needs no rule of its own.
   - The adjacent `SessionMeta.origin` (`cli`|`routine`,
     `sessions-cli/src/lib/session/types.ts:90`) is *row provenance* (live scan vs archived routine
     run), not launch location; `isTeamOrigin` (`:170`) flags a teams-spawned
