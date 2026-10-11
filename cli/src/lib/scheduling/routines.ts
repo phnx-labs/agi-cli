@@ -318,6 +318,7 @@ export interface JobConfig {
   loop?: LoopConfig;
   actor?: string;
   projects?: string[];
+  dispatchedBy?: 'webhook';
 }
 
 export function normalizeProjects(projects: string[] | undefined): string[] | undefined {
@@ -472,9 +473,11 @@ export function finalizeRunMeta(
   }
 }
 
-export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices'>): boolean {
-  const activated = routineEnabledOnThisDevice(config.name);
-  if (activated !== null) return activated;
+export function jobRunsOnThisDevice(config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>): boolean {
+  if (config.dispatchedBy === undefined) {
+    const activated = routineEnabledOnThisDevice(config.name);
+    if (activated !== null) return activated;
+  }
   const owner = routineOwnerDevice(config);
   if (owner === null) return true;
   return owner === machineId();
@@ -536,7 +539,7 @@ interface JobEligibilityResult {
 }
 
 export function checkJobDeviceEligibility(
-  config: Pick<JobConfig, 'name' | 'devices'>,
+  config: Pick<JobConfig, 'name' | 'devices' | 'dispatchedBy'>,
 ): JobEligibilityResult | null {
   if (jobRunsOnThisDevice(config)) return null;
   const allowed = (config.devices ?? []).map((d) => normalizeHost(d));
@@ -667,6 +670,10 @@ export function readJobFileResult(filePath: string): RoutineReadResult {
     return { config: null, problem: '`devices:` must be a list — routine is inert' };
   }
 
+  if (Object.prototype.hasOwnProperty.call(parsed, 'dispatchedBy')) {
+    return { config: null, problem: '`dispatchedBy:` is a runtime-only webhook marker, not a routine field — routine is inert' };
+  }
+
   return {
     config: {
       ...JOB_DEFAULTS,
@@ -708,6 +715,7 @@ export function writeJob(config: JobConfig): void {
   if (output.runOnce === false || output.runOnce === undefined) delete output.runOnce;
   if (output.catchup === true || output.catchup === undefined) delete output.catchup;
   delete output.devices;
+  delete output.dispatchedBy;
   const normProjects = normalizeProjects(output.projects as string[] | undefined);
   if (normProjects) output.projects = normProjects;
   else delete output.projects;
@@ -1178,7 +1186,58 @@ export function shouldPurgeCompletedOneShotRoutine(
   return hasCompletedOneShotRun(config, now);
 }
 
-export function resolveJobPrompt(config: JobConfig): string {
+export interface WebhookContext {
+  source: string;
+  event: string;
+  action?: string;
+  issue?: unknown;
+  updatedFrom?: unknown;
+  pull_request?: unknown;
+  repository?: unknown;
+}
+
+function getPath(obj: unknown, path: string): unknown {
+  const parts = path.split('.');
+  let current: unknown = obj;
+  for (const part of parts) {
+    if (current === null || current === undefined) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+export function substituteWebhookPrompt(prompt: string, context: WebhookContext): string {
+  return prompt.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
+    const value = getPath(context, rawPath.trim());
+    if (value === undefined || value === null) return '';
+    return String(value);
+  });
+}
+
+export function substituteWebhookCommand(command: string, context: WebhookContext): string {
+
+  return command.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
+    const value = getPath(context, rawPath.trim());
+    if (value === undefined || value === null) return "''";
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+  });
+}
+
+export function assertShellSubstitutionSupported(
+  command: string,
+  platform: NodeJS.Platform = process.platform,
+): void {
+
+  if (platform === 'win32' && /\{\{[^{}]+\}\}/.test(command)) {
+    throw new Error(
+      'run.command with {{…}} placeholders is not supported on Windows: the values come from an ' +
+        'untrusted webhook payload and cmd.exe cannot be quoted safely. Use run.prompt, or a ' +
+        'command with no placeholders.',
+    );
+  }
+}
+
+export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): string {
   const now = new Date();
   const tz = config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1199,6 +1258,10 @@ export function resolveJobPrompt(config: JobConfig): string {
     for (const [key, value] of Object.entries(config.variables)) {
       prompt = prompt.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
     }
+  }
+
+  if (context) {
+    prompt = substituteWebhookPrompt(prompt, context);
   }
 
   const latestRun = getLatestCompletedRun(config.name);
