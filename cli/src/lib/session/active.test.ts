@@ -70,7 +70,7 @@ describe('resolvePaneIdentity (per-pane attribution for the authoritative tmux s
   });
 });
 
-describe('resolveFallbackStatus (a LIVE process never resolves to unknown)', () => {
+describe('resolveFallbackStatus (a live process with no readable transcript is unknown, never running)', () => {
   const tmp: string[] = [];
   const mkfile = (ageMs: number): string => {
     const p = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-fallback-')), 'sess.jsonl');
@@ -86,14 +86,14 @@ describe('resolveFallbackStatus (a LIVE process never resolves to unknown)', () 
     return p;
   };
 
-  it('no transcript + a LIVE process ⇒ running (the honest live floor, never unknown)', () => {
-    expect(resolveFallbackStatus(undefined, true)).toBe('running');
+  it('no transcript + a LIVE process ⇒ unknown: being alive is not evidence of work', () => {
+    expect(resolveFallbackStatus(undefined, true)).toBe('unknown');
   });
 
-  it('a LIVE process is running regardless of transcript freshness — fresh, stale, or vanished', () => {
-    expect(resolveFallbackStatus(mkfile(10_000), true)).toBe('running');
-    expect(resolveFallbackStatus(mkfile(5 * 60_000), true)).toBe('running');
-    expect(resolveFallbackStatus(gonePath(), true)).toBe('running');
+  it('an unreadable transcript + a LIVE process ⇒ unknown whether fresh, stale, or vanished', () => {
+    expect(resolveFallbackStatus(mkfile(10_000), true)).toBe('unknown');
+    expect(resolveFallbackStatus(mkfile(5 * 60_000), true)).toBe('unknown');
+    expect(resolveFallbackStatus(gonePath(), true)).toBe('unknown');
   });
 
   it('a DEAD process with a fresh transcript ⇒ closed (not the old fabricated idle)', () => {
