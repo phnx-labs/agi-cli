@@ -648,7 +648,7 @@ export function registerRunCommand(program: Command): void {
     .option('--since <time>', 'With a bare --resume: only sessions newer than this (default 30d; e.g. 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'With a bare --resume: maximum sessions loaded into the picker (default 200)')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents events logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',
@@ -718,7 +718,7 @@ export function registerRunCommand(program: Command): void {
       'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or "interactive" for the machine pinned as interactive.host (the box a human is sitting at). Naming this machine runs locally, no SSH. Same as --where device:<name>. See `agents devices`.',
     )
     .option('--remote-cwd <dir>', "Explicit device working directory for --device runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
-    .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).')
+    .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents devices ps` and `agents events logs`).')
     .option('--any', 'With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.')
     .option(
       '--copy-creds',

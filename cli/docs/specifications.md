@@ -2952,7 +2952,7 @@ and host/lease dispatch (`--device`/`--remote-cwd`/`--no-follow`/
   (EXEC-21's four sites are all reachable only from a path that knows the
   exit code). The launcher exits before an outcome is known, so a
   `--no-follow` dispatch produces no local audit trail unless later
-  reconciled through `agents hosts ps`/`logs`.
+  reconciled through `agents devices ps` / `agents events logs`.
 
 ---
 

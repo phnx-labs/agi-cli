@@ -476,7 +476,7 @@ agents run <agent> ["<task>"] --device <device>
 
 > Shipped surface: dispatch is `agents run <agent> ["<task>"] --device <name>`.
 > With a prompt, the run is headless, follows live by default, and `--no-follow`
-> detaches; track with `agents hosts ps` and `agents hosts logs <id>`. With no
+> detaches; track with `agents devices ps` and `agents events logs <id>`. With no
 > prompt (and a local TTY), the local TTY is forwarded over SSH and the agent runs
 > interactively on the remote host (`ssh -tt`). The remote machine spawns it
 > directly unless its device-local `tmux.enabled` setting opts into the wrapper.
@@ -529,23 +529,23 @@ agents run <agent> ["<task>"] --device <device>
 > you back into the agent.
 >
 > Pass `--name <slug>` at dispatch to give the run a durable handle instead of an
-> opaque id: `agents hosts ps` shows it under a **NAME** column, and
-> `agents hosts logs <name>` resolves by name (case-insensitive, newest-wins). The
+> opaque id: `agents devices ps` shows it under a **NAME** column, and
+> `agents events logs <name>` resolves by name (case-insensitive, newest-wins). The
 > name also seeds the run's **session label**, so it shows up as `<name>` in
 > `agents sessions` and `agents sessions <name>` resolves it. Omitting `--name` is
 > a no-op — unnamed runs stay id-only, render `-` in the NAME column, and show the
 > `[host/<name>]` tag as their session label.
 >
-> `agents hosts ps` re-probes each still-`running` task against the remote `.exit`
+> `agents devices ps` re-probes each still-`running` task against the remote `.exit`
 > marker so a finished (or crashed) run does not stay stuck at `running` after the
-> local follower dies. `agents hosts stop <id>` (alias `kill`) terminates the
+> local follower dies. `agents devices stop <id>` (alias `kill`) terminates the
 > remote process group from this machine, writes exit `143`, and keeps the log
-> for `agents hosts logs <id>`.
+> for `agents events logs <id>`.
 >
 > **Steering a detached dispatch.** Type into the live session on the box that
 > runs it with `agents send --channel session --to <session-id> --device <box>
 > --text "<text>"`, or queue a mailbox note with `agents send --channel mailbox
-> --to <session-id> --text "<text>"`. `agents hosts ps` shows which box owns each
+> --to <session-id> --text "<text>"`. `agents devices ps` shows which box owns each
 > dispatch.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)

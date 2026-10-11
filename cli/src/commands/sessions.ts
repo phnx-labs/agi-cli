@@ -1807,7 +1807,7 @@ export function registerSessionsCommands(program: Command): void {
       # --- Session lifecycle ---
       # Get back into a session — attaches a live pane, or recovers an ended one
       agents sessions resume a1b2c3d4
-      # Same, by the tmux name shown in: agents tmux ls
+      # Same, by its tmux session name
       agents sessions resume ag-claude-a1b2c3d4
       # Attach only — never fork a copy
       agents sessions resume a1b2c3d4 --attach-only

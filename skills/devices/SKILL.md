@@ -113,16 +113,16 @@ default; `--no-follow` detaches and returns immediately.
 agents run claude "profile this build" --device gpu-box   # run there, follow live
 agents run claude "..." --device gpu-box --no-follow        # detach
 
-agents hosts ps              # list dispatched runs and their status
-agents hosts stop <id>       # terminate a hung/detached run (alias: kill)
-agents hosts logs --device gpu-box   # pick a run on that host
-agents hosts logs <id> -f        # follow a host-task log
+agents devices ps              # list dispatched runs and their status
+agents devices stop <id>       # terminate a hung/detached run (alias: kill)
+agents events logs --device gpu-box   # pick a run on that host
+agents events logs <id> -f        # follow a host-task log
 ```
 
-`agents hosts logs <id>` shows host-dispatch output; `agents events logs --device <name>` picks a run dispatched there; `agents events` is the timeline.
-local session by id, filters with `--device`/`--agent`/`--version`, and `-f`
-follows a live one. `agents hosts logs <id>` is the host-only equivalent.
-`agents hosts stop <id>` SIGTERMs the remote process group from this machine and
+`agents events logs <id>` shows a dispatched run's output or a local session by id,
+filters with `--device`/`--agent`/`--version`, and `-f` follows a live one;
+`agents events` is the timeline.
+`agents devices stop <id>` SIGTERMs the remote process group from this machine and
 keeps the log for later inspection.
 
 Registered devices are part of the host pool automatically: they appear in
