@@ -3,8 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CODEX_RULES_FILENAME, PERMISSION_TARGETS, readCanonicalPermissions } from './permissions-registry.js';
-import { capableAgents } from './capabilities.js';
+import { CODEX_ASK_RULES_FILENAME, CODEX_RULES_FILENAME, PERMISSION_TARGETS, readCanonicalPermissions } from './permissions-registry.js';
+import { capableAgents, isCapable } from './capabilities.js';
 import {
   applyPermissionsToVersion,
   convertDenyToCodexRules,
@@ -37,6 +37,18 @@ describe('PERMISSION_TARGETS completeness', () => {
   it('states what each harness loses on the way back', () => {
     for (const [agent, target] of Object.entries(PERMISSION_TARGETS)) {
       expect(target!.lossyBecause, `${agent} has no lossyBecause`).toBeTruthy();
+    }
+  });
+
+  it('marks ask support exactly where the capability is on, with a reason where it is off', () => {
+    for (const [agent, target] of Object.entries(PERMISSION_TARGETS)) {
+      const id = agent as AgentId;
+      if (target!.ask === true) {
+        expect(isCapable(id, 'ask'), `${agent} writes ask but the capability is off`).toBe(true);
+      } else {
+        expect(isCapable(id, 'ask'), `${agent} skips ask but the capability is on`).toBe(false);
+        expect(target!.ask.reason.length, `${agent} skip has no reason`).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -291,6 +303,129 @@ describe('harness detection does not depend on the working directory', () => {
       expect(fromBare, `${spelling} undetected from a bare cwd`).not.toBeNull();
       expect(fromDecoy).toEqual(fromBare);
       expect(fromDecoy!.allow).toContain('Bash(git *)');
+    });
+  }
+});
+
+const ASK_RULE = 'Bash(git push:*)';
+
+describe('ask rules round-trip through the native field', () => {
+  const supported = ['claude', 'opencode', 'codex', 'grok', 'kimi', 'droid', 'antigravity'] as AgentId[];
+  const set: PermissionSet = {
+    name: 'test',
+    allow: ['Bash(git status:*)'],
+    deny: ['Bash(rm:*)'],
+    ask: [ASK_RULE],
+  };
+
+  for (const agent of supported) {
+    it(`${agent} writes ${ASK_RULE} as ask and reads it back`, () => {
+      const home = makeTempHome();
+      const result = applyPermissionsToVersion(agent, set, home, false, process.cwd());
+      expect(result.success, result.error).toBe(true);
+      expect(result.skipped, `${agent} skipped a native ask rule`).toBeUndefined();
+
+      const back = readCanonicalPermissions(agent, 'user', undefined, home);
+      expect(back?.ask ?? [], agent).toContain(ASK_RULE);
+      expect(back?.deny ?? []).toContain('Bash(rm:*)');
+
+      if (agent === 'claude') {
+        const settings = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf-8'));
+        expect(settings.permissions.ask).toContain(ASK_RULE);
+      } else if (agent === 'opencode') {
+        const config = JSON.parse(fs.readFileSync(path.join(home, '.config', 'opencode', 'opencode.jsonc'), 'utf-8'));
+        expect(config.permission.bash['git push:*']).toBe('ask');
+      } else if (agent === 'codex') {
+        const rules = fs.readFileSync(path.join(home, '.codex', 'rules', CODEX_ASK_RULES_FILENAME), 'utf-8');
+        expect(rules).toContain('decision = "prompt"');
+        expect(rules).toContain('pattern = ["git", "push"]');
+        const deny = fs.readFileSync(path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME), 'utf-8');
+        expect(deny).toContain('decision = "forbidden"');
+        expect(deny).not.toContain('"prompt"');
+      } else if (agent === 'droid') {
+        const settings = JSON.parse(fs.readFileSync(path.join(home, '.factory', 'settings.json'), 'utf-8'));
+        expect(settings.permissionRules).toEqual({
+          version: 1,
+          rules: [{
+            id: 'agents-cli/git-push',
+            decision: 'ask',
+            match: { prefix: ['git', 'push'] },
+            tests: { match: ['git push'], noMatch: ['true'] },
+          }],
+        });
+        expect(settings.commandDenylist).toEqual(['rm *']);
+      } else if (agent === 'antigravity') {
+        const settings = JSON.parse(fs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf-8'));
+        expect(settings.permissions.ask).toContain('command(git push *)');
+      } else if (agent === 'grok') {
+        const raw = fs.readFileSync(path.join(home, '.grok', 'config.toml'), 'utf-8');
+        expect(raw).toContain('action = "ask"');
+        expect(raw).toContain('git push *');
+      } else if (agent === 'kimi') {
+        const raw = fs.readFileSync(path.join(home, '.kimi-code', 'config.toml'), 'utf-8');
+        expect(raw).toContain('decision = "ask"');
+        expect(raw).toContain('Bash(git push*)');
+      }
+    });
+  }
+
+  it('does not read a Droid commandDenylist entry back as ask', () => {
+    const home = makeTempHome();
+    expect(applyPermissionsToVersion('droid', {
+      name: 'test',
+      allow: [],
+      deny: ['Bash(rm:*)'],
+    }, home, false, process.cwd()).success).toBe(true);
+    const settings = JSON.parse(fs.readFileSync(path.join(home, '.factory', 'settings.json'), 'utf-8'));
+    expect(settings.permissionRules).toBeUndefined();
+    expect(settings.commandDenylist).toEqual(['rm *']);
+    expect(readCanonicalPermissions('droid', 'user', undefined, home)?.ask).toBeUndefined();
+  });
+
+  it('deletes agents-ask.rules when a later Codex apply has no ask rules', () => {
+    const home = makeTempHome();
+    const askPath = path.join(home, '.codex', 'rules', CODEX_ASK_RULES_FILENAME);
+    expect(applyPermissionsToVersion('codex', {
+      name: 'a',
+      allow: [],
+      ask: [ASK_RULE],
+    }, home, false, process.cwd()).success).toBe(true);
+    expect(fs.existsSync(askPath)).toBe(true);
+    expect(readCanonicalPermissions('codex', 'user', undefined, home)?.ask).toEqual([ASK_RULE]);
+
+    expect(applyPermissionsToVersion('codex', {
+      name: 'b',
+      allow: ['Bash(git status:*)'],
+      ask: [],
+    }, home, false, process.cwd()).success).toBe(true);
+    expect(fs.existsSync(askPath)).toBe(false);
+    expect(readCanonicalPermissions('codex', 'user', undefined, home)?.ask).toBeUndefined();
+  });
+});
+
+describe('harnesses without a per-rule ask list skip with a reason', () => {
+  const unsupported = ['cursor', 'copilot', 'openclaw', 'hermes'] as AgentId[];
+
+  for (const agent of unsupported) {
+    it(`${agent} keeps allow and deny and does not invent an ask field`, () => {
+      const home = makeTempHome();
+      const result = applyPermissionsToVersion(agent, {
+        name: 'test',
+        allow: ['Bash(git status:*)'],
+        deny: ['Bash(rm:*)'],
+        ask: [ASK_RULE],
+      }, home, false, process.cwd());
+      const reason = (PERMISSION_TARGETS[agent]!.ask as { reason: string }).reason;
+      expect(result.success, result.error).toBe(true);
+      expect(result.skipped).toEqual([`${agent}: ask rules skipped: ${reason}`]);
+
+      const configPath = PERMISSION_TARGETS[agent]!.home(home);
+      expect(fs.existsSync(configPath), configPath).toBe(true);
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      expect(raw).not.toMatch(/^\s*"?ask"?\s*[:=]/m);
+      if (agent === 'hermes') {
+        expect(raw).not.toMatch(/mode:/);
+      }
     });
   }
 });

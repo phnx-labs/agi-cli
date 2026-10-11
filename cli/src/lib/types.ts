@@ -129,6 +129,7 @@ export interface AgentConfig {
     mcpHttp: Capability;
     mcpHeaders: Capability;
     allowlist: Capability;
+    ask: Capability;
     skills: Capability;
     commands: Capability;
     plugins: Capability;
@@ -147,7 +148,7 @@ export type Capability = boolean | { since?: string; until?: string };
 
 export type RulesCapability = false | { file: string };
 
-export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory' | 'interactiveRepl';
+export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allowlist' | 'ask' | 'skills' | 'commands' | 'plugins' | 'subagents' | 'rules' | 'workflows' | 'memory' | 'interactiveRepl';
 export type Mode = 'plan' | 'edit' | 'auto' | 'skip';
 
 export const ALL_MODES: readonly Mode[] = ['plan', 'edit', 'auto', 'skip'] as const;
@@ -668,6 +669,7 @@ export interface PermissionSet {
   description?: string;
   allow: string[];
   deny?: string[];
+  ask?: string[];
   additionalDirectories?: string[];
 }
 
@@ -681,6 +683,7 @@ export interface ClaudePermissions {
   permissions: {
     allow: string[];
     deny: string[];
+    ask?: string[];
     additionalDirectories?: string[];
   };
 }

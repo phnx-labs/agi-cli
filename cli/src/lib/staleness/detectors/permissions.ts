@@ -7,6 +7,7 @@ import { capableAgents } from '../../capabilities.js';
 import {
   discoverPermissionGroups,
   buildPermissionsFromGroups,
+  CODEX_ASK_RULES_FILENAME,
   CODEX_RULES_FILENAME,
 } from '../../permissions.js';
 import type { ResourceDetector, DetectArgs } from './types.js';
@@ -23,20 +24,23 @@ function buildClaudeDetector(): ResourceDetector {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
         const allowRules: string[] = settings.permissions?.allow || [];
         const denyRules: string[] = settings.permissions?.deny || [];
-        if (allowRules.length === 0 && denyRules.length === 0) return [];
+        const askRules: string[] = settings.permissions?.ask || [];
+        if (allowRules.length === 0 && denyRules.length === 0 && askRules.length === 0) return [];
 
 
         const groups = discoverPermissionGroups();
         const applied: string[] = [];
         for (const group of groups) {
           const built = buildPermissionsFromGroups([group.name]);
-          if (built.allow.length === 0 && (!built.deny || built.deny.length === 0)) {
+          const askContent = built.ask ?? [];
+          if (built.allow.length === 0 && (!built.deny || built.deny.length === 0) && askContent.length === 0) {
             applied.push(group.name);
             continue;
           }
           const hasAllow = built.allow.some(r => allowRules.includes(r));
           const hasDeny = built.deny?.some(r => denyRules.includes(r)) || false;
-          if (hasAllow || hasDeny) applied.push(group.name);
+          const hasAsk = askContent.some(r => askRules.includes(r));
+          if (hasAllow || hasDeny || hasAsk) applied.push(group.name);
         }
         return applied;
       } catch {
@@ -55,16 +59,18 @@ function buildCodexDetector(): ResourceDetector {
     list({ versionHome }: DetectArgs): string[] {
       const codexConfigPath = path.join(versionHome, '.codex', 'config.toml');
       const codexRulesPath = path.join(versionHome, '.codex', 'rules', CODEX_RULES_FILENAME);
+      const codexAskPath = path.join(versionHome, '.codex', 'rules', CODEX_ASK_RULES_FILENAME);
       const hasConfig = fs.existsSync(codexConfigPath);
       const hasRules = fs.existsSync(codexRulesPath);
-      if (!hasConfig && !hasRules) return [];
+      const hasAskRules = fs.existsSync(codexAskPath);
+      if (!hasConfig && !hasRules && !hasAskRules) return [];
       try {
         let hasPermKeys = false;
         if (hasConfig) {
           const config = TOML.parse(fs.readFileSync(codexConfigPath, 'utf-8')) as Record<string, unknown>;
           hasPermKeys = !!(config.approval_policy || config.sandbox_mode || config.sandbox_workspace_write);
         }
-        if (hasPermKeys || hasRules) {
+        if (hasPermKeys || hasRules || hasAskRules) {
           return discoverPermissionGroups().map(g => g.name);
         }
       } catch {  }
@@ -105,7 +111,8 @@ function buildAntigravityDetector(): ResourceDetector {
         const perms = settings?.permissions;
         const hasAllow = Array.isArray(perms?.allow) && perms.allow.length > 0;
         const hasDeny = Array.isArray(perms?.deny) && perms.deny.length > 0;
-        if (hasAllow || hasDeny) {
+        const hasAsk = Array.isArray(perms?.ask) && perms.ask.length > 0;
+        if (hasAllow || hasDeny || hasAsk) {
           return discoverPermissionGroups().map(g => g.name);
         }
       } catch {  }
@@ -184,7 +191,9 @@ function buildDroidDetector(): ResourceDetector {
         const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
         const hasAllow = Array.isArray(settings.commandAllowlist) && settings.commandAllowlist.length > 0;
         const hasDeny = Array.isArray(settings.commandDenylist) && settings.commandDenylist.length > 0;
-        if (hasAllow || hasDeny) return discoverPermissionGroups().map(g => g.name);
+        const askRules = settings.permissionRules?.rules;
+        const hasAsk = Array.isArray(askRules) && askRules.some((rule: { decision?: string }) => rule?.decision === 'ask');
+        if (hasAllow || hasDeny || hasAsk) return discoverPermissionGroups().map(g => g.name);
       } catch {  }
       return [];
     },

@@ -46,6 +46,7 @@ const CANONICAL_BY_OPENCLAW_TOOL = invertFirstWins(CANONICAL_TO_OPENCLAW_TOOL);
 const CANONICAL_BY_ANTIGRAVITY_ACTION = invertFirstWins(ANTIGRAVITY_ACTION_BY_TOOL);
 
 export const CODEX_RULES_FILENAME = 'agents-deny.rules';
+export const CODEX_ASK_RULES_FILENAME = 'agents-ask.rules';
 
 const CANONICAL_TOOL_CASE: Record<string, string> = {
   bash: 'Bash',
@@ -78,14 +79,16 @@ function canonicalRule(lowerTool: string, pattern: string | null): string {
   return `${tool}(${pattern})`;
 }
 
-function permissionSet(allow: string[], deny: string[]): PermissionSet | null {
+function permissionSet(allow: string[], deny: string[], ask: string[] = []): PermissionSet | null {
   const uniqueAllow = [...new Set(allow)];
   const uniqueDeny = [...new Set(deny)];
-  if (uniqueAllow.length === 0 && uniqueDeny.length === 0) return null;
+  const uniqueAsk = [...new Set(ask)];
+  if (uniqueAllow.length === 0 && uniqueDeny.length === 0 && uniqueAsk.length === 0) return null;
   return {
     name: 'exported',
     allow: uniqueAllow,
     ...(uniqueDeny.length ? { deny: uniqueDeny } : {}),
+    ...(uniqueAsk.length ? { ask: uniqueAsk } : {}),
   };
 }
 
@@ -188,8 +191,8 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
-function convertCodexRulesToDeny(content: string): string[] {
-  const deny: string[] = [];
+function convertCodexRulesByDecision(content: string, wanted: 'forbidden' | 'prompt'): string[] {
+  const rules: string[] = [];
   const marker = 'prefix_rule';
   let searchFrom = 0;
   while (searchFrom < content.length) {
@@ -206,7 +209,7 @@ function convertCodexRulesToDeny(content: string): string[] {
     searchFrom = bodyEnd + 1;
 
     const decision = body.match(/decision\s*=\s*"((?:\\.|[^"\\])*)"/);
-    if (!decision || decision[1] !== 'forbidden') continue;
+    if (!decision || decision[1] !== wanted) continue;
 
     const patternKw = body.search(/pattern\s*=/);
     if (patternKw < 0) continue;
@@ -223,9 +226,9 @@ function convertCodexRulesToDeny(content: string): string[] {
     if (!Array.isArray(parsed)) continue;
     const parts = parsed.filter((p): p is string => typeof p === 'string' && p.length > 0);
     if (parts.length === 0) continue;
-    deny.push(`Bash(${parts.join(' ')}:*)`);
+    rules.push(`Bash(${parts.join(' ')}:*)`);
   }
-  return deny;
+  return rules;
 }
 
 function findMatchingCloser(source: string, openIdx: number, open: string, close: string): number {
@@ -259,14 +262,40 @@ function findMatchingCloser(source: string, openIdx: number, open: string, close
   return -1;
 }
 
-function readCodexDenyRules(configPath: string): string[] {
-  const rulesPath = path.join(path.dirname(configPath), 'rules', CODEX_RULES_FILENAME);
+function readCodexRulesFile(configPath: string, filename: string, decision: 'forbidden' | 'prompt'): string[] {
+  const rulesPath = path.join(path.dirname(configPath), 'rules', filename);
   if (!fs.existsSync(rulesPath)) return [];
   try {
-    return convertCodexRulesToDeny(fs.readFileSync(rulesPath, 'utf-8'));
+    return convertCodexRulesByDecision(fs.readFileSync(rulesPath, 'utf-8'), decision);
   } catch {
     return [];
   }
+}
+
+function readCodexDenyRules(configPath: string): string[] {
+  return readCodexRulesFile(configPath, CODEX_RULES_FILENAME, 'forbidden');
+}
+
+function readCodexAskRules(configPath: string): string[] {
+  return readCodexRulesFile(configPath, CODEX_ASK_RULES_FILENAME, 'prompt');
+}
+
+function droidAskRules(config: Record<string, unknown>): string[] {
+  const block = config.permissionRules;
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return [];
+  const rules = (block as { rules?: unknown }).rules;
+  if (!Array.isArray(rules)) return [];
+  const ask: string[] = [];
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object' || Array.isArray(rule)) continue;
+    const r = rule as { decision?: unknown; match?: { prefix?: unknown } };
+    if (r.decision !== 'ask') continue;
+    const prefix = r.match?.prefix;
+    if (!Array.isArray(prefix) || prefix.length === 0) continue;
+    if (!prefix.every((part): part is string => typeof part === 'string' && part.length > 0)) continue;
+    ask.push(`Bash(${prefix.join(' ')}:*)`);
+  }
+  return ask;
 }
 
 
@@ -276,6 +305,7 @@ interface PermissionTarget {
   toCanonical(configPath: string): PermissionSet | null;
   lossyBecause: string;
   altSuffixes?: string[];
+  ask: true | { reason: string };
 }
 
 export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
@@ -283,12 +313,13 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
     home: (h) => path.join(h, '.claude', 'settings.json'),
     project: (cwd) => path.join(cwd, '.claude', 'settings.json'),
     lossyBecause: 'canonical Write(...) is written as Edit(...), so it reads back as Edit',
+    ask: true,
     toCanonical(configPath) {
       const config = readJson(configPath);
       const perms = config?.permissions;
       if (!perms || typeof perms !== 'object' || Array.isArray(perms)) return null;
       const p = perms as Record<string, unknown>;
-      const set = permissionSet(stringList(p.allow), stringList(p.deny));
+      const set = permissionSet(stringList(p.allow), stringList(p.deny), stringList(p.ask));
       const dirs = stringList(p.additionalDirectories);
       if (set && dirs.length) set.additionalDirectories = dirs;
       return set;
@@ -308,6 +339,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       'opencode.json',
     ],
     lossyBecause: 'OpenCode gates Bash only, so non-Bash rules were never written',
+    ask: true,
     toCanonical(configPath) {
       const config = readJson(configPath);
       const permission = config?.permission;
@@ -316,11 +348,13 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       if (!bash || typeof bash !== 'object' || Array.isArray(bash)) return null;
       const allow: string[] = [];
       const deny: string[] = [];
+      const ask: string[] = [];
       for (const [pattern, action] of Object.entries(bash as Record<string, unknown>)) {
         if (action === 'allow') allow.push(`Bash(${pattern})`);
         else if (action === 'deny') deny.push(`Bash(${pattern})`);
+        else if (action === 'ask') ask.push(`Bash(${pattern})`);
       }
-      return permissionSet(allow, deny);
+      return permissionSet(allow, deny, ask);
     },
   },
 
@@ -328,7 +362,8 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
     home: (h) => path.join(h, '.codex', 'config.toml'),
     project: (cwd) => path.join(cwd, '.codex', 'config.toml'),
     lossyBecause:
-      'sandbox mode widens into representative blanket grants; deny round-trips from agents-deny.rules as Bash(prefix:*)',
+      'sandbox mode widens into representative blanket grants; deny round-trips from agents-deny.rules and ask from agents-ask.rules, both as Bash(prefix:*)',
+    ask: true,
     toCanonical(configPath) {
       const config = readToml(configPath);
       const allow: string[] = [];
@@ -344,13 +379,14 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
           allow.push('WebSearch(*)', 'WebFetch(*)');
         }
       }
-      return permissionSet(allow, readCodexDenyRules(configPath));
+      return permissionSet(allow, readCodexDenyRules(configPath), readCodexAskRules(configPath));
     },
   },
 
   cursor: {
     home: (h) => path.join(h, '.cursor', 'cli-config.json'),
     lossyBecause: 'canonical Bash reads back from Shell(...) and Edit was written as Write(...)',
+    ask: { reason: 'Cursor permissions are allow and deny lists; cli-config.json has no ask list' },
     toCanonical(configPath) {
       const config = readJson(configPath);
       const perms = config?.permissions;
@@ -365,6 +401,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   antigravity: {
     home: (h) => path.join(h, '.gemini', 'antigravity-cli', 'settings.json'),
     lossyBecause: 'only command/read_file/write_file/read_url map, so other canonical tools were never written',
+    ask: true,
     toCanonical(configPath) {
       const config = readJson(configPath);
       const perms = config?.permissions;
@@ -382,13 +419,14 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
         }
         return out;
       };
-      return permissionSet(back(stringList(p.allow)), back(stringList(p.deny)));
+      return permissionSet(back(stringList(p.allow)), back(stringList(p.deny)), back(stringList(p.ask)));
     },
   },
 
   grok: {
     home: (h) => path.join(h, '.grok', 'config.toml'),
     lossyBecause: 'canonical Write is written as Grok `edit`, so it reads back as Edit',
+    ask: true,
     toCanonical(configPath) {
       const config = readToml(configPath);
       const permission = config?.permission;
@@ -397,6 +435,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       if (!Array.isArray(rules)) return null;
       const allow: string[] = [];
       const deny: string[] = [];
+      const ask: string[] = [];
       for (const rule of rules) {
         if (!rule || typeof rule !== 'object' || Array.isArray(rule)) continue;
         const r = rule as { action?: unknown; tool?: unknown; pattern?: unknown };
@@ -407,15 +446,17 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
         const pattern = raw === null ? null : lowerTool === 'bash' ? denormalizeBashPattern(raw) : raw;
         const canonical = canonicalRule(lowerTool, pattern);
         if (r.action === 'deny') deny.push(canonical);
+        else if (r.action === 'ask') ask.push(canonical);
         else if (r.action === 'allow') allow.push(canonical);
       }
-      return permissionSet(allow, deny);
+      return permissionSet(allow, deny, ask);
     },
   },
 
   kimi: {
     home: (h) => path.join(h, '.kimi-code', 'config.toml'),
     lossyBecause: 'each Bash arg-glob was written as two picomatch patterns, which collapse back to one rule',
+    ask: true,
     toCanonical(configPath) {
       const config = readToml(configPath);
       const permission = config?.permission;
@@ -424,6 +465,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       if (!Array.isArray(rules)) return null;
       const allow: string[] = [];
       const deny: string[] = [];
+      const ask: string[] = [];
       for (const rule of rules) {
         if (!rule || typeof rule !== 'object' || Array.isArray(rule)) continue;
         const r = rule as { decision?: unknown; pattern?: unknown };
@@ -431,15 +473,17 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
         const canonical = kimiPatternToCanonical(r.pattern);
         if (!canonical) continue;
         if (r.decision === 'deny') deny.push(canonical);
+        else if (r.decision === 'ask') ask.push(canonical);
         else if (r.decision === 'allow') allow.push(canonical);
       }
-      return permissionSet(allow, deny);
+      return permissionSet(allow, deny, ask);
     },
   },
 
   droid: {
     home: (h) => path.join(h, '.factory', 'settings.json'),
     lossyBecause: 'Droid gates shell commands only, so non-Bash rules were never written',
+    ask: true,
     toCanonical(configPath) {
       const config = readJson(configPath);
       if (!config) return null;
@@ -448,6 +492,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
       return permissionSet(
         back(stringList(config.commandAllowlist)),
         back(stringList(config.commandDenylist)),
+        droidAskRules(config),
       );
     },
   },
@@ -455,6 +500,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   copilot: {
     home: (h) => path.join(h, '.copilot', 'permissions-config.json'),
     lossyBecause: 'approvals are per working directory and read/write are whole-tool kinds with no path',
+    ask: { reason: 'Copilot stores pre-approved tool_approvals only; there is no per-rule ask list' },
     toCanonical(configPath) {
       const config = readJson(configPath);
       const locations = config?.locations;
@@ -486,6 +532,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   openclaw: {
     home: (h) => path.join(h, '.openclaw', 'openclaw.json'),
     lossyBecause: 'OpenClaw gates whole tools, so only blanket rules were written and all read back as blanket',
+    ask: { reason: 'OpenClaw ask is an exec mode (allowlist on miss), not a per-command ask rule' },
     toCanonical(configPath) {
       const config = readJson(configPath);
       const tools = config?.tools;
@@ -503,6 +550,7 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   hermes: {
     home: (h) => path.join(h, '.hermes', 'config.yaml'),
     lossyBecause: 'Hermes gates shell commands only, so non-Bash rules were never written',
+    ask: { reason: 'Hermes has a global approvals mode plus allow and deny lists, not a per-command ask list' },
     toCanonical(configPath) {
       const config = readYaml(configPath);
       if (!config) return null;

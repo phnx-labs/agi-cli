@@ -304,6 +304,7 @@ describe('AGENTS capability matrix', () => {
       'mcpHttp',
       'mcpHeaders',
       'allowlist',
+      'ask',
       'skills',
       'commands',
       'plugins',

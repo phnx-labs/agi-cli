@@ -2168,8 +2168,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (activePresetName) {
     const recipe = readPermissionPresetRecipe(activePresetName);
     if (recipe) {
-      const available = new Set(allGroupNames);
-      presetFilteredGroups = recipe.includes.filter(g => available.has(g));
+      presetFilteredGroups = recipe.includes;
     } else {
       console.warn(`${PERMISSION_PRESET_ENV_VAR}=${activePresetName} but no recipe at ~/.agents/permissions/presets/${activePresetName}.yaml — falling back to all groups`);
     }

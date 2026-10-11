@@ -452,10 +452,15 @@ a format rewrite.
                                                                             (generated text)
 ```
 
-Group-to-permission-set is concatenation with one naming convention:
-groups ending in `-deny` (e.g. `99-deny.yaml`) contribute to `deny` even
-though their YAML lists appear under `allow`
-(`permissions.ts:230-235`).
+Group-to-permission-set is concatenation. A quoted rule under `ask:` stays
+an ask rule. A rule under `deny:`, or any non-ask rule in a group whose name
+is `99-deny` or contains `-deny`, goes to deny. Everything else is allow.
+`buildPermissionsFromGroups` throws when a named group has no file, and the
+error names the active preset (`AGENTS_PERMISSION_PRESET`, or `(none)`) and
+the missing group. `00-local` is the one exception: it is the per-machine
+layer and is skipped when absent. Preset sync passes the recipe's include
+list through unchanged, so a dangling include reaches that check instead of
+being dropped first.
 
 Reading back — `agents permissions list <agent>`, and the config-file import
 behind `agents permissions add <path>` — goes through `PERMISSION_TARGETS` (`lib/permissions-registry.ts`), one entry
@@ -471,12 +476,13 @@ Per-agent conversion is lossy in both directions — the reverse projection
 recovers a set that grants the same access, not the byte-identical rules that
 were written, and each target names its own loss in a `lossyBecause` line:
 
-- Claude's native format is closest to canonical — near 1:1 passthrough
-  (`permissions.ts:362-369`).
+- Claude's native format is closest to canonical. Allow, deny, and ask arrays
+  pass through (`convertToClaudeFormat`). On Claude, ask is evaluated before
+  allow, so an ask rule prompts even when a broader allow also matches.
 - OpenCode 1.1.1+ maps `Bash(pattern)` rules into the `permission.bash`
-  `allow`/`deny` map in `~/.config/opencode/opencode.jsonc` (or `.json`) for
-  user scope, or project-root `opencode.jsonc` (or `.json`). Non-bash rules are
-  dropped.
+  `allow`/`deny`/`ask` map in `~/.config/opencode/opencode.jsonc` (or `.json`)
+  for user scope, or project-root `opencode.jsonc` (or `.json`). Deny is
+  written last, so it wins on the same pattern. Non-bash rules are dropped.
 - Codex (>= 0.138.0) writes `approval_policy` and `sandbox_mode` to
   `.codex/config.toml`, plus `sandbox_workspace_write.network_access=true` when
   web tools are allowed. It also writes a platform-resolved baseline of
@@ -496,8 +502,10 @@ were written, and each target names its own loss in a `lossyBecause` line:
   `approval_policy="never"` over the identical sandbox, so an unattended run
   never stops on a prompt; a denied command just fails and the agent works
   around it. Only explicit `skip` bypasses approvals and sandboxing.
-  Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
-  (`permissions.ts:38-56`).
+  Deny rules are emitted as Starlark `prefix_rule`s with `decision = "forbidden"`
+  to `agents-deny.rules`. Ask rules are the same prefix form with
+  `decision = "prompt"` in the sibling file `agents-ask.rules`. Both files are
+  replaced from the set being applied, and deleted when that side is empty.
 - Goose is **not** allowlist-capable. Its `permission.yaml` gates whole tools
   (`developer__shell`, `developer__text_editor`), so several distinct canonical
   rules collapse onto one entry and cannot be read back faithfully — the
@@ -512,7 +520,19 @@ were written, and each target names its own loss in a `lossyBecause` line:
 - Hermes maps canonical Bash allow rules to `~/.hermes/config.yaml`
   `command_allowlist` and Bash deny rules to `approvals.deny`, preserving
   sibling YAML keys like `mcp_servers` and `hooks`. Hermes has command-glob
-  persistence only; session-scoped `/tools` toggles are not written.
+  persistence only; session-scoped `/tools` toggles are not written. Hermes
+  `approvals.mode` is a global switch, not a per-command ask list, so ask
+  rules are skipped.
+- Grok writes `action = "ask"` and Kimi writes `decision = "ask"` beside
+  allow and deny. Antigravity writes `permissions.ask` with the same
+  `command`/`read_file`/`write_file`/`read_url` serializer as allow and deny
+  (Deny, then Ask, then Allow). Droid ask rules are `permissionRules` v1
+  entries with `decision: "ask"`, a token prefix, and the required `tests`
+  match and noMatch. `commandDenylist` stays the deny list. It is not reused
+  as ask.
+- Cursor, Copilot, and OpenClaw have no per-rule ask field. Ask rules are
+  not written into those configs. Apply still succeeds for allow and deny,
+  and reports `skipped` with the reason on `PERMISSION_TARGETS`.
 ## Plugins: Synthetic Marketplace + Exec-Surface Gate
 
 Plugins bundle skills, commands, hooks, MCP servers, settings, and permissions

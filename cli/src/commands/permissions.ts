@@ -108,6 +108,13 @@ When to use:
               console.log(`      ${chalk.yellow(p)}`);
             }
           }
+          const claudeAsk = (claudePerms.permissions as { ask?: string[] }).ask ?? [];
+          if (claudeAsk.length > 0) {
+            console.log(chalk.yellow('    Ask:'));
+            for (const p of claudeAsk) {
+              console.log(`      ${chalk.yellow(p)}`);
+            }
+          }
         } else if (agentId === 'opencode') {
           const ocPerms = perms as { permission: { bash: Record<string, string> } };
           console.log(chalk.gray('    Bash commands:'));
@@ -148,6 +155,10 @@ When to use:
           if (set.deny?.length) {
             console.log(chalk.red('    Deny:'));
             for (const p of set.deny) console.log(`      ${chalk.yellow(p)}`);
+          }
+          if (set.ask?.length) {
+            console.log(chalk.yellow('    Ask:'));
+            for (const p of set.ask) console.log(`      ${chalk.yellow(p)}`);
           }
         }
         console.log();
@@ -253,7 +264,7 @@ When to use:
             ? ` - ${chalk.gray(truncateToWidth(perm.set.description, budget))}`
             : '';
           console.log(`${prefix}${desc}`);
-          console.log(`    ${chalk.gray(`${perm.set.allow.length} allow, ${perm.set.deny?.length || 0} deny rules`)}`);
+          console.log(`    ${chalk.gray(`${perm.set.allow.length} allow, ${perm.set.deny?.length || 0} deny${perm.set.ask?.length ? `, ${perm.set.ask.length} ask` : ''} rules`)}`);
         }
       }
     });
@@ -322,7 +333,7 @@ Examples:
               value: installed.name,
               name: installed.set.description
                 ? `${installed.name}  ${chalk.gray(installed.set.description.slice(0, 40))}`
-                : `${installed.name}  ${chalk.gray(`${installed.set.allow.length} allow, ${installed.set.deny?.length || 0} deny`)}`,
+                : `${installed.name}  ${chalk.gray(`${installed.set.allow.length} allow, ${installed.set.deny?.length || 0} deny${installed.set.ask?.length ? `, ${installed.set.ask.length} ask` : ''}`)}`,
             }));
 
             const selected = await checkbox({
@@ -391,6 +402,7 @@ Examples:
                 const applyResult = applyPermissionsToVersion(agentId, installed.set, versionHome, !options.replace);
                 if (applyResult.success) {
                   console.log(chalk.green(`  Applied ${setName} to ${agentLabel(agentId)}@${version}`));
+                  for (const line of applyResult.skipped ?? []) console.log(chalk.yellow(`  ${line}`));
                   recordVersionResources(agentId, version, 'permissions', [setName]);
                   applied++;
                 } else {
@@ -433,7 +445,7 @@ Examples:
         if (isAgentConfig) {
           const incoming = exportPermissionsFromPath(localPath);
 
-          if (!incoming || (incoming.allow.length === 0 && (!incoming.deny || incoming.deny.length === 0))) {
+          if (!incoming || (incoming.allow.length === 0 && (!incoming.deny || incoming.deny.length === 0) && (!incoming.ask || incoming.ask.length === 0))) {
             console.log(chalk.yellow(`\nNo permissions found in ${localPath}`));
             return;
           }
@@ -441,8 +453,8 @@ Examples:
           const existing = getDefaultPermissionSet();
 
           const diff = computePermissionsDiff(existing, incoming);
-          const totalNew = diff.allow.added.length + diff.deny.added.length;
-          const totalExisting = diff.allow.existing.length + diff.deny.existing.length;
+          const totalNew = diff.allow.added.length + diff.deny.added.length + diff.ask.added.length;
+          const totalExisting = diff.allow.existing.length + diff.deny.existing.length + diff.ask.existing.length;
 
           if (totalNew === 0) {
             console.log(chalk.gray('\nAll permissions already exist in central storage.'));
@@ -465,6 +477,13 @@ Examples:
             console.log(chalk.red('\n  New deny rules:'));
             for (const rule of diff.deny.added) {
               console.log(chalk.red(`    + ${rule}`));
+            }
+          }
+
+          if (diff.ask.added.length > 0) {
+            console.log(chalk.yellow('\n  New ask rules:'));
+            for (const rule of diff.ask.added) {
+              console.log(chalk.yellow(`    + ${rule}`));
             }
           }
 
@@ -548,6 +567,7 @@ Examples:
                 const applyResult = applyPermissionsToVersion(agentId, merged, versionHome, !options.replace);
                 if (applyResult.success) {
                   console.log(chalk.green(`  Applied to ${agentLabel(agentId)}@${version}`));
+                  for (const line of applyResult.skipped ?? []) console.log(chalk.yellow(`  ${line}`));
                   recordVersionResources(agentId, version, 'permissions', [merged.name || 'default']);
                   applied++;
                 } else {
@@ -582,7 +602,7 @@ Examples:
           for (const perm of permissions) {
             const desc = perm.set.description ? ` - ${perm.set.description}` : '';
             console.log(`  ${chalk.cyan(perm.name)}${desc}`);
-            console.log(`    ${chalk.gray(`${perm.set.allow.length} allow, ${perm.set.deny?.length || 0} deny rules`)}`);
+            console.log(`    ${chalk.gray(`${perm.set.allow.length} allow, ${perm.set.deny?.length || 0} deny${perm.set.ask?.length ? `, ${perm.set.ask.length} ask` : ''} rules`)}`);
           }
 
           const broadGrants = permissions
@@ -683,6 +703,7 @@ Examples:
                   const applyResult = applyPermissionsToVersion(agentId, perm.set, versionHome, !options.replace);
                   if (applyResult.success) {
                     console.log(chalk.green(`  Applied ${perm.name} to ${agentLabel(agentId)}@${version}`));
+                    for (const line of applyResult.skipped ?? []) console.log(chalk.yellow(`  ${line}`));
                     recordVersionResources(agentId, version, 'permissions', [perm.name]);
                     applied++;
                   } else {
@@ -835,6 +856,13 @@ Examples:
       if (perm.set.deny && perm.set.deny.length > 0) {
         lines.push(chalk.red('\n  Deny rules:'));
         for (const rule of perm.set.deny) {
+          lines.push(`    ${chalk.yellow(rule)}`);
+        }
+      }
+
+      if (perm.set.ask && perm.set.ask.length > 0) {
+        lines.push(chalk.yellow('\n  Ask rules:'));
+        for (const rule of perm.set.ask) {
           lines.push(`    ${chalk.yellow(rule)}`);
         }
       }
