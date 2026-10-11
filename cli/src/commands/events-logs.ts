@@ -9,6 +9,7 @@ import { runSessions } from '../lib/sessions-client.js';
 import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';
 import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
+import { setHelpSections } from '../lib/help.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
 interface LogsOptions {
@@ -154,7 +155,7 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
 }
 
 export function registerEventsLogsCommand(events: Command): void {
-  events
+  const logs = events
     .command('logs [id]')
     .description('Show the log of a dispatched run or a session')
     .option('--device <name>', 'Scope to runs dispatched to a device')
@@ -166,4 +167,28 @@ export function registerEventsLogsCommand(events: Command): void {
     .option('--json', 'Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events }')
     .action((id: string | undefined, _opts: LogsOptions, command: Command) =>
       runLogs(id, command.optsWithGlobals() as LogsOptions));
+
+  setHelpSections(logs, {
+    examples: `
+      # Follow one dispatched run. The id is the one agents devices ps prints.
+      agents events logs <id> -f
+
+      # Runs dispatched to one device. One match shows; several ask you to pick.
+      agents events logs --device gpu-box
+
+      # The full raw transcript or stdout, instead of the concise summary.
+      agents events logs <id> --full
+
+      # Machine-readable. A host task is { kind, task, log }.
+      agents events logs <id> --json
+    `,
+    notes: `
+      With no id, this lists host tasks (and, unless --device is set, indexed
+      sessions) that match --agent and --version. --session <id> selects the
+      same run as the positional id.
+
+      --device filters those runs on this machine. It does not send the command
+      to that device; pass the id from agents devices ps to read one run.
+    `,
+  });
 }
