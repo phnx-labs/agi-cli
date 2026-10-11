@@ -206,7 +206,6 @@ describe('focusTabSpecs — raise the owning window, then focus the tab in it', 
 
 
 describe('spawn ack — the contract agi-ext writes back for a /spawn nonce', () => {
-  // Same bytes as agi-ext src/core/testdata/spawn-ack.json: change both or neither.
   const fixture = fs.readFileSync(new URL('./testdata/spawn-ack.json', import.meta.url), 'utf8');
   const full = JSON.parse(fixture);
 

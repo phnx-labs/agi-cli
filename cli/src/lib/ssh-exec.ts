@@ -411,7 +411,6 @@ export function saveLocalTerminal(): string | undefined {
 
 export function sshStream(target: string, remoteCmd: string, opts: SshStreamOptions = {}): number {
   assertValidSshTarget(target);
-  // A TTY session is long-lived; it never rides a shared master (see runOnPeer).
   const mux = opts.multiplex === false || opts.tty ? [] : controlOpts();
   const tty = opts.tty ? ['-tt'] : [];
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), ...tty, target, remoteCmd];

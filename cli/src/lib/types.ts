@@ -59,8 +59,6 @@ export const RUN_AUTO_HOST_RESOLVED_ENV = 'AGENTS_RUN_AUTO_HOST_RESOLVED';
 
 export const REMOTE_INTERACTIVE_ENV = 'AGENTS_REMOTE_INTERACTIVE';
 
-// Set on the far side of an SSH hop the CLI makes for itself (runOnPeer). Nobody
-// typed agents on that box, so a startup prompt there would block the hop unseen.
 export const PEER_HOP_ENV = 'AGENTS_PEER_HOP';
 
 export interface AgentRunConfig {

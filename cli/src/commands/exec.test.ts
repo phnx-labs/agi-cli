@@ -670,7 +670,6 @@ describe('custom harness names take precedence over native agent ids', () => {
         },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      // --quiet keeps agents' own lines out of the terminal and in the launch log.
       expect(result.stderr).toBe('');
       expect(fs.readFileSync(path.join(root, 'launch.log'), 'utf8')).toContain("Resolved custom harness 'claude' -> opencode");
     } finally {
@@ -717,7 +716,6 @@ describe('custom harness names take precedence over native agent ids', () => {
         },
       );
       expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-      // --quiet keeps agents' own lines out of the terminal and in the launch log.
       expect(result.stderr).toBe('');
       expect(fs.readFileSync(path.join(root, 'launch.log'), 'utf8')).toContain("Resolved custom harness 'gemini' -> opencode");
     } finally {
