@@ -19,6 +19,7 @@ export interface PidSessionEntry {
   terminalId?: string;
   originTerminal?: LaunchOrigin;
   tmuxPane?: string;
+  machine?: string;
   startedAtMs: number;
   processIdentity?: { bootId?: string; pidNamespace?: string; initStartTicks?: string; startTicks?: string; startTime?: string };
 }
