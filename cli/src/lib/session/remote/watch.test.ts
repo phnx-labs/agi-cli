@@ -11,6 +11,7 @@ import {
   toPreviousSessionWatchRow,
   watchLocalSessions,
   toSessionWatchRow,
+  previewDigestBuildsForTest,
 } from './watch.js';
 import { loadSessionPreviewDigest } from '../preview-digest.js';
 
@@ -338,6 +339,33 @@ describe('previous rows carry the card text live rows carry (PHNX-4326)', () => 
     expect(reset?.type === 'reset' && reset.rows[0].lastAgentLine).toBeFalsy();
     expect(upsert?.type === 'upsert' && upsert.row.previous && upsert.row.lastAgentLine).toBe('**Done.** The release notes are written and ready for review.');
     expect(events.indexOf(reset!)).toBeLessThan(events.indexOf(upsert!));
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  it('does not rebuild a digest that failed until its transcript changes', async () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'previous-card-failed-')));
+    const filePath = path.join(dir, '9b1d2c3e-0000-4000-8000-000000000003.jsonl');
+    fs.mkdirSync(filePath);
+    const session = indexed('9b1d2c3e-0000-4000-8000-000000000003', { agent: 'claude', filePath, cwd: dir });
+    const watchOnce = async () => {
+      const controller = new AbortController();
+      const watching = watchLocalSessions({
+        scope: 'zion', signal: controller.signal, journalPath: path.join(dir, 'active.jsonl'), heartbeatMs: 60_000,
+        readCache: () => ({ version: 1, scope: 'local', capturedAt: 1, sessions: [] }),
+        readPrevious: () => [session],
+        emit: () => {},
+      });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      controller.abort();
+      await watching;
+    };
+    const before = previewDigestBuildsForTest();
+    await watchOnce();
+    expect(previewDigestBuildsForTest()).toBe(before + 1);
+    await watchOnce();
+    expect(previewDigestBuildsForTest()).toBe(before + 1);
+    fs.utimesSync(filePath, new Date(), new Date(Date.now() + 5_000));
+    await watchOnce();
+    expect(previewDigestBuildsForTest()).toBe(before + 2);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

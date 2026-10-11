@@ -231,8 +231,8 @@ only for an expanded session. Several ids in one call,
 `agents ps preview <id> <id> <id> --json`, print one JSON array in argument
 order: each element is the single-id envelope plus `query` (the id as given), and
 an id that does not resolve is an element with `session: null` and `error` set.
-The command exits 1 only when no id resolved. One id still prints the single
-object. The CLI owns transport and the durable requester
+The command exits 1 only when no id resolved, with or without `--json`. One id
+still prints the single object. The CLI owns transport and the durable requester
 cache; the Menu never reads a peer's files directly. A known owner means one
 peer request, without fleet discovery. `agents sessions preview`, the spelling
 older Menu builds request, was removed in PHNX-4227: such a build gets the

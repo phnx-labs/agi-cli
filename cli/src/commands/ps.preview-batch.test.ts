@@ -9,7 +9,7 @@ process.env.AGENTS_REAL_HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
-const { renderSessionPreview, renderSessionPreviews } = await import('./ps.js');
+const { previewJsonFor, renderSessionPreview, renderSessionPreviews } = await import('./ps.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 afterAll(() => {
@@ -56,6 +56,27 @@ describe('sessions preview with several ids (PHNX-4326)', () => {
     const { query: _query, ...first } = batch[0];
     expect(Object.keys(first).sort()).toEqual(Object.keys(single).sort());
     expect(batch[1]).toMatchObject({ session: null, preview: null, error: `No session with id ${missing} on this machine.` });
+  });
+
+  it('keeps every element when one id\'s read throws', async () => {
+    const failing = b.id;
+    const batch = JSON.parse(await captured(() => renderSessionPreviews([a.id, failing], { json: true, local: true }, (query, scope, live) => {
+      if (query === failing) throw new Error('index locked');
+      return previewJsonFor(query, scope, live);
+    })));
+    expect(batch.map((entry: { query: string }) => entry.query)).toEqual([a.id, failing]);
+    expect(batch[0].preview.lastAssistant).toBe('first reply');
+    expect(batch[1]).toMatchObject({ session: null, preview: null, error: 'index locked' });
+  });
+
+  it('prints every card without --json and exits 1 only when no id resolved', async () => {
+    process.exitCode = undefined;
+    const text = await captured(() => renderSessionPreviews([a.id, missing], { local: true }));
+    expect(text).toContain('first reply');
+    expect(process.exitCode).toBeUndefined();
+    await captured(() => renderSessionPreviews([missing, 'dddd1111-2222-4333-8444-555555555555'], { local: true }));
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
   });
 
   it('exits 1 only when no id resolved', async () => {
