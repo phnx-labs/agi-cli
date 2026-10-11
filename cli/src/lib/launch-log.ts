@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getLogsDir } from './state.js';
 
+// The failure record (`launches/<session>.json`) is read by the standalone `sessions`
+// reader as a row's `lastLaunch`.
 // A launch that must open straight into the agent (a tab, a CLI-made SSH hop) keeps
 // everything agents itself says out of the terminal: it goes to a per-launch log on
 // the machine doing the work. Only a failed launch prints, naming the cause and the
@@ -26,14 +28,6 @@ export function launchFailurePath(sessionId: string): string {
   return path.join(launchesDir(), `${sessionId}.json`);
 }
 
-export function readLaunchFailure(sessionId: string): LaunchFailure | undefined {
-  try {
-    const value = JSON.parse(fs.readFileSync(launchFailurePath(sessionId), 'utf8'));
-    return value?.status === 'failed' && typeof value.cause === 'string' && typeof value.log === 'string' ? value : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 // `sessions resume <id>`, `sessions focus <id>`, `run … --resume <id>`.
 export function launchSessionId(argv: string[]): string | undefined {
