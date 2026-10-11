@@ -73,7 +73,6 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()).toMatchObject({
         'menubar.menu.groupTicketsByMilestone': true,
         'menubar.statusbar.goalCountdown': true,
-        // The old switch on and ticketGroup unset: the menu groups by milestone.
         'menubar.menu.ticketGroup': 'milestone',
       });
       setConfigValue('menubar.menu.ticketGroup', 'status');
