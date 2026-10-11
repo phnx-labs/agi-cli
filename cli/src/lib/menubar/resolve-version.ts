@@ -8,8 +8,6 @@ import { helperFloor } from '../helper-versions.js';
 import { getCliVersion } from '../version.js';
 import { menubarHelperAssetUrls } from './download-menubar.js';
 
-// Plain github.com endpoints only: api.github.com allows 60 unauthenticated
-// requests per hour per IP, and a shared IP exhausts that (PHNX-4326).
 const MENUBAR_UPLOAD_PACK = `https://github.com/${HELPER_RELEASE_REPO}.git/git-upload-pack`;
 const MENUBAR_TAG_REF_PREFIX = 'refs/tags/menubar/';
 
@@ -20,8 +18,6 @@ interface MenubarResolveCache {
   version: string;
 }
 
-// agi-menu's release.sh marks a release --prerelease exactly when its tag has a
-// -pre.N suffix, so the strict x.y.z shape is what excludes pre-releases.
 const TAG = /^menubar\/v(\d+\.\d+\.\d+)$/;
 
 function pktLine(payload: string): string {
@@ -122,8 +118,6 @@ async function fetchMenubarTags(fetchImpl: FetchLike): Promise<string[]> {
   return parseLsRefsTags(Buffer.from(await res.arrayBuffer()));
 }
 
-// A draft release serves no download, and a tag pushed before its upload
-// finished has none yet: both answer 404 here and are skipped.
 async function assetPublished(fetchImpl: FetchLike, url: string): Promise<boolean> {
   const res = await fetchImpl(url, { method: 'HEAD', headers: userAgent(), redirect: 'manual', signal: AbortSignal.timeout(5_000) });
   if (res.status === 404) return false;
