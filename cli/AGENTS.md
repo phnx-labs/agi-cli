@@ -1871,7 +1871,7 @@ version bumps. `release.sh` regenerates and stages all three before constructing
 the release commit. See [the reference workflow](docs/README.md#generated-command-reference).
 
 ```bash
-bun install && bun run build && bun test
+bun install && bun run build && bun run test   # vitest; plain `bun test` skips tests/setup.ts and its sandboxed HOME
 ```
 
 Tests are `*.test.ts` next to source; integration in `tests/`. Every PR to `main`

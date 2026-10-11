@@ -118,12 +118,22 @@ export function listTasks(filter?: { provider?: CloudProviderId; status?: CloudT
 }
 
 const TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'];
+const WORKING_STATUSES = ['queued', 'allocating', 'running'];
 
-export function listActiveTasks(): CloudTask[] {
-  const placeholders = TERMINAL_STATUSES.map(() => '?').join(', ');
+export const CLOUD_TASK_STALE_MS = 24 * 60 * 60 * 1000;
+
+export function listActiveTasks(opts: { includeStale?: boolean; nowMs?: number } = {}): CloudTask[] {
+  const terminal = TERMINAL_STATUSES.map(() => '?').join(', ');
+  if (opts.includeStale) {
+    return (db().prepare(
+      `SELECT * FROM tasks WHERE status NOT IN (${terminal}) ORDER BY created_at DESC`,
+    ).all(...TERMINAL_STATUSES) as Record<string, unknown>[]).map(rowToTask);
+  }
+  const working = WORKING_STATUSES.map(() => '?').join(', ');
+  const cutoff = new Date((opts.nowMs ?? Date.now()) - CLOUD_TASK_STALE_MS).toISOString();
   const rows = db().prepare(
-    `SELECT * FROM tasks WHERE status NOT IN (${placeholders}) ORDER BY created_at DESC`,
-  ).all(...TERMINAL_STATUSES) as Record<string, unknown>[];
+    `SELECT * FROM tasks WHERE status NOT IN (${terminal}) AND (status NOT IN (${working}) OR updated_at >= ?) ORDER BY created_at DESC`,
+  ).all(...TERMINAL_STATUSES, ...WORKING_STATUSES, cutoff) as Record<string, unknown>[];
   return rows.map(rowToTask);
 }
 

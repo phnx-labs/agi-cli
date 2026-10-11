@@ -251,6 +251,31 @@ match that file; otherwise the canonical fold processes bounded recent events.
 request. A bounded copy is marked partial. Consumers must not replace newer
 feed content with an older or undated detail projection.
 
+The `preview` digest also carries what a session card shows without a second
+fetch (PHNX-4326). Each field is additive and absent when the session has none:
+
+- `todos`: the latest checklist, `{ items: [{ content, status, activeForm?,
+  description? }], done, total, activeForm? }`, with `status` one of `pending`,
+  `in_progress` or `completed`. It folds Claude `TodoWrite` and
+  `TaskCreate`/`TaskUpdate`, Codex `update_plan` and Kimi `TodoList`, the same
+  fold the feed rows' `todos` use, so a list row reads `todos.done`/`todos.total`
+  from `feed watch` with no preview call.
+- `subAgents`: `[{ id?, description, agentType?, status, startedAt?, durationMs? }]`,
+  `status` one of `running`, `completed` or `failed`. For Claude sessions that
+  keep `subagents/agent-*.jsonl` transcripts, those children are the list and
+  `subAgentCount` equals its length. Otherwise it lists the newest 30 spawning
+  calls (Agent/Task tools, `agents run`, `agents teams add/start`) with the outcome
+  of their recorded result. A spawn with no result yet, or a background spawn, is
+  `running`; `subAgentCount` stays the total count.
+- `images`: `[{ path, source, at? }]`, the newest 6 image files that still exist,
+  `source` one of `attached` (pasted or attached by the user, including the
+  copies under `~/.agents/.cache/attachments/<sessionId>/`), `read` (opened by a
+  read tool) or `produced` (written or edited by the session).
+
+All three come from the same bounded parse as the rest of the digest. A
+`partial: true` digest reflects only the transcript tail, except that
+subagent transcripts and cached pasted images are read on every call.
+
 The requester cache holds at most 500 entries and 16 MiB of payload metadata,
 with a 512 KiB envelope limit. Ordinary copies are fresh for 45 seconds when no
 activity cursor is supplied. Failures use exponential backoff. A shared
