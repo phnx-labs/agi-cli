@@ -292,10 +292,10 @@ SSH access (§7); rendering sessions that no harness produced.
   Consequence worth stating: because only Claude resolves off disk, a non-Claude
   live row carries no transcript until the index reaches it, so during that
   window `computeLiveSignals` returns `{}` and the row shows the
-  `resolveFallbackStatus` `running` rather than a `working` / `waiting_input`
-  distinction (SES-18 still holds — it never reads `unknown`). SES-9c's warm tick
-  is what keeps that window short. This is the deliberate trade: a coarser status
-  for seconds beats a confident render of someone else's conversation.
+  `resolveFallbackStatus` `unknown` rather than a `working` / `waiting_input`
+  distinction (SES-18). SES-9c's warm tick is what keeps that window short. This
+  is the deliberate trade: an honest "unknown" for seconds beats a confident
+  render of someone else's conversation.
   Status: landed (RUSH-2691).
 - **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
   transcript index within seconds, not on the next unrelated `agents sessions*`
@@ -517,18 +517,17 @@ SSH access (§7); rendering sessions that no harness produced.
   reuse by comparing recorded start-time within a 60s tolerance; Windows falls
   back to bare existence (`lib/session/active.ts:287,327-338`; test
   `active.liveness.test.ts:35-37`).
-- **SES-18 (MUST).** Session status MUST be derived honestly, and a LIVE process
-  MUST NEVER resolve to `unknown`. Every tracked harness (not only Claude/Codex)
-  MUST be parsed into a real `working`/`waiting_input`/`idle` when its transcript
-  is locatable + parseable (`computeLiveSignals` / `findSessionFileForKind`,
-  `lib/session/active.ts`); an opaque/untracked kind or an unreadable transcript
-  MUST fall back to `resolveFallbackStatus`, which reports `running` for any live
-  process (never a blanket `unknown`, never a fabricated `idle`)
-  (`lib/session/active.ts`). A dead process MUST report `closed`; a transcript not
-  written for `ABANDONED_STALE_MS` MUST report `abandoned`, whether its PID is dead
-  or still alive. `unknown` is reserved for the sole un-answerable case: no PID
-  signal and no file signal; modern local scanners pass a definite PID-liveness
-  boolean, but `unknown` remains valid input from older remote peers. A structural
+- **SES-18 (MUST).** Session status MUST be derived honestly from evidence.
+  Every tracked harness (not only Claude/Codex) MUST be parsed into a real
+  `working`/`waiting_input`/`idle` when its transcript is locatable + parseable
+  (`computeLiveSignals` / `findSessionFileForKind`, `lib/session/active.ts`). An
+  opaque/untracked kind or an unreadable transcript MUST fall back to
+  `resolveFallbackStatus`, which reports `unknown` for a live process: being alive
+  is not evidence of work, and reporting `running` there listed dozens of
+  headless processes with no session, folder or title as working (2026-10-10).
+  It never fabricates `idle` or `running`. A dead process MUST report `closed`; a
+  transcript not written for `ABANDONED_STALE_MS` MUST report `abandoned`, whether
+  its PID is dead or still alive. `unknown` derives phase `idle`. A structural
   `AskUserQuestion` / `ExitPlanMode` as last event MUST report `waiting_input` and
   MUST NOT decay with the freshness window (`sessions-cli/src/lib/session/state.ts`; test
   `state.test.ts`). A dead process whose OWNING HOST WINDOW also stopped
@@ -4021,8 +4020,9 @@ location/activity context, while healthy rows are summarized until `--verbose` i
 - **WD-GAP-2.** There is no distinct `done` state — a completed session is inferred as
   `idle` and the agent skips it with `needsHuman: false` rather than a first-class status.
   Planned.
-- **WD-GAP-3.** Live status inference covers Claude/Codex; other harnesses fall to
-  `unknown` and are not yet steered (`findSessionFileForKind`,
+- **WD-GAP-3.** Live status inference covers Claude/Codex and the tracked harnesses
+  whose transcript the index has reached; the rest report `unknown` (SES-18) and are
+  not yet steered (`findSessionFileForKind`,
   `lib/session/active.ts`). Planned.
 - **WD-GAP-4.** No default `watchdog/WORKFLOW.md` decider ships in this repo; absent
   one, the built-in `WATCHDOG_SYSTEM_PROMPT` runs.

@@ -703,7 +703,7 @@ const LIVE_STATE_MAX_EVENTS = 80;
 function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): SessionEvent[] {
   let events: SessionEvent[];
   try {
-    events = parseSession(sessionFile, agent, { includeInterrupts: true });
+    events = parseSession(sessionFile, agent);
   } catch {
     return [];
   }
