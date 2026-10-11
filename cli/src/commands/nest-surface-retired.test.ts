@@ -158,7 +158,7 @@ describe('PHNX-3391 removed `list` (duplicate of `view`)', () => {
   });
 });
 
-describe('PHNX-4267 retired humans/reminders/modes/feedback/restore; restore and empty live under trash', () => {
+describe('PHNX-4267 retired humans/reminders/modes/feedback/restore', () => {
   const RETIRED = ['humans', 'reminders', 'modes', 'feedback', 'restore'];
 
   it('each is gone from the root tree and marked retired', async () => {
@@ -169,13 +169,47 @@ describe('PHNX-4267 retired humans/reminders/modes/feedback/restore; restore and
       expect(isKnownTopLevelCommand(name), name).toBe(false);
       expect(RETIRED_TOP_LEVEL_COMMANDS.has(name), name).toBe(true);
     }
-    const trash = program.commands.find((c) => c.name() === 'trash');
-    expect(trash?.commands.map((c) => c.name()).sort()).toEqual(['empty', 'list', 'restore']);
+
   });
 
   it('a bare `agents modes` is an unknown command, not an auto-correct to models', () => {
     const home = guardedHome();
     const r = run(home, 'modes');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toMatch(/unknown command/i);
+  });
+});
+
+describe('PHNX-4227 batch A removed dead and duplicate groups', () => {
+  const REMOVED = [
+    'route', 'routes', 'registry', 'packages', 'search', 'install', 'tmux', 'message',
+    'mailboxes', 'mailbox', 'traces', 'webhooks', 'logs', 'trash',
+  ];
+
+  it('each is gone from the root tree and marked retired', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    for (const name of REMOVED) {
+      expect(names, name).not.toContain(name);
+      expect(isKnownTopLevelCommand(name), name).toBe(false);
+      expect(RETIRED_TOP_LEVEL_COMMANDS.has(name), name).toBe(true);
+    }
+  });
+
+  it('trash lives under prune, the run-log viewer under events, and daemon drops webhooks/funnel', async () => {
+    const program = await buildFullCommandTree();
+    const sub = (parent: string) => program.commands.find((c) => c.name() === parent)?.commands ?? [];
+    const trash = sub('prune').find((c) => c.name() === 'trash');
+    expect(trash?.commands.map((c) => c.name()).sort()).toEqual(['empty', 'list', 'restore']);
+    expect(sub('events').map((c) => c.name())).toContain('logs');
+    const daemon = sub('daemon').map((c) => c.name());
+    expect(daemon).not.toContain('webhooks');
+    expect(daemon).not.toContain('funnel');
+  });
+
+  it('a bare `agents logs` is an unknown command, not an auto-correct', () => {
+    const home = guardedHome();
+    const r = run(home, 'logs');
     expect(r.status).not.toBe(0);
     expect(r.stderr ?? '').toMatch(/unknown command/i);
   });

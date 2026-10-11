@@ -33,7 +33,7 @@ function find(nodes: CommandNode[], path: string): CommandNode | undefined {
 describe('command index generation', () => {
   it('builds a non-trivial tree from the real command modules', async () => {
     const nodes = await tree();
-    expect(nodes.length).toBeGreaterThan(50);
+    expect(nodes.length).toBeGreaterThan(30);
     expect(countCommands(nodes)).toBeGreaterThan(nodes.length);
   });
 
@@ -100,9 +100,9 @@ describe('command index generation', () => {
     expect(query).toBeDefined();
     expect(query!.options.some((option) => option.long?.startsWith('--'))).toBe(true);
     expect(query!.options.some((option) => option.defaultValue !== undefined)).toBe(true);
-    const tmux = find(nodes, 'tmux');
-    expect(tmux?.examples).toContain('agents tmux');
-    expect(tmux?.notes?.length).toBeGreaterThan(0);
+    const empty = find(nodes, 'prune trash empty');
+    expect(empty?.examples).toContain('agents prune trash empty');
+    expect(empty?.notes?.length).toBeGreaterThan(0);
   });
 
   it('renders scannable Markdown with a fenced block per group', async () => {

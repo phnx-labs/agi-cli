@@ -86,7 +86,6 @@ export const RUN_OPTION_FORWARDING: Record<string, RunOptionForwarding> = {
   cloudEnv: 'local-only',
   authCheck: 'local-only',
   notify: 'local-only',
-  traceSync: 'local-only',
   broadcast: 'local-only',
   task: 'local-only',
   listTasks: 'local-only',

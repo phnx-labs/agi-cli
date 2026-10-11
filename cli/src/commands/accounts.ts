@@ -500,7 +500,7 @@ agents accounts default claude --json`,
           if (plan.totals.slots + plan.totals.trash + plan.totals.deferred > 0) {
             console.log();
             console.log('Dry-run: nothing written. Re-run with --apply to execute.');
-            console.log('Restore a trashed install with: agents trash restore <agent>@<label>');
+            console.log('Restore a trashed install with: agents prune trash restore <agent>@<label>');
           }
           return;
         }
@@ -518,14 +518,14 @@ agents accounts default claude --json`,
         console.log();
         console.log(`Wrote manifest: ${result.manifestPath}`);
         console.log(`Re-indexed ${result.sessionsReindexed} session path${result.sessionsReindexed === 1 ? '' : 's'}.`);
-        console.log('Restore a trashed install with: agents trash restore <agent>@<label>');
+        console.log('Restore a trashed install with: agents prune trash restore <agent>@<label>');
       });
     });
   setHelpSections(migrateCmd, {
     examples: `agents accounts migrate --dry-run
 agents accounts migrate --apply
 agents accounts migrate --dry-run --device worker-1`,
-    notes: 'Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.',
+    notes: 'Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents prune trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.',
   });
 
   accounts.command('set-key <name>')

@@ -56,7 +56,7 @@ agents setup tools                     # install/upgrade the standalone sessions
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and managed trace sync (`agents traces sync` with no Cloudflare setup). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, term, fleet, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and owner notifications. `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, term, fleet, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 The command surface teaches setup through `agents setup` and group-level `--help`.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
@@ -136,8 +136,8 @@ agents skills add ~/skills/payments-review --agents claude
 agents routines add nightly-payments-audit \
   --schedule "0 2 * * *" --agent claude --prompt "Audit payments/* for regressions"
 
-# Steer the fleet this loop runs on from the menu bar
-agents menubar setup
+# Check the fleet this loop runs on, AGI Menu included
+agents doctor
 ```
 
 `agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
@@ -148,15 +148,13 @@ agents menubar setup
 
 ```bash
 # Set up the Notion MCP server once.
-agents install mcp:com.notion/mcp
+agents mcp add notion uvx notion-mcp --agents claude,codex,antigravity,cursor
 
 # It's now registered with Claude Code, Codex, Antigravity, and Cursor.
 agents mcp list
 ```
 
 Skills, slash commands, rules, hooks, and permissions work the same way -- install once in `~/.agents/`, synced to every agent's native format automatically.
-
-A schema-v3 `agent.yaml` package materializes into an ephemeral Claude, Codex, or OpenCode home for Factory / Prix Cloud workers (`agents packages materialize ./reviewer --harness codex --harness-version 0.42.0 --output-home "$OUTPUT_HOME" --json`) -- it never writes the live user home.
 
 ```bash
 agents skills add gh:yourteam/python-expert     # Knowledge pack -> all agents
@@ -494,7 +492,7 @@ agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # original harness/
 agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897  # adapt if its account is unavailable
 ```
 
-`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents sessions resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. When that origin login is usage-limited but the home still owns the transcript, resume stays native and rotates to a healthy injectable provider account of the **same harness**. `/continue <id>` is the last-resort fallback — a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin, or a limited origin whose transcript is no longer in that home — and still authenticates as a healthy same-harness account (injecting a provider credential when that is the pick, so it never launches the exhausted native login). It never native-resumes from a different isolated home. Back them with **tmux** and the runs turn durable: detach, close your editor, reboot the GUI -- the session is still alive to `agents tmux attach`. The whole `agents tmux` subsystem (persistent multiplexer sessions that survive editor restarts and can be shared with other tools) sits underneath.
+`agents sessions resume` reopens several sessions in whatever terminal you're in -- auto-detected across iTerm, Ghostty, tmux, and the VSCodium agent-terminal, or forced with `--iterm` / `--ghostty` / `--tmux` / `--vscodium`. `agents sessions resume <id>` resumes one session without requiring you to name its harness: exact IDs take a local SQLite fast path, then resolve fleet-wide and recover on the source device. If the origin version is installed, signed in, healthy, and still owns the indexed transcript, its isolated home performs native resume. Claude launches that native resume from the original project directory recorded before the first turn, so its `projects/<cwd-key>` lookup reaches the conversation even when the session later changed directories. When that origin login is usage-limited but the home still owns the transcript, resume stays native and rotates to a healthy injectable provider account of the **same harness**. `/continue <id>` is the last-resort fallback — a signed-out, revoked, trashed, backup-only, or same-number-reinstalled origin, or a limited origin whose transcript is no longer in that home — and still authenticates as a healthy same-harness account (injecting a provider credential when that is the pick, so it never launches the exhausted native login). It never native-resumes from a different isolated home. Back them with **tmux** (`tmux.enabled`) and the runs turn durable: detach, close your editor, reboot the GUI -- `agents focus` or `agents sessions resume` reattaches the still-running session.
 
 ### Send an agent to the background — and bring it back
 
@@ -520,11 +518,11 @@ Running agents aren't fire-and-forget. Steer them mid-run without opening their 
 ### Message a running agent
 
 ```bash
-# Delivered at the agent's next tool call — no restart, no lost context.
-agents message tester "also cover the null case"
+# Queued in the agent's mailbox, read at its next tool call — no restart, no lost context.
+agents send --channel mailbox --to <session-id> --text "also cover the null case" --from orchestrator
 ```
 
-`agents message <target> <text>` reaches any running agent by name or id -- a live local run, a teammate, a loop agent, or a cloud task -- and the text lands at its next tool call. Tag the sender with `--from <who>`.
+The `mailbox` channel of `agents send` queues a note for a running agent by session id, and the text lands at its next tool call. A cloud task takes `agents cloud message <id> <text>`.
 
 To type straight into an agent's terminal instead -- a "continue" for one that stalled at a prompt -- use the `session` channel of `agents send`. The id is anything `agents ps` shows (session id or prefix, the `<shortid>` of an `ag-<agent>-<shortid>` tmux name, or a `%pane`); add `--device <name>` for a session on another box.
 
@@ -565,7 +563,7 @@ agents config set summarizer.baseUrl http://localhost:11434   # Ollama / vLLM / 
 agents config set summarizer.model qwen2.5:3b
 ```
 
-Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
+Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents send --channel mailbox`, so the decision routes back to the agent that asked it.
 
 ### Auto-nudge stalls
 
@@ -689,30 +687,6 @@ Profile YAML has no secrets -- safe to `agents repo push` to a shared repo. `age
 
 ---
 
-## Named routers
-
-A **router** is a reusable, task-typed allowlist -- which harnesses, which models/tiers per harness, and which linked accounts a task may be routed to. It's a generalization of a profile: a profile is a router pinned to one harness and one account.
-
-```bash
-# Scope a router to two harnesses, capped at a tier
-agents route add research --harness gemini,kimi --tier cheap,default   # alias: create
-
-# Narrow one harness's model set
-agents route allow research kimi kimi-k2
-
-# Only these accounts are eligible when routing under this router
-agents route link-account research gemini personal
-agents route link-account research kimi work
-
-agents route view research        # alias: show
-agents route rename research prod  # rename a router, preserving its config
-agents route list --json
-```
-
-Router YAML has no secrets -- safe to `agents repo push` to a shared repo. Harness ids and model/tier tokens are validated on `add`/`allow`: an unknown harness or an unverifiable model id fails loud and writes nothing. Routers resolve as a layered resource (project > user > system, same as profiles). The old verbs `create`/`show` remain as aliases.
-
----
-
 ## Run on your own machines
 
 <p align="center">
@@ -738,9 +712,9 @@ agents insights output --device all                      # per-device burn vs sh
 agents view --device all --json                          # machine-readable fleet inventory
 agents hosts ps                         # list dispatched runs + terminal status
 agents hosts stop <id>                  # terminate a hung/detached run (alias: kill)
-agents logs --device gpu-box              # pick a dispatched run — concise summary by default
-agents logs <id> --full                 # the full raw transcript / stdout (token-heavy)
-agents logs <id> -f                     # re-attach to a running one and follow
+agents events logs --device gpu-box       # pick a dispatched run — concise summary by default
+agents events logs <id> --full          # the full raw transcript / stdout (token-heavy)
+agents events logs <id> -f              # re-attach to a running one and follow
 agents view claude --device gpu-box       # inspect the remote install
 agents sync --device gpu-box              # make the remote machine current
 agents doctor claude                    # diagnose every installed claude version
@@ -1188,7 +1162,7 @@ agents browser profiles create cloud \
 
 ## Sign in
 
-Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **managed trace sync** — `agents traces sync` publishes to our storage with **zero Cloudflare setup**. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind these hosted surfaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. Signing in unlocks the hosted surfaces: **team spaces** (`agents auth space`) and **owner notifications** (`agents send --to owner`). `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind these hosted surfaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
 
 ```bash
 agents auth login                        # shows a code, opens a Phoenix-branded page
@@ -1375,13 +1349,12 @@ agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
 agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
 agents routines list --device yosemite-s0                            # query another device
 
-# Signed webhook trigger: Linear issue labeled "agent" fires a routine
+# Event trigger: a Linear issue labeled "agent" fires a routine
 agents routines add agent-labeled-issue --on linear:Issue --action update \
   --team-key RUSH --label agent --agent claude \
   --cwd '~' \
   --prompt "Work the Linear issue that was just labeled agent"
-agents daemon webhooks add --secrets-bundle webhooks --port 8787    # supervised receiver: /hooks/linear, /hooks/github
-agents daemon funnel up yosemite-s0 --local-port 8787 --port 443    # public HTTPS ingress
+agents routines webhook --source linear --event Issue --file payload.json   # fire matches for one payload
 ```
 
 Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
@@ -1520,7 +1493,7 @@ Two repos with the same shape, different roles:
 
 See [docs/concepts.md](cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists, restores (`agents trash restore <agent>@<version>`) and empties (`agents trash empty --older-than 30d`) soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents prune trash` lists, restores (`agents prune trash restore <agent>@<version>`) and empties (`agents prune trash empty --older-than 30d`) soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1529,20 +1502,18 @@ Other useful commands: `agents doctor` checks CLI availability and resource sync
 On macOS, `agi-cli` puts a status item in your menu bar -- a live glance at what your agents are doing, plus a Spotlight-style bar for filing work without breaking focus.
 
 ```bash
-agents menubar setup       # configure end-to-end: one instance, started at login
-agents menubar status      # is it installed and running?
+agents doctor                                 # AGI Menu duplicates, stale or replaced helper, signing
+agents config set menubar.enabled false       # turn it off on this Mac (true turns it back on)
 ```
 
-There is only ever **one** agents mark: the helper takes a lock at launch, so a
-second copy surfaces the running one's menu and exits instead of adding a
-duplicate icon. `agents menubar setup` is the recovery command when a machine is
-already wrong -- it ends any duplicate, installs the bundle, wires the login
-item, and verifies exactly one helper came back up.
+The CLI installs and heals AGI Menu on its own: any `agents` command on a Mac
+installs the login item when it is missing and `menubar.enabled` is true. There is
+only ever **one** agents mark: the helper takes a lock at launch, so a second copy
+surfaces the running one's menu and exits instead of adding a duplicate icon.
+`agents doctor` names any duplicate or stale helper with the exact fix.
 
-AGI Menu has its own update controls: `agents menubar update --check` checks the
-app release, `agents menubar update` installs it, and
-`agents config set menubar.autoUpdate false` disables the default twice-daily
-automatic checks. See [AGI Menu updates](cli/docs/menubar.md#app-updates).
+AGI Menu updates itself about twice a day; `agents config set menubar.autoUpdate
+false` turns that off. See [AGI Menu updates](cli/docs/menubar.md#app-updates).
 
 The helper itself is AGI Menu, developed in
 [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) and published as a
@@ -1713,7 +1684,7 @@ Claude Code, Codex CLI, Antigravity, Grok Build, and others each have their own 
 
 ### Is it free?
 
-Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` unlocks the hosted surfaces — team spaces (`agents auth space`) and managed trace sync (`agents traces sync`, no Cloudflare setup); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
+Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` unlocks the hosted surfaces — team spaces (`agents auth space`) and owner notifications (`agents send --to owner`); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
 
 ### Is this like `nvm` / `mise` / `asdf` for AI agents?
 
@@ -1748,7 +1719,7 @@ macOS and Linux. Windows via WSL works but isn't first-class yet.
 **macOS-only features:** `agents accounts add` requires macOS. `agents secrets` itself is cross-platform — macOS Keychain, Linux libsecret, or the `file` backend everywhere, including Windows (non-WSL) via environment variables or a `.env` file as a fallback when neither native store applies.
 
 Interactive runs spawn directly by default. Enable `tmux.enabled` on a device to
-give each run an addressable pane for `agents message`, injection, and `agents
+give each run an addressable pane for `agents send --channel session`, injection, and `agents
 focus`; tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?

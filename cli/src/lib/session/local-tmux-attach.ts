@@ -39,7 +39,7 @@ async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
 
   if (!process.stdout.isTTY) {
     console.error(chalk.red(`"${selector}" is a live tmux session, but attaching needs a TTY.`));
-    console.error(chalk.gray(`  Run it from a terminal, or: agents tmux attach ${selector}`));
+    console.error(chalk.gray(`  Run it from a terminal, or: tmux -S ${socket} attach -t =${selector}`));
     process.exitCode = 1;
     return true;
   }
@@ -94,7 +94,7 @@ export async function attachLocalLiveSelector(selector: string | undefined, host
   if (found.kind === 'none') return false;
   if (found.kind === 'collision') {
     console.error(chalk.red(`"${selector}" matches ${found.aliases.length} live local panes: ${found.aliases.join(', ')}`));
-    console.error(chalk.gray('  Pass the full alias to disambiguate — see: agents tmux ls'));
+    console.error(chalk.gray(`  Pass the full alias to disambiguate — see: tmux -S ${getDefaultSocketPath()} ls`));
     process.exitCode = 1;
     return true;
   }

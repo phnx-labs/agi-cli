@@ -49,10 +49,10 @@ describe('runSessions', () => {
   }, 120_000);
 });
 
-describeLive('agents logs -f', () => {
+describeLive('agents events logs -f', () => {
   it('streams through `sessions tail --json` and survives Ctrl+C long enough to report the child exit', async () => {
     const { home, cwd, id, transcript } = indexedClaudeSession();
-    const child = spawn('node', ['--import', tsxLoaderUrl, cliEntry, 'logs', id, '-f', '--full'], {
+    const child = spawn('node', ['--import', tsxLoaderUrl, cliEntry, 'events', 'logs', id, '-f', '--full'], {
       cwd,
       detached: true,
       env: {

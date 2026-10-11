@@ -27,7 +27,7 @@
  *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
  *              rc-secret-export · env-secret-export · auth-bundle-wrong-backend · exec-policy · stale-cli ·
- *              binary-shadow · leaked-daemon.
+ *              binary-shadow · leaked-daemon · menubar.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
  *   stale-sync states one `agents sync` resolves, not "needs you now".)
  *
@@ -48,6 +48,7 @@ import type { AgentId } from '../types.js';
 import type { DuplicateVersionHook } from '../hooks/install.js';
 import type { AgentsBinaryShadow } from '../binary-shadow.js';
 import type { LeakedDaemon } from '../daemon/leaked-daemons.js';
+import type { MenubarDoctorReport, MenubarStatus } from '../menubar/install-menubar.js';
 import type { RcSecretFinding } from '../secrets-types.js';
 import { windowsSshEnrollmentProblem, type WindowsSshEnrollmentAudit } from './windows-ssh-enrollment.js';
 import type { SyncStatusRow, OrphanRow } from '../drift.js';
@@ -125,6 +126,7 @@ export const ALL_FINDING_KINDS = [
   'binary-shadow',
   'owner-not-signed-in',
   'leaked-daemon',
+  'menubar',
 ] as const;
 
 export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
@@ -158,6 +160,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'stale-cli': 'warning',
   'binary-shadow': 'warning',
   'leaked-daemon': 'warning',
+  'menubar': 'warning',
 };
 
 export type FindingKind = typeof ALL_FINDING_KINDS[number];
@@ -257,6 +260,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'remove or repoint the shadowing agents install(s)';
     case 'leaked-daemon':
       return 'kill <pid>';
+    case 'menubar':
+      return 'agents menubar restart';
     case 'owner-not-signed-in':
       return 'agents auth login';
   }
@@ -312,6 +317,10 @@ export interface LocalFindingInputs {
   ownerSignedIn?: boolean;
   binaryShadows?: AgentsBinaryShadow[];
   leakedDaemons?: LeakedDaemon[];
+  menubar?: {
+    status: Pick<MenubarStatus, 'disabledByUser' | 'stale' | 'installedVersion' | 'currentVersion' | 'instances' | 'foreignInstances'>;
+    report: Pick<MenubarDoctorReport, 'signingIdentity' | 'staleRunningProcess' | 'accessibilityHintNeeded'>;
+  };
 }
 
 export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
@@ -511,7 +520,39 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
     });
   }
 
+  if (input.menubar) out.push(...menubarFindings(device, input.menubar));
+
   return collapseAcrossVersions(out, new Set(input.isolatedVersions ?? []));
+}
+
+function menubarFindings(device: string, { status, report }: NonNullable<LocalFindingInputs['menubar']>): DoctorFinding[] {
+  if (status.disabledByUser) return [];
+  const out: DoctorFinding[] = [];
+  const add = (message: string, remediation: string) =>
+    out.push({ severity: FINDING_SEVERITY.menubar, kind: 'menubar', device, message, remediation });
+  const pids = (ps: Array<{ pid: number }>) => ps.map((p) => p.pid).join(' ');
+
+  if (status.instances.length > 1) {
+    add(`${status.instances.length} copies of AGI Menu are running (duplicate menu-bar icon)`, `kill ${pids(status.instances.slice(1))}`);
+  }
+  if (status.foreignInstances.length > 0) {
+    add(`AGI Menu process outside the install may hold Cmd-Shift-V/O (pid ${pids(status.foreignInstances)})`, `kill ${pids(status.foreignInstances)}`);
+  }
+  if (status.stale) {
+    add(`AGI Menu ${status.installedVersion ?? 'unknown'} is older than ${status.currentVersion}`, 'agents menubar update');
+  }
+  if (report.signingIdentity === 'ad-hoc') {
+    add('AGI Menu is ad-hoc signed; its Accessibility grant breaks on every update', 'agents menubar update');
+  }
+  const replaced = report.staleRunningProcess.filter((p) => p.stale);
+  if (replaced.length > 0) {
+    add(`AGI Menu pid ${pids(replaced)} still runs the binary an update replaced`, 'agents menubar restart');
+  }
+  if (report.accessibilityHintNeeded) {
+    add('AGI Menu Accessibility grant may not be trusted for the current binary',
+      'open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"');
+  }
+  return out;
 }
 
 function orphanFinding(device: string, rows: OrphanRow[]): DoctorFinding[] {

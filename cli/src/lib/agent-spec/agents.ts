@@ -948,20 +948,6 @@ export async function getUnmanagedAgentInstalls(): Promise<UnmanagedInstall[]> {
   return unmanaged;
 }
 
-export function ensureCommandsDir(agentId: AgentId): void {
-  const agent = AGENTS[agentId];
-  if (!fs.existsSync(agent.commandsDir)) {
-    fs.mkdirSync(agent.commandsDir, { recursive: true });
-  }
-}
-
-export function ensureSkillsDir(agentId: AgentId): void {
-  const agent = AGENTS[agentId];
-  if (!fs.existsSync(agent.skillsDir)) {
-    fs.mkdirSync(agent.skillsDir, { recursive: true });
-  }
-}
-
 export function agentConfigDirName(agentId: AgentId): string {
   // Use import-time HOME: nested config dirs and later HOME overrides must stay relative.
   return path.relative(HOME, AGENTS[agentId].configDir);

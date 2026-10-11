@@ -570,39 +570,6 @@ describe('readJobFile fails closed on legacy singular device key', () => {
   });
 });
 
-describe('readJobFile fails closed on the runtime-only dispatchedBy marker', () => {
-  it('returns null for a YAML file that contains dispatchedBy:', () => {
-    ensureAgentsDir();
-    const name = '__test-readjob-dispatchedby__';
-    const file = path.join(getRoutinesDir(), `${name}.yml`);
-    try {
-      fs.writeFileSync(file, yaml.stringify({
-        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi', dispatchedBy: 'webhook',
-      }));
-      expect(readJob(name)).toBeNull();
-    } finally {
-      if (fs.existsSync(file)) fs.unlinkSync(file);
-    }
-  });
-
-  it('writeJob never persists the marker, so a round-trip cannot smuggle it in', () => {
-    ensureAgentsDir();
-    const name = '__test-writejob-dispatchedby__';
-    const file = path.join(getRoutinesDir(), `${name}.yml`);
-    try {
-      writeJob({
-        name, schedule: '0 3 * * *', agent: 'claude', prompt: 'hi',
-        mode: 'auto', effort: 'auto', timeout: '10m', enabled: true,
-        dispatchedBy: 'webhook',
-      } as JobConfig);
-      expect(fs.readFileSync(file, 'utf-8')).not.toContain('dispatchedBy');
-      expect(readJob(name)?.prompt).toBe('hi');
-    } finally {
-      if (fs.existsSync(file)) fs.unlinkSync(file);
-    }
-  });
-});
-
 describe('writeJob extension handling', () => {
   function fullConfig(name: string): JobConfig {
     return {
@@ -851,28 +818,6 @@ describe('getLatestCompletedRun / {last_report} poison-stop', () => {
     expect(resolved).toContain('GOOD REPORT');
     expect(resolved).not.toContain('Not logged in');
     expect(resolved).not.toContain('/login');
-  });
-
-  it('substitutes {{...}} webhook context placeholders when context is passed', () => {
-    const config = {
-      name: jobName,
-      agent: 'claude',
-      schedule: '0 3 * * *',
-      prompt: 'Issue {{issue.identifier}}: {{issue.title}} (from {{updatedFrom.state.name}})',
-      mode: 'auto',
-      effort: 'auto',
-      timeout: '10m',
-      enabled: true,
-    } as JobConfig;
-
-    const resolved = resolveJobPrompt(config, {
-      source: 'linear',
-      event: 'Issue',
-      action: 'update',
-      issue: { identifier: 'RUSH-42', title: 'Fix it', state: { name: 'Plan' } },
-      updatedFrom: { state: { name: 'Triage' } },
-    });
-    expect(resolved).toBe('Issue RUSH-42: Fix it (from Triage)');
   });
 });
 

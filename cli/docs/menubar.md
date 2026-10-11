@@ -48,7 +48,7 @@ bundle.
 flowchart LR
   A[phnx-labs/agi-menu<br/>scripts/release.sh x.y.z] -->|build + sign + notarize| B[MenubarHelper.app.zip<br/>.sha256 · menubar-source.txt]
   B -->|gh release upload| C[(agi-cli release<br/>menubar/vx.y.z)]
-  D[cli/src/lib/helper-versions.ts<br/>menubar floor = x.y.z] --> E[agents menubar setup / enable]
+  D[cli/src/lib/helper-versions.ts<br/>menubar floor = x.y.z] --> E[background prefetch +<br/>startup install]
   C --> E
   E -->|sha256 · Team · DR pin · Gatekeeper| F[~/Library/Application Support/agents-cli/MenubarHelper.app]
   C --> G[cli/scripts/stage-menubar-helper.sh]
@@ -65,9 +65,11 @@ flowchart LR
    it. The floor file is also the helper's **release-manifest input**, so the
    bump is what makes `scripts/release-attestation-produce.sh --with-helpers`
    re-record the row from the published asset.
-3. **Install** (on a user's Mac): `agents menubar setup` / `enable` (and the
-   startup repair for a missing helper, from a bundled or cached copy only) download, verify, and
-   install it. No build happens on any user machine.
+3. **Install** (on a user's Mac): automatic. The background sync worker
+   (`prefetchMenubarHelper`) downloads and verifies the floor build into the
+   release cache, and the next `agents` command installs the login item from it
+   (`installMenubarLaunchAgentOnUpgrade`). Both skip a Mac where
+   `menubar.enabled` is false. No build happens on any user machine.
 4. **Update, unattended.** Installed release helpers move to the newest
    published build on their own: `resolveMenubarVersion`
    (`src/lib/menubar/resolve-version.ts`) finds it about twice a day over plain
@@ -105,8 +107,8 @@ cli/scripts/stage-menubar-helper.sh --print-floor   # the resolved floor, nothin
 ```
 
 `cli/bin/MenubarHelper.app` is the installer's working-tree source
-(`sourceAppPath()` in `install-menubar.ts`), so a staged bundle is what
-`agents-dev menubar setup` installs from a checkout. An agi-menu developer
+(`sourceAppPath()` in `install-menubar.ts`), so a staged bundle is what the
+next `agents-dev` command installs from a checkout. An agi-menu developer
 testing a local build copies it to the same path. `scripts/remote-sign-mac.sh`
 runs the stage on its selected signing Mac and pulls the result back.
 
@@ -192,9 +194,19 @@ runs the stage on its selected signing Mac and pulls the result back.
 
 ## Commands
 
-`agents menubar setup` (configure end-to-end: one instance, started at login),
-`enable`, `disable`, `status`, `doctor`, and the read-only `snapshot --json` the
-helper polls. Full flag reference: [command-index.md](command-index.md#menubar--manage-agi-menu-running-sessions-agents-awaiting-input-routines).
+`agents menubar` is hidden from `--help`: it holds only the four verbs AGI Menu
+calls (`snapshot --json`, `update [--check] --json`, `restart --json`, `disable`).
+People use `agents doctor` and `agents config`:
+
+- `agents doctor` reports AGI Menu problems as `menubar` warnings (macOS only):
+  duplicate copies, a process outside the install, a stale or ad-hoc-signed
+  helper, a pid still running a replaced binary, and an untrusted Accessibility
+  grant, each with its fix.
+- `agents config set menubar.enabled false|true` turns AGI Menu off or on for
+  this Mac (device scope, default true). `menubar disable` writes the same key.
+  The next `agents` command removes or installs the login item to match.
+
+`setup`, `enable`, `status` and `doctor` were removed (PHNX-4227).
 
 ## Files the CLI owns
 
@@ -205,7 +217,6 @@ helper polls. Full flag reference: [command-index.md](command-index.md#menubar--
 | `~/Library/Application Support/agents-cli/.menubar-version` | installed-version stamp |
 | `~/Library/Application Support/agents-cli/.menubar-last-heal` | last self-heal reinstall, epoch ms — the non-owner takeover cooldown |
 | `~/Library/Application Support/agents-cli/.menubar-tcc-migrated` | marks the one-time ad-hoc -> Developer ID `tccutil reset Accessibility` as done |
-| `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.cache/menubar/mac-helper/v<x.y.z>/` | downloaded + verified release cache, one dir per tag |
 | `~/.agents/.cache/menubar/latest.json` | newest published helper version resolved from the `menubar/v*` tags and their release assets, with the time it was read (12 hours old at most) |
@@ -256,8 +267,8 @@ The kickstart runs in its own session, because launchd ends the menu's whole pro
 group: the restart completes even when the menu requested it and is killed before
 the command prints. JSON is `{outcome, previousPids, pids, detail}` with `outcome`
 `restarted` or `failed`; every failure (turned off, kickstart error, no new process)
-exits 1 with its reason. It never starts a turned-off menu: `agents menubar setup`
-does that.
+exits 1 with its reason. It never starts a turned-off menu:
+`agents config set menubar.enabled true` does that.
 
 The login item starts AGI Menu at login and relaunches it after a crash
 (`KeepAlive` = `{SuccessfulExit: false}`), but not after a clean exit, so the menu's

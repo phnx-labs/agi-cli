@@ -187,7 +187,7 @@ export async function runLoop(
     );
   }
 
-  process.stderr.write(`[loop] mailbox: agents message ${ctx.runId} "<text>"\n`);
+  process.stderr.write(`[loop] mailbox: agents send --channel mailbox --to ${ctx.runId} --text "<text>"\n`);
 
   let tokens = ctx.startTokens ?? 0;
   let lastSignal: LoopSignal | undefined;

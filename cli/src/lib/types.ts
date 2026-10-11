@@ -250,11 +250,6 @@ export interface Manifest {
   };
 }
 
-export interface CommandInstallation {
-  path: string;
-  method: 'symlink' | 'copy';
-}
-
 export interface SkillMetadata {
   name: string;
   description: string;
@@ -298,7 +293,7 @@ export function systemRepoSlug(repo: string = DEFAULT_SYSTEM_REPO): string {
   return repo.replace(/^gh:/, '').replace(/\.git$/, '');
 }
 
-export type RegistryType = 'mcp' | 'skill';
+export type RegistryType = 'mcp';
 
 export interface RegistryConfig {
   url: string;
@@ -310,17 +305,6 @@ export const DEFAULT_REGISTRIES: Record<RegistryType, Record<string, RegistryCon
   mcp: {
     official: {
       url: 'https://registry.modelcontextprotocol.io/v0',
-      enabled: true,
-    },
-  },
-  skill: {},
-};
-
-export const SEEDED_REGISTRIES: Record<RegistryType, Record<string, RegistryConfig>> = {
-  mcp: {},
-  skill: {
-    hermes: {
-      url: 'https://hermes-agent.nousresearch.com/docs/api/skills-index.json',
       enabled: true,
     },
   },
@@ -360,46 +344,6 @@ export interface McpRegistryResponse {
     count: number;
     next_cursor?: string;
   };
-}
-
-export interface SkillEntry {
-  name: string;
-  description?: string;
-  source: string;
-  identifier?: string;
-  repo?: string;
-  path?: string;
-  author?: string;
-  installs?: number;
-  tags?: string[];
-  trustLevel?: string;
-  sha256?: string;
-}
-
-export interface SkillRegistryResponse {
-  skills: SkillEntry[];
-  metadata?: {
-    count: number;
-    next_cursor?: string;
-  };
-}
-
-export interface RegistrySearchResult {
-  name: string;
-  description?: string;
-  type: 'mcp' | 'skill';
-  source: string;
-  registry: string;
-  version?: string;
-  installs?: number;
-}
-
-export interface ResolvedPackage {
-  type: 'mcp' | 'skill' | 'git' | 'plugin';
-  source: string;
-  mcpEntry?: McpServerEntry;
-  skillEntry?: SkillEntry;
-  pluginSpec?: string;
 }
 
 export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins' | 'workflows';
@@ -577,7 +521,7 @@ export interface Meta {
   beta?: {
     enabled?: BetaFeatureName[];
   };
-  registries?: Record<RegistryType, Record<string, RegistryConfig>>;
+  registries?: Partial<Record<RegistryType, Record<string, RegistryConfig>>>;
   profiles?: ResourceProfilesConfig;
   versions?: Partial<Record<AgentId, Record<string, VersionResources>>>;
   source?: string;
@@ -585,7 +529,6 @@ export interface Meta {
   extraRepos?: Record<string, ExtraRepoConfig>;
   brands?: Record<string, BrandConfig>;
   actors?: Record<string, ActorConfig>;
-  seededPresets?: string[];
   hooks?: Record<string, ManifestHook>;
   deviceBrowser?: Record<string, BrowserProfileConfig>;
   config?: Record<string, unknown>;

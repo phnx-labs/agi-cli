@@ -338,7 +338,7 @@ removal and is restored intact. Two consequences follow from the marker:
   NOT an isolated install, and its picker only lists isolated versions — so a
   normal/default install (and the real `~/.<agent>`) can never be removed by
   accident. Removal is still a soft-delete to trash, recoverable via
-  `agents trash restore` until `agents trash empty` deletes it for good
+  `agents prune trash restore` until `agents prune trash empty` deletes it for good
   (`--older-than 30d` keeps anything trashed more recently).
 
 `--isolated` cannot be combined with `--project` (an isolated copy is
@@ -568,7 +568,7 @@ upgrade only prints the report. The planner:
    `projects/<cwd-key>` under the home) in the same transaction.
 5. Defers any home `isInstallationLikelyActive` reports busy. Never moves it.
 
-Everything is reversible: `agents trash restore <agent>@<label>` puts a trashed
+Everything is reversible: `agents prune trash restore <agent>@<label>` puts a trashed
 install back, and a manifest at `~/.agents/.history/accounts/migration-<ts>.json`
 maps old label → new slot. The manifest is written with the full plan and
 `status: planned` before the first irreversible move, then updated after each

@@ -32,9 +32,18 @@ Do not reintroduce these, and do not "restore" them as a cleanup.
 |---|---|---|
 | `agents hosts` | `agents devices` (`ps`, `stop`, `run`, `add`) | `cli/src/lib/startup/command-registry.test.ts` |
 | `agents monitors` | none | PHNX-4241 |
-| `agents humans`, `reminders`, `modes`, `feedback`, `restore` | the account owner path; `trash restore` | PHNX-4267, `RETIRED_TOP_LEVEL_COMMANDS` |
+| `agents humans`, `reminders`, `modes`, `feedback`, `restore` | the account owner path; `prune trash restore` | PHNX-4267, `RETIRED_TOP_LEVEL_COMMANDS` |
 | `agents artifacts` and the share Worker | the standalone `artifacts` CLI | PHNX-3992 |
 | Installing `gemini` | `antigravity` | `cli/AGENTS.md` §Supported harnesses |
+| `agents route` / `routes` and the `routers` resource kind | none; nothing read a router | owner decision 2026-10-11, PHNX-4227 |
+| `agents registry`, `packages` (incl. `packages materialize`), `search`, `install`, and the schema-v3 agent-package materializer | `agents plugins add`, `skills add`, `mcp add` (bare `mcp add <name>` still looks the server up in the MCP registry) | owner decision 2026-10-11, PHNX-4227 |
+| `agents tmux` | `agents focus`, `agents sessions resume`, `agents send --channel session`; raw `tmux -S <socket>` for anything else | owner decision 2026-10-11, PHNX-4227 |
+| `agents message`, `mailboxes` (`mailbox`) | `agents send --channel mailbox` or `--channel session`; `agents cloud message` for a cloud task | owner decision 2026-10-11, PHNX-4227 |
+| `agents traces` and the run-exit / feed / owner-send trace auto-sync (`--no-trace-sync`, `AGENTS_NO_TRACE_SYNC`) | none | owner decision 2026-10-11, PHNX-4227 |
+| `agents webhooks serve`, `daemon webhooks`, `daemon funnel`, the `webhook-receiver` daemon service and webhook handlers (`~/.agents/webhooks/*.yml`) | `agents routines webhook --source <github\|linear> --event <e>` fires trigger routines from a payload | owner decision 2026-10-11, PHNX-4227 |
+| `agents logs` | `agents events logs` (run-log viewer); `events audit`, `events stats`, `events rotate` | owner decision 2026-10-11, PHNX-4227 |
+| `agents trash` | `agents prune trash list\|restore\|empty` | owner decision 2026-10-11, PHNX-4227 |
+| `agents menubar setup`, `enable`, `status`, `doctor`, and the `menubar.disabled` sentinel | automatic install on any `agents` run; `agents doctor` (`menubar` findings); `agents config set menubar.enabled <bool>`. `menubar` is hidden and keeps only `snapshot`, `update`, `restart`, `disable` for AGI Menu | owner decision 2026-10-11, PHNX-4227 |
 
 ## Decided, not yet removed
 
@@ -43,8 +52,7 @@ change with its own PR, never a side effect of a cleanup.
 
 | Decision | Current state | Record |
 |---|---|---|
-| `trace` and `traces` stop being top-level nouns: the daemon captures and uploads | both still registered; `traces` code is the evals capture seam and stays | `cli/docs/surface-census.md` (2026-09-06) |
-| `search` is cut because `sessions` owns search | still registered | `cli/docs/surface-census.md` (2026-09-06) |
+| `trace` stops being a top-level noun | still registered (`traces` was removed, PHNX-4227) | `cli/docs/surface-census.md` (2026-09-06) |
 
 ## What an automated simplification pass may change
 

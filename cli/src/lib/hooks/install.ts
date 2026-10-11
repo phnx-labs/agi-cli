@@ -530,43 +530,6 @@ export function listInstalledHooksWithScope(
   return results;
 }
 
-export async function installHooks(
-  source: string,
-  agents: AgentId[],
-  options: { scope?: 'user' | 'project' } = {}
-): Promise<{ installed: string[]; errors: string[] }> {
-  const installed: string[] = [];
-  const errors: string[] = [];
-  const scope = options.scope || 'user';
-  const cwd = process.cwd();
-
-  const hooksDir = path.join(source, 'hooks');
-  const hooks = listHookEntriesFromDir(hooksDir);
-
-  const uniqueAgents = Array.from(new Set(agents));
-  for (const agentId of uniqueAgents) {
-    const agent = AGENTS[agentId];
-    if (!agent || !agent.supportsHooks) {
-      errors.push(`${agentId}:Agent does not support hooks`);
-      continue;
-    }
-
-    const targetDir =
-      scope === 'project' ? getProjectHooksDirs(agentId, cwd)[0] : getHooksDir(agentId);
-
-    for (const entry of hooks) {
-      try {
-        copyHook(entry, targetDir);
-        installed.push(`${entry.name}:${agentId}`);
-      } catch (err) {
-        errors.push(`${entry.name}:${agentId}:${(err as Error).message}`);
-      }
-    }
-  }
-
-  return { installed, errors };
-}
-
 export function getVersionHooksDir(agent: AgentId, version: string): string {
   return getHooksDirInHome(agent, getVersionHomePath(agent, version));
 }
@@ -1522,35 +1485,6 @@ export function registerHooksToSettings(
     return registerHooksForHermes(versionHome, manifest, resolveScript, managedPrefixes);
   }
   return { registered: [], errors: [] };
-}
-
-export function hookRegistrationTargets(agentId: AgentId, home: string): string[] {
-  switch (agentId) {
-    case 'claude':
-    case 'droid':
-    case 'muse':
-      return [path.join(home, agentConfigDirName(agentId), 'settings.json')];
-    case 'codex':
-      return [path.join(home, '.codex', 'hooks.json'), path.join(home, '.codex', 'config.toml')];
-    case 'antigravity':
-      return [path.join(home, '.gemini', 'antigravity-cli', 'settings.json')];
-    case 'grok':
-      return [path.join(home, '.grok', 'hooks', 'hooks.json')];
-    case 'kimi':
-      return [path.join(home, '.kimi-code', 'config.toml')];
-    case 'copilot':
-      return [path.join(home, '.copilot', 'hooks', COPILOT_MANAGED_HOOKS_FILE)];
-    case 'goose':
-      return [path.join(home, '.agents', 'plugins', GOOSE_MANAGED_PLUGIN_NAME, 'hooks', 'hooks.json')];
-    case 'cursor':
-      return [path.join(home, '.cursor', 'hooks.json')];
-    case 'hermes':
-      return [path.join(home, '.hermes', 'config.yaml')];
-    case 'opencode':
-      return [path.join(home, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts')];
-    default:
-      return [];
-  }
 }
 
 const OPENCODE_DIRECT_EVENT_MAP: Record<string, string> = {

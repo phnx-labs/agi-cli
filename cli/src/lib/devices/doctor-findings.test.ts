@@ -95,6 +95,26 @@ describe('severity rubric', () => {
     expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'leaked-daemon')).toBe(false);
   });
 
+  it('AGI Menu duplicates, a stale helper, and a replaced binary are WARNINGs with concrete fixes', () => {
+    const menubar = {
+      status: {
+        disabledByUser: false, stale: true, installedVersion: '1.15.10', currentVersion: '1.15.19',
+        instances: [{ pid: 101, executable: '/A/AGI Menu' }, { pid: 202, executable: '/A/AGI Menu' }],
+        foreignInstances: [{ pid: 303, executable: '/tmp/debug/AGI Menu' }],
+      },
+      report: { signingIdentity: 'developer-id' as const, staleRunningProcess: [{ pid: 101, stale: true }], accessibilityHintNeeded: false },
+    };
+    const found = buildLocalFindings(localInput({ menubar })).filter((x) => x.kind === 'menubar');
+    expect(found.every((f) => f.severity === 'warning')).toBe(true);
+    expect(found.map((f) => f.remediation)).toEqual([
+      'kill 202', 'kill 303', 'agents menubar update', 'agents menubar restart',
+    ]);
+    expect(found[2].message).toContain('1.15.10 is older than 1.15.19');
+
+    const off = { ...menubar, status: { ...menubar.status, disabledByUser: true } };
+    expect(buildLocalFindings(localInput({ menubar: off })).some((x) => x.kind === 'menubar')).toBe(false);
+  });
+
   it('a broken Windows OpenSSH enrollment is CRITICAL and names the effective file', () => {
     const findings = buildLocalFindings(localInput({
       windowsSshEnrollment: { status: {

@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn, type ChildProcess, execFileSync } from 'child_process';
 import {
-  isSessionIdLiveOnProcessTable,
   foldSubordinateAgents,
   listUnattributedActive,
   clearActiveScanCachesForTest,
@@ -71,34 +70,6 @@ async function waitFor<T>(probe: () => T | Promise<T>, timeoutMs = 10_000): Prom
     await new Promise((r) => setTimeout(r, 50));
   }
 }
-
-describe('isSessionIdLiveOnProcessTable', () => {
-  it('rejects non-uuid targets so a short prefix never false-matches', async () => {
-    expect(await isSessionIdLiveOnProcessTable('f0f6cb6b')).toBe(false);
-    expect(await isSessionIdLiveOnProcessTable('')).toBe(false);
-  });
-
-  it('returns true only when a deps table row carries the session id', async () => {
-    expect(
-      await isSessionIdLiveOnProcessTable(UUID, {
-        readTable: async () => [{ pid: 1, kind: 'claude' }, { pid: 2, kind: 'claude' }],
-        sessionIdOf: (pid) => (pid === 2 ? UUID : undefined),
-      }),
-    ).toBe(true);
-    expect(
-      await isSessionIdLiveOnProcessTable(UUID, {
-        readTable: async () => [{ pid: 1, kind: 'claude' }],
-        sessionIdOf: () => UUID_B,
-      }),
-    ).toBe(false);
-    expect(
-      await isSessionIdLiveOnProcessTable(UUID, {
-        readTable: async () => [{ pid: 9 }],
-        sessionIdOf: () => UUID,
-      }),
-    ).toBe(false);
-  });
-});
 
 describe('live --session-id recovery (RUSH-2384 real process)', () => {
   posixOnly('sessionIdFromLivePid recovers the id from a claude-named process with empty by-pid', async (ctx) => {

@@ -4,10 +4,8 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import * as TOML from 'smol-toml';
 import { execFileSync } from 'child_process';
-import * as os from 'os';
 import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
-import { getBinaryPath, getVersionHomePath } from './installations/versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
 import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath, parseMcpConfig, stripJsonComments } from './agents.js';
 import { MCP_TARGETS, mcpWriteUnsupportedReason } from './mcp-registry.js';
@@ -27,11 +25,6 @@ export interface InstalledMcpServer {
   path: string;
   config: McpYamlConfig;
   scope?: 'user' | 'project';
-}
-
-export interface McpCommandSpec {
-  command: string;
-  args: string[];
 }
 
 export interface McpTargetOperationResult {
@@ -354,68 +347,6 @@ function installMcpViaCodex(binaryPath: string, server: InstalledMcpServer, vers
     env: { ...process.env, HOME: versionHome },
     shell: spec.shell,
   });
-}
-
-export async function registerMcpCommandToTargets(
-  targets: { directAgents: AgentId[]; versionSelections: Map<AgentId, string[]> },
-  name: string,
-  commandSpec: McpCommandSpec,
-  scope: 'user' | 'project' = 'user',
-  transport: string = 'stdio'
-): Promise<McpTargetOperationResult[]> {
-  const results: McpTargetOperationResult[] = [];
-
-  for (const agentId of targets.directAgents) {
-    const result = registerMcpCommand(agentId, name, commandSpec, scope, transport);
-    results.push({ agentId, success: result.success, error: result.error });
-  }
-
-  for (const [agentId, versions] of targets.versionSelections) {
-    for (const version of versions) {
-      const result = registerMcpCommand(agentId, name, commandSpec, scope, transport, {
-        home: getVersionHomePath(agentId, version),
-        binary: getBinaryPath(agentId, version),
-      });
-      results.push({ agentId, version, success: result.success, error: result.error });
-    }
-  }
-
-  return results;
-}
-
-function registerMcpCommand(
-  agentId: AgentId,
-  name: string,
-  commandSpec: McpCommandSpec,
-  scope: 'user' | 'project',
-  transport: string,
-  options: { home?: string; binary?: string } = {}
-): { success: boolean; error?: string } {
-  try {
-    validateMcpServerName(name);
-    if (agentId === 'hermes') {
-      const home = options.home || os.homedir();
-      writeMcpConfig(agentId, getMcpConfigPathForHome(agentId, home), [{
-        name,
-        transport: transport === 'http' ? 'http' : 'stdio',
-        ...(transport === 'http'
-          ? { url: commandSpec.command }
-          : { command: commandSpec.command, args: commandSpec.args }),
-      }], 'merge');
-      return { success: true };
-    }
-    const bin = options.binary || AGENTS[agentId].cliCommand;
-    const commandArgs = [commandSpec.command, ...commandSpec.args];
-    const args = agentId === 'claude'
-      ? ['mcp', 'add', '--transport', transport, '--scope', scope, '--', name, ...commandArgs]
-      : ['mcp', 'add', '--', name, ...commandArgs];
-    const env = options.home ? { ...process.env, HOME: options.home } : process.env;
-    const spec = execFileShellSpec(bin, args);
-    execFileSync(spec.command, spec.args, { stdio: 'pipe', timeout: 30000, env, shell: spec.shell });
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
 }
 
 export interface WritableMcpServer {

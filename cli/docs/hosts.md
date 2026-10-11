@@ -542,12 +542,11 @@ agents run <agent> ["<task>"] --device <device>
 > remote process group from this machine, writes exit `143`, and keeps the log
 > for `agents hosts logs <id>`.
 >
-> **Steering a detached dispatch.** `agents message <id|name> "<text>"` resolves a
-> `--no-follow` dispatch the same way `agents hosts ps`/`logs` do (dispatch id,
-> `--name` handle, or the remote agent's own session id) and reroutes the message
-> over `--device` to the box that actually owns the live process — no need to know
-> which host it landed on. A task that already finished fails loud naming its
-> status instead of silently doing nothing.
+> **Steering a detached dispatch.** Type into the live session on the box that
+> runs it with `agents send --channel session --to <session-id> --device <box>
+> --text "<text>"`, or queue a mailbox note with `agents send --channel mailbox
+> --to <session-id> --text "<text>"`. `agents hosts ps` shows which box owns each
+> dispatch.
 
 ### Host sources — owned (registered) + leased on demand (crabbox)
 

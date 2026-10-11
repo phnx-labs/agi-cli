@@ -136,7 +136,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 **Terminal layout is a monospace grid.** Tables are built from space-padded columns (`'NAME'.padEnd(24)`, `.padEnd(16)`, `.padEnd(28)`) with a `bold` header row, so everything aligns without box-drawing chrome. Conventions:
 
 - **Two-space indent** for sub-lines and detail rows under a heading.
-- **`backtick`-wrapped command hints** in gray (e.g. `` `agents menubar enable` ``) so the next action is always literally spelled out.
+- **`backtick`-wrapped command hints** in gray (e.g. `` `agents config set menubar.enabled true` ``) so the next action is always literally spelled out.
 - **Aligned key/value pairs** — label left, value right, padded to a common width.
 - No heavy ASCII boxes; alignment and color do the structuring.
 

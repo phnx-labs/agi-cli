@@ -17,7 +17,7 @@ flowchart LR
 ## Resources and resolution
 
 A resource is portable agent input: rules, commands, skills, hooks, MCP servers,
-permissions, subagents, workflows, profiles, routers, secret metadata, or host CLI
+permissions, subagents, workflows, profiles, secret metadata, or host CLI
 declarations. A DotAgents repository stores these concepts in a harness-neutral form.
 
 Resolution is layered: project overrides user, user overrides extra repositories, and

@@ -187,24 +187,6 @@ describe('diffVersionCommands — plugin-bundled commands are source-managed', (
 });
 
 describe('version command management', () => {
-  it('installs an unmanaged Cursor command to both surfaces through the package installation path', () => {
-    const home = makeTempHome();
-    const source = writeSystemCommand(
-      home,
-      'package-command',
-      '---\nname: package-command\ndescription: Package command\n---\n\nPackage command body.',
-    );
-
-    const installed = runCommandsExpression(
-      home,
-      `installCommand(${JSON.stringify(source)}, 'cursor', 'package-command', 'copy')`
-    ) as { error?: string };
-
-    expect(installed.error).toBeUndefined();
-    expect(fs.existsSync(path.join(home, '.cursor', 'commands', 'package-command.md'))).toBe(true);
-    expect(fs.existsSync(path.join(home, '.cursor', 'skills', 'package-command', 'SKILL.md'))).toBe(true);
-  });
-
   it('installs and removes Cursor commands from both native and generated-skill surfaces', () => {
     const home = makeTempHome();
     writeSystemCommand(home, 'recap', 'Summarize this session.');

@@ -21,7 +21,7 @@ import { getDB } from '../session/db.js';
 import { readSlots, slotDir } from './slots.js';
 import { addNativeAccount, bindAccount, listNativeAccounts, removeAccount, unbindAccount } from '../account-registry.js';
 import { getHistoryDir, getVersionsDir, readMeta, updateMeta } from '../state.js';
-import { restoreVersion } from '../../commands/trash.js';
+import { restoreVersion } from '../../commands/prune-trash.js';
 
 const suffix = `t7${Date.now().toString(36)}`;
 const labels = {
@@ -323,7 +323,7 @@ describe('accounts migrate (PHNX-3940 T7)', () => {
     expect(live).toEqual([labels.icloud, labels.gmailNew].sort());
   });
 
-  it('agents trash restore reverses one trashed home', async () => {
+  it('agents prune trash restore reverses one trashed home', async () => {
     prevDefault = fixtureFleet().prevDefault;
     await applyAccountMigration(['claude'], { isActive: async () => false });
     expect(fs.existsSync(getVersionDir('claude', labels.emptyDefault))).toBe(false);

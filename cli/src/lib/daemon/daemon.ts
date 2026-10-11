@@ -560,7 +560,6 @@ export async function runDaemon(): Promise<void> {
     { FeedStreamService },
     { AttentionNotifyService },
     { RecordingsService },
-    { WebhookReceiverService },
     { HeartbeatService },
     { TmuxReapService },
   ] = await Promise.all([
@@ -581,7 +580,6 @@ export async function runDaemon(): Promise<void> {
     import('./feed-stream-service.js'),
     import('./attention-notify-service.js'),
     import('../recordings/service.js'),
-    import('./webhook-receiver-service.js'),
     import('./heartbeat-service.js'),
     import('./tmux-reap-service.js'),
   ]);
@@ -719,9 +717,6 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('usage-sync')) supervisor.register(new UsageSyncService());
   else log('INFO', 'Usage-sync service disabled');
-
-  if (isEnabled('webhook-receiver')) supervisor.register(new WebhookReceiverService());
-  else log('INFO', 'Webhook receiver service disabled');
 
   if (isEnabled('daemon-heartbeat')) supervisor.register(new HeartbeatService(() => writeHeartbeat()));
   else log('INFO', 'Daemon heartbeat service disabled');

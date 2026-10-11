@@ -75,8 +75,7 @@ record of `null` for it.
   ONE fleet feed fan-out and serves it to every reader over a socket, so N
   consumers cost one ssh per peer instead of N — PHNX-3999; the socket binds on
   start but the fan-out itself is demand-gated on a connected reader), and
-  `webhook-receiver`
-  (`webhook-receiver-service.ts`), `daemon-heartbeat`
+  `daemon-heartbeat`
   (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
   `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`
   (`auth-sync-service.ts`: also mints and pushes owner-notify device tokens to

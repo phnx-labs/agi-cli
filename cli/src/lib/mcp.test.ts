@@ -4,7 +4,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseMcpServerConfig, buildWorkflowMcpConfig, validateMcpServerName, registerMcpCommandToTargets, type InstalledMcpServer } from './mcp.js';
+import { parseMcpServerConfig, buildWorkflowMcpConfig, validateMcpServerName, type InstalledMcpServer } from './mcp.js';
 import { IS_WINDOWS } from './platform/index.js';
 import * as TOML from 'smol-toml';
 
@@ -368,43 +368,6 @@ describe('MCP argv construction', () => {
     expect(result.success).toBe(true);
     const log = fs.readFileSync(logPath, 'utf-8');
     expect(log).toMatch(/ARG:mcp\nARG:add\nARG:remote\nARG:--url\nARG:https:\/\/e\.x\/mcp/);
-  });
-
-  it('rejects option-like names from registerMcpCommand before spawning', async () => {
-    const result = await registerMcpCommandToTargets(
-      { directAgents: ['codex'], versionSelections: new Map() },
-      '--dangerous-flag',
-      { command: 'node', args: [] }
-    );
-    expect(result[0].success).toBe(false);
-    expect(result[0].error).toContain("names cannot start with '-'");
-  });
-
-  it.skipIf(IS_WINDOWS)('puts registerMcpCommand args after --', async () => {
-    const home = makeTempHome();
-    const version = '0.1.0';
-    const logPath = path.join(home, 'argv.log');
-    writeVersionBinary(home, 'claude', version, 'claude');
-    const moduleUrl = pathToFileURL(path.resolve('dist/lib/mcp.js')).href;
-    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
-      import { registerMcpCommandToTargets } from ${JSON.stringify(moduleUrl)};
-      const result = await registerMcpCommandToTargets(
-        { directAgents: [], versionSelections: new Map([['claude', ['${version}']]]) },
-        'demo',
-        { command: 'node', args: ['server.js'] },
-        'user',
-        'stdio'
-      );
-      console.log(JSON.stringify(result));
-    `], {
-      env: { ...process.env, HOME: home, LOG_PATH: logPath },
-      encoding: 'utf-8',
-    });
-    expect(child.status, child.stderr).toBe(0);
-    const result = JSON.parse(child.stdout.trim());
-    expect(result[0].success).toBe(true);
-    const log = fs.readFileSync(logPath, 'utf-8');
-    expect(log).toMatch(/ARG:--\nARG:demo\nARG:node\nARG:server\.js/);
   });
 });
 

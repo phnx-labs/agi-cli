@@ -546,10 +546,7 @@ channel:
   plain.** They cannot render a labeled link and a dumped naked URL reads as noise,
   so the message stays the human sentence with **no URLs** (keys and crumb as text).
 
-An **important** post (and every `--blocked` post) fires a best-effort background
-`agents traces sync` (`fireTraceSyncInBackground`, `run-trace-sync.ts`, gated
-exactly like the run-exit arm) so that console page exists when a Slack crumb is
-tapped. **`agents send --to owner` routes through this same composer**
+**`agents send --to owner` routes through this same composer**
 (`ownerMessageNotification`, `owner-message.ts`, over `ownerNotificationFromContext`
 in `feed-broadcast.ts`), so an owner ping carries the same plain body, footer and
 fields as an important feed post. A non-owner `agents send` (explicit
@@ -601,174 +598,6 @@ GitHub identity, so the `gh-merge-guard` rule in the system layer denies agents
 `prs merge --admin` and the raw REST/GraphQL merge calls. Agents land PRs with a
 plain `gh pr merge` after CI and a review verdict, or with `prs automerge`.
 
-`agents traces sync` publishes two redacted derived surfaces: a per-session
-`SessionDetail` at `sessions/<id>.json` (a `meta` summary —
-spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
-`whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
-rich per-device `index.json`. `activeMs` is `spanMs` minus every idle gap > 120s
-(PHNX-3457) so a session resumed after hours, or left idle mid-turn, reads as
-effort rather than calendar span (the raw span stays available per session as
-`SessionDetail.meta.spanMs`). **Every index statistic is computed over the AGENT
-corpus ONLY (PHNX-3474):** each session is classified `kind` = `utility` when it is
-internal machine plumbing — no tool call AND ≤2 messages (a single-shot call), or its
-topic/label matches a known internal-prompt signature (title generation, watchdog,
-commit-message writer, factory worker; `classifySessionKind` /
-`UTILITY_PROMPT_SIGNATURES` in `traces/sync.ts`) — otherwise `agent`. Utility rows
-(~68% of the raw corpus: title-gen, watchdog ticks, commit-message writes, factory
-workers, all spawned under the `claude` harness by the Rush app) are **tagged and
-excluded, never deleted** from `sessions.db`, so `sessionsImported` is the real agent
-count, and the medians / needs-attention / tool-error-rate / topic-bucket counts all
-measure agent work; a top-level **`utilityCount`** reports how many were dropped. Each
-session ref (topic-tile `sessions[]`, `needsAttention`) carries `kind` and `harness`
-(the producing agent) so the console can filter by both. The index contains duration/error statistics —
-`medianMs`/`p90Ms` are now the ACTIVE-time percentiles (same keys, new value; the
-fleet-aggregate worker keeps weighted-averaging them unchanged); those blended figures
-sit alongside **segmented** active-time stats (PHNX-3472) — `agentMedianMs`/`agentP90Ms`
-over AGENT runs (a session with any tool call OR more than 8 messages) and
-`interactiveMedianMs` over the one-shot INTERACTIVE remainder, plus `measuredFraction`
-(share of sessions carrying a non-null duration) — so the console can headline agent
-runs (~15min median) instead of the corpus blend the 63%-one-shot tail pulls to ~15s;
-every harness now
-carries a non-null span (`resolveDurationMs` in `session/db.ts` derives it at upsert
-for rush/grok/kimi/cursor/muse/antigravity, which previously left `duration_ms` NULL) —
-ranked attention flags, metadata/tool-mix topic buckets — the human task taxonomy the
-console treemap renders (Feature work · Bug fixes · Refactor · Debugging · Code review ·
-Release · Blog & docs · Fleet / ops), an ordered rules table in `classify.ts`'s
-`classifyTopic`, keyed within the five stable `TraceTopicGroup` groups, **each bucket
-carrying up to 30 example `sessions` refs (`{id,title,kind,harness}`) so a treemap tile is
-drillable into its session list (PHNX-3408)** — and structured tool
-failure cause buckets (`real`, `guard`, `hook`, and `behavioral` — the last a
-silent failure with no error code, see below), and a **rolling drift signal**.
-The shard also carries a **per-session `sessions` roster (PHNX-3483)** — one flat
-scalar `SessionRosterRow` per AGENT session (`id`, `title`, `harness`, `model`,
-`repo`, `mode`, `projectType`, `startedAt`, `durationMs`, `toolCount`, `errorCount`,
-`needsAttention`, best-effort `costUsd`), the raw material the Rush
-console filters and re-aggregates client-side (a pre-rolled scalar can't yield a
-filtered headline). `durationMs` reuses `sessionActiveMs` (the value behind
-`stats.medianMs`; 0 when unmeasured) and `mode` encodes the AGENT-vs-INTERACTIVE
-segmentation (`headless`/`interactive`) so a mode-split median over the MEASURED
-rows reproduces `stats.agentMedianMs`/`interactiveMedianMs` — the segmented stats
-skip null-duration rows, which the roster still carries at `durationMs: 0`; utility
-rows are excluded, so the roster length equals `stats.sessionsImported`.
-
-**`device=all` is synthesized, not stored:** each device syncs its own shard, and the
-worker merges them on read (`worker-template.ts`). That merge re-projects field by
-field — so a new per-device shard field reaches the default console view only if it is
-also added to the merge, else it silently vanishes from `/all` while still present
-per-device.
-
-Group-by dimensions for the console insight bar are pure functions in
-[`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`
-(model × harness), `classifyTaskType`, `failureTiming`, and `computeLatency`
-(time-to-first-tool percentiles from `steps[0].startMs`). The sync integrator
-wires them into the shard.
-
-**Behavioral silent-failure patterns** (RUSH-2988) are the sibling of the
-error-anchored clustering below, for failures with **no error code**: the agent
-went idle after its last event and a human had to nudge it. `computeInsights`
-only clusters `outcome === 'error'` tool calls, so a silent stall never reached
-`failurePatterns` — it was only a `needsAttention` friction input.
-`computeBehavioralPatterns` (`src/lib/traces/insights.ts`) promotes the
-per-session `silent stall: <bucket>` friction that `computeInsightFacets`
-(`sessions-cli/src/lib/session/insights.ts`) already computes into cross-session
-`FailurePattern`s with the `behavioral` cause (signature `tool: 'silent-stall'`,
-`key: <bucket>`), estimating `wastedMs` from the bucket midpoint bounded by the
-same 30-min `MAX_GAP_ATTRIBUTION_MS` cap. `buildIndexShard` passes them to
-`computeInsights`, which ranks them into the one top-K `failurePatterns` by
-wasted time and folds them into `wastedMsTotal`. `behavioral` is producer-derived,
-never returned by `classifyCause`, so `failures.byCause` reports it as `0`.
-
-**Cross-session failure clustering + wasted-time attribution** (PHNX-3141) is
-[`src/lib/traces/insights.ts`](src/lib/traces/insights.ts)'s `computeInsights()` —
-the piece that turns flat per-tool error counts into ranked, time-weighted
-**failure patterns**: failed `tool_calls` rows are grouped by `(tool, cause,
-normalized-error)` — volatile tokens (ids, counts, countdowns) stripped so 47
-near-identical "rate limit exceeded for user N" errors fold into one pattern —
-and each pattern accumulates `wastedMs` from two sources that sum. **(1) The
-failed call's own blocking duration** — `end_timestamp - timestamp` in
-`tool_calls` (PHNX-3437) — booked whenever the end time is known, independent of
-whether another call follows: a call that hung for minutes and then failed wasted
-that whole time even as the last call in its session, the case the gap heuristic
-alone booked as ~0 (this is what makes a fail-fast fix like PHNX-3407 — a
-user_location stdin hang cut from ~5.5m to <1s — measurable, dropping from ~5.5m
-to ~0). **(2) The inter-call gap** (`ordinal`/`timestamp`, already indexed)
-whenever the next call repeats the same signature (a retry loop) or the gap
-itself is a stall (≥60s), measured from the call's END when known so (1) is never
-double-counted. Both are bounded per contribution to `MAX_GAP_ATTRIBUTION_MS`
-(30m) so one huge gap — or a corrupt/backwards end timestamp — can't be booked as
-failure-loop waste; a real active loop is many short gaps that still sum large.
-A NULL `end_timestamp` (rows an older extractor stored, before the paired
-`TOOL_INDEX_VERSION` bump re-derives them; or a call still pending at scan end)
-falls back to the original gap-from-START heuristic unchanged — no crash, no NaN.
-Patterns are
-**bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
-so a single rare multi-hour loop still outranks a frequent but cheap one.
-Cost stays proportional to this sync's row count (no transcript re-parsing of
-already-classified sessions), so it stays incremental at 10k+ session scale.
-Patterns also carry a **`phenotype`** dimension (false-termination /
-premature-completion / out-of-order / failure-to-act,
-[`phenotype.ts`](src/lib/traces/phenotype.ts)) folded into the group key
-alongside `(tool, cause, normalized-error)` (PHNX-3327). That classification
-needs the full derived trajectory, which flat `tool_calls` rows don't carry — so
-it is computed per-session ONCE (parse → trajectory → `classifyPhenotype`) and
-**persisted in the mtime+size-keyed `session_phenotypes` cache** (same shape as
-`session_topics` / `session_insights`, `readSessionPhenotypes` /
-`writeSessionPhenotypes` in [`db.ts`](src/lib/session/db.ts)), then read for the
-**whole corpus** on every sync. Reading the cache for all rows — never just this
-run's freshly-parsed batch — is what keeps two identically-signatured sessions in
-ONE cluster regardless of which incremental sync first saw each; the `signature`
-output itself (`{ tool, cause, key }`) is unchanged, phenotype rides alongside it.
-
-| Field | Type | Description |
-|---|---|---|
-| `bucketHistory` | `BucketStats[][]` | 14-day rolling window. Each inner array is one day's per-bucket stats (errorRate = tool errors / total calls; stallRate = sessions with ≥1 stall / total sessions). |
-| `driftSignals` | `DriftSignal[]` | Buckets whose error or stall rate crossed ±0.20 vs the 7-day average. `severity`: `degrading | stable | improving`. Sorted by errorDelta desc. Buckets with <3 historical days are skipped. |
-| `failurePatterns` | `FailurePattern[]` | Top-25 cross-session failure clusters from `computeInsights()`, ranked by `wastedMs` desc. Each carries `signature` (tool/cause/normalized key), `phenotype` (the cluster's failure phenotype or `null`; folded into the group key + id so the same signature under two phenotypes is two clusters — PHNX-3327), `sessions`, `occurrences`, `wastedMs` (estimate — labeled, never presented as exact), `exampleSessionIds` (≤5), and `drift` vs the same pattern id in the previous shard. |
-| `wastedMsTotal` | `number` | Sum of `wastedMs` across every cluster found this sync — not just the top-25 rows in `failurePatterns` above. |
-| `latency` | `LatencyInsight` | `{ firstToolMs: { p50, p90, p99, max } }` — time-to-first-tool percentiles, reusing `segments.ts`'s `computeLatency()` over each session's earliest `tool_calls` row. |
-
-Per-session `SessionDetail` also carries `surfacedToolFailures` — every failed
-step, listed unconditionally regardless of the run's overall outcome, so a
-session that ultimately succeeded (merged / tests-green) still shows the tool
-failures it hit along the way instead of hiding them behind a green run-level
-status (the failure this fixes: a coding-agent analogue of a monitoring tool
-reporting 0% error rate while a run burned hours in a failed-tool retry loop).
-
-`meta.outcome` is the **truthful** run outcome (PHNX-3387): a run with tool
-errors reads `completed` ONLY when it *causally recovered* — a substantive,
-non-human-facing tool step succeeded strictly after the last error AND resolved
-the failed work (its **work signature** — the effective program for a shell step,
-the tool identity otherwise — matches an errored step's), the exact predicate the
-false-termination phenotype uses (`recoveredAfterErrors` in
-[`phenotype.ts`](src/lib/traces/phenotype.ts), shared with `deriveRunOutcome` in
-[`sync.ts`](src/lib/traces/sync.ts) so the console outcome and the phenotype can
-never disagree about whether a run finished). A run whose last substantive step
-is the error, whose only post-error steps are human-facing (a punt to
-`AskUserQuestion`), or whose only post-error success is unrelated work (a failed
-`bun test` followed by an incidental `ls`), stays `errored`. This is what makes
-`surfacedToolFailures` on a `completed` run honest: those are failures the run
-recovered from, not a green status hiding an unresolved one. It never flips a
-genuinely-unresolved run to `completed` (no regression vs the old
-`errorCount > 0 ? errored : completed`).
-
-On live sync, the prior shard is fetched from R2 before the PUT to seed history; failures (404, parse error) fall back to empty history. `--dry-run --out <dir>` seeds from the previous `index.json` in the output directory. Topic classification is lazily
-cached in the self-healing `session_topics` table by transcript mtime + size;
-it is not part of the hot session scan or `SCHEMA_VERSION`. `agents traces sync
---dry-run --out <dir>` computes both surfaces from the local `sessions.db` and
-writes them to a directory (no Phoenix auth, no worker, no upload) — a local
-export for verifying the real signal before the hosted path is wired.
-
-The sync gate is a per-device mtime **watermark** plus a **failure ledger**, both in
-`traces-sync.json` (PHNX-3267). The watermark alone cannot retry a failure — a
-later-mtime success advances it past an earlier failed row, which the next run then
-skips forever — so the ledger also records each failed session's identity + typed,
-redacted evidence and the row query unions those retry-worthy ids back in regardless
-of the watermark. Failures are typed `transcript-unavailable` (the file is gone;
-expected history, not re-read, aged out after 14 days), `parse-failed`, or
-`upload-failed` (both retried until they resolve); `SyncResult` carries the per-kind
-counts, `agents traces sync` prints the breakdown, and `agents traces status` lists
-the outstanding retry set. A `--dry-run` never touches the ledger.
-
 ## Authentication — Phoenix ID
 
 `agents auth login` signs in with **Phoenix ID** (`id.byphoenix.com`), the one family
@@ -794,8 +623,8 @@ signs out nothing else).
 - `PHOENIX_ID_BASE` (default `https://id.byphoenix.com`) points the CLI at a different
   account service for local/private backends.
 - The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
-  holds its own copy of the same Phoenix bearer. The surfaces that use it are `agents traces
-  sync` and the managed `agents sessions export/backup` target, each verifying the bearer at
+  holds its own copy of the same Phoenix bearer. The surfaces that use it are the managed
+  `agents sessions export/backup` target, which verifies the bearer at
   `${PHOENIX_ID_BASE}/api/v1/auth/me`, and owner notifications, which send it to rush/api
   (`RUSH_PROXY_BASE`, default `https://api.prix.dev`, `src/lib/rush-api.ts`). A worker never
   receives this bearer; it gets a `notify`-scoped device token instead (see owner
@@ -1087,7 +916,8 @@ is `logout-unprovable`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
 `rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli` and `binary-shadow`,
-plus `leaked-daemon` (a `__daemon-run` no unit main PID or daemon.pid owns, W4/PHNX-3736). (RUSH-2162 moved
+plus `leaked-daemon` (a `__daemon-run` no unit main PID or daemon.pid owns, W4/PHNX-3736)
+and `menubar` (an AGI Menu duplicate, stale or replaced helper, or ad-hoc signature; macOS only, PHNX-4227). (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
 one `agents sync` resolves.)
 
@@ -1548,7 +1378,7 @@ reading of an idle box with an empty disk; `stale` carries the CLI's own
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
 interactive `agents run` launch spawns the agent directly. Turn it on for a
 device to wrap eligible local launches in the shared-socket tmux session and give
-each agent an exact `%pane` address for `agents message`, injection, and
+each agent an exact `%pane` address for `agents send --channel session`, injection, and
 `agents focus`. The setting is machine-local and cannot be set for a peer.
 
 **It does not govern a run dispatched here over `--device` (RUSH-3125).** That
@@ -1854,7 +1684,7 @@ insights/tool-calls/digest/highlights/prompt/tail/share-html and the `SessionEve
 [`@phnx-labs/sessions-cli/reader`](https://www.npmjs.com/package/@phnx-labs/sessions-cli)
 (PHNX-4118), the same parse→normalize→render pipeline the `sessions` bin runs,
 imported **in-process** (a normal node_modules import — never a subprocess) so the
-indexer warm-tick (`db.ts`), the eval loop (`lib/traces/sync.ts`), and live-state
+indexer warm-tick (`db.ts`) and live-state
 (`active.ts`) parse without shelling out. What remains under `src/lib/session/` is the
 CLI-owned half: the writer/indexer (`db.ts`, `tool-index.ts` — which only WRITES the
 tool-call index; searching it is the standalone `sessions --include tools`, PHNX-4227 —
@@ -2413,7 +2243,7 @@ split (RUSH-3189). The cross-repo contract is short and lives in
 
 **Exactly one status item is an invariant, enforced in the helper.** The bundle
 can be started from more than one place — launchd's `KeepAlive` service, a
-LaunchServices/`open` launch, a second `agents menubar enable` — so the helper
+LaunchServices/`open` launch, a second startup install — so the helper
 takes an `flock` on `~/.agents/.cache/state/menubar.lock` at launch (agi-menu's
 `SingleInstance.swift`) and holds the descriptor for its lifetime; a loser
 surfaces the incumbent's menu and exits 0. Do NOT re-derive liveness from a pid
@@ -2421,9 +2251,9 @@ file or a `ps` scan — the kernel releases an `flock` however the holder dies,
 which a pid cannot express, and a process list cannot say which copy launchd will
 keep alive. On the CLI side, `classifyMenubarProcesses` returns live copies of
 the installed bundle as a LIST (`own`), never a boolean: collapsing them is what
-let a duplicate icon read as a healthy `running: yes`. `agents menubar setup` is
-the recovery path — it ends every live helper and re-kickstarts the service so
-the survivor is always launchd's.
+let a duplicate icon read as a healthy `running: yes`. `agents doctor` reports
+every copy past the first as a `menubar` warning with the `kill <pid>` that
+leaves launchd's copy.
 
 **Only the install that OWNS the helper may reinstall it.** The startup self-heal
 (`installMenubarLaunchAgentOnUpgrade`, every darwin invocation) reinstalls when the
@@ -2433,7 +2263,7 @@ copies each one read the others' marks as drift and recopied the bundle over the
 and recopying replaces the executable under the running helper, killing it, after
 which `KeepAlive` restarts it and the next copy repeats it. Observed: a new pid
 every 5-15s, 578 launches in one helper log, a status item that never stayed
-visible, and `agents menubar status` still saying `running: yes` because a pid
+visible, and the status read still saying `running: yes` because a pid
 always existed (#2109). `mayInstallMenubarHelper` gates it: the plist's
 `AGENTS_ENTRY` names the owner, and only the owner reinstalls freely. A same-install
 upgrade keeps its entry path, so `npm update` still lands normally.
@@ -2456,8 +2286,7 @@ the release first, then gates on THAT bundle (`menubarGateVersion`), and a newer
 signed build passes the version branch regardless of the plist owner. It converges:
 once the helper is on the newest build, every install reads "current". Before this,
 the update gated on the cached bundle for a release not yet downloaded, read "not
-Developer ID", and refused every new release (R5). `agents menubar setup` bypasses the gate
-entirely and stays the immediate manual fix.
+Developer ID", and refused every new release (R5).
 
 Two caveats worth knowing before you tune any of this. **(a)** Escapes (2) AND (3)
 are both refused to a source bundle that is not Developer-ID signed:

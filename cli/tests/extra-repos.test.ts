@@ -25,7 +25,6 @@ vi.mock('../src/lib/state.js', () => {
 vi.mock('../src/lib/agents.js', () => ({
   AGENTS: {},
   SKILLS_CAPABLE_AGENTS: [],
-  ensureSkillsDir: () => {},
 }));
 
 vi.mock('../src/lib/installations/versions.js', () => ({

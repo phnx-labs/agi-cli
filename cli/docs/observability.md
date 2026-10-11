@@ -89,13 +89,6 @@ links as their own Slack labeled links is a possible future enhancement tracked 
 PHNX-3708, pending owner sign-off, since it reintroduces a trailing line the
 current directive forbids.)
 
-An **important** post (and every `--blocked` post) also fires a best-effort,
-opt-in `agents traces sync` in the background so that console page exists when the
-owner taps a Slack crumb — trace sync otherwise only runs on `agents run` exit
-(PHNX-3628), which a mid-run ping precedes. The sync is gated exactly like the
-run-exit arm (signed in and already opted into the store; `AGENTS_NO_TRACE_SYNC=1`
-opts out) and never blocks or fails the post.
-
 `agents send --to owner` delivers through this **same** composer, so an owner ping is identical to an important `feed post` of the same
 event — short-shaped body with a `Sent from …` footer — instead of the raw body
 dump they sent before (`ownerMessageNotification` → `sendToOwner` →
@@ -212,7 +205,7 @@ drift.
 `never-synced`, `stale`, `repo-behind`, `repo-drift`, `fleet-resource-gap`,
 `version-skew`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`, `host-cli-missing`,
 `host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli`,
-`binary-shadow`, `leaked-daemon`.
+`binary-shadow`, `leaked-daemon`, `menubar`.
 
 The split is provability and blast radius: a critical is something the operator can act
 on right now with a known fix, while a warning is drift that one sweep resolves.

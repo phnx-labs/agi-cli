@@ -36,7 +36,6 @@ import {
   type SinkOutcome,
 } from '../lib/feed-broadcast.js';
 import { getSessionById, resolveFullSessionId } from '../lib/session/db.js';
-import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
 import { readMeta } from '../lib/state.js';
 import type { Meta } from '../lib/types.js';
 import {
@@ -807,7 +806,6 @@ async function broadcastPostedEvent(
       .filter((href) => /^https?:\/\//i.test(href)),
     eventKey: `${session}:${event.ts}`,
   }, meta);
-  if (level === 'important') fireTraceSyncInBackground();
   return runFeedBroadcast(planned, meta);
 }
 
@@ -825,7 +823,6 @@ async function broadcastBlock(
     { ...block, sessionId, ticket: block.ticket ?? ticket },
     extras,
   );
-  fireTraceSyncInBackground();
   return runFeedBroadcast(planFeedBroadcast(config, ctx, meta), meta);
 }
 

@@ -74,7 +74,7 @@ row its surface sits in.
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `doctor`, `daemon` | One requirement reaches them, no command contract does. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
-| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `webhook`, `daemon funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
+| **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `feed`, `send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
@@ -826,8 +826,7 @@ SSH access (§7); rendering sessions that no harness produced.
   = the verified userId), requiring NO `r2.backups` bucket. The mere PRESENCE of
   an `r2.backups` bundle MUST NOT be treated as a BYO override; only `--byo`,
   `AGENTS_SESSIONS_BACKEND=byo`, or a DI write token flips to BYO. The decision
-  MUST go through the ONE shared policy (`selectStorageBackendKind`) that
-  `agents traces sync` also uses, resolved once so a
+  MUST go through the ONE shared policy (`selectStorageBackendKind`), resolved once so a
   logout cannot flip the principal mid-preflight
   (`lib/session/sync/backend.ts:resolveSessionsBackend`;
   `lib/session/sync/backend.test.ts`).
@@ -2017,8 +2016,7 @@ engine.
 - **SEC-13 (MUST).** An **agent launch** MUST NOT raise an interactive OS
   prompt (e.g. Touch ID) on its own. agents-cli enforces this by always
   passing `agentOnly: true` on the run/exec injection path
-  (`commands/exec.ts`, `lib/exec.ts`, `lib/browser/chrome.ts`,
-  `commands/webhook.ts`) — the standalone resolves broker-only in that mode
+  (`commands/exec.ts`, `lib/exec.ts`, `lib/browser/chrome.ts`) — the standalone resolves broker-only in that mode
   and fails loud (naming `agents secrets unlock <bundle>`) rather than
   prompting. **Given** an agent launch **When** it resolves a `hold`/`always`
   bundle the broker does not already hold **Then** the resolution throws
@@ -3208,7 +3206,7 @@ nothing but its own view cache.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
   daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`), every `routines`
-  auto-start call site (`add`, `start`, `catchup`, webhook triggers,
+  auto-start call site (`add`, `start`, `catchup`, `routines webhook`,
   `commands/routines.ts`). It MUST NOT
   stop an already-running daemon and MUST NOT block the explicit override
   (`agents daemon start`), mirroring `systemctl disable` — a disabled unit still
@@ -3250,16 +3248,6 @@ nothing but its own view cache.
 - **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
   blocked, skipped, failed, timed-out, missed, and completed attempt remains
   inspectable without requiring an archived session transcript.
-- **SING-5f (MUST).** The routine activation manifest of SING-5a governs ROUTINES
-  only. A job a webhook handler synthesizes for its `run.agent`/`run.workflow`
-  action (`lib/triggers/handlers.ts`) has no definition and no manifest membership,
-  so it MUST NOT be gated on that manifest; its ownership is the one device the
-  webhook was delivered to. The exemption MUST be carried by an explicit marker on
-  the dispatched job (`dispatchedBy: 'webhook'`, read by `jobRunsOnThisDevice`,
-  `lib/scheduling/routines.ts`) and MUST NOT be inferred from whether a routine of
-  that name exists. A handler's `routine:` delegate fires a real routine and MUST
-  still honour SING-5a: a routine defined but not activated on the firing device
-  is refused.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
   `cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3
@@ -3477,61 +3465,9 @@ a machine-wide process sweep.)
   and `index.ts` adds top-level `uncaughtException`/`unhandledRejection`
   handlers so a startup crash always reaches the paced OS supervisor rather than
   hanging (RUSH-2418; PHNX-4116 removed the burst cap).
-- **SING-17 (MUST).** Public webhook ingress MUST be a `ServiceSupervisor`-managed daemon-hosted
-  service, not an unsupervised process. The `webhook-receiver` service
-  (`lib/daemon-services.ts`) binds one signed receiver per entry in
-  `~/.agents/daemon/webhooks.yaml` (`lib/daemon-webhooks.ts`,
-  `startHostedWebhookReceivers`), wrapped by `WebhookReceiverService`
-  (`lib/daemon/webhook-receiver-service.ts`) so each
-  receiver's signing secret resolves headlessly through the standalone `secrets`
-  CLI (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13, via
-  `secrets-client.ts` — OWN-1, no daemon-hosted broker) — no
-  `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. Every receiver MUST be torn down on
-  shutdown (`handleShutdown`, `lib/daemon/daemon.ts`). A box that declares no receiver
-  MUST bind nothing. A receiver whose bundle is locked or carries neither
-  `GITHUB_WEBHOOK_SECRET` nor `LINEAR_WEBHOOK_SECRET` MUST fail LOUD — logged and
-  skipped, never bound with an unverifiable signature — and MUST NOT take the
-  other receivers down with it. Declarations are per-box operational state and
-  are managed with `agents daemon webhooks add|list|remove`
-  (`commands/daemon.ts`), keyed by bind port (RUSH-2548).
-- **SING-18 (MUST).** A webhook receiver MUST acknowledge a verified delivery
-  BEFORE dispatching it. Once a delivery passes signature verification,
-  freshness, dedup, and rate limiting, `startWebhookServer`
-  (`lib/triggers/webhook.ts`) MUST write `202 {ok, accepted, deliveryId}` and
-  dispatch afterwards: dispatch starts an agent run (15-20s) and MUST NOT hold
-  the socket past a sender's delivery timeout. The dedup ledger MUST be
-  unchanged by this — `<source>:<delivery-id>` remains the key, a settled
-  delivery MUST still answer `200 {duplicate:true}`, per-job `markJob` MUST still
-  let a retry finish only the matches that failed, and a delivery MUST be marked
-  complete only after it settles. A retry arriving while the first is still
-  settling MUST be answered as a duplicate. Because no HTTP status can carry a
-  post-ack failure, one MUST be surfaced — `webhook.failed` plus the
-  `onDeliveryError` hook the daemon host and `agents webhooks serve` both log
-  (RUSH-2548).
-  **A post-ack dispatch failure is terminal until a manual redelivery**, and the
-  ack is what makes it so: the receiver used to answer 4xx on a dispatch failure,
-  which is what made GitHub/Linear retry and let the per-job ledger finish the
-  matches that failed. A sender does not retry a 202, so the ledger is intact but
-  nothing triggers it on its own. This is the accepted cost of not timing out
-  every delivery; the failure is loud in the log and the delivery stays unmarked,
-  so re-sending it from the provider's UI still completes only what did not run.
-  Closing this gap with an in-process retry of the unmarked jobs is
-  **WEBHOOK-GAP-1**, below.
 
 ### 4. Given/When/Then scenarios
 
-- **GIVEN** a box declares a receiver in `daemon/webhooks.yaml` whose secrets
-  bundle is locked, **WHEN** the daemon starts, **THEN** that receiver is skipped
-  with a WARN naming the bundle and does not bind, while any other declared
-  receiver still binds (SING-17,
-  `lib/daemon-webhooks.test.ts` "fails a receiver LOUD when its signing secret
-  cannot be resolved").
-- **GIVEN** a signed Linear delivery whose matched routine takes 15-20s to
-  dispatch, **WHEN** it is received, **THEN** the `202` ack is written while the
-  dispatch is provably still in flight, and a retry of the same delivery id in
-  that window is answered as a duplicate rather than dispatched again (SING-18,
-  `lib/triggers/webhook.test.ts` "acks a signed delivery before the agent
-  dispatch completes").
 - **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
   tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
   skip) — no UI surface fires a second rotate for the same session.
@@ -3665,17 +3601,6 @@ a machine-wide process sweep.)
   keeping the pacing interval and the `ensureDaemonStarted` breaker: a wedged daemon
   must always recover on its own, so the OS unit restart is paced but unbounded (see
   SING-14).
-- **WEBHOOK-GAP-1 (RUSH-2548).** SING-18's ack-before-dispatch removed the 4xx that
-  used to make a sender retry a failed dispatch, and nothing replaced it. The
-  per-delivery ledger still records exactly which matched jobs completed
-  (`markJob`, `lib/triggers/webhook.ts`) and a failed settle leaves the delivery
-  unmarked, so a retry would still finish only what did not run — but a sender does
-  not retry a 202, so only a manual redelivery from the provider's UI reaches it. A
-  routine whose `executeJobDetached` fails (missing agent binary, full disk) is
-  therefore logged (`webhook.failed` + the host's WARN) and then simply does not
-  run. Closing this needs an in-process retry of the unmarked jobs on the receiver
-  side; the trade was taken deliberately because the alternative — holding the
-  socket for the whole agent run — timed out every real delivery.
 
 ---
 

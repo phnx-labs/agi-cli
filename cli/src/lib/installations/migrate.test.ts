@@ -5,7 +5,7 @@ import { spawnSync, spawn } from 'child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { detrackUserChangelog, migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { detrackUserChangelog, migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateMenubarSentinelToConfig, migrateRoutineDeviceToDevices, migrateRoutineRemoteCwdToCwd, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { execFileSync } from 'child_process';
 import { toPosix } from '../platform/index.js';
 import * as yaml from 'yaml';
@@ -693,6 +693,26 @@ describe('migrateWatchdogSentinelToConfig', () => {
     const sentinel = path.join(dir, 'enabled');
     fs.writeFileSync(sentinel, 'enabled\n');
     migrateWatchdogSentinelToConfig(sentinel, () => { throw new Error('config unwritable'); });
+    expect(fs.existsSync(sentinel)).toBe(true);
+  });
+});
+
+describe('migrateMenubarSentinelToConfig', () => {
+  it('sentinel present -> sets menubar.enabled false and deletes the sentinel', () => {
+    const dir = makeTempHistoryDir();
+    const sentinel = path.join(dir, 'menubar.disabled');
+    fs.writeFileSync(sentinel, 'disabled\n');
+    let disabled = 0;
+    migrateMenubarSentinelToConfig(sentinel, () => { disabled++; });
+    expect(disabled).toBe(1);
+    expect(fs.existsSync(sentinel)).toBe(false);
+  });
+
+  it('leaves the sentinel in place if setting the config throws (retry next run)', () => {
+    const dir = makeTempHistoryDir();
+    const sentinel = path.join(dir, 'menubar.disabled');
+    fs.writeFileSync(sentinel, 'disabled\n');
+    migrateMenubarSentinelToConfig(sentinel, () => { throw new Error('config unwritable'); });
     expect(fs.existsSync(sentinel)).toBe(true);
   });
 });

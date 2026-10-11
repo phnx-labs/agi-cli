@@ -4,15 +4,15 @@ import { compareVersions } from './agent-spec/primitives.js';
 import { installedReleaseFor } from './installations/store.js';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { AGENTS, ensureCommandsDir, agentConfigDirName, resolveAgentName } from './agents.js';
+import { AGENTS, agentConfigDirName, resolveAgentName } from './agents.js';
 import { capableAgents, isCapable, supports } from './capabilities.js';
 import { isDirectoryDoc } from './resources.js';
 import { normalizeAliases } from './resource-aliases.js';
 import { markdownToToml } from './convert.js';
 import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
-import { getEffectiveHome, getVersionHomePath, listInstalledVersions, resolveVersion } from './installations/versions.js';
+import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { discoverPlugins } from './plugins/plugins.js';
-import type { AgentId, CommandInstallation } from './types.js';
+import type { AgentId } from './types.js';
 import {
   commandSkillMatches,
   installCommandSkillToVersion,
@@ -241,97 +241,6 @@ export function resolveCommandSource(
   }
 
   return null;
-}
-
-export function installCommand(
-  sourcePath: string,
-  agentId: AgentId,
-  commandName: string,
-  method: 'symlink' | 'copy' = 'symlink'
-): CommandInstallation & { error?: string; warnings?: string[] } {
-  const metadata = parseCommandMetadata(sourcePath);
-  const validation = validateCommandMetadata(metadata, commandName);
-
-  if (!validation.valid) {
-    return {
-      path: '',
-      method: 'copy',
-      error: `Invalid command: ${validation.errors.join(', ')}`,
-      warnings: validation.warnings,
-    };
-  }
-
-  const pinnedVersion = resolveVersion(agentId, process.cwd());
-  if (pinnedVersion) {
-    const gate = commandAppliesTo(agentId, pinnedVersion, metadata);
-    if (!gate.ok) {
-      return {
-        path: '',
-        method: 'copy',
-        error: explainCommandSkip(agentId, pinnedVersion, commandName, gate),
-        warnings: validation.warnings,
-      };
-    }
-  }
-
-  const agent = AGENTS[agentId];
-  ensureCommandsDir(agentId);
-
-  const home = getEffectiveHome(agentId);
-  const installVersion = pinnedVersion ?? listInstalledVersions(agentId)[0] ?? '';
-  const alsoInstallAsSkill = shouldAlsoInstallCommandAsSkill(agentId, installVersion);
-
-  if (alsoInstallAsSkill) {
-    const installed = installCommandSkillToVersion(
-      path.join(home, agentConfigDirName(agentId)),
-      commandName,
-      sourcePath,
-      [getSkillsDir(), ...getEnabledExtraRepos().map((repo) => path.join(repo.dir, 'skills'))],
-    );
-    if (!installed.success) {
-      return { path: '', method: 'copy', error: installed.error, warnings: validation.warnings };
-    }
-  }
-
-  if (agentId === 'goose') {
-    const result = installGooseCommandToVersion(home, commandName, sourcePath);
-    if (!result.success) {
-      return { path: '', method: 'copy', error: result.error, warnings: validation.warnings };
-    }
-    return {
-      path: path.join(home, '.config', 'goose', 'commands', `${commandName}.yaml`),
-      method: 'copy',
-      warnings: validation.warnings,
-    };
-  }
-
-  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
-  fs.mkdirSync(commandsDir, { recursive: true });
-
-  const ext = agent.format === 'toml' ? '.toml' : '.md';
-  const targetPath = path.join(commandsDir, `${commandName}${ext}`);
-
-  if (fs.existsSync(targetPath)) {
-    fs.unlinkSync(targetPath);
-  }
-
-  const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-  const sourceIsMarkdown = sourcePath.endsWith('.md');
-  const needsConversion = agent.format === 'toml' && sourceIsMarkdown;
-
-  if (needsConversion) {
-    const tomlContent = markdownToToml(commandName, sourceContent);
-    fs.writeFileSync(targetPath, tomlContent, 'utf-8');
-    return { path: targetPath, method: 'copy', warnings: validation.warnings };
-  }
-
-  if (method === 'symlink') {
-    fs.symlinkSync(sourcePath, targetPath);
-    return { path: targetPath, method: 'symlink', warnings: validation.warnings };
-  }
-
-  fs.copyFileSync(sourcePath, targetPath);
-  return { path: targetPath, method: 'copy', warnings: validation.warnings };
 }
 
 export function getVersionCommandsDir(agent: AgentId, version: string): string {

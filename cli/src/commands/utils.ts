@@ -11,9 +11,7 @@ import {
   installVersion,
   listInstalledVersions,
   resolveAgentVersionTargets,
-  resolveInstalledAgentTargets,
   VersionNotInstalledError,
-  type InstalledAgentTargetResult,
   type VersionSelectionResult,
 } from '../lib/installations/versions.js';
 import { resolveListFilter, AgentSpecError } from '../lib/agent-spec/index.js';
@@ -278,16 +276,6 @@ export async function resolveAgentTargetsAutoInstalling(
   const ok = await ensureAgentVersionsInstalled(value, availableAgents, options);
   if (!ok) return null;
   return resolveAgentVersionTargets(value, availableAgents, { allVersions: options.allVersions });
-}
-
-export async function resolveInstalledAgentTargetsAutoInstalling(
-  value: string,
-  availableAgents: readonly AgentId[],
-  options: { yes?: boolean; allVersions?: boolean } = {}
-): Promise<InstalledAgentTargetResult | null> {
-  const ok = await ensureAgentVersionsInstalled(value, availableAgents, options);
-  if (!ok) return null;
-  return resolveInstalledAgentTargets(value, availableAgents, { allVersions: options.allVersions });
 }
 
 export { VersionNotInstalledError } from '../lib/installations/versions.js';

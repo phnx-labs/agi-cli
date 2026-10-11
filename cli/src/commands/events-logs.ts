@@ -9,10 +9,6 @@ import { runSessions } from '../lib/sessions-client.js';
 import { showHostTaskLog, hostTaskLogJson } from '../lib/hosts/logs.js';
 import { listTasks, type HostTask } from '../lib/hosts/tasks.js';
 import { itemPicker } from '../lib/picker.js';
-import {
-  stats, getLogsPath, rotate,
-} from '../lib/feed/events.js';
-import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
 interface LogsOptions {
@@ -157,148 +153,17 @@ async function runLogs(id: string | undefined, opts: LogsOptions): Promise<void>
   await showCandidate(picked.item, follow, full, !!opts.json);
 }
 
-function parseSince(s: string): Date {
-  const m = s.match(/^(\d+)([smhdw])$/);
-  if (m) {
-    const n = parseInt(m[1], 10);
-    const unitMs: Record<string, number> = {
-      s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000,
-    };
-    return new Date(Date.now() - n * unitMs[m[2]]);
-  }
-  const ms = Date.parse(s);
-  if (isNaN(ms)) throw new Error(`Invalid --since value: ${s} (use e.g. 2h, 7d, or an ISO date)`);
-  return new Date(ms);
-}
-
-function levelColor(level: string): string {
-  if (level === 'audit') return chalk.magenta(level);
-  if (level === 'warn') return chalk.yellow(level);
-  if (level === 'debug') return chalk.gray(level);
-  return chalk.blue(level);
-}
-
-function humanBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-async function runStats(opts: { since?: string; json?: boolean }): Promise<void> {
-  let days = 7;
-  if (opts.since) {
-    try {
-      const d = parseSince(opts.since);
-      days = Math.max(1, Math.ceil((Date.now() - d.getTime()) / 86_400_000));
-    } catch (err) {
-      console.error(chalk.red((err as Error).message));
-      process.exit(2);
-    }
-  }
-
-  const s = stats({ days });
-
-  if (opts.json) {
-    console.log(JSON.stringify(s, null, 2));
-    return;
-  }
-
-  console.log(chalk.bold(`Audit statistics (last ${days} day${days === 1 ? '' : 's'})\n`));
-  console.log(`  Total events:  ${s.totalEvents}`);
-  console.log(`  Log files:     ${s.fileCount} (${humanBytes(s.totalBytes)})`);
-  console.log(`  Log path:      ${chalk.gray(getLogsPath())}`);
-
-  if (Object.keys(s.byLevel).length) {
-    console.log(chalk.bold('\n  By level:'));
-    for (const [k, v] of Object.entries(s.byLevel).sort((a, b) => b[1] - a[1])) {
-      console.log(`    ${levelColor(k).padEnd(20)} ${v}`);
-    }
-  }
-
-  if (Object.keys(s.byEvent).length) {
-    console.log(chalk.bold('\n  By event (top 15):'));
-    for (const [k, v] of Object.entries(s.byEvent).sort((a, b) => b[1] - a[1]).slice(0, 15)) {
-      console.log(`    ${chalk.cyan(k).padEnd(30)} ${v}`);
-    }
-  }
-
-  if (Object.keys(s.byModule).length) {
-    console.log(chalk.bold('\n  By module:'));
-    for (const [k, v] of Object.entries(s.byModule).sort((a, b) => b[1] - a[1])) {
-      console.log(`    ${k.padEnd(20)} ${v}`);
-    }
-  }
-
-  if (Object.keys(s.byUser).length) {
-    console.log(chalk.bold('\n  By user:'));
-    for (const [k, v] of Object.entries(s.byUser).sort((a, b) => b[1] - a[1])) {
-      console.log(`    ${k.padEnd(30)} ${v}`);
-    }
-  }
-
-  if (Object.keys(s.byActor).length) {
-    console.log(chalk.bold('\n  By actor:'));
-    for (const [k, v] of Object.entries(s.byActor).sort((a, b) => b[1] - a[1])) {
-      console.log(`    ${k.padEnd(30)} ${v}`);
-    }
-  }
-
-  console.log();
-}
-
-export function registerLogsCommand(program: Command): void {
-  const logsCmd = program
+export function registerEventsLogsCommand(events: Command): void {
+  events
     .command('logs [id]')
-    .description('Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.')
+    .description('Show the log of a dispatched run or a session')
     .option('--device <name>', 'Scope to runs dispatched to a device')
     .option('-a, --agent <agent>', 'Filter by agent (e.g. claude, codex@0.116.0)')
     .option('--version <version>', 'Filter by agent version')
     .option('--session <id>', 'Select a session/run by id (same as the positional id)')
     .option('-f, --follow', 'Follow live output')
     .option('-m, --full', 'Show the full raw transcript / stdout instead of the concise summary')
-    .option('--json', 'Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events } (same shape as `sessions <id> --json`)')
-    .action((id: string | undefined, opts: LogsOptions) => runLogs(id, opts));
-
-  addEventsReadOptions(logsCmd
-    .command('audit')
-    .description('Alias for `agents events audit`'))
-    .addHelpText('after', `
-Examples:
-  agents logs audit                          Recent activity across everything
-  agents logs audit --module teams           Team lifecycle (create / add / disband)
-  agents logs audit --module secrets         Every secret accessed or revealed
-  agents logs audit --level audit            Only audit-level events
-  agents logs audit --command "teams create" Just team creations
-  agents logs audit --event secrets.get --since 7d --json
-  agents logs audit -f                       Live tail`)
-    .action((_options: EventsOptions, command: Command) =>
-      runEventsCommand(command.optsWithGlobals() as EventsOptions, true));
-
-  logsCmd
-    .command('stats')
-    .description('Show aggregate audit statistics')
-    .option('--since <time>', 'Window size (e.g. 7d, 30d; default 7d)')
-    .option('--json', 'Output stats as JSON')
-    .action(async (opts: { since?: string; json?: boolean }) => runStats(opts));
-
-  logsCmd
-    .command('rotate')
-    .description('Apply event retention and the storage ceiling immediately')
-    .option('--days <n>', 'Retention period in days (default 7)', '7')
-    .option('--max-mb <n>', 'Total event storage ceiling in MiB (default 50)', '50')
-    .action((opts: { days?: string; maxMb?: string }) => {
-      const days = Math.max(1, parseInt(opts.days ?? '7', 10) || 7);
-      const maxMb = Math.max(1, parseInt(opts.maxMb ?? '50', 10) || 50);
-      const result = rotate(days, maxMb * 1024 * 1024);
-      const removed = result.removedByAge + result.removedBySize;
-      if (removed > 0) {
-        console.log(
-          `Removed ${removed} event file${removed === 1 ? '' : 's'} ` +
-          `(${result.removedByAge} by age, ${result.removedBySize} by size); ` +
-          `reclaimed ${humanBytes(result.bytesReclaimed)}.`,
-        );
-      } else {
-        console.log(chalk.gray(`No event files removed (retention ${days} days, ceiling ${maxMb} MiB).`));
-      }
-    });
+    .option('--json', 'Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events }')
+    .action((id: string | undefined, _opts: LogsOptions, command: Command) =>
+      runLogs(id, command.optsWithGlobals() as LogsOptions));
 }

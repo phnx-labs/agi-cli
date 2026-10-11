@@ -6,8 +6,7 @@ import chalk from 'chalk';
 import { expandLocalHome } from './project-root.js';
 import { type ProjectRepoTarget } from './projects.js';
 import { type RemoteAgentsJsonParseResult } from './remote-agents-json.js';
-import { getRepoCommit, getRemoteUrl, pullRepo } from './git.js';
-import { parseOwnerRepoFromRemote } from './registry.js';
+import { getRepoCommit, getRemoteUrl, parseOwnerRepoFromRemote, pullRepo } from './git.js';
 import { machineId } from './machine-id.js';
 
 

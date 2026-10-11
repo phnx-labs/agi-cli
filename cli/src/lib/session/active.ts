@@ -16,7 +16,6 @@ import {
   listPidSessionEntries,
   prunePidSessionRegistry,
   sessionIdFromLivePid,
-  isSessionIdShape,
   type PidSessionEntry,
 } from './pid-registry.js';
 import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
@@ -1560,23 +1559,6 @@ export async function describeActiveDiscoveryHealth(): Promise<ActiveDiscoveryHe
     if (err instanceof TmuxDiscoveryDegradedError) degradedSources.push('tmux');
   }
   return { degradedSources };
-}
-
-export async function isSessionIdLiveOnProcessTable(
-  sessionId: string,
-  deps: {
-    readTable?: () => Promise<Array<{ pid: number; kind?: string }>>;
-    sessionIdOf?: (pid: number) => string | undefined;
-  } = {},
-): Promise<boolean> {
-  if (!isSessionIdShape(sessionId)) return false;
-  const readTable = deps.readTable ?? (async () => readProcessTable());
-  const sessionIdOf = deps.sessionIdOf ?? sessionIdFromLivePid;
-  for (const row of await readTable()) {
-    if (!row.kind) continue;
-    if (sessionIdOf(row.pid) === sessionId) return true;
-  }
-  return false;
 }
 
 export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {

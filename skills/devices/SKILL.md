@@ -2,7 +2,7 @@
 name: devices
 description: "Register and connect to your machines over Tailscale SSH with agents-cli. Use this skill to sync devices from the tailnet, list them, open a shell on another machine, or see agent sessions running across your whole fleet."
 argument-hint: "[sync|list|show|add|set|ssh|update|run|fleet]"
-allowed-tools: Bash(agents devices*), Bash(agents fleet*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents logs*)
+allowed-tools: Bash(agents devices*), Bash(agents fleet*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents events*)
 user-invocable: true
 ---
 
@@ -119,7 +119,7 @@ agents hosts logs --device gpu-box   # pick a run on that host
 agents hosts logs <id> -f        # follow a host-task log
 ```
 
-`agents hosts logs <id>` shows host-dispatch output; `agents events` (alias `agents logs`) is the timeline.
+`agents hosts logs <id>` shows host-dispatch output; `agents events logs --device <name>` picks a run dispatched there; `agents events` is the timeline.
 local session by id, filters with `--device`/`--agent`/`--version`, and `-f`
 follows a live one. `agents hosts logs <id>` is the host-only equivalent.
 `agents hosts stop <id>` SIGTERMs the remote process group from this machine and

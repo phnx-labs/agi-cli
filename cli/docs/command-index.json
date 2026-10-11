@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 61,
-  "commands": 486,
+  "groups": 48,
+  "commands": 425,
   "root": {
     "name": "agents",
     "path": "",
@@ -455,7 +455,7 @@
             }
           ],
           "examples": "agents accounts migrate --dry-run\nagents accounts migrate --apply\nagents accounts migrate --dry-run --device worker-1",
-          "notes": "Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.",
+          "notes": "Folds leftover per-account installations (the old connect homes) into one managed install plus a HOME-shaped slot per identity. Empty logged-out homes and duplicate identities go to trash (agents prune trash restore reverses). A busy home is deferred, never moved. --apply is required to write; this upgrade only prints the dry-run report. Native OAuth files stay on this device inside the moved home.",
           "subcommands": []
         },
         {
@@ -2573,8 +2573,8 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Host a signed webhook receiver here, supervised and restarted on crash\nagents daemon webhooks add --secrets-bundle linear-webhook\nagents daemon webhooks list\n\n# Manage public ingress for daemon-world webhook receivers\nagents daemon funnel status yosemite-s0\nagents daemon funnel up yosemite-s0 --local-port 8787 --port 443\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# Trace every service tick and slow section while diagnosing (applies live)\nagents daemon logs level debug\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
-      "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\nalways. Use 'agents routines stats' for per-routine failure detail.\n\n'disable' is a persisted kill switch: it stops routines/add,\nroutines/start, routines/catchup, and webhook triggers from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. The inline scheduler re-evaluates its toggle on every reload as\nwell. A boot-disabled service other than webhook-receiver still needs\nan operator 'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
+      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# Trace every service tick and slow section while diagnosing (applies live)\nagents daemon logs level debug\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
+      "notes": "There is no 'agents daemon jobs' — scheduled work is 'agents routines',\nalways. Use 'agents routines stats' for per-routine failure detail.\n\n'disable' is a persisted kill switch: it stops routines/add,\nroutines/start, and routines/catchup from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. The inline scheduler re-evaluates its toggle on every reload as\nwell. Any other boot-disabled service still needs an operator\n'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
       "subcommands": [
         {
           "name": "disable",
@@ -2644,137 +2644,6 @@
             }
           ],
           "subcommands": []
-        },
-        {
-          "name": "funnel",
-          "path": "daemon funnel",
-          "aliases": [],
-          "description": "Manage Tailscale Funnel exposure for a fleet webhook receiver.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": [
-            {
-              "name": "down",
-              "path": "daemon funnel down",
-              "aliases": [],
-              "description": "Disable Tailscale Funnel exposure for a public HTTPS port.",
-              "args": [
-                {
-                  "name": "host",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--port <n>",
-                  "description": "Public Funnel port: 443, 8443, or 10000",
-                  "long": "--port",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "443"
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "status",
-              "path": "daemon funnel status",
-              "aliases": [],
-              "description": "Show Tailscale Funnel status on a fleet host.",
-              "args": [
-                {
-                  "name": "host",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "up",
-              "path": "daemon funnel up",
-              "aliases": [],
-              "description": "Expose a localhost webhook receiver through Tailscale Funnel.",
-              "args": [
-                {
-                  "name": "host",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--local-port <n>",
-                  "description": "Local receiver port on the remote host",
-                  "long": "--local-port",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--port <n>",
-                  "description": "Public Funnel port: 443, 8443, or 10000",
-                  "long": "--port",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "443"
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
         },
         {
           "name": "index",
@@ -3301,7 +3170,7 @@
             }
           ],
           "examples": "# State, enabled, consecutive failures, last error for every service\nagents daemon services\n\n# Machine-readable — additive: also carries the pre-existing\n# secretsBroker (reachability-only probe, PHNX-3989)/browserIpc\n# hosted-socket fields\nagents daemon services --json\n\n# Just the enable/disable metadata, no health probe\nagents daemon services list\n\n# Toggle or restart live — no daemon restart for a supervisor-managed\n# service (account-state, session-index)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state",
-          "notes": "A service disabled at daemon boot is normally not registered on the\nsupervisor, so enabling it needs an operator restart. The inline\nscheduler applies enable/disable on reload; webhook-receiver still\nrequires 'agents daemon restart'. Each row in\nthe plain-text view names which case it is; 'supervised: true/false' does\nthe same in --json.",
+          "notes": "A service disabled at daemon boot is normally not registered on the\nsupervisor, so enabling it needs an operator restart. The inline\nscheduler applies enable/disable on reload. Each row in\nthe plain-text view names which case it is; 'supervised: true/false' does\nthe same in --json.",
           "subcommands": [
             {
               "name": "disable",
@@ -3492,151 +3361,6 @@
             }
           ],
           "subcommands": []
-        },
-        {
-          "name": "webhooks",
-          "path": "daemon webhooks",
-          "aliases": [],
-          "description": "Signed webhook receivers this box hosts as a supervised daemon service.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# What this box hosts today\nagents daemon webhooks list\n\n# Host a receiver on the default port, signing secrets from a bundle\nagents daemon webhooks add --secrets-bundle linear-webhook\n\n# A second receiver on its own port, publicly exposed via Tailscale Funnel\nagents daemon webhooks add --secrets-bundle gh-webhook --port 8788 --funnel-port 443\n\n# Apply the change (the running daemon rebinds on restart)\nagents daemon restart\n\n# Stop hosting the receiver bound to a port\nagents daemon webhooks remove 8788",
-          "notes": "The bundle must hold GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET\n('agents secrets add <bundle> LINEAR_WEBHOOK_SECRET'). The daemon reads it\nheadlessly through the standalone 'secrets' CLI, so a hosted receiver needs\nno AGENTS_SECRETS_PASSPHRASE and no nohup. A LOCKED bundle fails that receiver\nloud in 'agents daemon logs' rather than binding unverified ingress.\n\nPort is the identity: a second 'add' on the same port edits that receiver.\nFunnel ports are limited by Tailscale to 443, 8443, and 10000.",
-          "subcommands": [
-            {
-              "name": "add",
-              "path": "daemon webhooks add",
-              "aliases": [],
-              "description": "Declare a receiver on this box. Replaces any receiver already on the same port.",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--secrets-bundle <name>",
-                  "description": "agents secrets bundle holding GITHUB_WEBHOOK_SECRET and/or LINEAR_WEBHOOK_SECRET",
-                  "long": "--secrets-bundle",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-p, --port <n>",
-                  "description": "Local bind port (default 8787)",
-                  "short": "-p",
-                  "long": "--port",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--rate-limit <n>",
-                  "description": "Accepted deliveries per source per minute (default 60)",
-                  "long": "--rate-limit",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "--funnel-port <n>",
-                  "description": "Expose publicly on this Tailscale Funnel port (443 | 8443 | 10000)",
-                  "long": "--funnel-port",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "list",
-              "path": "daemon webhooks list",
-              "aliases": [],
-              "description": "List the receivers declared for this box.",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--json",
-                  "description": "Emit as JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "remove",
-              "path": "daemon webhooks remove",
-              "aliases": [],
-              "description": "Stop hosting the receiver bound to this port.",
-              "args": [
-                {
-                  "name": "port",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            }
-          ]
         }
       ]
     },
@@ -4587,7 +4311,7 @@
           "name": "ps",
           "path": "devices ps",
           "aliases": [],
-          "description": "List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.",
+          "description": "List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents events logs <id>`.",
           "args": [],
           "options": [
             {
@@ -5739,6 +5463,99 @@
           ],
           "examples": "# 1. Produce one JSON object per line (this is the whole input format).\nprintf '%s\\n' '{\"event\":\"factory.command\",\"commandId\":\"agents.newClaude\"}' \\\n  | agents events emit --source factory\n\n# 2. Flush a batch and check what landed.\nagents events emit --source factory --json < batch.jsonl\n\n# 3. Read it back. --limit 0 matters whenever you aggregate.\nagents events --module factory --limit 0 --json",
           "notes": "`event` is required and must be a known kind. `ts` (ISO-8601) is optional\nand defaults to now — pass it so a batched producer records when each event\nHAPPENED rather than when it flushed.\n\nEnvelope keys: ts, sessionId, mailboxId, terminalId, launchId, tmuxPane,\nhost, runtime, agent, tool, detail, url, project, cwd. Any other key is\npayload and passes through the usual redaction.\n\nA milestone kind (e.g. factory.launch) REQUIRES a sessionId — the activity\nlog is one file per session. Milestones route there; everything else goes\nto the operational log. `agents events` reads both.\n\nRejection is per line: one bad line never discards the batch. Exit is 1 if\nany line was rejected.",
+          "subcommands": []
+        },
+        {
+          "name": "logs",
+          "path": "events logs",
+          "aliases": [],
+          "description": "Show the log of a dispatched run or a session",
+          "args": [
+            {
+              "name": "id",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--device <name>",
+              "description": "Scope to runs dispatched to a device",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-a, --agent <agent>",
+              "description": "Filter by agent (e.g. claude, codex@0.116.0)",
+              "short": "-a",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--version <version>",
+              "description": "Filter by agent version",
+              "long": "--version",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--session <id>",
+              "description": "Select a session/run by id (same as the positional id)",
+              "long": "--session",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-f, --follow",
+              "description": "Follow live output",
+              "short": "-f",
+              "long": "--follow",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-m, --full",
+              "description": "Show the full raw transcript / stdout instead of the concise summary",
+              "short": "-m",
+              "long": "--full",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events }",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         },
         {
@@ -8041,539 +7858,6 @@
       "subcommands": []
     },
     {
-      "name": "install",
-      "path": "install",
-      "aliases": [],
-      "description": "Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)",
-      "args": [
-        {
-          "name": "identifier",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-a, --agents <list>",
-          "description": "Targets: claude, codex@0.116.0, or cursor@default",
-          "short": "-a",
-          "long": "--agents",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--types <list>",
-          "description": "When source is a repo: comma-separated resource types to install (skills,workflows,commands,hooks,permissions,subagents,mcp)",
-          "long": "--types",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--names <list>",
-          "description": "When source is a repo: comma-separated resource names within the selected types",
-          "long": "--names",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-y, --yes",
-          "description": "Auto-install any missing agent versions without prompting",
-          "short": "-y",
-          "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--allow-exec-surfaces",
-          "description": "With plugin: allow plugins that ship hooks/mcp/bin (same as agents plugins install)",
-          "long": "--allow-exec-surfaces",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "logs",
-      "path": "logs",
-      "aliases": [],
-      "description": "Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.",
-      "args": [
-        {
-          "name": "id",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--device <name>",
-          "description": "Scope to runs dispatched to a device",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-a, --agent <agent>",
-          "description": "Filter by agent (e.g. claude, codex@0.116.0)",
-          "short": "-a",
-          "long": "--agent",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--version <version>",
-          "description": "Filter by agent version",
-          "long": "--version",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--session <id>",
-          "description": "Select a session/run by id (same as the positional id)",
-          "long": "--session",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-f, --follow",
-          "description": "Follow live output",
-          "short": "-f",
-          "long": "--follow",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-m, --full",
-          "description": "Show the full raw transcript / stdout instead of the concise summary",
-          "short": "-m",
-          "long": "--full",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Machine-readable JSON: a host task as { kind, task, log }, a session as the redacted { session, events } (same shape as `sessions <id> --json`)",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "audit",
-          "path": "logs audit",
-          "aliases": [],
-          "description": "Alias for `agents events audit`",
-          "args": [],
-          "options": [
-            {
-              "flags": "--include <families>",
-              "description": "Only these families (comma-sep): ops, activity, commands, runs, security",
-              "long": "--include",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--exclude <families>",
-              "description": "Drop these families (comma-sep): ops, activity, commands, runs, security",
-              "long": "--exclude",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--module <name>",
-              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
-              "long": "--module",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--command <path>",
-              "description": "Only this command path — prefix match (e.g. \"teams create\")",
-              "long": "--command",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--event <type>",
-              "description": "Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)",
-              "long": "--event",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": []
-            },
-            {
-              "flags": "--agent <name>",
-              "description": "Only events tagged with this agent",
-              "long": "--agent",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--caller <kind>",
-              "description": "Only this caller kind (claude-code, codex, cursor, terminal, script)",
-              "long": "--caller",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--level <level>",
-              "description": "Only this level: audit, warn, info, debug",
-              "long": "--level",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--session <id>",
-              "description": "Only events from this session (the provenance sessionId) — e.g. trace which session read a secret",
-              "long": "--session",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bundle <name>",
-              "description": "Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--since <time>",
-              "description": "Only events newer than this (e.g. 2h, 7d, or ISO date)",
-              "long": "--since",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--limit <n>",
-              "description": "Max records to show; 0 for no cap (default 50)",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "50"
-            },
-            {
-              "flags": "--json",
-              "description": "Output raw records as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-f, --follow",
-              "description": "Tail today's operational log live",
-              "short": "-f",
-              "long": "--follow",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rotate",
-          "path": "logs rotate",
-          "aliases": [],
-          "description": "Apply event retention and the storage ceiling immediately",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Retention period in days (default 7)",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--max-mb <n>",
-              "description": "Total event storage ceiling in MiB (default 50)",
-              "long": "--max-mb",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "50"
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "stats",
-          "path": "logs stats",
-          "aliases": [],
-          "description": "Show aggregate audit statistics",
-          "args": [],
-          "options": [
-            {
-              "flags": "--since <time>",
-              "description": "Window size (e.g. 7d, 30d; default 7d)",
-              "long": "--since",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output stats as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "mailboxes",
-      "path": "mailboxes",
-      "aliases": [
-        "mailbox"
-      ],
-      "description": "Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool",
-      "args": [
-        {
-          "name": "id",
-          "required": false,
-          "variadic": false,
-          "description": "A mailbox id (session UUID / teams agentId) to inspect in full"
-        }
-      ],
-      "options": [
-        {
-          "flags": "--json",
-          "description": "Output as JSON (NDJSON stream with --watch)",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-n, --limit <n>",
-          "description": "Max recent messages in the overview log",
-          "short": "-n",
-          "long": "--limit",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "20"
-        },
-        {
-          "flags": "-f, --watch",
-          "description": "Live tail: stream new cross-box messages until Ctrl-C",
-          "short": "-f",
-          "long": "--watch",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--between <boxes...>",
-          "description": "Thread view: every message between two boxes (id or label), either direction",
-          "long": "--between",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--from <agent>",
-          "description": "Only messages whose sender contains <agent>",
-          "long": "--from",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--to <agent>",
-          "description": "Only messages to boxes whose id or label contains <agent>",
-          "long": "--to",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--since <dur>",
-          "description": "Only messages newer than <dur> (30s/5m/2h/7d or ISO date); with --watch, backfills the window",
-          "long": "--since",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--graph",
-          "description": "Who-talks-to-whom adjacency, busiest first",
-          "long": "--graph",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "prune",
-          "path": "mailboxes prune",
-          "aliases": [
-            "gc"
-          ],
-          "description": "Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit the GC result as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# One-shot sweep using the live session set as the liveness source\nagents mailboxes prune\n\n# Machine-readable summary (for scripts)\nagents mailboxes prune --json",
-          "notes": "A box is considered dead when no live session (the same source\n`agents sessions --active` uses) owns it. Pending messages in dead boxes\nare archived as `dropped: dead`; expired messages in live boxes are\narchived as `dropped: expired'. Both surfaces a failure receipt back to\nthe feed store when the message carried a blockId.",
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "mcp",
       "path": "mcp",
       "aliases": [],
@@ -9004,309 +8288,6 @@
       ]
     },
     {
-      "name": "menubar",
-      "path": "menubar",
-      "aliases": [],
-      "description": "Manage AGI Menu (running sessions, agents awaiting input, routines)",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "disable",
-          "path": "menubar disable",
-          "aliases": [],
-          "description": "Stop and remove AGI Menu (stays off across upgrades)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "doctor",
-          "path": "menubar doctor",
-          "aliases": [],
-          "description": "Diagnose AGI Menu: install path, version skew, signing identity, stale process",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Why did Accessibility ask again after an update?\nagents menubar doctor",
-          "notes": "Read-only — never installs, restarts, or resets anything. Reports the\ninstalled bundle's signing identity (ad-hoc signing breaks the\nAccessibility grant on every update; Developer ID is stable across\nupdates) and whether a live helper pid started before the on-disk\nbundle's last write — the sign that a running process is still the\nbinary an update just replaced. `agents menubar setup` is the fix for\nanything this flags.",
-          "subcommands": []
-        },
-        {
-          "name": "enable",
-          "path": "menubar enable",
-          "aliases": [],
-          "description": "Install and start AGI Menu (launches at login)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "restart",
-          "path": "menubar restart",
-          "aliases": [],
-          "description": "Restart the running AGI Menu through its login item",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable restart result",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents menubar restart\nagents menubar restart --json",
-          "notes": "Restarts AGI Menu with launchctl kickstart -k and waits up to 15 seconds\nfor exactly one new process. The kickstart runs in its own session, so\nthe restart completes even when AGI Menu itself requested it. A turned-off\nAGI Menu is refused rather than started; `agents menubar setup` turns it on.",
-          "subcommands": []
-        },
-        {
-          "name": "setup",
-          "path": "menubar setup",
-          "aliases": [],
-          "description": "Configure AGI Menu end-to-end: one instance, started at login",
-          "args": [],
-          "options": [
-            {
-              "flags": "--check",
-              "description": "Report the current state, change nothing",
-              "long": "--check",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Configure AGI Menu end-to-end (idempotent — safe to re-run)\nagents menubar setup\n\n# Two agents marks in the menu bar? This ends the duplicate.\nagents menubar setup\n\n# See the current state without changing anything\nagents menubar setup --check",
-          "notes": "Configures, in order: every running helper ended, AGI Menu at\n~/Library/Application Support/agents-cli/MenubarHelper.app, its code\nsignature, the launchd login item (com.phnx-labs.agents-menubar —\nRunAtLoad, relaunched after a crash but not after Quit), then verifies\nexactly one helper came back up.\n\nEvery running helper is ended and launchd restarts one, so the survivor is\nalways the login-managed copy. Exits nonzero if it cannot reach that state.\n\nSetup clears a previous `agents menubar disable`. To turn AGI Menu off\nagain, run `agents menubar disable`.",
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "menubar status",
-          "aliases": [],
-          "description": "Show whether AGI Menu is installed and running",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "update",
-          "path": "menubar update",
-          "aliases": [],
-          "description": "Check for or install the newest AGI Menu release",
-          "args": [],
-          "options": [
-            {
-              "flags": "--check",
-              "description": "Check only; do not download, install, or restart the app",
-              "long": "--check",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable update status",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents menubar update --check --json\nagents menubar update --json\nagents config set menubar.autoUpdate false",
-          "notes": "Checks and updates only AGI Menu, independently of agents-cli.\nAutomatic updates default on and check about every 12 hours while awake.\nManual updates work with automatic updates off. JSON reports lookup and\ninstallation errors; a successful install hands off a bounded app restart\nafter this command exits. Check-only never installs or restarts the app.",
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "message",
-      "path": "message",
-      "aliases": [],
-      "description": "Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).",
-      "args": [
-        {
-          "name": "target",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        },
-        {
-          "name": "text",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--from <who>",
-          "description": "Label recorded as the sender of this message",
-          "long": "--from",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--as <operator>",
-          "description": "Verified operator id answering a high-consequence block",
-          "long": "--as",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--surface <surface>",
-          "description": "Surface that is sending this answer (feed, terminal, etc.)",
-          "long": "--surface",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "cli"
-        },
-        {
-          "flags": "--ttl <dur>",
-          "description": "Delivery TTL if the message is not consumed (e.g. 30m, 1h, 24h); 0 disables expiry",
-          "long": "--ttl",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "notes": "Planes (do not mix them up):\n  message / sessions inject  - CONTROL a running agent (mailbox answer, terminal keystroke, or resume by runtime)\n  send                       - DELIVER a message to a human recipient over a channel provider\n  feed post                  - RECORD progress / milestones (optional broadcast may call send)\n\n<text> here is consumed BY THE TARGET AGENT (an answer, a keystroke, or the\nargument to a resume) -- it is not a notification a person reads on their\nphone. To reach the operator instead, use `agents send --to owner`\n(or a feed.broadcast `channel:` sink).",
-      "subcommands": []
-    },
-    {
       "name": "models",
       "path": "models",
       "aliases": [],
@@ -9527,94 +8508,6 @@
               "subcommands": []
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "packages",
-      "path": "packages",
-      "aliases": [],
-      "description": "Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Materialize a package into an ephemeral Claude home\nagents packages materialize ./reviewer --harness claude --harness-version 2.1.0 --output-home /tmp/reviewer-claude\n\n# Machine-readable receipt for Factory / Prix Cloud\nagents packages materialize ./reviewer --harness codex --harness-version 0.42.0 --output-home \"$OUTPUT_HOME\" --json\n\n# OpenCode worker on a Factory box\nagents packages materialize ./reviewer --harness opencode --harness-version 1.0.0 --output-home \"$OUTPUT_HOME\" --json",
-      "notes": "Materialize writes only under --output-home. It never mutates ~/.claude,\n~/.codex, or ~/.opencode, never copies secrets, and never execs a harness.\n\nFactory usage: point --output-home at the worker's ephemeral home and pass\n--json so the orchestrator can read the receipt (agent ref + digest,\nharness, per-resource targets, warnings).",
-      "subcommands": [
-        {
-          "name": "materialize",
-          "path": "packages materialize",
-          "aliases": [],
-          "description": "Materialize a schema-v3 agent.yaml package into an ephemeral Claude, Codex, or OpenCode home",
-          "args": [
-            {
-              "name": "package",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--harness <id>",
-              "description": "Target harness: claude, codex, opencode",
-              "long": "--harness",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--harness-version <version>",
-              "description": "Exact harness version to gate capabilities and stamp on the receipt (not --version: that is the CLI version flag)",
-              "long": "--harness-version",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--output-home <dir>",
-              "description": "Ephemeral home to write into (must not escape or target the live user home)",
-              "long": "--output-home",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit the materialization receipt as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents packages materialize ./reviewer --harness claude --harness-version 2.1.0 --output-home /tmp/reviewer-claude\nagents packages materialize ./reviewer --harness codex --harness-version 0.42.0 --output-home \"$OUTPUT_HOME\" --json\nagents packages materialize ./reviewer --harness opencode --harness-version 1.0.0 --output-home \"$OUTPUT_HOME\" --json",
-          "notes": "Factory / Prix Cloud: materialize into the worker's ephemeral home, then\nexec the harness with HOME=$OUTPUT_HOME. The --json receipt is the handoff.\n\nSupported harnesses: claude, codex, opencode. Any other id fails as an\nunsupported capability. A package must be a directory containing agent.yaml\nwith schema_version: 3 and an execution block declaring the harness.",
-          "subcommands": []
         }
       ]
     },
@@ -11691,6 +10584,122 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "trash",
+          "path": "prune trash",
+          "aliases": [],
+          "description": "Inspect, restore, and empty soft-deleted agent versions and resources",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "empty",
+              "path": "prune trash empty",
+              "aliases": [],
+              "description": "Permanently delete trashed items, optionally only those trashed before a cutoff",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--older-than <duration>",
+                  "description": "only items trashed at least this long ago (e.g. 30d, 12h)",
+                  "long": "--older-than",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-y, --yes",
+                  "description": "skip the confirmation prompt",
+                  "short": "-y",
+                  "long": "--yes",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents prune trash list\nagents prune trash empty --older-than 30d\nagents prune trash empty --yes",
+              "notes": "Removes items from ~/.agents/.history/trash for good; they cannot be\nrestored afterwards. An item's age is the time it was moved to trash.\nWithout --yes, a terminal asks first and a non-interactive shell refuses.",
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "prune trash list",
+              "aliases": [],
+              "description": "List soft-deleted version directories (optionally filtered to one agent)",
+              "args": [
+                {
+                  "name": "agent",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "restore",
+              "path": "prune trash restore",
+              "aliases": [],
+              "description": "Restore the newest soft-deleted copy of an agent version (e.g. \"codex@0.141.0\")",
+              "args": [
+                {
+                  "name": "target",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         }
       ]
     },
@@ -12573,255 +11582,6 @@
       ]
     },
     {
-      "name": "registry",
-      "path": "registry",
-      "aliases": [],
-      "description": "Manage package registries",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "registry add",
-          "aliases": [],
-          "description": "Add a registry (type: mcp or skill)",
-          "args": [
-            {
-              "name": "type",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "url",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--api-key <key>",
-              "description": "API key for authentication",
-              "long": "--api-key",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "config",
-          "path": "registry config",
-          "aliases": [],
-          "description": "Configure a registry",
-          "args": [
-            {
-              "name": "type",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--api-key <key>",
-              "description": "Set API key",
-              "long": "--api-key",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--url <url>",
-              "description": "Update URL",
-              "long": "--url",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "disable",
-          "path": "registry disable",
-          "aliases": [],
-          "description": "Disable a registry",
-          "args": [
-            {
-              "name": "type",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "enable",
-          "path": "registry enable",
-          "aliases": [],
-          "description": "Enable a registry",
-          "args": [
-            {
-              "name": "type",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "registry list",
-          "aliases": [],
-          "description": "List configured registries",
-          "args": [],
-          "options": [
-            {
-              "flags": "-t, --type <type>",
-              "description": "Filter by type: mcp or skill",
-              "short": "-t",
-              "long": "--type",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "registry remove",
-          "aliases": [],
-          "description": "Remove a registry",
-          "args": [
-            {
-              "name": "type",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "repos",
       "path": "repos",
       "aliases": [
@@ -13245,337 +12005,6 @@
             {
               "flags": "--json",
               "description": "machine-readable JSON output",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "route",
-      "path": "route",
-      "aliases": [
-        "routes"
-      ],
-      "description": "Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Create a router scoped to two harnesses, capped at a tier\nagents route add research --harness grok,kimi --tier cheap,default\n\n# Narrow one harness's model set\nagents route allow research kimi kimi-k2\n\n# Link accounts so routing under this router only ever picks them\nagents route link-account research grok personal\nagents route link-account research kimi work\n\n# Inspect, rename, remove it\nagents route view research\nagents route rename research deep-research\nagents route list --json",
-      "notes": "A router is a generalization of a profile -- a profile is a router\npinned to one harness and one account. It never resolves a target\noutside its declared harness/model/tier allowlist or linked accounts.\n\nRouters are a layered resource (project > user > system, like commands,\nskills, and profiles) but 'agents route add'/'allow'/'link-account'\nalways write to the user layer (~/.agents/routers/<name>.yml).\n\nThe older verb names still work as aliases: 'create' for 'add',\n'show' for 'view'.",
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "route add",
-          "aliases": [
-            "create"
-          ],
-          "description": "Create a named router with an initial harness + tier allowlist.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--harness <list>",
-              "description": "Comma-separated harness ids to allow, e.g. grok,kimi",
-              "long": "--harness",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--tier <list>",
-              "description": "Comma-separated tier tokens applied to every listed harness, e.g. cheap,default",
-              "long": "--tier",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--task <type>",
-              "description": "Free-text task type this router serves, e.g. research",
-              "long": "--task",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "allow",
-          "path": "route allow",
-          "aliases": [],
-          "description": "Set (replace) a harness's eligible model/tier allowlist under a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "models",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "link-account",
-          "path": "route link-account",
-          "aliases": [],
-          "description": "Link a durable credential account to a harness under a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "account",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "route list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List every configured router.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "route remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Remove a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rename",
-          "path": "route rename",
-          "aliases": [
-            "mv"
-          ],
-          "description": "Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.",
-          "args": [
-            {
-              "name": "old-name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "new-name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "unlink-account",
-          "path": "route unlink-account",
-          "aliases": [],
-          "description": "Unlink a durable credential account from a harness under a router.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "harness",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "account",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "view",
-          "path": "route view",
-          "aliases": [
-            "show"
-          ],
-          "description": "Show a router's harness/model/account allowlist, weights, and hijack flag.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit machine-readable JSON",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -16126,15 +14555,6 @@
           "negate": false
         },
         {
-          "flags": "--no-trace-sync",
-          "description": "Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).",
-          "long": "--no-trace-sync",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
           "flags": "--terminal [backend]",
           "description": "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
           "long": "--terminal",
@@ -16497,64 +14917,6 @@
       "subcommands": []
     },
     {
-      "name": "search",
-      "path": "search",
-      "aliases": [],
-      "description": "Find packages (MCP servers, skills) across configured registries",
-      "args": [
-        {
-          "name": "query",
-          "required": true,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-t, --type <type>",
-          "description": "Limit to mcp or skill packages",
-          "short": "-t",
-          "long": "--type",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-r, --registry <name>",
-          "description": "Search only this registry",
-          "short": "-r",
-          "long": "--registry",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-l, --limit <n>",
-          "description": "Max results to show",
-          "short": "-l",
-          "long": "--limit",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "20"
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
       "name": "secrets",
       "path": "secrets",
       "aliases": [],
@@ -16715,7 +15077,7 @@
         }
       ],
       "examples": "# Flag-first envelope (preferred)\nagents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\nagents send --to owner --text \"need a decision on the release\"\nagents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\nagents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n# Type into a running agent's terminal (find ids with: agents ps)\nagents send --channel session --to 4b2f1a9c --text \"continue\"\nagents send --channel session --to 4b2f1a9c --text \"continue\" --device yosemite-s0\n\n# Type into a known tmux pane, without pressing Enter\nagents send --channel session --pane %3 --socket /tmp/agents/tmux.sock --text \"draft\" --no-enter\n\n# Attach a local file (explicit channels only)\nagents send --channel slack --to \"#eng\" --text \"screenshot\" --attach ./out/cover.png\n\n# Legacy positional text still works\nagents send \"hi\" --channel desktop --to local\n\n# Dry-run (resolve provider, no delivery)\nagents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  message           - CONTROL a running agent through its mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner posts one notification to your account (agents auth login). The\naccount's preferences, edited in the console Settings page, decide which of\nemail, Slack and iMessage it reaches; quiet hours and dedup apply there. A box\nwith no Phoenix session or worker device token fails loud instead. --to owner\ntakes no --channel, --thread or --attach.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
+      "notes": "Planes (do not mix them up):\n  send              - DELIVER a message to a recipient (this command)\n  feed post         - RECORD progress / milestones (optional broadcast may call send)\n  activity          - READ the activity stream (not a send path)\n  send --channel mailbox - queue a message in a running agent's mailbox\n  send --channel session - type text + Enter into a running agent's terminal\n\n--to owner posts one notification to your account (agents auth login). The\naccount's preferences, edited in the console Settings page, decide which of\nemail, Slack and iMessage it reaches; quiet hours and dedup apply there. A box\nwith no Phoenix session or worker device token fails loud instead. --to owner\ntakes no --channel, --thread or --attach.\n\n--channel session resolves --to (a session id or unique prefix, the\n<shortid> of an ag-<agent>-<shortid> tmux name, or a %pane id) among the\nlive sessions on this machine; add --device <name> for a session on\nanother box. --attach, --thread and --from are refused on this channel.\n--device runs the whole send on that box, for every channel, not just session.\n\nThe session channel types the text exactly as given: surrounding spaces and\nnewlines are kept, and --text \"\" presses Enter alone. By default the text\nand Enter are two writes (what Ink TUIs such as Claude need); --combined\nfuses them, --no-enter types without submitting. --pane (with an optional\n--socket) addresses a tmux pane directly, without session lookup, and\nreplaces --to. These four options are refused on every other channel.",
       "subcommands": []
     },
     {
@@ -22319,595 +20681,6 @@
       ]
     },
     {
-      "name": "tmux",
-      "path": "tmux",
-      "aliases": [],
-      "description": "Persistent terminal-multiplexer sessions for agents. Survive editor restarts, share with other tools.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Verify tmux is installed\nagents tmux check\n\n# Start a detached agent session\nagents tmux new claude-debug --cmd \"agents run claude\" --cwd ~/code/myrepo\n\n# Attach (replaces this shell with the tmux client)\nagents tmux attach claude-debug\n\n# Inspect remotely without attaching\nagents tmux capture claude-debug --lines 200\n\n# Send a slash command from a script\nagents tmux send claude-debug \"/clear\"\n\n# Clean up one by name, or pick from a list that shows each pane's last lines\nagents tmux kill claude-debug\nagents tmux kill",
-      "notes": "Storage:\n  Shared server socket: ~/.agents/.cache/helpers/tmux/server.sock\n  Per-session meta:     ~/.agents/.cache/helpers/tmux/<name>.json\n\nSession names accept [A-Za-z0-9_-] up to 64 characters. tmux disallows\n'.' and ':' in names since those address windows and panes.\n\nExisting tmux sessions you started outside of agents-cli are NOT\nvisible here unless you point them at the same socket via --socket.",
-      "subcommands": [
-        {
-          "name": "attach",
-          "path": "tmux attach",
-          "aliases": [],
-          "description": "Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d) or the agent exits (session is then torn down).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "capture",
-          "path": "tmux capture",
-          "aliases": [],
-          "description": "Print the contents of a pane. Target is \"name\" or \"name:pane\".",
-          "args": [
-            {
-              "name": "target",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-l, --lines <n>",
-              "description": "Include this many extra history lines above the visible screen",
-              "short": "-l",
-              "long": "--lines",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--ansi",
-              "description": "Keep ANSI escape codes (default strips them)",
-              "long": "--ansi",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# See current screen\nagents tmux capture team\n\n# Include the last 500 history lines\nagents tmux capture team --lines 500\n\n# Target a specific pane\nagents tmux capture team:%3",
-          "subcommands": []
-        },
-        {
-          "name": "check",
-          "path": "tmux check",
-          "aliases": [],
-          "description": "Check whether tmux is installed and report its version.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Output as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "has",
-          "path": "tmux has",
-          "aliases": [],
-          "description": "Exit 0 if a session with this name exists, 1 otherwise. Useful in shell scripts.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "info",
-          "path": "tmux info",
-          "aliases": [],
-          "description": "Show provenance for a session (cmd, cwd, created_at, source, labels).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Output as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "kill",
-          "path": "tmux kill",
-          "aliases": [],
-          "description": "Kill one tmux session, or pick from a list that shows each pane's last screen. Idempotent.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Kill by name\nagents tmux kill ag-claude-04a1307c\n\n# Pick from live panes — preview shows the last lines on screen\n# (trust-folder stall, weekly-limit dialog, real work)\nagents tmux kill",
-          "notes": "With no name, the picker captures each pane so you can tell a leaked\nfirst-run dialog from an agent that is still working. Space multi-selects;\nenter kills the checked rows (or the highlighted one if none are checked).\nCtrl-b d still keeps a live session; exiting the agent tears it down.",
-          "subcommands": []
-        },
-        {
-          "name": "kill-all",
-          "path": "tmux kill-all",
-          "aliases": [],
-          "description": "Kill every session on the shared server and remove the socket. Requires --yes.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--yes",
-              "description": "Confirm — required, no interactive prompt",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "tmux list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "List live tmux sessions on the shared server (name, age, last screen line). Prunes stale meta files as a side effect.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "new",
-          "path": "tmux new",
-          "aliases": [],
-          "description": "Start a detached tmux session running a command. The session persists until killed.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-c, --cmd <command>",
-              "description": "Command to launch in the first pane (sh -c). Omit for an empty shell.",
-              "short": "-c",
-              "long": "--cmd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-d, --cwd <dir>",
-              "description": "Working directory for the first pane",
-              "short": "-d",
-              "long": "--cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-w, --width <n>",
-              "description": "Initial window width in columns (tmux clamps to client size on attach)",
-              "short": "-w",
-              "long": "--width",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --height <n>",
-              "description": "Initial window height in rows",
-              "short": "-h",
-              "long": "--height",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-s, --source <source>",
-              "description": "Provenance label: cli|extension|teams|external",
-              "short": "-s",
-              "long": "--source",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "cli"
-            },
-            {
-              "flags": "--label <k=v...>",
-              "description": "Free-form labels (repeatable)",
-              "long": "--label",
-              "required": true,
-              "optional": false,
-              "variadic": true,
-              "negate": false,
-              "defaultValue": {}
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--replace",
-              "description": "Kill any existing session with the same name first",
-              "long": "--replace",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--attach-existing",
-              "description": "Return the existing session if one with this name already exists",
-              "long": "--attach-existing",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output session meta as JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--help",
-              "description": "Show help",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Detached agent session\nagents tmux new claude-debug --cmd \"agents run claude\"\n\n# Reuse the session if it already exists (idempotent)\nagents tmux new pair --cmd \"agents run claude\" --attach-existing\n\n# Replace a stale session\nagents tmux new pair --cmd \"agents run claude\" --replace",
-          "subcommands": []
-        },
-        {
-          "name": "send",
-          "path": "tmux send",
-          "aliases": [],
-          "description": "Send keystrokes to a session. Target is \"name\" or \"name:pane\" (e.g. team:%2 or team:1).",
-          "args": [
-            {
-              "name": "target",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "keys",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--no-enter",
-              "description": "Do not append Enter after the keys",
-              "long": "--no-enter",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--raw",
-              "description": "Send literally (-l) without tmux key-name interpretation (C-c, Enter, etc.)",
-              "long": "--raw",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Type a command into the session and press Enter\nagents tmux send team \"echo hello\"\n\n# Send Ctrl-C to interrupt\nagents tmux send team \"C-c\"\n\n# Send literal text (no key-name interpretation)\nagents tmux send team \"C-c\" --raw\n\n# Target a specific pane\nagents tmux send team:%2 \"ls -la\"",
-          "subcommands": []
-        },
-        {
-          "name": "split",
-          "path": "tmux split",
-          "aliases": [],
-          "description": "Split the active pane of a session. Direction: h (left/right) or v (top/bottom).",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "direction",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-c, --cmd <command>",
-              "description": "Command to launch in the new pane",
-              "short": "-c",
-              "long": "--cmd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-d, --cwd <dir>",
-              "description": "Working directory for the new pane",
-              "short": "-d",
-              "long": "--cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--socket <path>",
-              "description": "Use a custom socket (default: shared server)",
-              "long": "--socket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output as JSON (returns new pane id like %3)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Split horizontally (panes side-by-side) and start a second agent\nagents tmux split team h --cmd \"agents run codex\"\n\n# Split vertically (panes stacked) — empty shell\nagents tmux split team v",
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "trace",
       "path": "trace",
       "aliases": [],
@@ -23063,313 +20836,6 @@
       "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# What the agent said it was doing, step by step — the sidebar's timeline as text\nagents sessions trace a1b2c3d4 --steps\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents sessions trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents sessions trace a1b2c3d4 e5f6a7b8 --text\n\n# The team an orchestrator spawned, as a graph (one selector + --tree)\nagents sessions trace a1b2c3d4 --tree\n\n# The same lineage as an indented tree an agent can read\nagents sessions trace a1b2c3d4 --tree --text",
       "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff); one selector with --tree renders its lineage —\nthe session and every session it spawned, with the edges read from the teams records\n(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript\nand has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract\nconsumers read so nothing re-parses a transcript.\n\nLineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.\nThree or more selectors, and --tree with more than one selector, fail loud.",
       "subcommands": []
-    },
-    {
-      "name": "traces",
-      "path": "traces",
-      "aliases": [],
-      "description": "Sync this device's derived, redacted trajectories to your Phoenix account",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "open",
-          "path": "traces open",
-          "aliases": [],
-          "description": "Open the Phoenix Evals console",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "$ agents traces open\n  Open the Phoenix Evals console for your account.",
-          "subcommands": []
-        },
-        {
-          "name": "setup",
-          "path": "traces setup",
-          "aliases": [],
-          "description": "(advanced) Provision a self-hosted Cloudflare Worker + R2 bucket for traces — NOT required; `agents auth login` syncs to the managed endpoint with zero setup",
-          "args": [],
-          "options": [
-            {
-              "flags": "--bundle <name>",
-              "description": "secrets bundle holding the Cloudflare API token",
-              "long": "--bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "cloudflare"
-            },
-            {
-              "flags": "--worker <name>",
-              "description": "Worker name",
-              "long": "--worker",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "agents-traces"
-            },
-            {
-              "flags": "--bucket <name>",
-              "description": "R2 bucket name",
-              "long": "--bucket",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "agents-traces"
-            },
-            {
-              "flags": "--account <id>",
-              "description": "Cloudflare account id (else read from the bundle / prompt)",
-              "long": "--account",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--token <token>",
-              "description": "Cloudflare API token (else read from the --bundle)",
-              "long": "--token",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--domain <host>",
-              "description": "custom domain to map",
-              "long": "--domain",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "traces.agents-cli.sh"
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "$ agents traces setup\n  Provision the private agents-traces Worker, R2 bucket, and managed domain.\n\n  $ agents traces setup --account <id> --token <token>\n  Provision non-interactively with explicit Cloudflare credentials.",
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "traces status",
-          "aliases": [],
-          "description": "Show last sync time for this device",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "$ agents traces status\n  Show what's been synced — session count and last sync time for this device.",
-          "subcommands": []
-        },
-        {
-          "name": "sync",
-          "path": "traces sync",
-          "aliases": [],
-          "description": "Push derived, redacted trajectories (incremental)",
-          "args": [],
-          "options": [
-            {
-              "flags": "--limit <n>",
-              "description": "Maximum number of sessions to sync in this run",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--dry-run",
-              "description": "Compute the shards from real sessions.db and WRITE them locally (no auth, no upload)",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--out <dir>",
-              "description": "Directory to write index.json + sessions/<id>.json (required with --dry-run)",
-              "long": "--out",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "$ agents traces sync\n  Push this device's derived, redacted trajectories to your Phoenix account.\n\n  $ agents traces sync --limit 20\n  Sync at most 20 sessions (useful for a first run on a large fleet device).\n\n  $ agents traces sync --dry-run --out ./trace-preview\n  Compute the shards from your real sessions.db and WRITE them locally — no\n  Phoenix sign-in, no worker, no upload. Point a console at ./trace-preview to\n  see your real trajectories before wiring the hosted path.",
-          "notes": "Reads from the local sessions.db, computes a derived SessionTrajectory (steps +\n  gaps + stats, no raw transcript text), redacts secrets, and PUTs each to\n  the agents-traces store.\n\n  An incremental gate (traces-sync.json ledger) means re-runs only upload\n  sessions whose file_mtime_ms changed since the last sync.\n\n  On a real (non-dry-run) sync with the managed Phoenix backend, also\n  fire-and-forget registers this session with Prix (api.prix.dev) so the\n  console can serve live trajectories — a link failure never blocks sync.\n\n  Sign in first with: agents auth login",
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "trash",
-      "path": "trash",
-      "aliases": [],
-      "description": "Inspect, restore, and empty soft-deleted agent versions and resources",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "empty",
-          "path": "trash empty",
-          "aliases": [],
-          "description": "Permanently delete trashed items, optionally only those trashed before a cutoff",
-          "args": [],
-          "options": [
-            {
-              "flags": "--older-than <duration>",
-              "description": "only items trashed at least this long ago (e.g. 30d, 12h)",
-              "long": "--older-than",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-y, --yes",
-              "description": "skip the confirmation prompt",
-              "short": "-y",
-              "long": "--yes",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents trash list\nagents trash empty --older-than 30d\nagents trash empty --yes",
-          "notes": "Removes items from ~/.agents/.history/trash for good; they cannot be\nrestored afterwards. An item's age is the time it was moved to trash.\nWithout --yes, a terminal asks first and a non-interactive shell refuses.",
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "trash list",
-          "aliases": [],
-          "description": "List soft-deleted version directories (optionally filtered to one agent)",
-          "args": [
-            {
-              "name": "agent",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "restore",
-          "path": "trash restore",
-          "aliases": [],
-          "description": "Restore the newest soft-deleted copy of an agent version (e.g. \"codex@0.141.0\")",
-          "args": [
-            {
-              "name": "target",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "uninstall",
@@ -24152,87 +21618,6 @@
               "optional": false,
               "variadic": false,
               "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "webhooks",
-      "path": "webhooks",
-      "aliases": [],
-      "description": "Run a localhost signed webhook receiver for routine triggers.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "serve",
-          "path": "webhooks serve",
-          "aliases": [],
-          "description": "Receive signed GitHub/Linear/Slack webhooks on /hooks/<source> and fire matching routines and handlers.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--secrets-bundle <name>",
-              "description": "agents secrets bundle containing GITHUB_WEBHOOK_SECRET, LINEAR_WEBHOOK_SECRET, and/or SLACK_SIGNING_SECRET",
-              "long": "--secrets-bundle",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--bind <addr>",
-              "description": "Bind address (default 127.0.0.1)",
-              "long": "--bind",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "127.0.0.1"
-            },
-            {
-              "flags": "-p, --port <n>",
-              "description": "Local port (default 8787)",
-              "short": "-p",
-              "long": "--port",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "8787"
-            },
-            {
-              "flags": "--rate-limit <n>",
-              "description": "Accepted deliveries per source per minute",
-              "long": "--rate-limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "60"
             },
             {
               "flags": "-h, --help",

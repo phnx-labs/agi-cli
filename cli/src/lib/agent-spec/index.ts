@@ -7,11 +7,6 @@ import type { AgentTarget, ResolveOptions, VersionFilter } from './types.js';
 export * from './types.js';
 export * from './primitives.js';
 
-export * from './package-types.js';
-export { parseAgentPackageManifest, loadAgentPackageManifest } from './package-schema.js';
-export { resolveAgentPackage, effectiveResources } from './package-resolve.js';
-export { materializeAgentPackage, sha256OfReceiptFile } from './materialize.js';
-
 export const AGENT_SPEC_HELP =
   'Agent spec: <agent>[@<qualifier>]. Qualifiers: ' +
   '@latest (highest installed), @oldest (lowest installed), ' +

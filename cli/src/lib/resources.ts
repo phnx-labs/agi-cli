@@ -32,7 +32,6 @@ export type ResourceKind =
   | 'subagents'
   | 'workflows'
   | 'profiles'
-  | 'routers'
   | 'secrets';
 
 export interface ResolvedResource {

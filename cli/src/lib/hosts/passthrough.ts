@@ -77,19 +77,15 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   defaults: {},
   update: {},
   teams: {},
-  message: {},
-
   send: {},
   routines: {},
   jobs: {},
   cron: {},
   prune: {},
-  trash: {},
   restore: {},
   worktree: {},
   events: {},
   feedback: {},
-  tmux: {},
   watchdog: {},
   factory: {},
 };
@@ -107,7 +103,6 @@ export const OWN_HOST_COMMANDS = new Set([
   'browser',
   'secrets',
   'accounts',
-  'logs',
   'hosts',
   'ssh',
   'devices',
@@ -417,6 +412,8 @@ export async function maybeRunOnHost(
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
   if (command === 'daemon' && firstSubcommand(allArgs, 'daemon') === 'index') return false;
+
+  if (command === 'events' && firstSubcommand(allArgs, 'events') === 'logs') return false;
 
   if (command === 'teams') {
 

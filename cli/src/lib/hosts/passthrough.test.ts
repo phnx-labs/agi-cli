@@ -131,6 +131,10 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--device', 'mac'])).toBe(false);
   });
 
+  it('leaves `events logs --device` to the run-log viewer, which scopes runs by device', async () => {
+    expect(await maybeRunOnHost('events', ['events', 'logs', '--device', 'mac'])).toBe(false);
+  });
+
   it('leaves feed host lists to the command-level fleet aggregator', async () => {
     expect(await maybeRunOnHost('feed', ['feed', '--device', 'mac', '--json'])).toBe(false);
   });
@@ -175,11 +179,11 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
 
   it('short-circuits to a local run when --device names this machine (no SSH to itself)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'agents', 'message', 'abc', 'hi', '--device', 'mybox'];
-    expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device', 'mybox'])).toBe(false);
-    expect(process.argv).toEqual(['node', 'agents', 'message', 'abc', 'hi']);
-    process.argv = ['node', 'agents', 'message', 'abc', 'hi', '--device=mybox'];
-    expect(await maybeRunOnHost('message', ['message', 'abc', 'hi', '--device=mybox'])).toBe(false);
+    process.argv = ['node', 'agents', 'send', 'hi', '--device', 'mybox'];
+    expect(await maybeRunOnHost('send', ['send', 'hi', '--device', 'mybox'])).toBe(false);
+    expect(process.argv).toEqual(['node', 'agents', 'send', 'hi']);
+    process.argv = ['node', 'agents', 'send', 'hi', '--device=mybox'];
+    expect(await maybeRunOnHost('send', ['send', 'hi', '--device=mybox'])).toBe(false);
   });
 
   it('resolves `auto` to a local pick and runs locally, not a self-SSH (RUSH-2185)', async () => {
