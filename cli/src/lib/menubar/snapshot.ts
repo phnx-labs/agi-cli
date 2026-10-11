@@ -114,9 +114,6 @@ function effectiveMenuPreferences(): Array<[string, unknown]> {
   for (const name of MENUBAR_CONFIG_KEYS) {
     const entry = getConfigValue(name);
     let value = entry.value !== undefined ? entry.value : entry.spec.defaultValue;
-    // A menu that saved "Group by milestone" before ticketGroup existed keeps
-    // that grouping: an unset ticketGroup reads as milestone while the old
-    // switch is on (PHNX-4326).
     if (name === 'menubar.menu.ticketGroup' && entry.value === undefined
         && getConfigValue('menubar.menu.groupTicketsByMilestone').value === true) {
       value = 'milestone';
