@@ -26,10 +26,19 @@ export class SessionProjection {
     if (event.type === 'scope' || event.type === 'heartbeat') {
       return [{ ...event, ...stamp(), scope }];
     }
+    const runsIt = new Map<string, string>();
+    for (const [observer, rows] of this.observations) for (const row of rows.values()) {
+      if (row.sessionId && row.sessionFile && normalizeHost(row.machine || row.sourceDevice || observer) === observer) runsIt.set(`${row.kind}\0${row.sessionId}`, observer);
+    }
+    const ownerOf = (observer: string, row: SessionWatchRow): string => {
+      const own = normalizeHost(row.machine || row.sourceDevice || observer);
+      if (row.sessionFile || !row.terminalId || !row.sessionId) return own;
+      return runsIt.get(`${row.kind}\0${row.sessionId}`) ?? own;
+    };
     const launchSessions = new Map<string, Set<string>>();
     for (const [observer, rows] of this.observations) for (const row of rows.values()) {
       if (!row.launchId || !row.sessionId) continue;
-      const owner = normalizeHost(row.machine || row.sourceDevice || observer);
+      const owner = ownerOf(observer, row);
       const launch = `${owner}\0${row.kind}\0${row.launchId}`;
       const ids = launchSessions.get(launch) ?? new Set<string>();
       ids.add(row.sessionId);
@@ -37,7 +46,7 @@ export class SessionProjection {
     }
     const groups = new Map<string, { scope: string; row: SessionWatchRow }[]>();
     for (const [observer, rows] of this.observations) for (const row of rows.values()) {
-      const owner = normalizeHost(row.machine || row.sourceDevice || observer);
+      const owner = ownerOf(observer, row);
       const launchIds = row.launchId ? launchSessions.get(`${owner}\0${row.kind}\0${row.launchId}`) : undefined;
       const sessionId = row.sessionId || (launchIds?.size === 1 ? [...launchIds][0] : undefined);
       const identity = sessionId ? `${row.kind}\0${sessionId}` : `${observer}\0${row.rowKey}`;
@@ -49,7 +58,7 @@ export class SessionProjection {
     const next = new Map<string, SessionWatchRow>();
     const selected = new Map<string, string>();
     for (const [rowKey, observations] of groups) {
-      const owner = normalizeHost(observations[0].row.machine || observations[0].row.sourceDevice || observations[0].scope);
+      const owner = ownerOf(observations[0].scope, observations[0].row);
       const authoritative = observations.filter(item => item.scope === owner);
       const candidates = authoritative.length ? authoritative : this.observations.has(owner) ? [] : observations;
       candidates.sort((a, b) => Number(a.row.previous) - Number(b.row.previous)

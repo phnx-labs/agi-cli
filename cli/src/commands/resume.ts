@@ -5,7 +5,8 @@ import { resolveSessionMetadataValue } from '../lib/session/selection.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { machineId } from '../lib/machine-id.js';
 import { takeOverDetachedSession } from '../lib/session/detached.js';
-import { liveSessionProcesses } from '../lib/session/pid-registry.js';
+import { liveSessionProcesses, writePidSessionEntry } from '../lib/session/pid-registry.js';
+import { launchIdentityEnv } from '../lib/launch-identity.js';
 
 const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
@@ -126,6 +127,15 @@ export async function runStrictResume(
     if (!options.quiet) {
       process.stderr.write(chalk.gray(`[agents] session ${outcome.session.shortId} belongs to ${owner} → resuming there\n`));
     }
+    writePidSessionEntry({
+      pid: process.pid,
+      agent: outcome.session.agent,
+      sessionId: outcome.session.id,
+      cwd: outcome.session.cwd,
+      terminalId: launchIdentityEnv().AGENT_TERMINAL_ID,
+      machine: owner,
+      startedAtMs: Date.now(),
+    });
     const { runOnPeer } = await import('../lib/session/remote-list.js');
     const rc = await runOnPeer(
       buildResumeRemoteArgs(outcome.session.id, prompt, options),

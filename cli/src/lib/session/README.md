@@ -193,7 +193,7 @@ shim whose owner answered the sweep (a parseable JSON array) without that sessio
 is dropped (the tab is bound to a run that is no longer live there); remote
 teammates are exempt. Only a shim whose owner went unheard
 survives, as `unknown`. `SessionProjection` (`projection.ts`) applies the same rule
-to the watch stream, folding the tab into the owner row's `observerTerminals` (with the `workspaceDir` its editor window has open).
+to the watch stream, folding the tab into the owner row's `observerTerminals` (with the `workspaceDir` its editor window has open). A tab with no transcript of its own (an ssh tab from `agents sessions resume`, which also records its owner machine) folds into whichever device reports that session's transcript.
 
 The interactive running-filter live set is fleet-wide: the browser builds `live` from
 the same `gatherActiveSessions` (`sessions-browser.ts:446`), not the old local-only

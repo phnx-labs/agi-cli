@@ -931,6 +931,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
 
   const labelMap = buildClaudeLabelMap();
   const runNameMap = buildRunNameMap();
+  const self = machineId();
 
   return entries.flatMap((t): ActiveSession[] => {
     const directEntry = readPidSessionEntry(t.pid, procByPid.get(t.pid)?.startTime);
@@ -971,8 +972,13 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       workspaceDir: t.cwd ?? undefined,
       windowHeartbeatMs: t.windowHeartbeatMs,
       owner: resolveOwner(pidEntry?.actor, resolvedId),
+      ...relayedTo(pidEntry, self),
     }, state, sessionFile, pidAlive)];
   });
+}
+
+export function relayedTo(entry: Pick<PidSessionEntry, 'machine'> | undefined, self: string): { machine?: string; offloadedFrom?: string } {
+  return entry?.machine && entry.machine !== self ? { machine: entry.machine, offloadedFrom: self } : {};
 }
 
 function listCloudActive(): ActiveSession[] {
