@@ -38,10 +38,48 @@ export function launchSessionId(argv: string[]): string | undefined {
   return undefined;
 }
 
-// A command that ends in a running agent never stops to ask about anything else first.
+// A command that ends in a running agent never stops to ask about anything else first:
+// `run`, `sessions resume|focus` (with or without an id, i.e. the pickers too), and the
+// top-level `focus` / `ps focus`.
 export function launchesAgent(argv: string[]): boolean {
   const words = argv.filter((a) => !a.startsWith('-'));
-  return words[0] === 'run' || (words[0] === 'sessions' && (words[1] === 'resume' || words[1] === 'focus'));
+  return words[0] === 'run'
+    || words[0] === 'focus'
+    || (words[0] === 'ps' && words[1] === 'focus')
+    || (words[0] === 'sessions' && (words[1] === 'resume' || words[1] === 'focus'));
+}
+
+// Written to the launch log when the agent's process starts (or a hop to the machine
+// that starts it). After it, the agent owns the terminal and its exit code: a later
+// non-zero exit is the agent's, not a launch failure.
+const AGENT_STARTED = '[agents] launch handed to the agent';
+
+export function markAgentStarted(env: NodeJS.ProcessEnv = process.env): void {
+  const log = env[LAUNCH_LOG_ENV];
+  if (!log) return;
+  try {
+    fs.appendFileSync(log, `${AGENT_STARTED}\n`, { mode: 0o600 });
+  } catch {
+  }
+}
+
+const LAUNCH_LOG_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
+
+// Launch logs can hold prompts: owner-only, and dropped after two weeks.
+function pruneLaunchLogs(dir: string, nowMs: number): void {
+  let files: string[];
+  try {
+    files = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const f of files) {
+    const file = path.join(dir, f);
+    try {
+      if (nowMs - fs.statSync(file).mtimeMs > LAUNCH_LOG_MAX_AGE_MS) fs.rmSync(file, { force: true });
+    } catch {
+    }
+  }
 }
 
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
@@ -57,14 +95,15 @@ export function startQuietLaunch(argv: string[], env: NodeJS.ProcessEnv = proces
   const outermost = !env[LAUNCH_LOG_ENV];
   const log = env[LAUNCH_LOG_ENV] || path.join(launchesDir(), `${new Date().toISOString().replace(/[:.]/g, '-')}-${process.pid}.log`);
   env[LAUNCH_LOG_ENV] = log;
-  fs.mkdirSync(path.dirname(log), { recursive: true });
+  fs.mkdirSync(path.dirname(log), { recursive: true, mode: 0o700 });
+  if (outermost) pruneLaunchLogs(path.dirname(log), Date.now());
   const sessionId = launchSessionId(argv);
   if (sessionId) fs.rmSync(launchFailurePath(sessionId), { force: true });
   const ownStart = fs.existsSync(log) ? fs.statSync(log).size : 0;
 
   const write = (chunk: unknown, encodingOrCb?: unknown, cb?: unknown): boolean => {
     try {
-      fs.appendFileSync(log, typeof chunk === 'string' || Buffer.isBuffer(chunk) ? chunk : String(chunk));
+      fs.appendFileSync(log, typeof chunk === 'string' || Buffer.isBuffer(chunk) ? chunk : String(chunk), { mode: 0o600 });
     } catch {
     }
     const done = typeof encodingOrCb === 'function' ? encodingOrCb : cb;
@@ -87,11 +126,12 @@ export function startQuietLaunch(argv: string[], env: NodeJS.ProcessEnv = proces
       mine = buf.toString('utf8');
     } catch {
     }
+    if (mine.includes(AGENT_STARTED)) return;
     const cause = failureCause(mine);
     if (sessionId) {
       try {
         const record: LaunchFailure = { status: 'failed', cause, log, exitCode, at: new Date().toISOString() };
-        fs.writeFileSync(launchFailurePath(sessionId), JSON.stringify(record));
+        fs.writeFileSync(launchFailurePath(sessionId), JSON.stringify(record), { mode: 0o600 });
       } catch {
       }
     }

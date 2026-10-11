@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode, RunStrategy } from './types.js';
 import { ALL_MODES, PEER_HOP_ENV, REMOTE_INTERACTIVE_ENV } from './types.js';
-import { LAUNCH_LOG_ENV } from './launch-log.js';
+import { LAUNCH_LOG_ENV, markAgentStarted } from './launch-log.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
 import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
@@ -882,6 +882,7 @@ async function execShimPassthroughLeased(
 
   return new Promise((resolve) => {
     const child = spawn(command, args, { cwd, stdio: 'inherit', env, shell });
+    markAgentStarted();
     if (child.pid) {
       const passthroughSessionId = extractSessionIdArg(rawArgs);
       writePidSessionEntry({
@@ -1457,6 +1458,7 @@ async function spawnAgentLeased(options: ExecOptions): Promise<SpawnResult> {
       env: buildExecEnv(options),
       shell: useShell,
     });
+    markAgentStarted();
 
     writePidSessionEntry({
       pid: child.pid ?? 0,

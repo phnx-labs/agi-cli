@@ -6,7 +6,7 @@ import { homeRemainder, remoteCdPrefix } from '../project-root.js';
 import { sshExec } from '../ssh-exec.js';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
-import { awaitSpawnAck, ackLandedIn, localSpawnAckPath, spawnAckRelPath, SPAWN_ACK_TIMEOUT_MS, type SpawnAck } from './backends/vscodium-agent.js';
+import { awaitSpawnAck, ackLandedIn, localSpawnAckPath, SPAWN_ACK_TIMEOUT_MS, type SpawnAck } from './backends/vscodium-agent.js';
 
 const DEFAULT_STAGGER_MS = 400;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -30,17 +30,10 @@ export interface OpenOptions {
   ackTimeoutMs?: number;
 }
 
-function ackReader(nonce: string, host: string | undefined, resolveHost?: HostResolver): () => string | undefined {
-  if (!host || host === 'local') {
-    const file = localSpawnAckPath(nonce);
-    return () => {
-      try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; }
-    };
-  }
-  const target = resolveHost ? resolveHost(host) : host;
+function ackReader(nonce: string): () => string | undefined {
+  const file = localSpawnAckPath(nonce);
   return () => {
-    const res = sshExec(target, `cat "$HOME"/${spawnAckRelPath(nonce)} 2>/dev/null`, { multiplex: true });
-    return res.code === 0 ? res.stdout : undefined;
+    try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; }
   };
 }
 
@@ -69,6 +62,10 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
       resolved = { ...req, cwd };
     }
     // The extension opens a /spawn only in the window holding its project.
+    // The ack is a file on the machine running the editor; it is read here only.
+    if (req.backend === 'vscodium-agent' && req.host && req.host !== 'local') {
+      return { ok: false, request: req, error: `VSCodium tabs open on this machine only; run the command on ${req.host} instead of passing --device` };
+    }
     if (req.backend === 'vscodium-agent' && !req.project) {
       return { ok: false, request: req, error: `no local project folder for ${req.cwd}, so there is no VSCodium window to open it in` };
     }
@@ -79,7 +76,7 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
     }
     if (!nonce) return { ok: true, request: req };
     const timeoutMs = opts.ackTimeoutMs ?? SPAWN_ACK_TIMEOUT_MS;
-    const ack = await awaitSpawnAck(nonce, ackReader(nonce, req.host, opts.resolveHost), timeoutMs);
+    const ack = await awaitSpawnAck(nonce, ackReader(nonce), timeoutMs);
     const failure = ackFailure(ack, req, timeoutMs);
     return failure ? { ok: false, request: req, error: failure, ack } : { ok: true, request: req, ack };
   } catch (err: any) {
