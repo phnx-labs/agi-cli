@@ -5,13 +5,13 @@ import { truncate, humanDuration, formatBytes } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '@phnx-labs/sessions-cli/reader';
 import { sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
-import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '@phnx-labs/sessions-cli/reader';
+import { parseSession, sanitizeForTerminal } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTail, readSessionHead } from '@phnx-labs/sessions-cli/reader';
 import { safeTeamText } from '@phnx-labs/sessions-cli/reader';
 import { cleanSessionPrompt, extractSessionTopic, isSyntheticUserMessage, firstUserMessageFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { linkPath, linkUrl, relativeToCwd, shortenModel } from '@phnx-labs/sessions-cli/reader';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
-import { extractTodoProgress, WORKTREE_RE } from '@phnx-labs/sessions-cli/reader';
+import { extractTodoProgressFromEvents, WORKTREE_RE } from '@phnx-labs/sessions-cli/reader';
 import { renderMarkdown } from '../lib/markdown.js';
 import { wrapToWidth } from '../lib/wrap.js';
 import { terminalWidth, stringWidth } from '../lib/session/width.js';
@@ -30,6 +30,7 @@ import {
   isBackgroundShellStart,
   isSubAgentTool,
 } from '@phnx-labs/sessions-cli/reader';
+import { cachedAttachmentImages, materializeInlineImages, mergePreviewImages, previewImagesFromEvents, previewSubAgentsFromEvents, previewSubAgentsFromFiles } from '../lib/session/glance-files.js';
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isPromptCancelled } from '../lib/format.js';
@@ -340,7 +341,8 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
       });
     } else {
       try {
-        events = parseSession(session.filePath, session.agent);
+        events = parseSession(session.filePath, session.agent, { includeInlineImages: true });
+        if (session.agent === 'claude') materializeInlineImages(events, session.id);
         digest = buildSessionPreviewDigest(events, safe);
         writeSessionPreviewCache({
           id: session.id,
@@ -354,7 +356,23 @@ export function loadSessionPreviewDigest(session: SessionMeta): {
     }
   }
   digest.plugins = getSessionPlugins(session.id);
+  applyLiveSessionFiles(digest, session);
   return { digest, events };
+}
+
+function applyLiveSessionFiles(digest: SessionPreviewDigest, session: SessionMeta): void {
+  if (session.agent === 'claude' && session.filePath) {
+    const children = previewSubAgentsFromFiles(session.filePath, digest.subAgents ?? []);
+    if (children) {
+      digest.subAgents = children;
+      digest.subAgentCount = children.length;
+    }
+  }
+  const known = new Set((digest.images ?? []).map(image => image.path));
+  const images = mergePreviewImages(digest.images ?? [], cachedAttachmentImages(session.id).filter(image => !known.has(image.path)));
+  if (images.length) digest.images = images;
+  else delete digest.images;
+  if (!digest.subAgents?.length) delete digest.subAgents;
 }
 
 export function buildPreview(session: SessionMeta): string {
@@ -644,7 +662,6 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
   const toolCounts: Record<string, number> = {};
   let toolCalls = 0;
   let planFile = '';
-  let latestTodos: TodoProgress | undefined;
   let subAgentCount = 0;
   let backgroundShellCount: number | undefined = harnessTracksBackgroundShells(session.agent)
     ? 0
@@ -677,10 +694,6 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
       if (!planFile && p && /\/plans\/[^/]+\.md$/.test(p)) {
         planFile = p;
       }
-      if (SNAPSHOT_TODO_TOOLS.has(tool)) {
-        const progress = extractTodoProgress(event.args);
-        if (progress) latestTodos = progress;
-      }
       if (tool) toolCounts[tool] = (toolCounts[tool] ?? 0) + 1;
       toolCalls++;
     }
@@ -689,12 +702,14 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
   if (session.usedBrowser) toolTags.add('browser');
   if (session.usedComputer) toolTags.add('computer');
 
-  const todos: TodoProgress | undefined = latestTodos ?? session.todos;
+  const todos: TodoProgress | undefined = extractTodoProgressFromEvents(events) ?? session.todos;
 
   const changes = classifyFileChanges(events);
   const chg = changeCounts(changes);
 
   const errorEvents = events.filter(e => e.type === 'error');
+  const subAgents = previewSubAgentsFromEvents(events, isSubAgentTool);
+  const images = previewImagesFromEvents(events, changes, session.cwd);
   return {
     schemaVersion: 1,
     firstUser,
@@ -704,6 +719,8 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
     planFile,
     todos,
     subAgentCount,
+    ...(subAgents.length ? { subAgents } : {}),
+    ...(images.length ? { images } : {}),
     backgroundShellCount,
     toolTags: [...toolTags],
     changes: chg,

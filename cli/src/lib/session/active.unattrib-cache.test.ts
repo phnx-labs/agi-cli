@@ -1,4 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
+import { claudeProjectDirName } from '../project-key.js';
 import {
   PROCESS_TABLE_FRESH_MS,
   UNATTRIBUTED_RESCAN_MS,
@@ -134,5 +139,63 @@ describe('unattributed rescan throttle (#2047)', () => {
 
     await listUnattributedActive(new Set([999_001]));
     expect(unattributedFullRescanCountForTest()).toBe(2);
+  });
+});
+
+describe('warm-cache tick keeps a resumed session (PHNX-4326)', () => {
+  const posixOnly = process.platform === 'win32' ? it.skip : it;
+  const UUID = '9ff4d220-6b1e-4c41-9b0e-3f2b8a4d7c11';
+  let child: ChildProcess | undefined;
+  let dir: string | undefined;
+
+  afterEach(() => {
+    if (child?.pid) {
+      try { process.kill(child.pid, 'SIGKILL'); } catch {  }
+    }
+    child = undefined;
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  posixOnly('stamps the row with the process start, so a transcript older than its process survives the cached tick', async (ctx) => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-4326-'));
+    const cwd = fs.realpathSync(dir);
+    const projectDir = path.join(process.env.HOME!, '.claude', 'projects', claudeProjectDirName(cwd));
+    fs.mkdirSync(projectDir, { recursive: true });
+    const transcript = path.join(projectDir, `${UUID}.jsonl`);
+    fs.writeFileSync(transcript, `${JSON.stringify({ type: 'user', sessionId: UUID, cwd, message: { role: 'user', content: 'resume me' } })}\n`);
+    const twoDaysAgo = (Date.now() - 2 * 86_400_000) / 1000;
+    fs.utimesSync(transcript, twoDaysAgo, twoDaysAgo);
+    fs.utimesSync(transcript, new Date(), new Date());
+    await new Promise((r) => setTimeout(r, 2_100));
+
+    const bin = path.join(cwd, 'claude');
+    try { fs.linkSync(process.execPath, bin); } catch { fs.copyFileSync(process.execPath, bin); fs.chmodSync(bin, 0o755); }
+    child = spawn(bin, ['-e', 'setInterval(() => {}, 60_000)', '--', '--session-id', UUID], { cwd, stdio: 'ignore' });
+    const pid = child.pid!;
+
+    let t = 5_000_000;
+    setActiveScanClockForTest(() => t);
+    let row: ActiveSession | undefined;
+    const deadline = Date.now() + 10_000;
+    while (!row && Date.now() < deadline) {
+      clearActiveScanCachesForTest();
+      setActiveScanClockForTest(() => t);
+      row = (await listUnattributedActive(new Set())).find((s) => s.pid === pid && s.sessionFile === transcript);
+      if (!row) await new Promise((r) => setTimeout(r, 100));
+    }
+    if (!row) {
+      ctx.skip(`ps never classified pid ${pid} as claude or its cwd did not resolve - see RUSH-2508`);
+      return;
+    }
+    const lstart = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }).trim();
+    expect(row.startedAtMs).toBe(Date.parse(lstart));
+    expect(row.startedAtMs).toBeGreaterThan(fs.statSync(transcript).birthtimeMs);
+
+    const scans = unattributedFullRescanCountForTest();
+    t += 1_000;
+    const warm = await listUnattributedActive(new Set());
+    expect(unattributedFullRescanCountForTest()).toBe(scans);
+    expect(warm.find((s) => s.pid === pid)?.sessionId).toBe(UUID);
   });
 });

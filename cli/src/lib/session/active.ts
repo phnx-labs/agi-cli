@@ -1343,7 +1343,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       topic,
       tokPerSec,
       sessionFile,
-      startedAtMs: hookRec?.ts ?? birthtimeMs,
+      startedAtMs: parseStartMs(procByPid.get(pid)?.startTime ?? '') ?? birthtimeMs,
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
       owner: resolveOwner(entry?.actor, resolvedId),

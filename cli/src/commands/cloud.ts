@@ -280,7 +280,7 @@ Examples:
       const status = options.status as CloudTaskStatus | undefined;
       const limit = parseInt(options.limit as string, 10) || 20;
 
-      const activeTasks = listActiveTasks();
+      const activeTasks = listActiveTasks({ includeStale: true });
       if (activeTasks.length > 0) {
         const byProvider = new Map<CloudProviderId, string[]>();
         for (const t of activeTasks) {
