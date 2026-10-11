@@ -1,13 +1,16 @@
 import type { Command } from 'commander';
+import { stripVTControlCharacters } from 'node:util';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { indexActiveBySessionId, runLiveRoster, type LiveStatusFilter, type LiveStatusFlags } from './ps-roster.js';
-import { buildPreview, loadSessionPreviewDigest, transcriptOnPeerOf } from './sessions-picker.js';
+import { buildPreview, transcriptOnPeerOf } from './sessions-picker.js';
+import { loadSessionPreviewDigest } from '../lib/session/preview-digest.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import { isBookmarked } from '../lib/session/bookmarks.js';
 import { discoverSessions, isCompleteSessionId } from '../lib/session/discover.js';
 import { buildSessionDetailBlock, formatLiveStatusHeadline, notFoundByIdMessage, sessionTranscriptStamp } from '../lib/session/presentation.js';
-import { runOnPeer, shouldIncludeLocal } from '../lib/session/remote-list.js';
+import { fetchPeerPreviewEnvelope, runOnPeer, shouldIncludeLocal } from '../lib/session/remote-list.js';
 import { applyScopeFilters, computeLocalMetadataMatches, metadataResolveOutcome, resolveSessionMetadataValue, resolveSessionQuery, selectorAllowsEarlyExit, serializeResolvedSessionsJson } from '../lib/session/selection.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { loadLocalActiveSessions } from '../lib/session/session-cache.js';
@@ -183,8 +186,8 @@ function registerPeerResolveCommand(ps: Command): void {
 function registerSessionPreviewCommand(parent: Command): void {
   const previewCmd = parent
     .command('preview')
-    .argument('<id>', 'Full session ID or displayed 8-character short ID')
-    .description('Show one rich session card without rendering the full transcript')
+    .argument('<id...>', 'Full session IDs or displayed 8-character short IDs')
+    .description('Show rich session cards without rendering the full transcripts')
     .option('-a, --agent <agent>', 'Narrow the ID to one agent type/version')
     .option('-p, --project <name>', 'Narrow the ID to one project')
     .option('--local', 'Only this machine; do not resolve the ID across the fleet')
@@ -207,17 +210,21 @@ function registerSessionPreviewCommand(parent: Command): void {
 
       # Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch
       agents ps preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh
+
+      # Several cards in one call: a JSON array in argument order
+      agents ps preview 407b8dd5 c70ecdea --json
     `,
     notes: `
       - Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
       - Short IDs wait for every selected device so ambiguity is never hidden.
       - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.
       - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.
+      - With several IDs, --json prints one array in argument order; each element is the single-ID envelope plus "query", and an ID that does not resolve is an element with "error" set. The exit code is 1 only when no ID resolved.
       - Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device.
     `,
   });
 
-  previewCmd.action(async (id: string) => {
+  previewCmd.action(async (ids: string[]) => {
     const options = previewCmd.optsWithGlobals() as {
       agent?: string;
       project?: string;
@@ -229,7 +236,7 @@ function registerSessionPreviewCommand(parent: Command): void {
       revision?: string;
     };
     const hosts = [...(options.host ?? []), ...(options.device ?? [])];
-    await renderSessionPreview(id, {
+    const scope: PreviewScope = {
       agent: options.agent,
       project: options.project,
       local: options.local,
@@ -237,36 +244,42 @@ function registerSessionPreviewCommand(parent: Command): void {
       json: options.json,
       refresh: options.refresh,
       revision: options.revision,
-    });
+    };
+    if (ids.length === 1) await renderSessionPreview(ids[0], scope);
+    else await renderSessionPreviews(ids, scope);
   });
 }
 
-export async function renderSessionPreview(
-  query: string,
-  scope: { agent?: string; project?: string; local?: boolean; hosts?: string[]; json?: boolean; refresh?: boolean; revision?: string },
-): Promise<void> {
-  if (scope.json && !scope.local && scope.hosts?.length === 1
-    && scope.hosts[0] !== machineId() && isCompleteSessionId(query.trim())) {
-    const { getRemoteSessionPreview } = await import('../lib/session/remote-preview-cache.js');
-    const result = await getRemoteSessionPreview(query.trim(), scope.hosts[0], {
-      refresh: scope.refresh,
-      revision: scope.revision,
-    });
-    const envelope = result.envelope as {
-      session?: unknown; active?: unknown; preview?: unknown; error?: unknown; details?: unknown;
-    } | undefined;
-    console.log(JSON.stringify({
-      schemaVersion: 1,
-      session: envelope?.session ?? null,
-      active: result.cache.source === 'live' ? (envelope?.active ?? null) : null,
-      preview: envelope?.preview ?? null,
-      error: envelope?.error ?? (envelope ? null : result.cache.reason),
-      details: envelope?.details ?? null,
-      cache: result.cache,
-    }));
-    return;
-  }
+type PreviewScope = { agent?: string; project?: string; local?: boolean; hosts?: string[]; json?: boolean; refresh?: boolean; revision?: string };
+type PreviewJson = Record<string, unknown>;
 
+function previewErrorJson(message: string): PreviewJson {
+  return { schemaVersion: 1, session: null, active: null, preview: null, error: message, details: null };
+}
+
+async function remoteCachedPreviewJson(query: string, scope: PreviewScope): Promise<PreviewJson | undefined> {
+  if (!scope.json || scope.local || scope.hosts?.length !== 1
+    || scope.hosts[0] === machineId() || !isCompleteSessionId(query.trim())) return undefined;
+  const { getRemoteSessionPreview } = await import('../lib/session/remote-preview-cache.js');
+  const result = await getRemoteSessionPreview(query.trim(), scope.hosts[0], {
+    refresh: scope.refresh,
+    revision: scope.revision,
+  });
+  const envelope = result.envelope as {
+    session?: unknown; active?: unknown; preview?: unknown; error?: unknown; details?: unknown;
+  } | undefined;
+  return {
+    schemaVersion: 1,
+    session: envelope?.session ?? null,
+    active: result.cache.source === 'live' ? (envelope?.active ?? null) : null,
+    preview: envelope?.preview ?? null,
+    error: envelope?.error ?? (envelope ? null : result.cache.reason),
+    details: envelope?.details ?? null,
+    cache: result.cache,
+  };
+}
+
+async function resolvePreviewSession(query: string, scope: PreviewScope): Promise<{ session: SessionMeta } | { errorLines: string[] }> {
   let outcome = await resolveSessionMetadataValue(query, scope);
   if (outcome.kind !== 'resolved'
     && (!scope.hosts?.length || shouldIncludeLocal(scope.hosts, machineId()))) {
@@ -285,30 +298,119 @@ export async function renderSessionPreview(
   }
   if (outcome.kind === 'partial') {
     const offline = outcome.failedPeers;
-    console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
-    console.error(chalk.red(`No session matching "${query}" on any reachable device (${offline.length} unreachable, not checked).`));
-    console.error(chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'));
-    process.exitCode = 1;
-    return;
+    return { errorLines: [
+      chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`),
+      chalk.red(`No session matching "${query}" on any reachable device (${offline.length} unreachable, not checked).`),
+      chalk.gray('  If it lives on an offline box, wake it (agents devices) or run there: agents ssh <device>'),
+    ] };
   }
-  if (outcome.kind === 'not-found') {
-    notFoundByIdMessage(query).forEach(l => console.error(l));
-    process.exitCode = 1;
-    return;
-  }
+  if (outcome.kind === 'not-found') return { errorLines: notFoundByIdMessage(query) };
   if (outcome.kind === 'ambiguous') {
-    console.error(chalk.red(`Multiple sessions match "${query}" across the fleet:`));
-    for (const candidate of outcome.candidates) {
-      const match = candidate.hits[0].session;
-      const machines = candidate.hits.map(hit => hit.machine).join(', ');
-      console.error(chalk.cyan(`  ${match.shortId}  ${match.id}`) + chalk.gray(`  ${machines}  ${match.agent}${match.version ? ` ${match.version}` : ''}`));
+    return { errorLines: [
+      chalk.red(`Multiple sessions match "${query}" across the fleet:`),
+      ...outcome.candidates.map((candidate) => {
+        const match = candidate.hits[0].session;
+        const machines = candidate.hits.map(hit => hit.machine).join(', ');
+        return chalk.cyan(`  ${match.shortId}  ${match.id}`) + chalk.gray(`  ${machines}  ${match.agent}${match.version ? ` ${match.version}` : ''}`);
+      }),
+      chalk.gray('Pass the full session ID to narrow it down.'),
+    ] };
+  }
+  return { session: outcome.session };
+}
+
+function localPreviewJson(session: SessionMeta, live: ActiveSession | undefined): PreviewJson {
+  const sourceStamp = sessionTranscriptStamp(session);
+  const { digest, error, events } = loadSessionPreviewDigest(session);
+  return {
+    schemaVersion: 1,
+    session: {
+      id: session.id,
+      shortId: session.shortId,
+      agent: session.agent,
+      version: session.version,
+      model: session.model,
+      account: session.account,
+      machine: session.machine ?? machineId(),
+      cwd: session.cwd,
+      project: session.project,
+      gitBranch: session.gitBranch,
+      createdAt: session.timestamp,
+      lastActivity: session.lastActivity,
+      durationMs: session.durationMs,
+      messageCount: session.messageCount,
+      tokenCount: session.tokenCount,
+      costUsd: session.costUsd,
+      label: session.label,
+      topic: session.topic,
+      ticketId: session.ticketId,
+      prUrl: session.prUrl,
+    },
+    active: live ? {
+      status: live.status,
+      activity: live.activity,
+      awaitingReason: live.awaitingReason,
+      lastActivityMs: live.lastActivityMs,
+      startedAtMs: live.startedAtMs,
+      pid: live.pid,
+      host: live.host,
+    } : null,
+    preview: digest ?? null,
+    error: error ?? null,
+    details: buildSessionDetailBlock(session, digest, events, sourceStamp),
+  };
+}
+
+async function liveSessionsById(): Promise<Map<string, ActiveSession>> {
+  try {
+    return indexActiveBySessionId((await loadLocalActiveSessions()).sessions);
+  } catch {
+    return new Map();
+  }
+}
+
+async function previewJsonFor(query: string, scope: PreviewScope, live: Promise<Map<string, ActiveSession>>): Promise<PreviewJson> {
+  const cached = await remoteCachedPreviewJson(query, scope);
+  if (cached) return cached;
+  const resolved = await resolvePreviewSession(query, scope);
+  if ('errorLines' in resolved) return previewErrorJson(resolved.errorLines.map(line => stripVTControlCharacters(line).trim()).join(' '));
+  const { session } = resolved;
+  const transcriptPeer = transcriptOnPeerOf(session);
+  if (transcriptPeer) {
+    const fetched = await fetchPeerPreviewEnvelope(session.id, transcriptPeer);
+    if (fetched.ok && fetched.envelope && typeof fetched.envelope === 'object' && !Array.isArray(fetched.envelope)) return fetched.envelope as PreviewJson;
+    return previewErrorJson(`Session ${session.id} is on ${transcriptPeer}, but that device did not answer (${fetched.ok ? 'invalid-json' : fetched.reason}).`);
+  }
+  return localPreviewJson(session, (await live).get(session.id));
+}
+
+export async function renderSessionPreviews(queries: string[], scope: PreviewScope): Promise<void> {
+  if (!scope.json) {
+    for (const [index, query] of queries.entries()) {
+      if (index > 0) console.log('');
+      await renderSessionPreview(query, scope);
     }
-    console.error(chalk.gray('Pass the full session ID to narrow it down.'));
+    return;
+  }
+  const live = liveSessionsById();
+  const results: PreviewJson[] = await Promise.all(queries.map(async (query) => ({ query, ...await previewJsonFor(query, scope, live) })));
+  console.log(JSON.stringify(results));
+  if (results.every(result => result.session === null)) process.exitCode = 1;
+}
+
+export async function renderSessionPreview(query: string, scope: PreviewScope): Promise<void> {
+  const cached = await remoteCachedPreviewJson(query, scope);
+  if (cached) {
+    console.log(JSON.stringify(cached));
+    return;
+  }
+  const resolved = await resolvePreviewSession(query, scope);
+  if ('errorLines' in resolved) {
+    resolved.errorLines.forEach(line => console.error(line));
     process.exitCode = 1;
     return;
   }
-
-  const session = outcome.session;
+  const { session } = resolved;
   const transcriptPeer = transcriptOnPeerOf(session);
   if (transcriptPeer) {
     const args = ['ps', 'preview', session.id, '--local'];
@@ -321,51 +423,9 @@ export async function renderSessionPreview(
     return;
   }
 
-  let live: ActiveSession | undefined;
-  try {
-    const loaded = await loadLocalActiveSessions();
-    live = indexActiveBySessionId(loaded.sessions).get(session.id);
-  } catch {  }
+  const live = (await liveSessionsById()).get(session.id);
   if (scope.json) {
-    const sourceStamp = sessionTranscriptStamp(session);
-    const { digest, error, events } = loadSessionPreviewDigest(session);
-    console.log(JSON.stringify({
-      schemaVersion: 1,
-      session: {
-        id: session.id,
-        shortId: session.shortId,
-        agent: session.agent,
-        version: session.version,
-        model: session.model,
-        account: session.account,
-        machine: session.machine ?? machineId(),
-        cwd: session.cwd,
-        project: session.project,
-        gitBranch: session.gitBranch,
-        createdAt: session.timestamp,
-        lastActivity: session.lastActivity,
-        durationMs: session.durationMs,
-        messageCount: session.messageCount,
-        tokenCount: session.tokenCount,
-        costUsd: session.costUsd,
-        label: session.label,
-        topic: session.topic,
-        ticketId: session.ticketId,
-        prUrl: session.prUrl,
-      },
-      active: live ? {
-        status: live.status,
-        activity: live.activity,
-        awaitingReason: live.awaitingReason,
-        lastActivityMs: live.lastActivityMs,
-        startedAtMs: live.startedAtMs,
-        pid: live.pid,
-        host: live.host,
-      } : null,
-      preview: digest ?? null,
-      error: error ?? null,
-      details: buildSessionDetailBlock(session, digest, events, sourceStamp),
-    }));
+    console.log(JSON.stringify(localPreviewJson(session, live)));
     return;
   }
   const headline = formatLiveStatusHeadline(live, isBookmarked(session.id));

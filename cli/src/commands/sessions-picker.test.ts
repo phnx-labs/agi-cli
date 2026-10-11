@@ -5,13 +5,10 @@ import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
   buildPreview,
-  buildSessionPreviewDigest,
-  loadSessionPreviewDigest,
   clearPreviewMemoryCacheForTest,
   clearRemoteDigestCacheForTest,
   extractTiming,
   githubRepoUrlFromCwd,
-  relativizeDir,
   renderLastResponse,
   sanitizeRemoteDigest,
   setPeerDigestFetcherForTest,
@@ -19,6 +16,7 @@ import {
   transcriptOnPeerOf,
 } from './sessions-picker.js';
 import { formatTodoCompact } from '../lib/session/presentation.js';
+import { buildSessionPreviewDigest, loadSessionPreviewDigest, relativizeDir } from '../lib/session/preview-digest.js';
 import { stringWidth } from '../lib/session/width.js';
 import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
 import { machineId } from '../lib/session/sync/config.js';

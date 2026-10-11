@@ -1735,7 +1735,12 @@ renderer and its registration live in `commands/ps.ts` and the detail block in
 error, which reads as unreachable.
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the
-transcript's actual mtime + size. Live status is deliberately outside that durable
+transcript's actual mtime + size. The digest builder and its cache read live in
+`lib/session/preview-digest.ts`, not in the picker, because the watch stream
+reuses them: a previous-session row takes its card text (`lastAgentLine`, `todos`,
+`artifacts`) from the cached digest, the reset never parses, and missing digests
+are built one per macrotask after it (PHNX-4326). Do not give previous rows their
+own transcript parse. Live status is deliberately outside that durable
 digest and expires after 15 seconds through `session-cache.ts`. A remote-host row
 whose lightweight digest was fleet-synced (a `mirrorSyncedAt` row — see §10 the
 session mirror, PHNX-3792) renders its topic + first-user preview INLINE from that

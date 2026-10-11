@@ -227,7 +227,12 @@ notification ledger, the screenshot OCR index) are documented in agi-menu.
 ## Session detail previews
 
 The Menu requests `agents ps preview <full-id> --device <owner> --json`
-only for an expanded session. The CLI owns transport and the durable requester
+only for an expanded session. Several ids in one call,
+`agents ps preview <id> <id> <id> --json`, print one JSON array in argument
+order: each element is the single-id envelope plus `query` (the id as given), and
+an id that does not resolve is an element with `session: null` and `error` set.
+The command exits 1 only when no id resolved. One id still prints the single
+object. The CLI owns transport and the durable requester
 cache; the Menu never reads a peer's files directly. A known owner means one
 peer request, without fleet discovery. `agents sessions preview`, the spelling
 older Menu builds request, was removed in PHNX-4227: such a build gets the
@@ -272,9 +277,20 @@ fetch (PHNX-4326). Each field is additive and absent when the session has none:
   copies under `~/.agents/.cache/attachments/<sessionId>/`), `read` (opened by a
   read tool) or `produced` (written or edited by the session).
 
-All three come from the same bounded parse as the rest of the digest. A
+- `producedArtifacts`: what the session made for a person, newest first, the same
+  list a live feed row's `artifacts` holds (created reviewable files plus outputs
+  the agent named in its replies).
+
+All four come from the same bounded parse as the rest of the digest. A
 `partial: true` digest reflects only the transcript tail, except that
 subagent transcripts and cached pasted images are read on every call.
+
+Previous-session rows on `agents feed watch --json` carry the same card text
+(`lastAgentLine`, `request`, `todos`, `artifacts`, `importantMessage`) from this
+digest's cache, so a closed session's card needs no preview call. A row whose
+digest is not cached yet arrives without them in the reset and is upserted with
+them once the stream has built the digest, which it does once per transcript
+change.
 
 The requester cache holds at most 500 entries and 16 MiB of payload metadata,
 with a 512 KiB envelope limit. Ordinary copies are fresh for 45 seconds when no
