@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.23.11
+
+- **The daemon no longer restarts when a service tick runs slow (PHNX-4225).** A
+  tick past its deadline is now aborted, logged as `tick.breach`, and skipped until
+  it settles; the daemon exits for a supervised restart only when a tick is still
+  unsettled at 10 times its deadline. On a loaded laptop the old exit-on-overrun
+  policy restarted the daemon about 200 times a day. Source:
+  `cli/src/lib/daemon/supervisor.ts`.
+- **Recordings encode one video at a time and stop encodes a dead daemon left
+  running (PHNX-4225).** Each daemon exit used to leave its `ffmpeg` running and
+  the next start re-encoded every queued recording at once, so encodes of the same
+  file piled up. The ledger now records each encode's process and work directory,
+  a restarted daemon stops a leftover encode and deletes its directory before
+  requeueing, and only one recording is processed at a time. Source:
+  `cli/src/lib/recordings/pipeline.ts`.
+
 ## 1.23.10
 
 - **A desktop tab showing a session that runs on another machine is listed once, as that session.** An ssh tab opened by `agents sessions resume` (AGI EXT opens remote sessions this way) used to appear in `agents feed watch` and `agents ps` as a second session on the desktop with status `unknown` and nothing to read, beside the real one on the worker. The resume hop now records the owner machine for its tab, and the stream projection folds a tab with no transcript of its own into the device that reports the session's transcript, so the tab shows up in that session's `observerTerminals`. Tabs opened before this release fold in the same way. Source: `cli/src/commands/resume.ts`, `cli/src/lib/session/active.ts`, `cli/src/lib/session/projection.ts`.
