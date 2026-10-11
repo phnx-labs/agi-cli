@@ -49,6 +49,7 @@ interface RemoteAgentsJsonResult<T> {
   deviceCount: number;
   skipped: string[];
   parseFailed: string[];
+  answered: string[];
   discoveryFailed: boolean;
 }
 
@@ -143,7 +144,7 @@ export async function gatherRemoteAgentsJson<T>(
     try {
       devices = await loadDevices();
     } catch {
-      return { items: [], deviceCount: 0, skipped: [], parseFailed: [], discoveryFailed: true };
+      return { items: [], deviceCount: 0, skipped: [], parseFailed: [], answered: [], discoveryFailed: true };
     }
     for (const device of Object.values(devices)) {
       if (!isDialableDevice(device)) continue;
@@ -164,6 +165,7 @@ export async function gatherRemoteAgentsJson<T>(
 
   const skipped: string[] = [];
   const parseFailed: string[] = [];
+  const answered: string[] = [];
 
   const controller = options.earlyExit ? new AbortController() : undefined;
   if (controller) setMaxListeners(targets.length + 1, controller.signal);
@@ -196,6 +198,7 @@ export async function gatherRemoteAgentsJson<T>(
       }
       return [] as T[];
     }
+    answered.push(target.machine);
     if (controller && options.earlyExit && !earlyResolved
       && parsed.items.some((item) => options.earlyExit!.isDefinitive(item, target.machine))) {
       earlyResolved = true;
@@ -204,5 +207,5 @@ export async function gatherRemoteAgentsJson<T>(
     return parsed.items;
   }));
 
-  return { items: results.flat(), deviceCount: targets.length, skipped, parseFailed, discoveryFailed: false };
+  return { items: results.flat(), deviceCount: targets.length, skipped, parseFailed, answered, discoveryFailed: false };
 }

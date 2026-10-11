@@ -31,6 +31,7 @@ interface RemoteActiveResult {
   sessions: ActiveSession[];
   deviceCount: number;
   skipped: string[];
+  answered: string[];
   discoveryFailed: boolean;
 }
 
@@ -53,6 +54,7 @@ export async function gatherRemoteActive(
     sessions: result.items,
     deviceCount: result.deviceCount,
     skipped: result.skipped,
+    answered: result.answered,
     discoveryFailed: result.discoveryFailed,
   };
 }

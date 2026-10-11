@@ -112,7 +112,7 @@ describe('dedupeByMachineSession', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'zion', sessionId: 'dup' }),
       mk({ machine: 'zion', sessionId: 'dup' }),
-    ]);
+    ], []);
     expect(out).toHaveLength(1);
   });
 
@@ -120,7 +120,7 @@ describe('dedupeByMachineSession', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'zion', sessionId: 'same' }),
       mk({ machine: 'yosemite-s1', sessionId: 'same' }),
-    ]);
+    ], []);
     expect(out).toHaveLength(2);
   });
 
@@ -128,7 +128,7 @@ describe('dedupeByMachineSession', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'zion', sessionId: undefined }),
       mk({ machine: 'zion', sessionId: undefined }),
-    ]);
+    ], []);
     expect(out).toHaveLength(2);
   });
 
@@ -136,16 +136,25 @@ describe('dedupeByMachineSession', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion', label: '[host/yosemite-s0]' }),
       mk({ machine: 'yosemite-s0', sessionId: 'off', sessionFile: '/t.jsonl', topic: 'real work' }),
-    ]);
+    ], ['yosemite-s0']);
     expect(out).toHaveLength(1);
     expect(out[0].offloadedFrom).toBeUndefined();
     expect(out[0].topic).toBe('real work');
   });
 
+  it('drops the shim of a session its answering owner no longer runs, keeps it when the owner went unheard', () => {
+    const zionTab = mk({ host: 'codium', machine: 'yosemite-m6', offloadedFrom: 'zion', sessionId: '56cfac7c-0268-4114-8ab4-d6475a5052f1', terminalId: 'cl-1791693165229-12', status: 'unknown', pid: 19709, pidAlive: true, label: '[host/yosemite-m6]' });
+    const m6Row = mk({ context: 'headless', machine: 'yosemite-m6', sessionId: '23eeb807-c970-4628-a2bf-fbce27d7cac3', status: 'input_required', pid: 350818, pidAlive: true });
+    expect(dedupeByMachineSession([zionTab, m6Row], ['yosemite-m6'])).toEqual([m6Row]);
+    expect(dedupeByMachineSession([zionTab, m6Row], ['yosemite-m5'])).toEqual([zionTab, m6Row]);
+    const m6Same = mk({ context: 'headless', machine: 'yosemite-m6', sessionId: zionTab.sessionId, status: 'idle' });
+    expect(dedupeByMachineSession([zionTab, m6Same], ['yosemite-m6'])).toEqual([m6Same]);
+  });
+
   it('keeps the shim when it is the only row for that session (peer unreachable)', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion' }),
-    ]);
+    ], []);
     expect(out).toHaveLength(1);
     expect(out[0].offloadedFrom).toBe('zion');
   });
@@ -154,7 +163,7 @@ describe('dedupeByMachineSession', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'yosemite-s0', sessionId: 'off', topic: 'real work' }),
       mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion' }),
-    ]);
+    ], []);
     expect(out).toHaveLength(1);
     expect(out[0].topic).toBe('real work');
   });

@@ -284,7 +284,8 @@ export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: 
   return { machines };
 }
 
-export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession[] {
+export function dedupeByMachineSession(sessions: ActiveSession[], answered: readonly string[]): ActiveSession[] {
+  const heard = new Set(answered.map(normalizeHost));
   const seen = new Map<string, number>();
   const out: ActiveSession[] = [];
   for (const s of sessions) {
@@ -298,7 +299,7 @@ export function dedupeByMachineSession(sessions: ActiveSession[]): ActiveSession
     }
     if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
   }
-  return out;
+  return out.filter(s => !(s.sessionId && s.offloadedFrom && s.machine && heard.has(normalizeHost(s.machine))));
 }
 
 export function filterActiveSessionsByHostScope(
@@ -473,7 +474,7 @@ async function gatherActiveSessionsLive(
       remoteDeviceCount = remote.deviceCount;
       remoteSkipped = remote.skipped;
       remoteDiscoveryFailed = remote.discoveryFailed;
-      merged = dedupeByMachineSession([...local, ...remote.sessions]);
+      merged = dedupeByMachineSession([...local, ...remote.sessions], remote.answered);
     }
   }
   return {

@@ -8,6 +8,7 @@ const gatherRemoteActiveMock = vi.hoisted(() =>
     sessions: [],
     deviceCount: 2,
     skipped: ['asleep-peer'],
+    answered: [],
     discoveryFailed: false,
   })),
 );

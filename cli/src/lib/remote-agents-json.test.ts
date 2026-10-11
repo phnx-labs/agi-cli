@@ -121,6 +121,15 @@ describe('gatherRemoteAgentsJson early-exit + cancellation', () => {
     expect(result.items).toEqual([{ id: 'the-match' }]);
     expect(aborted).toEqual([SLOW]);
     expect(result.skipped).toEqual([]);
+    expect(result.answered).toHaveLength(1);
+  });
+
+  it('reports a peer that answered with no rows as heard, and a failed or cancelled one as not', async () => {
+    const capture: SshCaptureFn = (target) => Promise.resolve(target === FAST ? { code: 0, stdout: '[]' } : { code: 255, stdout: '' });
+    const result = await gatherRemoteAgentsJson<Row>({ args: ['sessions', '--json'], noFanoutEnv: 'X', hosts: [FAST, SLOW], quiet: true, parse: parseRows }, { capture });
+    expect(result.answered).toHaveLength(1);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.answered[0]).not.toBe(result.skipped[0]);
   });
 
   it('without early-exit, the default all-settle waits for every peer', async () => {

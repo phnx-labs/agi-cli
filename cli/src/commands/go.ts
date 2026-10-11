@@ -91,7 +91,7 @@ export async function gatherLiveTargets(
       const remote = await gatherRemoteActive(opts.hosts, {
         earlyExit: liveSelectorEarlyExit(opts.selector),
       });
-      active = dedupeByMachineSession([...localActive, ...remote.sessions]);
+      active = dedupeByMachineSession([...localActive, ...remote.sessions], remote.answered);
     } catch {  }
   }
   active = filterLivePool(active, { hosts: opts.hosts, statuses: opts.statuses });
