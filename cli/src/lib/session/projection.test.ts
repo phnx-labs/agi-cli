@@ -31,6 +31,13 @@ describe('execution-owned session projection', () => {
     expect(rows[0].attachments).toEqual([{ path: '/uploads/diagram.png', name: 'diagram.png', type: 'image' }]);
   });
 
+  it('an observer tab names the workspace its window has open, so the editor can say which window holds it', () => {
+    const c = client();
+    c.apply(reset('worker', [row('worker')]));
+    const rows = c.apply(reset('desktop', [row('desktop', { terminalId: 'tab', viewingIn: 'VSCodium', workspaceDir: '/Users/me/src/agents-cli' })]));
+    expect(rows[0].observerTerminals).toEqual([expect.objectContaining({ device: 'desktop', terminalId: 'tab', workspaceDir: '/Users/me/src/agents-cli' })]);
+  });
+
   it('retains owner on disconnect, replaces on reconnect, and refuses stale launcher resurrection', () => {
     const c = client();
     c.apply(reset('desktop', [row('desktop')]));

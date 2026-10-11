@@ -60,7 +60,7 @@ export class SessionProjection {
       if (!chosen) continue;
       selected.set(`${candidate.scope}\0${chosen.rowKey}`, rowKey);
       const observerTerminals = observations.filter(item => !item.row.previous && (item.row.terminalId || item.row.viewingIn || item.row.provenance?.reply))
-        .map(({ scope: device, row }): NonNullable<SessionWatchRow['observerTerminals']>[number] => ({ device, terminalId: row.terminalId, launchId: row.launchId, viewingIn: row.viewingIn, provenance: row.provenance }));
+        .map(({ scope: device, row }): NonNullable<SessionWatchRow['observerTerminals']>[number] => ({ device, terminalId: row.terminalId, launchId: row.launchId, viewingIn: row.viewingIn, provenance: row.provenance, ...(row.workspaceDir ? { workspaceDir: row.workspaceDir } : {}) }));
       const origin = chosen.originTerminal;
       if (!chosen.previous && origin && normalizeHost(origin.device) !== owner) {
         const device = normalizeHost(origin.device);

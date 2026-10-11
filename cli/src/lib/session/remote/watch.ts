@@ -39,7 +39,7 @@ export type SessionWatchEnvelope =
 
 export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'context'> {
   context: ActiveSession['context'] | 'recent';
-  observerTerminals?: { device: string; terminalId?: string; launchId?: string; viewingIn: string | null; provenance?: ActiveSession['provenance'] }[];
+  observerTerminals?: { device: string; terminalId?: string; launchId?: string; viewingIn: string | null; workspaceDir?: string; provenance?: ActiveSession['provenance'] }[];
   branch?: string;
   rowKey: string;
   sourceDevice: string;
