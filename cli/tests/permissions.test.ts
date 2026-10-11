@@ -87,6 +87,21 @@ describe('parsePermissionSet', () => {
     expect(result).not.toBeNull();
     expect(result!.allow).toEqual([]);
     expect(result!.deny).toEqual([]);
+    expect(result!.ask).toBeUndefined();
+  });
+
+  it('keeps an ask array and omits it when the file has none', () => {
+    const filePath = join(TEST_DIR, 'ask.yml');
+    writeFileSync(filePath, yaml.stringify({
+      name: 'ask',
+      allow: ['Bash(git status:*)'],
+      ask: ['Bash(git push:*)'],
+    }));
+
+    const result = parsePermissionSet(filePath);
+    expect(result).not.toBeNull();
+    expect(result!.allow).toEqual(['Bash(git status:*)']);
+    expect(result!.ask).toEqual(['Bash(git push:*)']);
   });
 });
 
@@ -335,7 +350,7 @@ describe('openCodeToCanonical', () => {
     expect(result.deny).toContain('Bash(rm *)');
   });
 
-  it('ignores ask permissions', () => {
+  it('round-trips ask permissions', () => {
     const perms: OpenCodePermissions = {
       permission: {
         bash: {
@@ -348,6 +363,7 @@ describe('openCodeToCanonical', () => {
     const result = openCodeToCanonical(perms);
     expect(result.allow).toEqual(['Bash(git *)']);
     expect(result.deny).toBeUndefined();
+    expect(result.ask).toEqual(['Bash(mv *)']);
   });
 });
 

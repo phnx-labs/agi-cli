@@ -16,8 +16,12 @@ function buildPermissionsWriter(agent: AgentId): ResourceWriter<string[]> {
       const built = buildPermissionsFromGroups(selection);
       const hasAllow = built.allow.length > 0;
       const hasDeny = (built.deny?.length ?? 0) > 0;
-      if (!hasAllow && !hasDeny) return { synced: [] };
+      const hasAsk = (built.ask?.length ?? 0) > 0;
+      if (!hasAllow && !hasDeny && !hasAsk) return { synced: [] };
       const r = applyPermsToVersion(agent, built, versionHome, true, cwd);
+      if (r.skipped?.length) {
+        for (const line of r.skipped) console.warn(line);
+      }
       return { synced: r.success ? selection : [] };
     },
   };

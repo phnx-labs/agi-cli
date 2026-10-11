@@ -30,6 +30,15 @@ import type { AgentId } from './types.js';
 
 const tempDirs: string[] = [];
 
+function restoreEnv(previous: { user: string | undefined; system: string | undefined; preset: string | undefined }): void {
+  if (previous.user === undefined) delete process.env.AGENTS_USER_PERMISSIONS_DIR;
+  else process.env.AGENTS_USER_PERMISSIONS_DIR = previous.user;
+  if (previous.system === undefined) delete process.env.AGENTS_SYSTEM_PERMISSIONS_DIR;
+  else process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = previous.system;
+  if (previous.preset === undefined) delete process.env.AGENTS_PERMISSION_PRESET;
+  else process.env.AGENTS_PERMISSION_PRESET = previous.preset;
+}
+
 function makeTempHome(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-perms-'));
   tempDirs.push(dir);
@@ -282,6 +291,91 @@ describe('permission path handling', () => {
     makeTempHome();
 
     expect(() => buildPermissionsFromGroups(['../outside'])).toThrow('Invalid name: ../outside.yaml');
+  });
+
+  it('fails loud when a preset names a group file that does not exist', () => {
+    const root = makeTempHome();
+    const user = path.join(root, 'user');
+    const system = path.join(root, 'system');
+    fs.mkdirSync(user, { recursive: true });
+    fs.mkdirSync(system, { recursive: true });
+    const previous = {
+      user: process.env.AGENTS_USER_PERMISSIONS_DIR,
+      system: process.env.AGENTS_SYSTEM_PERMISSIONS_DIR,
+      preset: process.env.AGENTS_PERMISSION_PRESET,
+    };
+    process.env.AGENTS_USER_PERMISSIONS_DIR = user;
+    process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = system;
+    process.env.AGENTS_PERMISSION_PRESET = 'default';
+    try {
+      expect(() => buildPermissionsFromGroups(['16-mcp'])).toThrow(
+        'permission preset "default" includes "16-mcp", but no permissions/groups/16-mcp.yaml file exists',
+      );
+    } finally {
+      restoreEnv(previous);
+    }
+  });
+
+  it('treats a missing 00-local group as the optional per-machine layer', () => {
+    const root = makeTempHome();
+    const user = path.join(root, 'user');
+    const system = path.join(root, 'system');
+    fs.mkdirSync(path.join(system, 'groups'), { recursive: true });
+    fs.mkdirSync(user, { recursive: true });
+    fs.writeFileSync(path.join(system, 'groups', '01-core.yaml'), [
+      'allow:',
+      '  - "Bash(pwd)"',
+      '',
+    ].join('\n'));
+    const previous = {
+      user: process.env.AGENTS_USER_PERMISSIONS_DIR,
+      system: process.env.AGENTS_SYSTEM_PERMISSIONS_DIR,
+      preset: process.env.AGENTS_PERMISSION_PRESET,
+    };
+    process.env.AGENTS_USER_PERMISSIONS_DIR = user;
+    process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = system;
+    process.env.AGENTS_PERMISSION_PRESET = 'default';
+    try {
+      expect(buildPermissionsFromGroups(['00-local', '01-core'])).toEqual({
+        name: 'built',
+        description: 'Built from groups: 00-local, 01-core',
+        allow: ['Bash(pwd)'],
+      });
+    } finally {
+      restoreEnv(previous);
+    }
+  });
+
+  it('reads an ask section without treating the filename as a deny group', () => {
+    const root = makeTempHome();
+    const system = path.join(root, 'system');
+    fs.mkdirSync(path.join(system, 'groups'), { recursive: true });
+    fs.writeFileSync(path.join(system, 'groups', '40-ask.yaml'), [
+      'ask:',
+      '  - "Bash(git push:*)"',
+      '  - "Bash(gh pr merge:*)"',
+      'allow:',
+      '  - "Bash(git status:*)"',
+      '',
+    ].join('\n'));
+    const previous = {
+      user: process.env.AGENTS_USER_PERMISSIONS_DIR,
+      system: process.env.AGENTS_SYSTEM_PERMISSIONS_DIR,
+      preset: process.env.AGENTS_PERMISSION_PRESET,
+    };
+    process.env.AGENTS_USER_PERMISSIONS_DIR = path.join(root, 'user');
+    process.env.AGENTS_SYSTEM_PERMISSIONS_DIR = system;
+    delete process.env.AGENTS_PERMISSION_PRESET;
+    try {
+      expect(buildPermissionsFromGroups(['40-ask'])).toEqual({
+        name: 'built',
+        description: 'Built from groups: 40-ask',
+        allow: ['Bash(git status:*)'],
+        ask: ['Bash(git push:*)', 'Bash(gh pr merge:*)'],
+      });
+    } finally {
+      restoreEnv(previous);
+    }
   });
 
   it('escapes deny rules before writing Codex Starlark string literals', async () => {
