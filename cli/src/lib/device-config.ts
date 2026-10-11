@@ -719,7 +719,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'user',
     type: 'bool',
     defaultValue: false,
-    description: 'AGI Menu: group a project\'s tickets under milestone headers. Off = one flat list ordered by ticketSort.',
+    description: 'AGI Menu: superseded by menubar.menu.ticketGroup (an unset ticketGroup reads as milestone while this is true). Kept for menus older than ticketGroup.',
   },
   {
     name: 'menubar.menu.ticketGroup',
