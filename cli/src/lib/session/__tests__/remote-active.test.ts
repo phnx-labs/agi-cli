@@ -1,6 +1,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { parseRemoteActive } from '../remote-active.js';
+import { gatherRemoteAgentsJson, type SshCaptureFn } from '../../remote-agents-json.js';
+import { dedupeByMachineSession } from '../../../commands/ps-roster.js';
 
 describe('parseRemoteActive', () => {
   it('tags every parsed session with the source machine', () => {
@@ -8,45 +10,45 @@ describe('parseRemoteActive', () => {
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a' },
       { context: 'cloud', kind: 'codex', status: 'queued' },
     ]);
-    const out = parseRemoteActive(stdout, 'zion');
+    const out = parseRemoteActive(stdout, 'zion').items;
     expect(out).toHaveLength(2);
     expect(out.every((s) => s.machine === 'zion')).toBe(true);
     expect(out[0].sessionId).toBe('a');
   });
 
-  it('returns [] on non-JSON (a login-shell banner leaked into stdout)', () => {
-    expect(parseRemoteActive('bash: agents: command not found\n', 'zion')).toEqual([]);
+  it('rejects non-JSON (a login-shell banner leaked into stdout) as an invalid answer', () => {
+    expect(parseRemoteActive('bash: agents: command not found\n', 'zion')).toEqual({ items: [], valid: false });
   });
 
-  it('returns [] when the top level is not an array', () => {
-    expect(parseRemoteActive(JSON.stringify({ error: 'nope' }), 'zion')).toEqual([]);
+  it('rejects a top level that is not an array as an invalid answer', () => {
+    expect(parseRemoteActive(JSON.stringify({ error: 'nope' }), 'zion')).toEqual({ items: [], valid: false });
   });
 
   it('drops non-object entries but keeps the valid ones', () => {
     const stdout = JSON.stringify([null, 'weird', 42, { kind: 'claude', context: 'teams', status: 'idle' }]);
-    const out = parseRemoteActive(stdout, 'mark');
+    const out = parseRemoteActive(stdout, 'mark').items;
     expect(out).toHaveLength(1);
     expect(out[0].machine).toBe('mark');
   });
 
-  it('returns [] on empty stdout (peer produced nothing)', () => {
-    expect(parseRemoteActive('', 'zion')).toEqual([]);
+  it('rejects empty stdout (peer produced nothing) as an invalid answer', () => {
+    expect(parseRemoteActive('', 'zion')).toEqual({ items: [], valid: false });
   });
 });
 
 describe('parseRemoteActive viewingIn normalization', () => {
   it('turns a peer label back into the internal viewer shape', () => {
-    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'codium tab 3' }]), 'peer');
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'codium tab 3' }]), 'peer').items;
     expect(rows[0].viewingIn).toEqual({ app: 'codium', tab: 3 });
   });
 
   it('treats a detached peer row as having no viewer', () => {
-    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'detached' }]), 'peer');
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: 'detached' }]), 'peer').items;
     expect(rows[0].viewingIn).toBeUndefined();
   });
 
   it('accepts the object shape a peer on an older version emits', () => {
-    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: { app: 'ghostty', tab: 2 } }]), 'peer');
+    const rows = parseRemoteActive(JSON.stringify([{ sessionId: 'a', viewingIn: { app: 'ghostty', tab: 2 } }]), 'peer').items;
     expect(rows[0].viewingIn).toEqual({ app: 'ghostty', tab: 2 });
   });
 
@@ -54,7 +56,7 @@ describe('parseRemoteActive viewingIn normalization', () => {
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'off', machine: 'yosemite-s0', offloadedFrom: 'zion' },
     ]);
-    const out = parseRemoteActive(stdout, 'zion');
+    const out = parseRemoteActive(stdout, 'zion').items;
     expect(out[0].machine).toBe('yosemite-s0');
     expect(out[0].offloadedFrom).toBe('zion');
   });
@@ -63,14 +65,14 @@ describe('parseRemoteActive viewingIn normalization', () => {
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a', machine: 'mark.local' },
     ]);
-    expect(parseRemoteActive(stdout, 'mark')[0].machine).toBe('mark');
+    expect(parseRemoteActive(stdout, 'mark').items[0].machine).toBe('mark');
   });
 
   it('still stamps the dialed peer when the row reports no machine at all', () => {
     const stdout = JSON.stringify([
       { context: 'terminal', kind: 'claude', status: 'running', sessionId: 'a' },
     ]);
-    expect(parseRemoteActive(stdout, 'zion')[0].machine).toBe('zion');
+    expect(parseRemoteActive(stdout, 'zion').items[0].machine).toBe('zion');
   });
 });
 
@@ -151,5 +153,20 @@ describe('gatherRemoteActive — earlyExit is opt-in, default all-settle', () =>
     expect(arg.earlyExit).toBeUndefined();
     vi.doUnmock('../../remote-agents-json.js');
     vi.resetModules();
+  });
+});
+
+describe('gatherRemoteAgentsJson + parseRemoteActive — a garbled exit-0 peer is not an answer', () => {
+  it('keeps the shim of a peer that printed a banner or an object, drops it only for a peer that answered', async () => {
+    const BANNER = 'tester@banner.example.com';
+    const OBJECT = 'tester@object.example.com';
+    const EMPTY = 'tester@empty.example.com';
+    const stdout: Record<string, string> = { [BANNER]: 'Welcome to Ubuntu\n[]', [OBJECT]: '{}', [EMPTY]: '[]' };
+    const capture: SshCaptureFn = (target) => Promise.resolve({ code: 0, stdout: stdout[target] });
+    const result = await gatherRemoteAgentsJson({ args: ['sessions', '--active', '--json'], noFanoutEnv: 'X', hosts: [BANNER, OBJECT, EMPTY], quiet: true, parse: parseRemoteActive }, { capture });
+    expect(result.answered).toHaveLength(1);
+    expect(result.parseFailed).toHaveLength(2);
+    const shims = result.parseFailed.concat(result.answered).map((machine, i) => ({ context: 'terminal' as const, kind: 'claude', status: 'unknown' as const, sessionId: `s${i}`, machine, offloadedFrom: 'zion' }));
+    expect(dedupeByMachineSession(shims, result.answered).map(s => s.sessionId)).toEqual(['s0', 's1']);
   });
 });
