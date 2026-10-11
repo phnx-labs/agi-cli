@@ -5556,6 +5556,8 @@
               "negate": false
             }
           ],
+          "examples": "# Follow one dispatched run. The id is the one agents devices ps prints.\nagents events logs <id> -f\n\n# Runs dispatched to one device. One match shows; several ask you to pick.\nagents events logs --device gpu-box\n\n# The full raw transcript or stdout, instead of the concise summary.\nagents events logs <id> --full\n\n# Machine-readable. A host task is { kind, task, log }.\nagents events logs <id> --json",
+          "notes": "With no id, this lists host tasks (and, unless --device is set, indexed\nsessions) that match --agent and --version. --session <id> selects the\nsame run as the positional id.\n\n--device filters those runs on this machine. It does not send the command\nto that device; pass the id from agents devices ps to read one run.",
           "subcommands": []
         },
         {
