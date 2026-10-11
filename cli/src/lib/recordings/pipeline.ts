@@ -3,9 +3,11 @@ import { ArtifactsClientError, invocation, resolveArtifactsBin } from '../artifa
 import { machineId } from '../machine-id.js';
 import { RecordingIdentityError, verifyOrganizationIdentity } from './identity.js';
 import { RecordingLedger } from './ledger.js';
-import { isNewerRecording, type RecordingCandidate, type RecordingLedgerRow } from './model.js';
+import { isNewerRecording, type RecordingCandidate, type RecordingLedgerRow, type TranscodeJob } from './model.js';
 import { processFailure, runProcess } from './process.js';
-import { RecordingDependencyError, transcodeRecording, type TranscodedRecording } from './transcode.js';
+import { reapTranscode, RecordingDependencyError, transcodeRecording, type TranscodedRecording } from './transcode.js';
+
+type Transcode = (sourcePath: string, signal?: AbortSignal, onStart?: (job: TranscodeJob) => void) => Promise<TranscodedRecording>;
 
 interface ActiveUpload {
   candidate: RecordingCandidate;
@@ -18,7 +20,8 @@ export interface RecordingPipelineOptions {
   ledger?: RecordingLedger;
   artifactsBin?: string;
   env?: NodeJS.ProcessEnv;
-  transcode?: (sourcePath: string, signal?: AbortSignal) => Promise<TranscodedRecording>;
+  transcode?: Transcode;
+  reapTranscode?: (job: TranscodeJob) => Promise<{ killed: boolean }>;
   verifyIdentity?: (signal?: AbortSignal) => Promise<{ email: string }>;
   raiseAttention?: (message: string) => Promise<void>;
   reportError?: (message: string) => void;
@@ -89,7 +92,8 @@ export class RecordingPipeline {
   private readonly active = new Map<string, ActiveUpload>();
   private readonly configuredArtifactsBin?: string;
   private readonly env: NodeJS.ProcessEnv;
-  private readonly transcode: (sourcePath: string, signal?: AbortSignal) => Promise<TranscodedRecording>;
+  private readonly transcode: Transcode;
+  private readonly reapTranscode: (job: TranscodeJob) => Promise<{ killed: boolean }>;
   private readonly verifyIdentity: (signal?: AbortSignal) => Promise<{ email: string }>;
   private readonly raiseAttention: (message: string) => Promise<void>;
   private readonly reportError: (message: string) => void;
@@ -100,7 +104,8 @@ export class RecordingPipeline {
     this.ledger = options.ledger ?? new RecordingLedger();
     this.configuredArtifactsBin = options.artifactsBin;
     this.env = options.env ?? process.env;
-    this.transcode = options.transcode ?? ((source, signal) => transcodeRecording(source, signal));
+    this.transcode = options.transcode ?? ((source, signal, onStart) => transcodeRecording(source, signal, { onStart }));
+    this.reapTranscode = options.reapTranscode ?? reapTranscode;
     this.verifyIdentity = options.verifyIdentity
       ?? ((signal) => verifyOrganizationIdentity(signal, { artifactsBin: this.artifactsBin(), env: this.env }));
     this.raiseAttention = options.raiseAttention ?? defaultAttention;
@@ -132,8 +137,16 @@ export class RecordingPipeline {
     for (const candidate of candidates) await this.ledger.queue(candidate);
   }
 
-  async recoverInterrupted(): Promise<void> {
-    await this.ledger.recoverInterrupted();
+  async recoverInterrupted(): Promise<{ reaped: number }> {
+    let reaped = 0;
+    for (const job of await this.ledger.recoverInterrupted()) {
+      try {
+        if ((await this.reapTranscode(job)).killed) reaped += 1;
+      } catch (error) {
+        this.reportError(`could not reap transcode pid ${job.pid}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return { reaped };
   }
 
   private async attention(message: string): Promise<void> {
@@ -179,9 +192,13 @@ export class RecordingPipeline {
     };
     const promise = (async (): Promise<RecordingLedgerRow | null> => {
       let transcoded: TranscodedRecording | undefined;
+      let recorded: Promise<unknown> | undefined;
       try {
         if (!await this.ledger.claim(candidate.stem, candidate.path)) return null;
-        transcoded = await this.transcode(candidate.path, controller.signal);
+        transcoded = await this.transcode(candidate.path, controller.signal, (job) => {
+          recorded = this.ledger.update(candidate.stem, candidate.path, { transcode: job });
+        });
+        await recorded;
         await this.ledger.update(candidate.stem, candidate.path, { status: 'uploading' });
         const url = await this.share(candidate, transcoded.filePath, controller.signal);
         const row = await this.ledger.update(candidate.stem, candidate.path, {
@@ -220,7 +237,9 @@ export class RecordingPipeline {
         });
         throw error;
       } finally {
+        await recorded?.catch(() => undefined);
         await transcoded?.cleanup();
+        if (recorded) await this.ledger.update(candidate.stem, candidate.path, { transcode: undefined });
       }
     })();
     active.promise = promise;
@@ -233,9 +252,11 @@ export class RecordingPipeline {
     return promise;
   }
 
+  // One full-resolution encode at a time; all at once stalled the daemon's own ticks (PHNX-4225).
   async drain(options: { awaitUploads?: boolean; signal?: AbortSignal } = {}): Promise<RecordingLedgerRow[]> {
+    if (this.active.size > 0) return [];
     const pending = await this.ledger.pending();
-    const candidates = pending.map(rowCandidate).filter((candidate) => !this.active.has(candidate.stem));
+    const candidates = pending.map(rowCandidate).slice(0, 1);
     if (candidates.length === 0) return [];
     try {
       await this.verifyIdentity(options.signal);

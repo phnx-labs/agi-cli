@@ -11,6 +11,7 @@ export interface RunProcessOptions {
   env?: NodeJS.ProcessEnv;
   signal?: AbortSignal;
   timeoutMs?: number;
+  onSpawn?: (pid: number) => void;
 }
 
 export class RecordingProcessError extends Error {
@@ -44,6 +45,7 @@ export async function runProcess(
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+    if (child.pid !== undefined) options.onSpawn?.(child.pid);
     let stdout = '';
     let stderr = '';
     let settled = false;

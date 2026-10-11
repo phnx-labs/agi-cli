@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { atomicWriteFile, withFileLockAsync } from '../fs-atomic.js';
-import type { RecordingCandidate, RecordingLedgerRow } from './model.js';
+import type { RecordingCandidate, RecordingLedgerRow, TranscodeJob } from './model.js';
 import { recordingsLedgerPath } from './config.js';
 
 interface LedgerFile {
@@ -106,14 +106,18 @@ export class RecordingLedger {
     });
   }
 
-  async recoverInterrupted(now = Date.now()): Promise<void> {
-    await this.transaction((ledger) => {
+  async recoverInterrupted(now = Date.now()): Promise<TranscodeJob[]> {
+    return this.transaction((ledger) => {
+      const orphaned: TranscodeJob[] = [];
       for (const row of ledger.rows) {
+        if (row.transcode) orphaned.push(row.transcode);
+        delete row.transcode;
         if (row.status !== 'transcoding' && row.status !== 'uploading') continue;
         row.status = 'queued';
         row.error = 'Interrupted before completion; retrying.';
         row.updatedAt = new Date(now).toISOString();
       }
+      return orphaned;
     });
   }
 

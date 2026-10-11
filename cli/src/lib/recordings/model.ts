@@ -12,6 +12,11 @@ export interface RecordingCandidate {
   sessionId?: string;
 }
 
+export interface TranscodeJob {
+  pid: number;
+  workDir: string;
+}
+
 export interface RecordingLedgerRow {
   path: string;
   stem: string;
@@ -25,6 +30,7 @@ export interface RecordingLedgerRow {
   sessionId?: string;
   updatedAt: string;
   retryAt?: string;
+  transcode?: TranscodeJob;
 }
 
 export function isRecordingFile(filePath: string): boolean {

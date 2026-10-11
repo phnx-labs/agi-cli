@@ -21,7 +21,8 @@ export class RecordingsService extends BasePeriodicService {
     });
     this.settler = new RecordingSettler();
     this.startedAtMs = Date.now();
-    await this.pipeline.recoverInterrupted();
+    const { reaped } = await this.pipeline.recoverInterrupted();
+    if (reaped > 0) ctx.log('WARN', `recordings: stopped ${reaped} transcode(s) a previous daemon left running`, { event: 'recordings.reaped', reaped });
   }
 
   protected async onTick(ctx: DaemonContext, signal: AbortSignal): Promise<void> {

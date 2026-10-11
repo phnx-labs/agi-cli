@@ -84,7 +84,7 @@ describe('ServiceSupervisor instrumentation', () => {
     expect(typeof failed?.fields?.durMs).toBe('number');
   });
 
-  it('a breach logs a snapshot naming the in-flight ticks, the synchronous section that held the loop, and the daemon vitals', async () => {
+  it('a breach logs a snapshot naming the in-flight ticks, the synchronous section that held the loop, and the daemon vitals, without exiting', async () => {
     const { lines, ctx } = capture();
     installSpanLog(ctx.log as (level: never, message: string, fields?: LogFields) => void, { slowSyncMs: 10_000 });
     let exitCode: number | undefined;
@@ -99,7 +99,7 @@ describe('ServiceSupervisor instrumentation', () => {
     await sleep(500);
     await sup.stopAll();
 
-    expect(exitCode).toBe(70);
+    expect(exitCode).toBeUndefined();
     const breach = lines.find((l) => l.level === 'ERROR' && l.fields?.event === 'tick.breach');
     expect(breach?.message).toContain("service 'attention-notify' breached its deadline");
     expect(breach?.fields).toMatchObject({ service: 'attention-notify', vitals: { cpuPct: 99 } });

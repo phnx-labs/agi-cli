@@ -100,7 +100,7 @@ class HangingService implements PeriodicService {
 }
 
 describe('ServiceSupervisor', () => {
-  it('a never-settling tick breaches its deadline and exits the process ONCE with code 70 (PHNX-4116)', async () => {
+  it('a never-settling tick is logged at its deadline and exits ONCE with code 70 only at 10x its deadline (PHNX-4225)', async () => {
     const exit = makeExit();
     const logs: string[] = [];
     const ctx: DaemonContext = { log: (level, msg) => { logs.push(`${level} ${msg}`); } };
@@ -111,19 +111,53 @@ describe('ServiceSupervisor', () => {
     await supervisor.startAll(ctx);
     await vi.advanceTimersByTimeAsync(0);
     expect(hanging.ticksStarted).toBe(1);
-    expect(exit).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
+    expect(exit).not.toHaveBeenCalled();
+    expect(logs.find((l) => l.startsWith('ERROR'))).toContain("service 'device-probe' breached its deadline (tick exceeded deadline of 500ms)");
+    expect(supervisor.health()['device-probe'].lastError).toMatch(/deadline of 500ms/);
+
+    await vi.advanceTimersByTimeAsync(4_499);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(hanging.ticksStarted).toBe(1);
     expect(exit).toHaveBeenCalledTimes(1);
     expect(exit).toHaveBeenCalledWith(70);
+    expect(logs.at(-1)).toContain("service 'device-probe' hung (tick did not settle within 5000ms");
+    expect(readRecentDaemonRestarts(0)).toHaveLength(1);
 
-    const errorLine = logs.find((l) => l.startsWith('ERROR'));
-    expect(errorLine).toBeDefined();
-    expect(errorLine).toContain('device-probe');
-    expect(errorLine).toContain('deadline of 500ms');
-
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(exit).toHaveBeenCalledTimes(1);
+  });
+
+  it('a slow tick that overruns its deadline but settles never exits; later ticks are skipped until it settles (PHNX-4225)', async () => {
+    const exit = makeExit();
+    const events: Array<{ event?: unknown; skippedTicks?: unknown }> = [];
+    const ctx: DaemonContext = { log: (_level, _msg, fields) => { events.push({ event: fields?.event, skippedTicks: fields?.skippedTicks }); } };
+    class SlowService extends HealthyService {
+      async tick(): Promise<void> {
+        this.ticks += 1;
+        if (this.ticks === 1) await new Promise<void>((resolve) => setTimeout(resolve, 3_200));
+      }
+    }
+    const slow = new SlowService('attention-notify');
+    const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
+    supervisor.register(slow);
+
+    await supervisor.startAll(ctx);
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(slow.ticks).toBe(1);
+    expect(events.filter((e) => e.event === 'tick.breach')).toHaveLength(1);
+    expect(events.find((e) => e.event === 'tick.settled')?.skippedTicks).toBe(3);
+    expect(supervisor.health()['attention-notify'].consecutiveFailures).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(800);
+    expect(slow.ticks).toBe(2);
+    expect(supervisor.health()['attention-notify'].consecutiveFailures).toBe(0);
+    expect(exit).not.toHaveBeenCalled();
+    expect(readRecentDaemonRestarts(0)).toHaveLength(0);
+
+    await supervisor.stopAll();
   });
 
   it('a hang whose deadline elapses AFTER stopAll() does NOT exit or write a restart record (PHNX-4116)', async () => {
@@ -188,7 +222,7 @@ describe('ServiceSupervisor', () => {
     expect(exit).toHaveBeenCalledWith(70);
   });
 
-  it('a cooperating tick receives a real deadline-driven AbortSignal, aborted before the exit (PHNX-4116)', async () => {
+  it('a cooperating tick receives a real deadline-driven AbortSignal and stopping on it keeps the daemon up (PHNX-4225)', async () => {
     const exit = makeExit();
     class AbortAwareService implements PeriodicService {
       readonly id: DaemonServiceId = 'device-probe';
@@ -221,7 +255,10 @@ describe('ServiceSupervisor', () => {
 
     await vi.advanceTimersByTimeAsync(500);
     expect(svc.aborts).toBe(1);
-    expect(exit).toHaveBeenCalledWith(70);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(svc.ticks).toBeGreaterThan(1);
+    expect(exit).not.toHaveBeenCalled();
+    await supervisor.stopAll();
   });
 
   it('health() returns a record for every registered service', async () => {
@@ -391,7 +428,7 @@ describe('ServiceSupervisor', () => {
       await supervisor.stopAll();
     });
 
-    it.each(P3_IDS)('%s: a hanging tick breaches its deadline and exits the process (PHNX-4116)', async (id) => {
+    it.each(P3_IDS)('%s: a hanging tick exits the process once it is a hang, not at its first deadline (PHNX-4116, PHNX-4225)', async (id) => {
       const exit = makeExit();
       const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
       class NamedHangingService extends HangingService {
@@ -407,8 +444,11 @@ describe('ServiceSupervisor', () => {
       expect(hanging.ticksStarted).toBe(1);
 
       await vi.advanceTimersByTimeAsync(500);
+      expect(exit).not.toHaveBeenCalled();
+      expect(good.ticks).toBeGreaterThanOrEqual(1);
+      await vi.advanceTimersByTimeAsync(4_500);
       expect(exit).toHaveBeenCalledWith(70);
-      expect(supervisor.health()[id].lastError).toMatch(/deadline/);
+      expect(supervisor.health()[id].lastError).toMatch(/did not settle/);
 
       await supervisor.stopAll();
     });
