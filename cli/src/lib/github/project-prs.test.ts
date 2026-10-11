@@ -168,6 +168,25 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
+  it('carries mergeable and mergeableState from one merge-state read per repo, not one per PR', async () => {
+    const { gh, asked } = recordedGh(soloRoutes());
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
+      [1, false, 'dirty'],
+      [2, true, 'clean'],
+      [3, null, 'unknown'],
+    ]);
+    expect(asked.filter((e) => e === 'graphql')).toHaveLength(1);
+    expect(asked.filter((e) => /^repos\/acme\/mono\/pulls\/[123]$/.test(e))).toEqual([]);
+  });
+
+  it('keeps the list when the merge-state read fails, naming the failure', async () => {
+    const { gh } = recordedGh({ ...soloRoutes(), graphql: ghError('gh: Server Error (HTTP 502)\n') });
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([[1, null, null], [2, null, null], [3, null, null]]);
+    expect(repo.ciError).toContain('502');
+  });
+
   it('lists merges in the last 7 days, newest first, keeping one at the cutoff and dropping one a millisecond earlier', async () => {
     const { gh } = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;

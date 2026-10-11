@@ -50,7 +50,11 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox'] as const;
+
+export const MENUBAR_RETIRED_TABS: readonly string[] = ['projects'];
+
+const MENUBAR_STORABLE_TABS: readonly string[] = [...MENUBAR_TABS, ...MENUBAR_RETIRED_TABS];
 
 const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github'];
 
@@ -59,12 +63,11 @@ export const MENUBAR_HOME_SECTIONS = ['company', 'cycle', 'today', 'needs', 'prs
 export const MENUBAR_ARTIFACT_KINDS = ['image', 'html', 'markdown'] as const;
 
 export function resolveMenubarTabOrder(stored: readonly string[]): string[] {
-  const known = MENUBAR_TABS as readonly string[];
   const tabs: string[] = [];
   for (const id of stored) {
-    if (known.includes(id) && !tabs.includes(id)) tabs.push(id);
+    if (MENUBAR_STORABLE_TABS.includes(id) && !tabs.includes(id)) tabs.push(id);
   }
-  return [...tabs, ...known.filter((t) => !tabs.includes(t))];
+  return [...tabs, ...MENUBAR_TABS.filter((t) => !tabs.includes(t))];
 }
 
 function oneOf(name: string, allowed: readonly string[]): (v: unknown) => string | null {
@@ -621,17 +624,18 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description:
       `AGI Menu: the order of the tab bar — every one of ${MENUBAR_TABS.join(', ')} exactly once. ` +
       'Settings is always last and is not listed. An order saved before Goals, Secrets, Linear or GitHub existed may omit them; ' +
-      'they read back appended. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
+      `they read back appended. The retired ${MENUBAR_RETIRED_TABS.join(', ')} tab is still accepted and kept where it was stored, ` +
+      'for menus that predate its removal. Hiding a tab is menubar.menu.hiddenTabs, not this key.',
     validate: (v) => {
       const tabs = v as string[];
       const required = MENUBAR_TABS.filter((t) => !MENUBAR_TABS_ADDED_LATER.includes(t));
       const ok = new Set(tabs).size === tabs.length
-        && tabs.every((t) => (MENUBAR_TABS as readonly string[]).includes(t))
+        && tabs.every((t) => MENUBAR_STORABLE_TABS.includes(t))
         && required.every((t) => tabs.includes(t));
       return ok
         ? null
         : `menubar.menu.tabOrder must list each of ${MENUBAR_TABS.join(', ')} exactly once ` +
-          `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and are appended).`;
+          `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and are appended; the retired ${MENUBAR_RETIRED_TABS.join(', ')} may be listed).`;
     },
     normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
   },
@@ -665,10 +669,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Settings cannot be hidden. Hiding Inbox loses nothing: its requests still show on Home. Secrets is hidden unless this list is set without it.',
     validate: (v) => {
       const tabs = v as string[];
-      const bad = tabs.find((t) => !(MENUBAR_TABS as readonly string[]).includes(t));
+      const bad = tabs.find((t) => !MENUBAR_STORABLE_TABS.includes(t));
       if (bad !== undefined) return `menubar.menu.hiddenTabs: "${bad}" is not one of ${MENUBAR_TABS.join(', ')}.`;
       if (new Set(tabs).size !== tabs.length) return 'menubar.menu.hiddenTabs lists a tab twice.';
-      if (tabs.length === MENUBAR_TABS.length) return 'menubar.menu.hiddenTabs cannot hide every tab.';
+      if (MENUBAR_TABS.every((t) => tabs.includes(t))) return 'menubar.menu.hiddenTabs cannot hide every tab.';
       return null;
     },
   },

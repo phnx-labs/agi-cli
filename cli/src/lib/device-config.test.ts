@@ -319,7 +319,7 @@ describe('validation', () => {
 
   it('stores the AGI Menu pin, tab, and milestone preferences as YAML lists and refuses malformed ones', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
-    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox']);
     expect(getConfigValue('menubar.menu.hiddenTabs').spec.defaultValue).toEqual(['secrets']);
     expect(getConfigValue('menubar.menu.groupTicketsByMilestone').spec.defaultValue).toBe(false);
 
@@ -343,7 +343,7 @@ describe('validation', () => {
     expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'goals', 'sessions', 'inbox', 'projects', 'settings'])).toThrow(/exactly once/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['settings'])).toThrow(/"settings" is not one of/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['inbox', 'inbox'])).toThrow(/twice/);
-    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox'])).toThrow(/every tab/);
     expect(() => setConfigValue('menubar.menu.groupTicketsByMilestone', 'on')).toThrow(/expects a boolean/);
   });
 
@@ -359,6 +359,17 @@ describe('validation', () => {
     expect(central).toContain('- calendar');
     writeCentral(central);
     expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals', 'secrets', 'linear', 'github']);
+  });
+
+  it('retires the Projects tab: an order without it is complete, one with it is still accepted and kept in place', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+    setConfigValue('menubar.menu.tabOrder', ['home', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github']);
+    setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github']);
+    setConfigValue('menubar.menu.hiddenTabs', ['projects', 'inbox']);
+    expect(getConfigValue('menubar.menu.hiddenTabs').value).toEqual(['projects', 'inbox']);
+    expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'sessions'])).toThrow(/exactly once/);
   });
 
   it('stores what the GitHub tab hides as org logins or owner/repo slugs and refuses anything else (PHNX-4269)', async () => {
