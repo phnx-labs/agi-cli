@@ -8,7 +8,6 @@ import {
   buildDeclaredBlock,
   deriveBlockState,
   publishBlock,
-  blockGeneration,
   type OpenBlock,
 } from '../lib/feed/feed.js';
 
@@ -139,7 +138,7 @@ export function formatFeedMastheadRight(blocks: OpenBlock[]): string {
 }
 
 export function formatFeedReplyHint(block: Pick<OpenBlock, 'host' | 'sessionId' | 'generation' | 'ts'>): string {
-  const key = `${block.host}/${block.sessionId}/${blockGeneration(block)}`;
+  const key = `${block.host}/${block.sessionId}/${block.generation ?? block.ts}`;
   return `↳ ag feed answer ${key} --text "…"`;
 }
 

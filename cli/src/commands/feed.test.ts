@@ -259,6 +259,9 @@ describe('formatFeedReplyHint', () => {
       host: 'zion', sessionId: 'sess-1', generation: 'gen-9', ts: '2026-07-13T00:00:00Z',
     });
     expect(hint).toBe('↳ ag feed answer zion/sess-1/gen-9 --text "…"');
+    expect(formatFeedReplyHint({
+      host: 'zion', sessionId: 'sess-1', ts: '2026-07-13T00:00:00Z',
+    })).toBe('↳ ag feed answer zion/sess-1/2026-07-13T00:00:00Z --text "…"');
     expect(hint.startsWith('↳')).toBe(true);
     expect(GLYPH.ask).toBe('▲');
     expect(GLYPH.delivered).toBe('✓');
