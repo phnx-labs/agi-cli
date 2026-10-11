@@ -1,0 +1,3 @@
+- **A live process with no readable transcript is `unknown`, not `running`.** Being alive is not evidence that an agent is working. On 2026-10-10 the fleet stream listed 26 such rows as running: headless `codex` and `rush` processes with no session id, folder or title (11 on one machine). They now report `unknown` (phase `idle`), and a dead one is still `closed`. Source: `cli/src/lib/session/active.ts` (`resolveFallbackStatus`).
+
+- **Pressing Esc on a turn reads as idle.** The live-status parse now asks the session reader for interrupt events, so a call you stopped no longer looks in flight; with `@phnx-labs/sessions-cli` carrying phnx-labs/sessions-cli#44 the session reads idle instead of working. Source: `cli/src/lib/session/active.ts` (`parseTailEventsForKind`).
