@@ -38,6 +38,14 @@ describe('execution-owned session projection', () => {
     expect(rows[0].observerTerminals).toEqual([expect.objectContaining({ device: 'desktop', terminalId: 'tab', workspaceDir: '/Users/me/src/agents-cli' })]);
   });
 
+  it('a desktop tab with no transcript of its own folds into the device that has it, even when the tab claims the desktop', () => {
+    const c = client();
+    c.apply(reset('desktop', [row('desktop', { terminalId: 'tab', machine: 'desktop', status: 'unknown', sessionFile: undefined })]));
+    const rows = c.apply(reset('worker', [row('worker', { sessionFile: '/w/s.jsonl', status: 'idle' })]));
+    expect(rows.filter(r => r.sessionId === 'exact-id')).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ machine: 'worker', status: 'idle', observerTerminals: [expect.objectContaining({ device: 'desktop', terminalId: 'tab' })] });
+  });
+
   it('retains owner on disconnect, replaces on reconnect, and refuses stale launcher resurrection', () => {
     const c = client();
     c.apply(reset('desktop', [row('desktop')]));

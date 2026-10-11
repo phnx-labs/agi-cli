@@ -245,9 +245,9 @@ export function listPidSessionEntries(): PidSessionEntry[] {
 
 export function liveSessionProcesses(sessionId: string): PidSessionEntry[] {
   return listPidSessionEntries()
-    .filter((entry) => entry.sessionId === sessionId)
+    .filter((entry) => entry.sessionId === sessionId && !entry.machine)
     .map((entry) => readLivePidSessionEntry(entry.pid))
-    .filter((entry): entry is PidSessionEntry => entry?.sessionId === sessionId);
+    .filter((entry): entry is PidSessionEntry => entry?.sessionId === sessionId && !entry.machine);
 }
 
 export function prunePidSessionRegistry(isAlive?: (pid: number, startedAtMs?: number) => boolean | undefined): void {
