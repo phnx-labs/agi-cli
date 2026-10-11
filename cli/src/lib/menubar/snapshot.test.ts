@@ -52,6 +52,9 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()).toMatchObject({
         'menubar.menu.groupTicketsByMilestone': false,
         'menubar.statusbar.goalCountdown': false,
+        'menubar.menu.showBrowserSessions': true,
+        'menubar.menu.showComputerSessions': true,
+        'menubar.menu.ticketGroup': 'none',
       });
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
@@ -70,7 +73,13 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()).toMatchObject({
         'menubar.menu.groupTicketsByMilestone': true,
         'menubar.statusbar.goalCountdown': true,
+        // The old switch on and ticketGroup unset: the menu groups by milestone.
+        'menubar.menu.ticketGroup': 'milestone',
       });
+      setConfigValue('menubar.menu.ticketGroup', 'status');
+      expect(buildMenuPreferences()['menubar.menu.ticketGroup']).toBe('status');
+      setConfigValue('menubar.menu.showBrowserSessions', false);
+      expect(buildMenuPreferences()['menubar.menu.showBrowserSessions']).toBe(false);
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
         'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github'],
