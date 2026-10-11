@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.9
+
+- Session status no longer reads an idle session as working: the bundled sessions reader moves to 0.8.3, which judges working vs idle by event timestamps instead of the transcript's file time (Claude's bookkeeping writes kept old sessions looking active). Formats without per-line timestamps (grok, cursor) still date their last event by the file time, so a waiting grok question still reads as waiting.
+
 ## 1.23.8
 
 - **AGI Menu config keys for the Linear tab, Sessions kinds and ticket grouping (PHNX-4326).** `tabOrder`/`hiddenTabs` accept `linear`; new `menubar.menu.showBrowserSessions` and `showComputerSessions` (default `true`) and `menubar.menu.ticketGroup` (default `none`; reads `milestone` while the superseded `groupTicketsByMilestone` is on). Source: `cli/src/lib/device-config.ts`, `cli/src/lib/menubar/snapshot.ts`.
