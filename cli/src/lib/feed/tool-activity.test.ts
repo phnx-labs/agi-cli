@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { collectToolRows, linkToolSessions, readLiveBrowserTasks, readStandaloneComputerRows, readToolJson, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
+import { collectToolRows, linkToolSessions, TOOL_LINK_TTL_MS, readLiveBrowserTasks, readStandaloneComputerRows, readToolJson, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
 import type { BrowserSessionRow, ComputerRunRow, ToolRow } from './tools.js';
 import { _resetBrowserClientForTest } from '../browser-client.js';
 import { _resetComputerClientForTest } from '../computer-client.js';
@@ -407,6 +407,24 @@ describe('rows read from the standalone tools (real processes printing fixture J
     expect(post.linkStatus).toBe('linked');
     expect(post.owner).toMatchObject({ sessionId: 'sess-post', agent: 'claude', label: 'post the release notes' });
     expect(rows.find((r) => r.kind === 'computer')!.linkStatus).toBe('unresolved');
+  });
+
+  it('reuses a found session for the link window instead of re-reading it on every reprojection, and never caches a miss', () => {
+    fs.mkdirSync(getSessionsDir(), { recursive: true });
+    const transcript = path.join(tempRoot(), 'sess-cache.jsonl');
+    fs.writeFileSync(transcript, '');
+    const index = (topic: string) => upsertSession({
+      id: 'sess-cache', shortId: 'sess-cac', agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic,
+    } as unknown as Parameters<typeof upsertSession>[0], topic);
+    const t0 = 1_800_000_000_000;
+
+    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0)[0]!.linkedSession).toBeUndefined();
+    index('first title');
+    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + 1)[0]!.linkedSession?.topic).toBe('first title');
+
+    index('renamed');
+    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + TOOL_LINK_TTL_MS - 1)[0]!.linkedSession?.topic).toBe('first title');
+    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + TOOL_LINK_TTL_MS + 2)[0]!.linkedSession?.topic).toBe('renamed');
   });
 
   it('a tool that exits non-zero makes the snapshot incomplete and keeps the other tool\'s rows', async () => {

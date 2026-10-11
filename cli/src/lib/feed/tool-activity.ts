@@ -88,6 +88,16 @@ export async function readStandaloneComputerRows(): Promise<ComputerRunRow[]> {
   });
 }
 
+export const TOOL_LINK_TTL_MS = 60_000;
+
+interface ToolLinkCache {
+  metas: Map<string, { meta: SessionMeta; at: number }>;
+  launches: Map<string, string>;
+  indexBuiltAt: number;
+}
+
+const linkCache: ToolLinkCache = { metas: new Map(), launches: new Map(), indexBuiltAt: -Infinity };
+
 function buildLaunchSessionIndex(): Map<string, string> {
   return spanSync('feed.tools.launch-index', buildLaunchSessionIndexNow);
 }
@@ -106,19 +116,39 @@ function buildLaunchSessionIndexNow(): Map<string, string> {
   return byLaunchId;
 }
 
-/** The tools record a session or launch id; only agents-cli's index can say which agent session that was. */
-export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[]): T[] {
-  return spanSync('feed.tools.link-sessions', () => linkToolSessionsNow(rows), () => ({ rows: rows.length }));
+/**
+ * The tools record a session or launch id; only agents-cli's index can say which agent session that was.
+ * Thousands of rows point at a few hundred sessions and rarely change, so a found session is reused for
+ * TOOL_LINK_TTL_MS and the launch index is rebuilt at most once per window: this runs on the daemon's
+ * event loop on every tool reprojection (PHNX-4225). A miss is never cached, so a newly indexed session
+ * links on the next pass.
+ */
+export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs = Date.now()): T[] {
+  return spanSync('feed.tools.link-sessions', () => linkToolSessionsNow(rows, nowMs), () => ({ rows: rows.length }));
 }
 
-function linkToolSessionsNow<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[]): T[] {
-  let byLaunchId: Map<string, string> | undefined;
+function linkToolSessionsNow<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs: number): T[] {
+  const cache = linkCache;
+  const sessionFor = (id: string): SessionMeta | null => {
+    const hit = cache.metas.get(id);
+    if (hit && nowMs - hit.at < TOOL_LINK_TTL_MS) return hit.meta;
+    const meta = getSessionById(id);
+    if (meta) cache.metas.set(id, { meta, at: nowMs });
+    else cache.metas.delete(id);
+    return meta;
+  };
+  const sessionIdForLaunch = (launchId: string): string | undefined => {
+    const known = cache.launches.get(launchId);
+    if (known || nowMs - cache.indexBuiltAt < TOOL_LINK_TTL_MS) return known;
+    for (const [lid, sid] of buildLaunchSessionIndex()) cache.launches.set(lid, sid);
+    cache.indexBuiltAt = nowMs;
+    return cache.launches.get(launchId);
+  };
   return rows.map((row) => {
-    let linked = row.sessionId ? getSessionById(row.sessionId) : null;
+    let linked = row.sessionId ? sessionFor(row.sessionId) : null;
     if (!linked && row.launchId) {
-      byLaunchId ??= buildLaunchSessionIndex();
-      const sessionId = byLaunchId.get(row.launchId);
-      linked = sessionId ? getSessionById(sessionId) : null;
+      const sessionId = sessionIdForLaunch(row.launchId);
+      linked = sessionId ? sessionFor(sessionId) : null;
     }
     return linked ? { ...row, linkedSession: linked } : row;
   });

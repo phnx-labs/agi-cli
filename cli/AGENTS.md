@@ -259,7 +259,11 @@ incomplete and its rows already on the stream are kept. The tools record a
 session or launch id but cannot resolve it; `linkToolSessions` joins it against
 agents-cli's own session index (session id first, then the launch-id join over
 recent activity, hook sessions and the pid registry), which is what makes a row
-`linked` rather than `unresolved`. The engine names a run's machine `local` when
+`linked` rather than `unresolved`. That join runs synchronously on the daemon's event
+loop on every reprojection, so a found session is reused for `TOOL_LINK_TTL_MS` (60 s)
+and the launch-id index is rebuilt at most once per window; a miss is never cached
+(PHNX-4225: the uncached join held the loop for up to 21 s per pass and crash-looped
+the daemon on its tick deadlines). The engine names a run's machine `local` when
 it recorded no hostname; that placeholder is never published as a device.
 
 Live browser tasks come from `tasks.json` via `readLiveBrowserTasks`, which is the
