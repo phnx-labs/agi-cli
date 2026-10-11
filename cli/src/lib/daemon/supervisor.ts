@@ -237,9 +237,7 @@ export class ServiceSupervisor {
     entry.timer = setInterval(() => { void this.runTick(id); }, entry.service.intervalMs);
   }
 
-  // A thrown tick retries on its interval. An overrun is aborted, logged and recorded, and the
-  // service skips ticks until it settles; only a tick still unsettled after HANG_DEADLINES deadlines
-  // is a hang that exits 70 for a supervised restart (PHNX-4225; PHNX-4116 for the hang).
+  // Throws retry; an overrun is aborted and skipped until it settles; only a hang (HANG_DEADLINES) exits 70.
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     const ctx = this.ctx;
