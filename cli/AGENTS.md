@@ -1305,12 +1305,12 @@ registered agent id, validated at write time, unset = the menu's own default and
 name; `auto` is `agents run --device auto`, which already refuses a `personal` or
 `desktop` box). Four keys shape the Projects tab and the tab bar:
 `pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
-`tabOrder` (every one of `home`, `goals`, `secrets`, `projects`, `github`, `sessions`,
-`inbox` exactly once; default in that order — an order saved before Goals, Secrets or
-GitHub existed may
-omit them, and every read resolves the stored list the way the menu's `TabLayout.resolve`
-does: unknown and repeated ids dropped, a missing tab appended in built-in order),
-`hiddenTabs` (any of those seven but not all; default `["secrets"]`, so the Secrets tab
+`tabOrder` (every one of `MENUBAR_TABS` exactly once; default in that order — an order
+saved before Goals, Secrets, Linear or GitHub existed may omit them, and every read
+resolves the stored list the way the menu's `TabLayout.resolve` does: unknown and
+repeated ids dropped, a missing tab appended in built-in order; the retired `projects`
+tab, `MENUBAR_RETIRED_TABS`, is still accepted and kept in place for older menus),
+`hiddenTabs` (any of those tabs but not all; default `["secrets"]`, so the Secrets tab
 starts hidden), and
 `groupTicketsByMilestone` (default `false`, a flat ticket list). Two keys drive Goals
 (PHNX-4291): `homeGoals` (the goal levels Home shows — any of `company`, `week`,
@@ -1336,7 +1336,7 @@ the list so the menu falls back to its own baked-in default (the defaults in
 `menubar.menu.*` and `menubar.statusbar.*` key → its effective value, i.e. the stored value or the registered
 default; `defaultProject` omitted when unset) so the menu consumes preferences from
 the snapshot it already polls rather than a second read path. That map is scalar-only:
-the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`, `githubHidden`) ride a separate
+the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`, `homeSections`, `artifactApps`, `githubHidden`) ride a separate
 `menuListPreferences` map, because a shipped menu decodes `menuPreferences` values as
 string/number/bool and a single array would fail its whole snapshot decode. On macOS, a one-shot
 sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
