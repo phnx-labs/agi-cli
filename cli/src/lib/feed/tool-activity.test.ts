@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { collectToolRows, linkToolSessions, TOOL_LINK_TTL_MS, readLiveBrowserTasks, readStandaloneComputerRows, readToolJson, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
+import { _resetToolLinkCacheForTest, collectToolRows, linkToolSessions, TOOL_LINK_MISS_TTL_MS, TOOL_LINK_TTL_MS, readLiveBrowserTasks, readStandaloneComputerRows, readToolJson, watchToolActivity, ToolRowSet, type ToolDiff } from './tool-activity.js';
 import type { BrowserSessionRow, ComputerRunRow, ToolRow } from './tools.js';
 import { _resetBrowserClientForTest } from '../browser-client.js';
 import { _resetComputerClientForTest } from '../computer-client.js';
-import { getSessionsDir } from '../state.js';
+import { getActivityDir, getSessionsDir } from '../state.js';
 import { upsertSession } from '../session/db.js';
 
 const roots: string[] = [];
@@ -16,6 +16,7 @@ function tempRoot(): string {
   return dir;
 }
 afterEach(() => { for (const dir of roots.splice(0)) fs.rmSync(dir, { recursive: true, force: true }); });
+beforeEach(() => _resetToolLinkCacheForTest());
 
 function browserRow(task: string, mtimeMs: number, captures = 1): BrowserSessionRow {
   return {
@@ -399,7 +400,7 @@ describe('rows read from the standalone tools (real processes printing fixture J
       id: 'sess-post', shortId: 'sess-pos', agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic: 'post the release notes',
     } as unknown as Parameters<typeof upsertSession>[0], 'post the release notes');
 
-    const [row] = linkToolSessions([{ sessionId: 'sess-post' }, { sessionId: 'never-indexed' }]);
+    const [row] = await linkToolSessions([{ sessionId: 'sess-post' }, { sessionId: 'never-indexed' }]);
     expect(row!.linkedSession?.id).toBe('sess-post');
 
     const { rows } = await collectToolRows('m1', live);
@@ -409,7 +410,7 @@ describe('rows read from the standalone tools (real processes printing fixture J
     expect(rows.find((r) => r.kind === 'computer')!.linkStatus).toBe('unresolved');
   });
 
-  it('reuses a found session for the link window instead of re-reading it on every reprojection, and never caches a miss', () => {
+  it('reuses a found session for the link window, and re-reads a miss after the short miss window', async () => {
     fs.mkdirSync(getSessionsDir(), { recursive: true });
     const transcript = path.join(tempRoot(), 'sess-cache.jsonl');
     fs.writeFileSync(transcript, '');
@@ -417,14 +418,44 @@ describe('rows read from the standalone tools (real processes printing fixture J
       id: 'sess-cache', shortId: 'sess-cac', agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic,
     } as unknown as Parameters<typeof upsertSession>[0], topic);
     const t0 = 1_800_000_000_000;
+    const link = async (at: number) => (await linkToolSessions([{ sessionId: 'sess-cache' }], at))[0]!.linkedSession;
 
-    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0)[0]!.linkedSession).toBeUndefined();
+    expect(await link(t0)).toBeUndefined();
     index('first title');
-    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + 1)[0]!.linkedSession?.topic).toBe('first title');
+    expect(await link(t0 + TOOL_LINK_MISS_TTL_MS - 1)).toBeUndefined();
+    const found = t0 + TOOL_LINK_MISS_TTL_MS + 1;
+    expect((await link(found))?.topic).toBe('first title');
 
     index('renamed');
-    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + TOOL_LINK_TTL_MS - 1)[0]!.linkedSession?.topic).toBe('first title');
-    expect(linkToolSessions([{ sessionId: 'sess-cache' }], t0 + TOOL_LINK_TTL_MS + 2)[0]!.linkedSession?.topic).toBe('renamed');
+    expect((await link(found + TOOL_LINK_TTL_MS - 1))?.topic).toBe('first title');
+    expect((await link(found + 2 * TOOL_LINK_TTL_MS))?.topic).toBe('renamed');
+  });
+
+  it('links through a launch id from the activity logs, replaces a remapped id after the window, and drops a removed log', async () => {
+    fs.mkdirSync(getSessionsDir(), { recursive: true });
+    for (const id of ['sess-launch-a', 'sess-launch-b']) {
+      const transcript = path.join(tempRoot(), `${id}.jsonl`);
+      fs.writeFileSync(transcript, '');
+      upsertSession({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: '2026-10-08T00:00:00.000Z', filePath: transcript, topic: id } as unknown as Parameters<typeof upsertSession>[0], id);
+    }
+    fs.mkdirSync(getActivityDir(), { recursive: true });
+    const log = path.join(getActivityDir(), 'activity-owner.jsonl');
+    const writeLog = (sessionId: string) => fs.writeFileSync(log, [
+      'partial line from a truncated tail',
+      JSON.stringify({ v: 1, ts: '2026-10-08T00:00:00.000Z', event: 'session.start', sessionId, launchId: 'launch-cache' }),
+    ].join('\n') + '\n');
+    const t0 = 1_900_000_000_000;
+    const link = async (at: number) => (await linkToolSessions([{ launchId: 'launch-cache' }], at))[0]!.linkedSession?.id;
+
+    writeLog('sess-launch-a');
+    expect(await link(t0)).toBe('sess-launch-a');
+
+    writeLog('sess-launch-b');
+    expect(await link(t0 + TOOL_LINK_TTL_MS - 1)).toBe('sess-launch-a');
+    expect(await link(t0 + 3 * TOOL_LINK_TTL_MS)).toBe('sess-launch-b');
+
+    fs.rmSync(log);
+    expect(await link(t0 + 6 * TOOL_LINK_TTL_MS)).toBeUndefined();
   });
 
   it('a tool that exits non-zero makes the snapshot incomplete and keeps the other tool\'s rows', async () => {
