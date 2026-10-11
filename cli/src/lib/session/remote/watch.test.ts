@@ -12,6 +12,7 @@ import {
   watchLocalSessions,
   toSessionWatchRow,
 } from './watch.js';
+import { loadSessionPreviewDigest } from '../preview-digest.js';
 
 const row = (sessionId: string, status: ActiveSession['status'] = 'running'): ActiveSession => ({
   context: 'terminal', kind: 'codex', sessionId, status, cwd: '/repo', lastActivityMs: 10,
@@ -284,6 +285,59 @@ describe('session watch protocol', () => {
       ['live', false],
       ['history', true],
     ]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('previous rows carry the card text live rows carry (PHNX-4326)', () => {
+  const fixture = path.join(import.meta.dirname, 'testdata', 'previous-card-claude.jsonl');
+
+  function previousSession(id: string): { session: SessionMeta; dir: string } {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'previous-card-')));
+    const filePath = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(filePath, fs.readFileSync(fixture, 'utf8').replaceAll('__DIR__', dir));
+    fs.mkdirSync(path.join(dir, '.agents', 'reports'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.agents', 'reports', 'release-notes.md'), '# Notes\n');
+    return {
+      dir,
+      session: indexed(id, { agent: 'claude', filePath, cwd: dir, firstUserMessage: 'Write the release notes for the feed cards' }),
+    };
+  }
+
+  it('fills lastAgentLine, request, todos and artifacts from the cached digest once it exists', () => {
+    const { session, dir } = previousSession('9b1d2c3e-0000-4000-8000-000000000001');
+    const cold = toPreviousSessionWatchRow('zion', session, []);
+    expect(cold.lastAgentLine).toBeUndefined();
+    expect(cold.request?.headline).toBe('Write the release notes for the feed cards');
+
+    expect(loadSessionPreviewDigest(session).digest).toBeDefined();
+    const warm = toPreviousSessionWatchRow('zion', session, []);
+    expect(warm.lastAgentLine).toBe('**Done.** The release notes are written and ready for review.');
+    expect(warm.importantMessage).toEqual({ text: warm.lastAgentLine, kind: 'activity' });
+    expect(warm.todos).toMatchObject({ done: 1, total: 2 });
+    expect(warm.artifacts?.map((artifact) => [artifact.basename, artifact.bucket, artifact.kind])).toEqual([['release-notes.md', 'reports', 'markdown']]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('serves the reset at once and upserts a cold row after building its digest', async () => {
+    const { session, dir } = previousSession('9b1d2c3e-0000-4000-8000-000000000002');
+    const controller = new AbortController();
+    const events: Parameters<Parameters<typeof watchLocalSessions>[0]['emit']>[0][] = [];
+    const watching = watchLocalSessions({
+      scope: 'zion', signal: controller.signal, journalPath: path.join(dir, 'active.jsonl'), heartbeatMs: 60_000,
+      readCache: () => ({ version: 1, scope: 'local', capturedAt: 1, sessions: [] }),
+      readPrevious: () => [session],
+      emit: (event) => {
+        events.push(event);
+        if (event.type === 'upsert') controller.abort();
+      },
+    });
+    await watching;
+    const reset = events.find((event) => event.type === 'reset');
+    const upsert = events.find((event) => event.type === 'upsert');
+    expect(reset?.type === 'reset' && reset.rows[0].lastAgentLine).toBeFalsy();
+    expect(upsert?.type === 'upsert' && upsert.row.previous && upsert.row.lastAgentLine).toBe('**Done.** The release notes are written and ready for review.');
+    expect(events.indexOf(reset!)).toBeLessThan(events.indexOf(upsert!));
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

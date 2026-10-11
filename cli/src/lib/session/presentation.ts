@@ -811,6 +811,7 @@ export interface SessionPreviewDigest {
   dirs: string[];
   repos: string[];
   artifacts: ReturnType<typeof extractArtifacts>;
+  producedArtifacts?: ReturnType<typeof extractArtifacts>;
   skills: ReturnType<typeof extractSkills>;
   plugins: string[];
   hooks: ReturnType<typeof extractHooks>;

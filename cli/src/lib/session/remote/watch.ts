@@ -8,9 +8,11 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../active.js';
+import { artifactKind, deriveImportantMessage, deriveSessionRecap, isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../active.js';
+import { loadSessionPreviewDigest, readCachedPreviewDigest } from '../preview-digest.js';
+import { indexArtifactSidecars, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { listNativeAccounts } from '../../account-registry.js';
-import { readMeta } from '../../state.js';
+import { getUserAgentsDir, readMeta } from '../../state.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionAgentSupportsResume } from '../recovery.js';
@@ -94,6 +96,33 @@ function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefin
   return session.label || session.generatedTitle || foldedHeadline || session.topic || undefined;
 }
 
+function previousRowCard(
+  session: SessionMeta,
+  request: ActiveSession['request'],
+  attachments: ActiveSession['attachments'],
+): Pick<ActiveSession, 'lastAgentLine' | 'request' | 'userPromptClean' | 'userPromptKind' | 'todos' | 'artifacts' | 'importantMessage'> {
+  const digest = readCachedPreviewDigest(session);
+  const recap = deriveSessionRecap({
+    ...session,
+    tail: digest?.lastAssistant ? [digest.lastAssistant] : undefined,
+    attachments,
+    request,
+  });
+  const sidecars = indexArtifactSidecars(path.join(getUserAgentsDir(), 'artifacts')).get(session.id) ?? [];
+  const artifacts = mergeArtifacts(digest?.producedArtifacts ?? [], sidecars).map((artifact) => ({ ...artifact, kind: artifactKind(artifact.path) }));
+  const todos = digest?.todos ?? session.todos;
+  const importantMessage = deriveImportantMessage({ status: 'closed', lastAgentLine: recap.lastAgentLine });
+  return {
+    ...(recap.lastAgentLine ? { lastAgentLine: recap.lastAgentLine } : {}),
+    ...(recap.request ? { request: recap.request } : {}),
+    ...(recap.userPromptClean ? { userPromptClean: recap.userPromptClean } : {}),
+    ...(recap.userPromptKind ? { userPromptKind: recap.userPromptKind } : {}),
+    ...(todos?.total ? { todos } : {}),
+    ...(artifacts.length ? { artifacts } : {}),
+    ...(importantMessage ? { importantMessage } : {}),
+  };
+}
+
 export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, accounts = listNativeAccounts(readMeta())): SessionWatchRow {
   const resumable = sessionAgentSupportsResume(session.agent);
   const sourceDevice = normalizeHost(session.machine ?? scope);
@@ -113,6 +142,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
   const folded = readSessionTimelineAny(session.id);
   const model = folded?.model ?? session.model;
   const title = previousRowTitle(session, folded?.request?.headline);
+  const card = previousRowCard(session, folded?.request, folded?.attachments);
   return {
     context: 'recent',
     kind: session.agent,
@@ -142,7 +172,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(summary?.checkpoints ? { checkpoints: summary.checkpoints } : {}),
     ...(summary?.summaryChecklist ? { summaryChecklist: summary.summaryChecklist } : {}),
     summaryState: resolveStreamSummaryState(summary?.summaryState),
-    ...(folded?.request ? { request: folded.request } : {}),
+    ...card,
     ...(folded?.timeline ? { timeline: folded.timeline } : {}),
     ...(folded?.files ? { files: folded.files } : {}),
     ...(model ? { model } : {}),
@@ -313,6 +343,16 @@ export class SessionWatchState {
     return events;
   }
 
+  refreshPrevious(scope: string, session: SessionMeta, accounts = listNativeAccounts(readMeta())): SessionWatchEnvelope | undefined {
+    const rows = this.rows.get(scope);
+    const rowKey = previousSessionWatchRowKey(scope, session.id);
+    const current = rows?.get(rowKey);
+    if (!rows || !current) return undefined;
+    const row = toPreviousSessionWatchRow(scope, session, accounts);
+    if (sameRow(current, row)) return undefined;
+    rows.set(rowKey, row);
+    return { ...this.base('upsert'), scope, rowKey, row };
+  }
 
   scope(scope: string, status: SessionWatchScopeStatus, reason?: string): SessionWatchEnvelope {
     return { ...this.base('scope'), scope, status, ...(reason ? { reason } : {}) };
@@ -350,6 +390,21 @@ export function readPreviousSessionsForWatch(scope: string): SessionMeta[] {
   }
 }
 
+async function fillPreviousCards(state: SessionWatchState, options: WatchLocalOptions, sessions: SessionMeta[]): Promise<void> {
+  const accounts = sessions.length ? listNativeAccounts(readMeta()) : [];
+  for (const session of sessions) {
+    if (options.signal.aborted) return;
+    if (readCachedPreviewDigest(session)) continue;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (options.signal.aborted) return;
+    try {
+      if (!loadSessionPreviewDigest(session).digest) continue;
+      const event = state.refreshPrevious(options.scope, session, accounts);
+      if (event) options.emit(event);
+    } catch {  }
+  }
+}
+
 export async function watchLocalSessions(options: WatchLocalOptions): Promise<void> {
   const state = new SessionWatchState();
   const readCache = options.readCache ?? readActiveSessionsCache;
@@ -359,9 +414,11 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   let offset = 0;
   try { offset = fs.statSync(journal).size; } catch {  }
   const initial = readCache('local');
-  options.emit(state.reset(options.scope, initial?.sessions ?? [], readPrevious(options.scope)));
+  const previous = readPrevious(options.scope);
+  options.emit(state.reset(options.scope, initial?.sessions ?? [], previous));
   options.emit(state.scope(options.scope, initial ? 'available' : 'unavailable', initial ? undefined : 'awaiting publisher'));
   if (options.signal.aborted) return;
+  void fillPreviousCards(state, options, previous);
   noteActiveSessionsJournalReader();
   await new Promise<void>((resolve) => {
     let partial = '';
