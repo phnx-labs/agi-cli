@@ -722,6 +722,17 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'AGI Menu: group a project\'s tickets under milestone headers. Off = one flat list ordered by ticketSort.',
   },
   {
+    name: 'menubar.menu.ticketGroup',
+    yamlKey: 'menubarMenuTicketGroup',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'none',
+    description:
+      'AGI Menu: how the Projects and Linear tabs group each project\'s tickets — none, status, assignee, ' +
+      'delegate, milestone, or priority. Replaces groupTicketsByMilestone for menus that know it.',
+    validate: oneOf('menubar.menu.ticketGroup', ['none', 'status', 'assignee', 'delegate', 'milestone', 'priority']),
+  },
+  {
     name: 'menubar.menu.prGroupOpen',
     yamlKey: 'menubarMenuPrGroupOpen',
     scope: 'user',

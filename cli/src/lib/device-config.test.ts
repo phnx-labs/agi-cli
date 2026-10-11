@@ -417,6 +417,10 @@ describe('validation', () => {
     setConfigValue('menubar.menu.showBrowserSessions', false);
     expect(getConfigValue('menubar.menu.showBrowserSessions').value).toBe(false);
     expect(() => setConfigValue('menubar.menu.showComputerSessions', 'off')).toThrow(/expects a boolean/);
+    expect(getConfigValue('menubar.menu.ticketGroup').spec.defaultValue).toBe('none');
+    setConfigValue('menubar.menu.ticketGroup', 'delegate');
+    expect(getConfigValue('menubar.menu.ticketGroup').value).toBe('delegate');
+    expect(() => setConfigValue('menubar.menu.ticketGroup', 'day')).toThrow(/none \| status/);
     setConfigValue('menubar.menu.sessionUpdates', false);
     expect(getConfigValue('menubar.menu.sessionUpdates').value).toBe(false);
     expect(() => setConfigValue('menubar.menu.sessionUpdates', 'off')).toThrow(/expects a boolean/);
@@ -496,6 +500,7 @@ describe('listConfig', () => {
       'menubar.menu.showPullRequests',
       'menubar.menu.tabOrder',
       'menubar.menu.thenBy',
+      'menubar.menu.ticketGroup',
       'menubar.menu.ticketSort',
       'menubar.menu.workingRowsShown',
       'menubar.statusbar.goalCountdown',
