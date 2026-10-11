@@ -16,6 +16,7 @@ import {
   isExpectedSystemRepoRemote,
   isSystemRepoOrigin,
   isSystemRepoRemote,
+  parseOwnerRepoFromRemote,
   parseSource,
   tryAutoPullSystemRepo,
   pullRepo,
@@ -733,6 +734,18 @@ describe('sameGitRemote (adopt-existing repo matching)', () => {
     expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-system.git')).toBe('github.com/phnx-labs/.agents-system');
     expect(sameGitRemote('git@github.com:phnx-labs/.agents.git', 'https://github.com/phnx-labs/.agents-system')).toBe(true);
     expect(sameGitRemote('git@github.com:phnx-labs/.agents-extras.git', 'https://github.com/phnx-labs/.agents-system')).toBe(false);
+  });
+});
+
+describe('parseOwnerRepoFromRemote', () => {
+  it('parses https + ssh + .git suffixed GitHub remotes', () => {
+    expect(parseOwnerRepoFromRemote('https://github.com/acme/team-skills.git')).toBe('acme/team-skills');
+    expect(parseOwnerRepoFromRemote('git@github.com:acme/team-skills.git')).toBe('acme/team-skills');
+    expect(parseOwnerRepoFromRemote('https://github.com/acme/team-skills')).toBe('acme/team-skills');
+  });
+
+  it('returns null for non-GitHub remotes', () => {
+    expect(parseOwnerRepoFromRemote('https://gitlab.com/acme/skills.git')).toBeNull();
   });
 });
 

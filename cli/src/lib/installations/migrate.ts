@@ -1047,7 +1047,7 @@ function containsOnlyDsStore(dir: string): boolean {
 
 function warnSystemOrphans(): void {
   const SHIPPED_ALLOWLIST = new Set<string>([
-    'commands', 'hooks', 'skills', 'rules', 'mcp', 'clis', 'permissions', 'subagents', 'profiles', 'agents', 'routines', 'webhooks',
+    'commands', 'hooks', 'skills', 'rules', 'mcp', 'clis', 'permissions', 'subagents', 'profiles', 'agents', 'routines',
     'agents.yaml', 'hooks.yaml', 'README.md', 'CHANGELOG.md',
     '.git', '.githooks', '.gitignore', '.assets', '.environment', '.plans',
     '.DS_Store', '.claude',
@@ -1461,6 +1461,23 @@ export function migrateWatchdogSentinelToConfig(
   console.error('Migrated watchdog: legacy enable sentinel → watchdog.enabled config (kept enabled)');
 }
 
+export function migrateMenubarSentinelToConfig(
+  sentinelPath: string = path.join(CACHE_DIR, 'state', 'menubar.disabled'),
+  disable: () => void = () => setConfigValue('menubar.enabled', false),
+): void {
+  if (!fs.existsSync(sentinelPath)) return;
+  try {
+    disable();
+  } catch (err) {
+    console.error(
+      `menubar sentinel migration: could not set menubar.enabled (${(err as Error).message}); leaving the sentinel for a later retry`,
+    );
+    return;
+  }
+  try { fs.rmSync(sentinelPath); } catch {  }
+  console.error('Migrated AGI Menu: legacy disabled sentinel → menubar.enabled=false');
+}
+
 export function migrateCliDirToClis(agentsDirs: string[]): void {
   for (const agentsDir of agentsDirs) {
     const src = path.join(agentsDir, 'cli');
@@ -1730,6 +1747,7 @@ export async function runMigration(): Promise<void> {
   migrateLegacyRoutineActivation();
 
   migrateWatchdogSentinelToConfig();
+  migrateMenubarSentinelToConfig();
   removeHomeCompiledProjectRules();
   pauseUnreadyEnabledRoutines();
 

@@ -309,7 +309,7 @@ Examples:
       }
 
       if (commandOrUrl.length === 0) {
-        const { getMcpServerInfo, mcpEntryToInstallSpec } = await import('../lib/registry.js');
+        const { getMcpServerInfo, mcpEntryToInstallSpec } = await import('../lib/mcp-lookup.js');
         const spinner = ora(`Looking up '${name}' in MCP registries…`).start();
         try {
           const entry = await getMcpServerInfo(name);

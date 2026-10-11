@@ -1,22 +1,4 @@
-import * as fs from 'fs';
 import * as path from 'path';
-
-export function realpathExistingPrefix(target: string): string {
-
-  let current = path.resolve(target);
-  const tail: string[] = [];
-  for (;;) {
-    try {
-      const real = fs.realpathSync(current);
-      return tail.length ? path.join(real, ...tail.reverse()) : real;
-    } catch {
-      const parent = path.dirname(current);
-      if (parent === current) return path.resolve(target);
-      tail.push(path.basename(current));
-      current = parent;
-    }
-  }
-}
 
 export function isSafeSegmentName(name: string): boolean {
   return (

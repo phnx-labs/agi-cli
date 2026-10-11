@@ -2,7 +2,7 @@
 
 Resources are the portable inputs that make an agent useful in a project: rules,
 commands, skills, hooks, MCP servers, permissions, subagents, workflows, profiles,
-routers, secret metadata, and host CLI declarations. A DotAgents repository stores
+secret metadata, and host CLI declarations. A DotAgents repository stores
 these concepts in a harness-neutral form. Synchronization projects that form into each
 harness's native layout.
 
@@ -69,31 +69,6 @@ stateDiagram-v2
 - Partial outcomes are reported as partial; a declined permission is not clean success.
 - Secret values never enter a DotAgents repository. Only bundle names and policy sync.
 - A plugin cannot bypass capability, precedence, consent, or pruning rules.
-
-## Portable agent packages (Factory / Prix Cloud)
-
-A schema-v3 `agent.yaml` package is a harness-neutral bundle. Materialize it into
-an **ephemeral** Claude, Codex, or OpenCode home — never the live `~/.claude` /
-`~/.codex` / `~/.opencode` directories:
-
-```bash
-# Factory worker: stamp the package into the job's output home, then exec there.
-agents packages materialize ./reviewer \
-  --harness codex --harness-version 0.42.0 --output-home "$OUTPUT_HOME" --json
-```
-
-`--json` emits the materialization receipt (agent ref + digest, harness,
-per-resource targets, warnings) — byte-identical to the `materialization-receipt.json`
-the materializer writes into the home. The command is a thin front door over the
-canonical native-home materializer: it writes only under `--output-home`, never
-copies secrets, and never execs a harness. The output-home guard refuses an existing
-live `~/.claude`/`~/.codex`/`~/.opencode` home (compared with exact `realpath`
-identity), and when any of those protected homes is a DANGLING symlink or chain it
-fails closed — refusing EVERY output home until the operator repairs the link,
-because the dangling target has no canonical spelling to compare a candidate against
-and the destination volume's case/Unicode collation cannot be reproduced from the
-path text. Materializing hooks never garbage-collects the process-global hook-shim
-directory the operator's own hooks live in. See `agents packages materialize --help`.
 
 ## Change guidance
 

@@ -109,7 +109,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     'session-state', 'account-state',
     'account-auth', 'catchup', 'session-index', 'watchdog',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
-    'usage-sync', 'webhook-receiver', 'daemon-heartbeat', 'tmux-reap',
+    'usage-sync', 'daemon-heartbeat', 'tmux-reap',
     'state-dir-check', 'attention-notify',
   ] as const;
 

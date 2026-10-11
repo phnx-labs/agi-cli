@@ -18,7 +18,7 @@ import {
   listJobs,
   validateJob,
 } from './scheduling/routines.js';
-import { parseOwnerRepoFromRemote } from './registry.js';
+import { parseOwnerRepoFromRemote } from './git.js';
 import { listProjectDefs, projectDirsAbs } from './projects.js';
 import { isSafeSegmentName } from './paths.js';
 

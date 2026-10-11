@@ -91,16 +91,6 @@ function writeFakeNpmInstaller(home: string, version: string): string {
   return binDir;
 }
 
-function writeLocalPackageRepo(): string {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-package-repo-'));
-  fs.mkdirSync(path.join(repo, 'commands'), { recursive: true });
-  fs.writeFileSync(
-    path.join(repo, 'commands', 'review.md'),
-    '---\ndescription: Review changes\n---\n\n# review\n',
-  );
-  return repo;
-}
-
 const DEVICE_ID = 'testdev';
 function devicesRuntimeDir(home: string): string {
   return path.join(home, '.agents', '.history', 'devices');
@@ -215,16 +205,11 @@ function seedNewerUpdateCache(home: string, futureVersion: string): void {
 }
 
 const tempHomes: string[] = [];
-const tempRepos: string[] = [];
 
 afterEach(() => {
   while (tempHomes.length > 0) {
     const home = tempHomes.pop()!;
     fs.rmSync(home, { recursive: true, force: true });
-  }
-  while (tempRepos.length > 0) {
-    const repo = tempRepos.pop()!;
-    fs.rmSync(repo, { recursive: true, force: true });
   }
 });
 
@@ -263,7 +248,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(result.status).toBe(0);
     expect(combined).toContain(`Moved Claude@${version} to trash`);
     expect(combined).toContain('Sessions remain accessible via `agents sessions`.');
-    expect(combined).toContain(`Restore with: agents trash restore claude@${version}`);
+    expect(combined).toContain(`Restore with: agents prune trash restore claude@${version}`);
     expect(fs.existsSync(versionDir)).toBe(false);
 
     const trashAgentDir = path.join(home, '.agents', '.history', 'trash', 'versions', 'claude', version);
@@ -283,7 +268,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     ).toContain(version);
   });
 
-  it('trash restore brings a pruned version back, and trash empty deletes only what is due', () => {
+  it('prune trash restore brings a pruned version back, and prune trash empty deletes only what is due', () => {
     const home = makeTempHome();
     tempHomes.push(home);
     writeFakeManagedVersion(home, 'codex', '0.130.0', 'codex');
@@ -292,23 +277,23 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const trashed = path.join(home, '.agents', '.history', 'trash', 'versions', 'codex');
 
     expect(runAgents(home, ['prune', 'codex@0.130.0']).status).toBe(0);
-    const restored = runAgents(home, ['trash', 'restore', 'codex@0.130.0']);
+    const restored = runAgents(home, ['prune', 'trash', 'restore', 'codex@0.130.0']);
     expect(restored.status).toBe(0);
     expect(fs.existsSync(path.join(versions, '0.130.0', 'node_modules', '.bin', 'codex'))).toBe(true);
     expect(fs.existsSync(path.join(trashed, '0.130.0'))).toBe(false);
 
     expect(runAgents(home, ['prune', 'codex@0.131.0']).status).toBe(0);
-    const unconfirmed = runAgents(home, ['trash', 'empty']);
+    const unconfirmed = runAgents(home, ['prune', 'trash', 'empty']);
     expect(unconfirmed.status).toBe(1);
     expect(unconfirmed.stderr).toContain('Pass --yes to confirm');
     expect(fs.existsSync(path.join(trashed, '0.131.0'))).toBe(true);
 
-    const notYet = runAgents(home, ['trash', 'empty', '--older-than', '30d', '--yes']);
+    const notYet = runAgents(home, ['prune', 'trash', 'empty', '--older-than', '30d', '--yes']);
     expect(notYet.status).toBe(0);
     expect(notYet.stdout).toContain('Nothing in trash is older than 30d');
     expect(fs.existsSync(path.join(trashed, '0.131.0'))).toBe(true);
 
-    const emptied = runAgents(home, ['trash', 'empty', '--yes']);
+    const emptied = runAgents(home, ['prune', 'trash', 'empty', '--yes']);
     expect(emptied.status).toBe(0);
     expect(emptied.stdout).toContain('Deleted 1 trashed item(s)');
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'trash', 'versions'))).toBe(false);
@@ -350,7 +335,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     const home = makeTempHome();
     tempHomes.push(home);
 
-    const result = runAgents(home, ['trash', 'restore', 'codex@9.9.9']);
+    const result = runAgents(home, ['prune', 'trash', 'restore', 'codex@9.9.9']);
     const combined = `${result.stdout}\n${result.stderr}`;
 
     expect(result.status).toBe(1);
@@ -517,46 +502,6 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     expect(fs.readdirSync(versionsDir).sort()).toEqual(['0.1.0', '0.2.0']);
     expect(fs.existsSync(path.join(versionsDir, '0.2.0', '.isolated'))).toBe(true);
     expect(agentsYaml).toContain('"codex": "0.1.0"');
-  });
-
-  it('installs package repo contents only to the requested explicit version target', () => {
-    const home = makeTempHome();
-    const repo = writeLocalPackageRepo();
-    tempHomes.push(home);
-    tempRepos.push(repo);
-    writeFakeManagedVersion(home, 'codex', '0.1.0', 'codex');
-    writeFakeManagedVersion(home, 'codex', '0.2.0', 'codex');
-
-    const result = runAgents(home, ['install', repo, '--agents', 'codex@0.2.0']);
-    const requestedPath = path.join(
-      home,
-      '.agents',
-      '.history',
-      'versions',
-      'codex',
-      '0.2.0',
-      'home',
-      '.codex',
-      'prompts',
-      'review.md',
-    );
-    const untouchedPath = path.join(
-      home,
-      '.agents',
-      '.history',
-      'versions',
-      'codex',
-      '0.1.0',
-      'home',
-      '.codex',
-      'prompts',
-      'review.md',
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('Package installed.');
-    expect(fs.existsSync(requestedPath)).toBe(true);
-    expect(fs.existsSync(untouchedPath)).toBe(false);
   });
 
   it('registers MCPs only against the requested explicit version target', () => {

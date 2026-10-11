@@ -472,6 +472,7 @@ describe('listConfig', () => {
       'formFactor',
       'interactive.host',
       'menubar.autoUpdate',
+      'menubar.enabled',
       'menubar.menu.bannerWhenNeedsYou',
       'menubar.menu.defaultProject',
       'menubar.menu.deviceSort',

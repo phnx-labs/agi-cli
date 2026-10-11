@@ -173,7 +173,7 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
   for (;;) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) {
-      process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents logs ' + opts.taskId + ' -f\n');
+      process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents events logs ' + opts.taskId + ' -f\n');
       return -1;
     }
 
@@ -204,7 +204,7 @@ export async function followHostTask(target: string, opts: FollowOptions): Promi
     }
 
     if (Date.now() > deadline) {
-      process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents logs ' + opts.taskId + ' -f\n');
+      process.stderr.write('\n[hosts] follow timed out; the run continues on the host. Reattach with: agents events logs ' + opts.taskId + ' -f\n');
       return -1;
     }
 

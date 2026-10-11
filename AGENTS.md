@@ -64,7 +64,7 @@ assets/ website/   Brand + launch demo (under assets/demo/), landing (repo-root,
 |---|---|---|
 | [`cli`](cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](cli/AGENTS.md) · [README.md](cli/README.md) |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
-| [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) | AGI Menu, the macOS menu-bar helper (own repo) — published as `MenubarHelper.app.zip` on this repo's `menubar/v<x.y.z>` tag, installed by `agents menubar` | that repo's AGENTS.md · [cli/docs/menubar.md](cli/docs/menubar.md) (the contract) |
+| [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) | AGI Menu, the macOS menu-bar helper (own repo) — published as `MenubarHelper.app.zip` on this repo's `menubar/v<x.y.z>` tag, installed and healed by the CLI on macOS (`menubar.enabled`) | that repo's AGENTS.md · [cli/docs/menubar.md](cli/docs/menubar.md) (the contract) |
 | `@phnx-labs/computer-cli` | The standalone `computer` engine (own repo) — the helper daemons, the RPC, and the autonomous loop behind `agents computer`. agents-cli is a thin consumer of it (PHNX-4075) | [cli/docs/computer.md](cli/docs/computer.md) (the contract) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
 | [`packages/agi-cli`](packages/agi-cli) | Deprecated alias — re-exports the canonical CLI | [README.md](packages/agi-cli/README.md) |
@@ -85,7 +85,7 @@ and [`architecture.md`](cli/docs/architecture.md).
 - **Resources** — the typed things an agent needs, one kind per subdirectory of a
   DotAgents repo (`ResourceKind` in `cli/src/lib/resources.ts`): `rules` (this
   `AGENTS.md` → `CLAUDE.md`/`GEMINI.md`/…), `commands`, `skills`, `hooks`, `mcp`,
-  `clis`, `permissions`, `subagents`, `workflows`, `profiles`, `routers`, `secrets`.
+  `clis`, `permissions`, `subagents`, `workflows`, `profiles`, `secrets`.
   Installed once in `~/.agents/` and synced into each agent's native format.
   Resolution is **layered** — project → user → extra repos → system; the highest
   layer wins a name collision, the rest union (`resolveResource`, `listResources`).

@@ -51,7 +51,6 @@ For the layered resource model that governs plugin resolution, see [resource-syn
 | `agents plugins info <name>` | Alias for `view` |
 | `agents plugins add <spec>` | Install from a git URL or local path |
 | `agents plugins install <spec>` | Alias for `add` |
-| `agents install plugin:<spec>` | Same install path (Phase 5 umbrella); same `--allow-exec-surfaces` gate |
 | `agents plugins update [name]` | Re-pull from original source and re-sync (all plugins if no name given) |
 | `agents sync --plugin <name> [agent]` | Apply a plugin to an agent (all supported agents if none given) |
 | `agents plugins remove [name]` | Unsync from all agent versions; optionally delete source directory |

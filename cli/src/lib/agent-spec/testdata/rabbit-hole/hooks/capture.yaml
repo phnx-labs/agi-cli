@@ -1,4 +1,0 @@
-name: capture
-script: capture.sh
-events:
-  - PostToolUse

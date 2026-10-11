@@ -5,7 +5,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { sleepSync } from '../fs-atomic.js';
-import { getRuntimeStateDir, getHelpersDir } from '../state.js';
+import { getHelpersDir } from '../state.js';
+import { getConfigValue, setConfigValue } from '../device-config.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
@@ -81,13 +82,8 @@ function servicePlistPath(): string {
   return path.join(os.homedir(), 'Library', 'LaunchAgents', `${serviceLabel()}.plist`);
 }
 
-function disabledSentinelPath(): string {
-  return path.join(getRuntimeStateDir(), 'menubar.disabled');
-}
-
 function menubarDisabledByUser(): boolean {
-
-  return fs.existsSync(disabledSentinelPath());
+  return getConfigValue('menubar.enabled').value === false;
 }
 
 function menubarServiceInstalled(): boolean {
@@ -281,9 +277,13 @@ export function restartMenubarLaunchAgent(
     bootstrapped = succeeds(['bootstrap', `gui/${uid}`, plist]);
   }
   if (!bootstrapped) {
-    process.stderr.write(`[agents] AGI Menu login item could not be registered (launchctl bootstrap gui/${uid} ${plist} failed 3 times); run \`agents menubar setup\`\n`);
+    process.stderr.write(`[agents] AGI Menu login item could not be registered (launchctl bootstrap gui/${uid} ${plist} failed 3 times); the next agents command retries it\n`);
   }
   succeeds(['kickstart', serviceTarget]);
+}
+
+function endProcess(pid: number): void {
+  try { process.kill(pid, 'SIGTERM'); } catch {  }
 }
 
 export function restartMenubarHelperAfterSwap(
@@ -343,7 +343,7 @@ export async function restartMenubarHelper(deps: MenubarRestartDeps = defaultRes
     ({ outcome: 'failed', previousPids, pids, detail });
   if (!onDarwin()) return failed('AGI Menu is macOS only');
   if (menubarDisabledByUser() || !menubarServiceInstalled()) {
-    return failed('AGI Menu is turned off; `agents menubar setup` turns it on');
+    return failed('AGI Menu is turned off; `agents config set menubar.enabled true` turns it on');
   }
   const registration = serviceManagerRegistrationAllowed();
   if (!registration.allowed) return failed(registration.reason);
@@ -358,7 +358,7 @@ export async function restartMenubarHelper(deps: MenubarRestartDeps = defaultRes
   let pids = deps.ownPids();
   while (!(pids.length === 1 && !previousPids.includes(pids[0]))) {
     if (Date.now() >= deadline) {
-      return failed(`AGI Menu did not come back as one new process within ${Math.round(deps.deadlineMs / 1000)} s; \`agents menubar setup\` repairs it`, previousPids, pids);
+      return failed(`AGI Menu did not come back as one new process within ${Math.round(deps.deadlineMs / 1000)} s`, previousPids, pids);
     }
     await deps.sleep(200);
     pids = deps.ownPids();
@@ -366,7 +366,7 @@ export async function restartMenubarHelper(deps: MenubarRestartDeps = defaultRes
   return { outcome: 'restarted', previousPids, pids, detail: `AGI Menu restarted (pid ${pids[0]})` };
 }
 
-function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppPath?: string } = {}): boolean {
+function startMenubarServiceFromSource(opts: { sourceAppPath?: string } = {}): boolean {
   if (!onDarwin()) return false;
   const src = opts.sourceAppPath ?? sourceAppPath();
   if (!src) return false;
@@ -376,25 +376,13 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
   if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     process.stderr.write(
       'agents: AGI Menu is not notarized/valid on this machine; skipping launch. ' +
-      'Upgrade to a notarized build (npm i -g @phnx-labs/agents-cli), then `agents menubar setup`.\n'
+      'Upgrade to a notarized build (npm i -g @phnx-labs/agents-cli); the next agents command installs it.\n'
     );
     return false;
   }
 
-  if (opts.clearOptOut) clearMenubarOptOut();
   installAndStartService(exec, stampFor(src));
   return true;
-}
-
-export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
-  if (!onDarwin()) return false;
-  let src = shippedAppPath();
-  if (!src) src = await downloadMenubarHelperApp(await menubarVersionToInstall());
-  return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
-}
-
-function clearMenubarOptOut(): void {
-  try { fs.rmSync(disabledSentinelPath(), { force: true }); } catch {  }
 }
 
 function installAndStartService(exec: string, stamp: MenubarStamp): void {
@@ -548,6 +536,11 @@ function plistRelaunchesCleanExit(): boolean {
 }
 
 export function disableMenubarService(): void {
+  setConfigValue('menubar.enabled', false);
+  stopMenubarService();
+}
+
+function stopMenubarService(): void {
   if (!onDarwin()) return;
   const plist = servicePlistPath();
   const reg = serviceManagerRegistrationAllowed();
@@ -559,10 +552,6 @@ export function disableMenubarService(): void {
     process.stderr.write(`[agents] ${reg.reason}\n`);
   }
   try { fs.unlinkSync(plist); } catch {  }
-  try {
-    fs.mkdirSync(path.dirname(disabledSentinelPath()), { recursive: true });
-    fs.writeFileSync(disabledSentinelPath(), `disabled ${new Date().toISOString()}\n`);
-  } catch {  }
 }
 
 export function mayInstallMenubarHelper(opts: {
@@ -642,7 +631,10 @@ function mayHealMenubar(needsDevIdHeal: boolean, source: string | null = sourceA
 export function installMenubarLaunchAgentOnUpgrade(): void {
   try {
     if (!onDarwin()) return;
-    if (menubarDisabledByUser()) return;
+    if (menubarDisabledByUser()) {
+      if (menubarServiceInstalled()) stopMenubarService();
+      return;
+    }
     if (menubarServiceInstalled() && fs.existsSync(installedExecutablePath()) && hasDeveloperIdSignature(installedAppPath())) {
       if (menubarSetupNeedsRepoint() && mayHealMenubar(false, installedAppPath())) {
         const stamp = readInstalledMenubarStamp();
@@ -653,14 +645,14 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     if (!menubarAutoUpdateEnabled()) return;
     if (!sourceAppPath()) return;
     if (!menubarServiceInstalled()) {
-      startMenubarServiceFromSource({ clearOptOut: false });
+      startMenubarServiceFromSource();
       return;
     }
     const needsDevIdHeal = installedNeedsDevIdHeal();
     const stale = menubarSetupStale();
     if (!(stale || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
     if (!mayHealMenubar(needsDevIdHeal)) return;
-    if (startMenubarServiceFromSource({ clearOptOut: false })) {
+    if (startMenubarServiceFromSource()) {
       stampMenubarHeal();
       if (shouldMigrateMenubarTcc({ needsDevIdHeal, alreadyMigrated: menubarTccAlreadyMigrated() })) {
         resetMenubarAccessibilityTcc();
@@ -705,113 +697,6 @@ export function resetMenubarAccessibilityTcc(
     fs.mkdirSync(installDir(), { recursive: true });
     fs.writeFileSync(tccMigrationMarkerPath(), new Date().toISOString());
   } catch {  }
-}
-
-export interface SetupStep {
-  name: string;
-  outcome: 'ok' | 'changed' | 'failed';
-  detail: string;
-}
-
-export interface SetupResult {
-  steps: SetupStep[];
-  configured: boolean;
-  status: MenubarStatus;
-}
-
-export function processesToEnd(status: Pick<MenubarStatus, 'instances' | 'foreignInstances'>): MenubarProcess[] {
-  return [...status.instances, ...status.foreignInstances];
-}
-
-function endProcess(pid: number): void {
-  try { process.kill(pid, 'SIGTERM'); } catch {  }
-}
-
-export async function runMenubarSetup(): Promise<SetupResult> {
-  const steps: SetupStep[] = [];
-  const step = (name: string, outcome: SetupStep['outcome'], detail: string) => {
-    steps.push({ name, outcome, detail });
-  };
-
-  if (!onDarwin()) {
-    step('platform', 'failed', `AGI Menu is macOS only (this is ${process.platform})`);
-    return { steps, configured: false, status: getMenubarStatus() };
-  }
-
-  const before = getMenubarStatus();
-
-  let src = shippedAppPath();
-  if (!src) {
-    try {
-      src = await downloadMenubarHelperApp(await menubarVersionToInstall({ force: true }));
-    } catch (e) {
-      step('bundle', 'failed', `no AGI Menu bundle ships with this install, and the release-asset download failed: ${(e as Error).message}`);
-      return { steps, configured: false, status: before };
-    }
-  }
-
-  const doomed = processesToEnd(before);
-  for (const p of doomed) endProcess(p.pid);
-  if (doomed.length > 1) {
-    step('duplicates', 'changed',
-      `ended ${doomed.length} running helpers (${doomed.map((p) => p.pid).join(', ')}) — launchd restarts exactly one`);
-  } else if (doomed.length === 1) {
-    step('duplicates', 'ok', 'one helper was running; restarting it under launchd');
-  } else {
-    step('duplicates', 'ok', 'no helper was running');
-  }
-
-  const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
-  if (!exec) {
-    step('bundle', 'failed', 'could not install the helper bundle');
-    return { steps, configured: false, status: getMenubarStatus() };
-  }
-  const bundleStamp = readInstalledMenubarStamp();
-  const bundleUnchanged =
-    bundleStamp !== null &&
-    !isMenubarStale({ installed: bundleStamp, available: availableStamp(), execExists: true });
-  step('bundle', bundleUnchanged ? 'ok' : 'changed',
-    `${installedAppPath()} (${stampVersionLabel(bundleStamp) ?? 'unknown'})`);
-
-  if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
-    step('signature', 'failed',
-      'not notarized/valid on this machine — refusing to start it (Gatekeeper rejects an ' +
-      'un-notarized helper as "damaged"). Upgrade to a notarized build of agents-cli.');
-    return { steps, configured: false, status: getMenubarStatus() };
-  }
-  step('signature', 'ok', 'valid + notarized');
-
-  clearMenubarOptOut();
-
-  installAndStartService(exec, stampFor(src ?? undefined));
-  step('login item', before.serviceInstalled ? 'ok' : 'changed',
-    `${serviceLabel()} — starts at login, restarts if it dies`);
-
-  const after = waitForSingleInstance();
-  if (after.instances.length === 1 && after.foreignInstances.length === 0) {
-    step('single instance', 'ok', `pid ${after.instances[0].pid}`);
-  } else if (after.instances.length === 0) {
-    step('single instance', 'failed', 'the helper did not come back up — see `agents menubar status`');
-  } else {
-    const extra = [...after.instances.slice(1), ...after.foreignInstances];
-    step('single instance', 'failed',
-      `${after.instances.length + after.foreignInstances.length} helpers running (${extra.map((p) => p.pid).join(', ')} are extra)`);
-  }
-
-  return {
-    steps,
-    configured: steps.every((s) => s.outcome !== 'failed'),
-    status: after,
-  };
-}
-
-function waitForSingleInstance(): MenubarStatus {
-  let status = getMenubarStatus();
-  for (let i = 0; i < 15 && status.instances.length !== 1; i++) {
-    sleepSync(200);
-    status = getMenubarStatus();
-  }
-  return status;
 }
 
 export interface MenubarProcess {
@@ -987,7 +872,7 @@ export function menubarUpdateSkipReason(opts: {
   installed: MenubarStamp | null;
 }): string | null {
   if (!opts.darwin) return 'macOS only';
-  if (opts.disabledByUser) return 'the menu bar is disabled (agents menubar disable)';
+  if (opts.disabledByUser) return 'the menu bar is disabled (menubar.enabled is false)';
   if (!opts.serviceInstalled) return 'the menu bar is not installed on this Mac';
   if (opts.shipped) return 'this install ships its own helper bundle; the startup self-heal owns it';
   if (!opts.installed || opts.installed.source !== 'release') {

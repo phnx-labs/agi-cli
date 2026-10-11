@@ -123,13 +123,13 @@ export function restoreVersion(target: string): void {
   const entry = pickLatest(entries, agent, version);
   if (!entry) {
     console.error(chalk.red(`No trashed copy found for ${agent}@${version}`));
-    console.error(chalk.gray('Run `agents trash list` to see what exists.'));
+    console.error(chalk.gray('Run `agents prune trash list` to see what exists.'));
     process.exit(1);
   }
   const dest = getVersionDir(agent, version);
   if (fs.existsSync(dest)) {
     console.error(chalk.red(`Cannot restore: ${dest} already exists.`));
-    console.error(chalk.gray('Move or remove the existing dir first, then re-run agents trash restore.'));
+    console.error(chalk.gray('Move or remove the existing dir first, then re-run agents prune trash restore.'));
     process.exit(1);
   }
   try {
@@ -148,8 +148,8 @@ export function restoreVersion(target: string): void {
   console.log(chalk.green(`Restored ${agentLabel(agent)}@${version} to ${dest}`));
 }
 
-export function registerTrashCommands(program: Command): void {
-  const trash = program
+export function registerPruneTrashCommands(prune: Command): void {
+  const trash = prune
     .command('trash')
     .description('Inspect, restore, and empty soft-deleted agent versions and resources');
 
@@ -180,7 +180,7 @@ export function registerTrashCommands(program: Command): void {
         );
       }
       console.log();
-      console.log(chalk.gray('Restore with: agents trash restore <agent>@<version>'));
+      console.log(chalk.gray('Restore with: agents prune trash restore <agent>@<version>'));
     });
 
   trash
@@ -197,9 +197,9 @@ export function registerTrashCommands(program: Command): void {
 
   setHelpSections(empty, {
     examples: `
-      agents trash list
-      agents trash empty --older-than 30d
-      agents trash empty --yes
+      agents prune trash list
+      agents prune trash empty --older-than 30d
+      agents prune trash empty --yes
     `,
     notes: `
       Removes items from ~/.agents/.history/trash for good; they cannot be

@@ -2,7 +2,6 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { gzipSync } from 'node:zlib';
-import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   emit, query, rotate, stats,
@@ -50,36 +49,7 @@ function makeRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('logs audit subcommand data path', () => {
-  it('is a compatibility alias for the canonical events audit reader', () => {
-    const logsDir = setupLogsDir();
-    const systemDir = path.join(logsDir, '.agents', '.system');
-    fs.mkdirSync(path.join(systemDir, '.git'), { recursive: true });
-    const packageVersion = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8')).version;
-    fs.writeFileSync(
-      path.join(systemDir, '.update-check'),
-      JSON.stringify({ lastCheck: Date.now(), latestVersion: packageVersion }),
-    );
-    emit('info', { module: 'alias-fixture', detail: 'same-reader' });
-    const run = (args: string[]) => spawnSync('node', ['--import', 'tsx', 'src/index.ts', ...args], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        HOME: logsDir,
-        AGENTS_EVENTS_PATH: path.join(logsDir, 'events.jsonl'),
-        AGENTS_SKIP_MIGRATION: '1',
-      },
-      encoding: 'utf-8',
-    });
-
-    const events = run(['events', '--include', 'ops', '--module', 'alias-fixture', '--json']);
-    const logs = run(['logs', 'audit', '--module', 'alias-fixture', '--json']);
-
-    expect(events.status).toBe(0);
-    expect(logs.status).toBe(0);
-    expect(JSON.parse(logs.stdout)).toEqual(JSON.parse(events.stdout));
-  });
-
+describe('event log data path', () => {
   it('query reads events written by emit for audit viewer', () => {
     setupLogsDir();
     emit('teams.create', { module: 'teams', team: 'alpha' });

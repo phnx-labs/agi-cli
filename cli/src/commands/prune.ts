@@ -34,6 +34,7 @@ import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/scheduling/routines.js';
+import { registerPruneTrashCommands } from './prune-trash.js';
 
 type ResourceType = 'commands' | 'skills' | 'hooks' | 'plugins' | 'subagents';
 type StateType = 'sessions' | 'runs';
@@ -348,7 +349,7 @@ What's an orphan?
 Durability:
   Version prune and cleanup move version directories to
   ~/.agents/.history/trash/versions/<agent>/<version>/<timestamp>/. Nothing is
-  hard-deleted until you run \`agents trash empty\`. Session records are durable;
+  hard-deleted until you run \`agents prune trash empty\`. Session records are durable;
   the sessions target remains only as a no-op compatibility shim.
 `)
     .action(async (target: string | undefined, options: PruneOptions) => {
@@ -377,4 +378,6 @@ Durability:
         await pruneDuplicates(parsed.versionAgent, options.yes === true, options.dryRun === true);
       }
     });
+
+  registerPruneTrashCommands(pruneCmd);
 }

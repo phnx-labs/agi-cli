@@ -56,7 +56,6 @@ interface ExecCommandActionOptions {
   sessionId?: string;
   name?: string;
   notify?: boolean;
-  traceSync?: boolean;
   terminal?: string | boolean;
   verbose?: boolean;
   raw?: boolean;
@@ -651,7 +650,6 @@ export function registerRunCommand(program: Command): void {
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
     .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents hosts logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
-    .option('--no-trace-sync', 'Skip the run-exit trace auto-sync for this run. Auto-sync fires by default only for local runs and only once you have run `agents traces sync` at least once (also silenced by AGENTS_NO_TRACE_SYNC=1).')
     .option(
       '--terminal [backend]',
       "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
@@ -1619,16 +1617,6 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
 
       const hostGiven = hostTargetGiven(options);
 
-      if (
-        prompt !== undefined &&
-        hostGiven.length === 0 &&
-        !options.lease &&
-        !options.box
-      ) {
-        const { armRunFinishTraceSync } = await import('../lib/run-trace-sync.js');
-        armRunFinishTraceSync({ disabled: options.traceSync === false });
-      }
-
       options.cwd = await resolveRunCwd(options, { forRemote: hostGiven.length > 0 });
 
       if (hostGiven.length > 0) {
@@ -1871,7 +1859,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
             console.log(
               chalk.green(`Dispatched to ${host.name}${task.name ? ` as "${task.name}"` : ''}.`) + '\n' +
               chalk.gray(`  Status:  agents sessions ${handle}`) + chalk.gray('   (compact digest — use this)') + '\n' +
-              chalk.gray(`  Raw log: agents logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
+              chalk.gray(`  Raw log: agents events logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
             );
             process.exit(0);
           }

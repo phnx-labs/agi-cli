@@ -36,18 +36,6 @@ export function masthead(o: {
   return `${left}${' '.repeat(gap)}${right}`;
 }
 
-const SPARK_LEVELS = '▁▂▃▄▅▆▇█';
-
-export function sparkline(counts: number[]): string {
-  if (counts.length === 0) return ' ';
-  const normalized = counts.map((count) => Number.isFinite(count) ? Math.max(0, count) : 0);
-  const max = Math.max(...normalized);
-  if (max === 0) return ' '.repeat(counts.length);
-  return normalized
-    .map((count) => SPARK_LEVELS[Math.round((count / max) * (SPARK_LEVELS.length - 1))])
-    .join('');
-}
-
 export function aggregate(boxes: {
   id: string;
   label: string;
@@ -67,36 +55,6 @@ export function aggregate(boxes: {
       }));
     })
     .sort((a, b) => compareText(b.ts, a.ts));
-}
-
-const HOUR_MS = 60 * 60 * 1_000;
-
-export function hourlyCounts(msgs: CommsMsg[], hours: number, now: Date = new Date()): number[] {
-  const bucketCount = Number.isFinite(hours) ? Math.max(0, Math.floor(hours)) : 0;
-  const counts = Array.from({ length: bucketCount }, () => 0);
-  const nowMs = now.getTime();
-  if (bucketCount === 0 || !Number.isFinite(nowMs)) return counts;
-
-  for (const message of msgs) {
-    const timestamp = Date.parse(message.ts);
-    const age = nowMs - timestamp;
-    if (!Number.isFinite(timestamp) || age < 0 || age >= bucketCount * HOUR_MS) continue;
-    const bucket = bucketCount - 1 - Math.floor(age / HOUR_MS);
-    counts[bucket]++;
-  }
-  return counts;
-}
-
-export function graphEdges(msgs: CommsMsg[]): { from: string; to: string; count: number }[] {
-  const edges = new Map<string, { from: string; to: string; count: number }>();
-  for (const message of msgs) {
-    const key = JSON.stringify([message.from, message.toLabel]);
-    const existing = edges.get(key);
-    if (existing) existing.count++;
-    else edges.set(key, { from: message.from, to: message.toLabel, count: 1 });
-  }
-  return [...edges.values()].sort((a, b) =>
-    b.count - a.count || compareText(a.from, b.from) || compareText(a.to, b.to));
 }
 
 function compareText(a: string, b: string): number {

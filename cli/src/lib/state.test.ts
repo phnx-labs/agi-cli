@@ -190,24 +190,13 @@ describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
   });
 
   it('leaves the file byte-identical across repeated reads', async () => {
-    writeCentral('registries:\n  mcp: {}\n  skill: {}\nseededPresets: []\n');
+    writeCentral('registries:\n  mcp: {}\n');
     const before = fs.readFileSync(centralPath(), 'utf-8');
 
     const { readMeta } = await freshState();
     readMeta();
     readMeta();
     expect(fs.readFileSync(centralPath(), 'utf-8')).toBe(before);
-  });
-
-  it('does not resurrect the seed through an unrelated write', async () => {
-    writeCentral('registries:\n  mcp: {}\n  skill: {}\n');
-
-    const { updateMeta } = await freshState();
-    updateMeta((m) => ({ ...m, source: 'set-by-write' }));
-
-    const after = fs.readFileSync(centralPath(), 'utf-8');
-    expect(after).toContain('source: set-by-write');
-    expect(after).not.toContain('hermes-agent.nousresearch.com');
   });
 });
 

@@ -2,7 +2,7 @@
 name: teams
 description: "Organize AI coding agents into teams that collaborate on a shared task. Create teams, add teammates, start them, monitor progress, and collect results. Use this skill when you need parallel agent execution. For single-agent dispatch, use `agents run` instead."
 argument-hint: "[create|add|start|status|disband]"
-allowed-tools: Bash(agents teams*), Bash(agents run*), Bash(agents feed*), Bash(agents mailboxes*), Bash(agents message*)
+allowed-tools: Bash(agents teams*), Bash(agents run*), Bash(agents feed*), Bash(agents send*)
 user-invocable: true
 ---
 
@@ -149,20 +149,16 @@ agents teams logs my-feature frontend
 
 ### Watch the fleet's comms
 
-`agents teams status` tells you *where each teammate is*; the fleet-comms surface
-tells you *what they're saying*. Both ride the same mailbox spool teammates use to
-message each other and to page you:
+`agents teams status` tells you *where each teammate is*; `agents feed` tells you
+*what they need from you*:
 
 ```bash
-agents feed                  # what agents need FROM YOU — open questions / blocks, with the reply command
-agents mailboxes             # what agents say TO EACH OTHER — boxes + a recent cross-box message log
-agents mailboxes --watch     # live tail of all fleet traffic (▲ you when a teammate pages you); Ctrl-C to stop
-agents mailboxes --graph     # who-talks-to-whom, busiest first
-agents mailboxes --between <a> <b>   # one teammate relationship as a thread
+agents feed                  # open questions / blocks, with the reply command
 ```
 
-Reply to a teammate (or answer a `feed` block) with `agents message <id> "…"` /
-`agents teams message <team> <teammate> "…"`.
+Reply to a teammate with `agents teams message <team> <teammate> "…"`, or queue a
+note in any running agent's mailbox with
+`agents send --channel mailbox --to <session-id> --text "…"`.
 
 ## Best Practices
 

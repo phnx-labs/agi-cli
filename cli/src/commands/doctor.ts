@@ -1337,6 +1337,12 @@ export function registerDoctorCommand(program: Command): void {
         const localName = machineId();
         const duplicateHooks = inspectDuplicateVersionHooks(cwd);
         const ambiguousPins = findAmbiguousDevicePins(cwd);
+        const menubar = process.platform === 'darwin'
+          ? await import('../lib/menubar/install-menubar.js').then((m) => ({
+              status: m.getMenubarStatus(),
+              report: m.buildMenubarDoctorReport(),
+            }))
+          : undefined;
 
         const signIn: Record<string, Pick<AccountInfo, 'signedIn' | 'email' | 'accountId'>> = {};
         await Promise.all(
@@ -1384,6 +1390,7 @@ export function registerDoctorCommand(program: Command): void {
           isolatedVersions,
           ownerSignedIn: resolveOwnerCredential() !== null,
           leakedDaemons: findLeakedDaemons(),
+          menubar,
         });
 
         if (opts.json) {

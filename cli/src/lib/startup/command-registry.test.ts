@@ -77,14 +77,6 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     }
   });
 
-  it('registers the plural webhooks command without a singular alias', async () => {
-    const program = await buildFullCommandTree();
-    const names = program.commands.flatMap((command) => [command.name(), ...command.aliases()]);
-
-    expect(names).toContain('webhooks');
-    expect(names).not.toContain('webhook');
-  });
-
   it('registerAllCommands loads the same visible tree onto an existing program', async () => {
     const program = configureRootCommand(new Command(), 'agents', '0.0.0');
     await registerAllCommands(program);

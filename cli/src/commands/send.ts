@@ -3,9 +3,8 @@ import chalk from 'chalk';
 import { die } from '../lib/format.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta } from '../lib/state.js';
-import { sendMessage, isOwnerAlias, type ResolveSendInput } from '../lib/channels/send.js';
+import { sendMessage, type ResolveSendInput } from '../lib/channels/send.js';
 import type { TerminalSendOptions } from '../lib/channels/registry.js';
-import { fireTraceSyncInBackground } from '../lib/run-trace-sync.js';
 
 interface SendCliOpts {
   text?: string;
@@ -59,7 +58,6 @@ async function runSend(
 ): Promise<void> {
   const meta = readMeta();
   const input = toInput(positionalText, opts);
-  if (isOwnerAlias(opts.to)) fireTraceSyncInBackground({ disabled: Boolean(opts.dryRun) });
 
   const out = await sendMessage(input, meta);
   if ('error' in out) {
@@ -92,7 +90,7 @@ const SHARED_NOTES = `
     send              - DELIVER a message to a recipient (this command)
     feed post         - RECORD progress / milestones (optional broadcast may call send)
     activity          - READ the activity stream (not a send path)
-    message           - CONTROL a running agent through its mailbox
+    send --channel mailbox - queue a message in a running agent's mailbox
     send --channel session - type text + Enter into a running agent's terminal
 
   --to owner posts one notification to your account (agents auth login). The

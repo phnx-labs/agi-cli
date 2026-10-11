@@ -235,7 +235,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description:
       'Whether the daemon may run on this device at all (browser IPC, watchdog, and the ' +
       'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
-      'is set, including `routines add`/`routines start`/`routines catchup`/webhook triggers. ' +
+      'is set, including `routines add`/`routines start`/`routines catchup`/`routines webhook`. ' +
       '`agents daemon start` still starts it explicitly.',
   },
   {
@@ -258,7 +258,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session — local runs and ' +
       'followed `--device` runs alike (PHNX-3316). Off, the default, spawns the agent directly; a remote run left bare ' +
       'is protected by reconnect-and-resume, not a pane. Turn it on to give every agent an addressable pane for ' +
-      '`agents message`, injection, and `agents focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
+      '`agents send --channel session`, injection, and `agents focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
   },
   {
     name: 'browser.remote-control',
@@ -653,6 +653,17 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
           `(${MENUBAR_TABS_ADDED_LATER.join(', ')} may be left out and are appended).`;
     },
     normalize: (v) => (Array.isArray(v) ? resolveMenubarTabOrder(v.map(String)) : v),
+  },
+  {
+    name: 'menubar.enabled',
+    yamlKey: 'menubarEnabled',
+    scope: 'device',
+    visibility: 'machine',
+    type: 'bool',
+    defaultValue: true,
+    description:
+      'Whether AGI Menu runs on this Mac. Set false and the next agents command removes its login item; ' +
+      'set true and the next agents command installs it again.',
   },
   {
     name: 'menubar.autoUpdate',

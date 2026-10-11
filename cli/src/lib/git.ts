@@ -364,6 +364,12 @@ const RENAMED_REMOTE_ALIASES: Record<string, string> = {
   'github.com/phnx-labs/.agents': 'github.com/phnx-labs/.agents-system',
 };
 
+export function parseOwnerRepoFromRemote(remoteUrl: string): string | null {
+  const s = remoteUrl.trim().replace(/\\/g, '/').replace(/\.git$/, '');
+  const m = s.match(/github\.com[/:]([^/]+\/[^/]+)$/);
+  return m ? m[1] : null;
+}
+
 export function isSystemRepoRemote(remote: string | null | undefined): boolean {
   if (!remote) return false;
   const c = canonicalGitRemote(remote);

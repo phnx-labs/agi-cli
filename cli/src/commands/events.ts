@@ -8,6 +8,7 @@ import { parseFamilyList, EVENT_FAMILIES, type EventFamily } from '../lib/event-
 import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerAuditCommands } from './audit.js';
+import { registerEventsLogsCommand } from './events-logs.js';
 
 export function resolveEventsLimit(raw: string | undefined): number | undefined {
   const token = raw ?? '50';
@@ -320,7 +321,7 @@ Examples:
   agents events stats
   agents events rotate --days 7
   agents events audit                    Alias of: events --include runs
-  agents logs                            Run log viewer (also aliases events audit/stats/rotate)`)
+  agents events logs <run-id> -f         Follow one dispatched run's log`)
     .action((_options: EventsOptions, command: Command) =>
       runEventsCommand(command.optsWithGlobals() as EventsOptions));
 
@@ -341,6 +342,7 @@ Examples:
     .action((opts: { days?: string; maxMb?: string }) => runEventsRotate(opts));
 
   registerAuditCommands(events);
+  registerEventsLogsCommand(events);
 }
 
 export function runEventsRotate(opts: { days?: string; maxMb?: string }): void {

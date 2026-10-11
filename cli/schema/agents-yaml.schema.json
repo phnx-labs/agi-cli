@@ -53,6 +53,10 @@
           "type": "boolean",
           "description": "Device scope. Top-level kill switch: whether the daemon may run on this device at all (daemon.enabled)."
         },
+        "menubarEnabled": {
+          "type": "boolean",
+          "description": "Device scope, machine-local. Whether AGI Menu runs on this Mac (menubar.enabled). Default true."
+        },
         "watchdogEnabled": {
           "type": "boolean",
           "description": "Device scope. Whether the daemon runs the watchdog pass on this device (watchdog.enabled)."
@@ -164,7 +168,7 @@
     },
     "registries": {
       "type": "object",
-      "description": "Resource registries by type (commands, skills, hooks, mcp, …)."
+      "description": "MCP registries `agents mcp add <name>` looks a server up in, keyed by name: { url, enabled, apiKey? } under `mcp`."
     },
     "profiles": {
       "type": "object",
@@ -193,11 +197,6 @@
     "actors": {
       "type": "object",
       "description": "Actors keyed by slug — who is behind a run."
-    },
-    "seededPresets": {
-      "type": "array",
-      "items": { "type": "string" },
-      "description": "Removal tombstones for seeded registry presets."
     },
     "hooks": {
       "type": "object",

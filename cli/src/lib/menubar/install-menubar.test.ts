@@ -30,7 +30,6 @@ import {
   mayInstallMenubarHelper,
   menubarGateVersion,
   MENUBAR_HELPER_EXECUTABLE_NAME,
-  processesToEnd,
   resetMenubarAccessibilityTcc,
   restartMenubarHelperAfterSwap,
   restartMenubarHelper,
@@ -103,28 +102,6 @@ describe('classifyMenubarProcesses', () => {
     const r = classifyMenubarProcesses(ps, ps, INSTALLED);
     expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([]);
-  });
-});
-
-describe('processesToEnd', () => {
-  const A = { pid: 43244, executable: '/Applications/…/AGI Menu' };
-  const B = { pid: 93684, executable: '/Applications/…/AGI Menu' };
-  const STRAY = { pid: 58619, executable: '/tmp/.build/debug/AGI Menu' };
-
-  it('ends both copies of a duplicated installed helper', () => {
-    expect(processesToEnd({ instances: [A, B], foreignInstances: [] })).toEqual([A, B]);
-  });
-
-  it('ends the lone running helper too, so launchd owns the restart', () => {
-    expect(processesToEnd({ instances: [A], foreignInstances: [] })).toEqual([A]);
-  });
-
-  it('ends foreign copies as well — they hold Cmd-Shift-V/O first-come', () => {
-    expect(processesToEnd({ instances: [A], foreignInstances: [STRAY] })).toEqual([A, STRAY]);
-  });
-
-  it('ends nothing when no helper is running', () => {
-    expect(processesToEnd({ instances: [], foreignInstances: [] })).toEqual([]);
   });
 });
 
@@ -254,20 +231,6 @@ describe('isMenubarStale', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
-  });
-
-  it("the setup bundle step compares stamps, not the lossy label", () => {
-    const src = fs.readFileSync(
-      path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
-      'utf-8',
-    );
-    const i = src.indexOf('const bundleUnchanged');
-    expect(i).toBeGreaterThan(-1);
-    const around = src.slice(i, src.indexOf("step('bundle'", i) + 200);
-    expect(around).toContain('isMenubarStale({');
-    expect(around).toContain('available: availableStamp()');
-    expect(around).not.toMatch(/bundleUnchanged[\s\S]{0,120}stampVersionLabel\(bundleStamp\) ===/);
-    expect(around).not.toContain('=== getCliVersion()');
   });
 
   it('never compares against the CLI version', () => {
@@ -549,7 +512,7 @@ describe('restartMenubarLaunchAgent', () => {
       try {
         expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec, () => {})).not.toThrow();
         expect(calls.map((c) => c.args[0])).toEqual(['bootout', 'print', 'bootstrap', 'bootstrap', 'bootstrap', 'kickstart']);
-        expect(stderr.mock.calls.map((c) => String(c[0])).join('')).toMatch(/could not be registered.*agents menubar setup/);
+        expect(stderr.mock.calls.map((c) => String(c[0])).join('')).toMatch(/could not be registered.*next agents command retries/);
       } finally {
         stderr.mockRestore();
       }
@@ -961,7 +924,7 @@ describe('restartMenubarHelper', () => {
     const { kicked, deps: d } = deps([[101]]);
     const r = await restartMenubarHelper(d);
     expect(r.outcome).toBe('failed');
-    expect(r.detail).toMatch(/turned off.*agents menubar setup/);
+    expect(r.detail).toMatch(/turned off.*menubar.enabled true/);
     expect(kicked).toEqual([]);
   });
 

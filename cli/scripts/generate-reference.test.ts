@@ -18,7 +18,7 @@ describe.skipIf(process.platform === 'win32')('generate-reference.sh', () => {
       const generated = run();
       expect(generated.status, generated.stderr).toBe(0);
       const before = outputs.map((file) => readFileSync(join(outDir, file), 'utf8'));
-      expect(JSON.parse(before[1]).tree.length).toBeGreaterThan(50);
+      expect(JSON.parse(before[1]).tree.length).toBeGreaterThan(30);
       expect(before[2]).toContain('<nav id="nav"');
       expect(before[2]).toContain('agents teams create &lt;team&gt;');
 

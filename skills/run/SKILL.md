@@ -234,7 +234,7 @@ Hosts are also a task backend (`agents cloud run "…" --device <name>` — see 
 `cloud` skill) and a routines placement target (`agents routines add …
 --run-on <name>` — see the `routines` skill).
 
-`agents hosts logs <id>` shows host-dispatch stdout; `agents sessions <id>` shows a session transcript. `agents logs` is an alias of `agents events` (timeline).
+`agents hosts logs <id>` shows host-dispatch stdout; `agents sessions <id>` shows a session transcript. `agents events logs <id>` views one dispatched run or session; `agents events` is the timeline.
 `agents hosts stop <id>` (alias `kill`) terminates the remote process group from
 this machine without deleting the remote log.
 

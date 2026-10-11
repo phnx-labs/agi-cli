@@ -2,7 +2,7 @@
 name: sessions
 description: "Search, browse, and read agent conversation transcripts across Claude, Codex, Gemini, and OpenCode. Use this skill to find previous sessions, recover context, or inspect what agents have done."
 argument-hint: "[search query or session ID]"
-allowed-tools: Bash(agents sessions*), Bash(agents cost*), Bash(agents logs*)
+allowed-tools: Bash(agents sessions*), Bash(agents cost*), Bash(agents events*)
 user-invocable: true
 ---
 

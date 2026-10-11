@@ -139,6 +139,7 @@ describe('config-keys', () => {
       expect(parseConfigKey('menubar.menu.showPullRequests')).toEqual({ scope: 'menubar', section: 'menu', property: 'showPullRequests' });
       expect(configKeyStorageHint(parseConfigKey('menubar.menu.groupBy'))).toContain('central agents.yaml');
       expect(listKnownConfigKeys()).toContain('menubar.menu.ticketSort');
+      expect(configKeyStorageHint(parseConfigKey('menubar.enabled'))).toBe('devices/<self>/agents.yaml config.menubarEnabled');
     });
 
     it('rejects an unknown AGI Menu preference key', () => {
@@ -166,7 +167,7 @@ describe('config-keys', () => {
     it('every parser-accepted AGI Menu key has a registered store spec', () => {
       for (const key of MENUBAR_CONFIG_KEYS) {
         expect(() => configKeySpec(key)).not.toThrow();
-        expect(configKeySpec(key).scope).toBe('user');
+        expect(configKeySpec(key).scope, key).toBe(key === 'menubar.enabled' ? 'device' : 'user');
       }
     });
   });

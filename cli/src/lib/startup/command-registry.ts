@@ -1,16 +1,15 @@
 const LOADED_COMMAND_NAMES = [
   'accounts', 'auth', 'view', 'inspect', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use',
-  'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install', 'packages',
+  'remove', 'rm', 'purge', 'update', 'prune', 'import',
   'routines', 'projects', 'run', '_callback', 'open', 'fork', 'config',
-  'models', 'trash', 'doctor',
-  'route', 'routes', 'harness', 'harnesses', 'secrets', 'menubar', 'sync',
+  'models', 'doctor',
+  'harness', 'harnesses', 'secrets', 'menubar', 'sync',
   'refresh-rules', 'factory', 'insights', 'trace',
-  'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
+  'watchdog', 'browser', 'computer', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
-  'teams', 'cloud', 'message', 'ps', 'send', 'feed',
-  'mailboxes', 'mailbox', 'webhooks',
-  'daemon', 'traces', 'recordings',
+  'teams', 'cloud', 'ps', 'send', 'feed',
+  'daemon', 'recordings',
 ] as const;
 
 const INLINE_COMMAND_NAMES = [
@@ -60,6 +59,20 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'modes',
   'feedback',
   'restore',
+  'route',
+  'routes',
+  'registry',
+  'packages',
+  'search',
+  'install',
+  'tmux',
+  'message',
+  'mailboxes',
+  'mailbox',
+  'traces',
+  'webhooks',
+  'logs',
+  'trash',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

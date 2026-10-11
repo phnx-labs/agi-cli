@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_61 command groups · 486 commands._
+_48 command groups · 425 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -165,10 +165,6 @@ agents daemon                             The always-on daemon: watchdog, sessio
 agents daemon disable                     Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
 agents daemon doctor                      One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
 agents daemon enable                      Clear the daemon.enabled kill switch. Does not start the daemon by itself.
-agents daemon funnel                      Manage Tailscale Funnel exposure for a fleet webhook receiver.
-agents daemon funnel down <host>          Disable Tailscale Funnel exposure for a public HTTPS port.
-agents daemon funnel status <host>        Show Tailscale Funnel status on a fleet host.
-agents daemon funnel up <host>            Expose a localhost webhook receiver through Tailscale Funnel.
 agents daemon index                       Maintain the session index the daemon keeps: transcript roots, FTS compaction, historical backfills. Runs in the foreground; never starts or restarts the daemon.
 agents daemon index backfill              Populate derived session data explicitly.
 agents daemon index backfill resources    Derive historical skill/slash-command usage once into the local SQLite index.
@@ -188,10 +184,6 @@ agents daemon services restart <service>  Restart a supervised daemon service li
 agents daemon start                       Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                      Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                        Stop the daemon.
-agents daemon webhooks                    Signed webhook receivers this box hosts as a supervised daemon service.
-agents daemon webhooks add                Declare a receiver on this box. Replaces any receiver already on the same port.
-agents daemon webhooks list               List the receivers declared for this box.
-agents daemon webhooks remove <port>      Stop hosting the receiver bound to this port.
 ```
 
 ## devices: Registry of SSH device profiles (platform, user, address, auth), self-populated from Tailscale. Alias: fleet.
@@ -218,7 +210,7 @@ agents devices lease stop <slug>               Stop (release) a leased crabbox b
 agents devices list                            List registered devices with platform, spec (cores/RAM/disk), live load/mem/disk headroom, role, and description.
 agents devices pick                            Print the device automatic placement would choose for offloaded machine work (the suite, a build) — least-loaded, reachable, POSIX, never the box you are sitting at. Writes just the name to stdout so scripts can consume it.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
-agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
+agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents events logs <id>`.
 agents devices register <name>                 Register a discovered node and record the approval in this box's device doc (fleet.discovery), unioned fleet-wide.
 agents devices remove <name>                   Remove a device from the registry.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
@@ -248,6 +240,7 @@ agents events audit         Alias of `agents events --include runs` — dispatch
 agents events audit list    Alias of `agents events audit` / `agents events --include runs`
 agents events audit verify  Walk the legacy hash-chain file (pre-unification history only)
 agents events emit          Record events produced outside this process (reads JSONL on stdin)
+agents events logs [id]     Show the log of a dispatched run or a session
 agents events rotate        Apply event retention and the storage ceiling immediately
 agents events stats         Show aggregate event statistics
 ```
@@ -314,29 +307,6 @@ agents insights resources      Which skills/commands you actually invoke, and wh
 agents inspect <target>  Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.
 ```
 
-## install: Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)
-
-```
-agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)
-```
-
-## logs: Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
-
-```
-agents logs [id]    Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
-agents logs audit   Alias for `agents events audit`
-agents logs rotate  Apply event retention and the storage ceiling immediately
-agents logs stats   Show aggregate audit statistics
-```
-
-## mailboxes: Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
-_aliases: mailbox_
-
-```
-agents mailboxes [id]   Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
-agents mailboxes prune  Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.
-```
-
 ## mcp: Connect agents to external tools via Model Context Protocol servers
 
 ```
@@ -359,25 +329,6 @@ agents memory remove <name>  Remove a user-layer memory fact
 agents memory view <name>    Print a memory fact (winning layer)
 ```
 
-## menubar: Manage AGI Menu (running sessions, agents awaiting input, routines)
-
-```
-agents menubar          Manage AGI Menu (running sessions, agents awaiting input, routines)
-agents menubar disable  Stop and remove AGI Menu (stays off across upgrades)
-agents menubar doctor   Diagnose AGI Menu: install path, version skew, signing identity, stale process
-agents menubar enable   Install and start AGI Menu (launches at login)
-agents menubar restart  Restart the running AGI Menu through its login item
-agents menubar setup    Configure AGI Menu end-to-end: one instance, started at login
-agents menubar status   Show whether AGI Menu is installed and running
-agents menubar update   Check for or install the newest AGI Menu release
-```
-
-## message: Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
-
-```
-agents message <target> <text>  Send a message to a running or parked agent (mailbox / terminal-select / resume by runtime).
-```
-
 ## models: Show the cost-tier map (cheap|default|best|ultra) for installed harnesses; pin overrides with `tier set`.
 
 ```
@@ -387,13 +338,6 @@ agents models tier                                Override which model a cost ti
 agents models tier clear <selector> [tier]        Clear one tier (or all tiers) back to the auto guess.
 agents models tier list                           List all configured tier overrides.
 agents models tier set <selector> <tier> <model>  Pin a tier to a model. selector: <agent> or <agent>@<version> (e.g. kimi, kimi@0.19.2).
-```
-
-## packages: Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
-
-```
-agents packages                        Portable agent packages — materialize schema-v3 agent.yaml into an ephemeral harness home
-agents packages materialize <package>  Materialize a schema-v3 agent.yaml package into an ephemeral Claude, Codex, or OpenCode home
 ```
 
 ## permissions: Control what agents can access with allow/deny rules for bash, tools, and filesystem
@@ -457,8 +401,12 @@ agents projects todo undo <id>        Undo the last to-do action: reopen a Done 
 ## prune: Uninstall agent CLI versions. Moves version data to trash for recovery.
 
 ```
-agents prune <specs...>        Uninstall agent CLI versions. Moves version data to trash for recovery.
-agents prune cleanup [target]  Remove orphan resources, old versions, or routine runs
+agents prune <specs...>              Uninstall agent CLI versions. Moves version data to trash for recovery.
+agents prune cleanup [target]        Remove orphan resources, old versions, or routine runs
+agents prune trash                   Inspect, restore, and empty soft-deleted agent versions and resources
+agents prune trash empty             Permanently delete trashed items, optionally only those trashed before a cutoff
+agents prune trash list [agent]      List soft-deleted version directories (optionally filtered to one agent)
+agents prune trash restore <target>  Restore the newest soft-deleted copy of an agent version (e.g. "codex@0.141.0")
 ```
 
 ## ps: List running agents on this machine and across the fleet; stop, focus, detach, or migrate one
@@ -483,18 +431,6 @@ agents recordings upload <file>  Transcode and publish one recording through the
 agents recordings watch          Enable the daemon-owned CleanShot watcher and persist its folder.
 ```
 
-## registry: Manage package registries
-
-```
-agents registry                          Manage package registries
-agents registry add <type> <name> <url>  Add a registry (type: mcp or skill)
-agents registry config <type> [name]     Configure a registry
-agents registry disable <type> [name]    Disable a registry
-agents registry enable <type> [name]     Enable a registry
-agents registry list                     List configured registries
-agents registry remove <type> [name]     Remove a registry
-```
-
 ## repos: Manage extra DotAgent repos alongside ~/.agents/ (for private or team skills).
 _aliases: repo_
 
@@ -510,21 +446,6 @@ agents repos push [alias]        Commit and push the user repo or a user-owned e
 agents repos remove <alias>      Unregister an extra repo. Managed clones are deleted; external paths are kept.
 agents repos sync <alias>        Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.
 agents repos view [name]         Show one repo's contents: git state and per-kind resource counts. Omit the name for an interactive picker.
-```
-
-## route: Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
-_aliases: routes_
-
-```
-agents route                                            Named routers -- reusable, task-typed allowlists of harnesses x models/tiers x linked accounts.
-agents route add <name>                                 Create a named router with an initial harness + tier allowlist.
-agents route allow <name> <harness> <models...>         Set (replace) a harness's eligible model/tier allowlist under a router.
-agents route link-account <name> <harness> <account>    Link a durable credential account to a harness under a router.
-agents route list                                       List every configured router.
-agents route remove <name>                              Remove a router.
-agents route rename <old-name> <new-name>               Rename a router, preserving every field (allowlists, weights, accounts, hijack). Errors on a name collision.
-agents route unlink-account <name> <harness> <account>  Unlink a durable credential account from a harness under a router.
-agents route view <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
 ```
 
 ## routines: Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
@@ -570,12 +491,6 @@ agents rules view [agent]     Read the full content of a rule file with markdown
 
 ```
 agents run [agent] [prompt]  Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.
-```
-
-## search: Find packages (MCP servers, skills) across configured registries
-
-```
-agents search <query>  Find packages (MCP servers, skills) across configured registries
 ```
 
 ## secrets: Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
@@ -706,46 +621,10 @@ agents teams status [team]                        Check in on a team: status, fi
 agents teams stop [team] [teammate]               Stop a running teammate. Resume it later with `agents teams resume`. Cleans up worktree if no uncommitted changes.
 ```
 
-## tmux: Persistent terminal-multiplexer sessions for agents. Survive editor restarts, share with other tools.
-
-```
-agents tmux                           Persistent terminal-multiplexer sessions for agents. Survive editor restarts, share with other tools.
-agents tmux attach <name>             Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d) or the agent exits (session is then torn down).
-agents tmux capture <target>          Print the contents of a pane. Target is "name" or "name:pane".
-agents tmux check                     Check whether tmux is installed and report its version.
-agents tmux has <name>                Exit 0 if a session with this name exists, 1 otherwise. Useful in shell scripts.
-agents tmux info <name>               Show provenance for a session (cmd, cwd, created_at, source, labels).
-agents tmux kill [name]               Kill one tmux session, or pick from a list that shows each pane's last screen. Idempotent.
-agents tmux kill-all                  Kill every session on the shared server and remove the socket. Requires --yes.
-agents tmux list                      List live tmux sessions on the shared server (name, age, last screen line). Prunes stale meta files as a side effect.
-agents tmux new <name>                Start a detached tmux session running a command. The session persists until killed.
-agents tmux send <target> <keys>      Send keystrokes to a session. Target is "name" or "name:pane" (e.g. team:%2 or team:1).
-agents tmux split <name> <direction>  Split the active pane of a session. Direction: h (left/right) or v (top/bottom).
-```
-
 ## trace: Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
 
 ```
 agents trace <selectors...>  Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
-```
-
-## traces: Sync this device's derived, redacted trajectories to your Phoenix account
-
-```
-agents traces         Sync this device's derived, redacted trajectories to your Phoenix account
-agents traces open    Open the Phoenix Evals console
-agents traces setup   (advanced) Provision a self-hosted Cloudflare Worker + R2 bucket for traces — NOT required; `agents auth login` syncs to the managed endpoint with zero setup
-agents traces status  Show last sync time for this device
-agents traces sync    Push derived, redacted trajectories (incremental)
-```
-
-## trash: Inspect, restore, and empty soft-deleted agent versions and resources
-
-```
-agents trash                   Inspect, restore, and empty soft-deleted agent versions and resources
-agents trash empty             Permanently delete trashed items, optionally only those trashed before a cutoff
-agents trash list [agent]      List soft-deleted version directories (optionally filtered to one agent)
-agents trash restore <target>  Restore the newest soft-deleted copy of an agent version (e.g. "codex@0.141.0")
 ```
 
 ## uninstall: Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
@@ -789,13 +668,6 @@ agents watchdog history [sessionId]          Show persisted Watchdog decisions a
 agents watchdog policy <sessionId> <policy>  Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).
 agents watchdog rotate <state>               Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). Rotate-only: nudging stays on — unlike `watchdog disable`, which disables the whole watchdog on this device.
 agents watchdog status                       Show whether the daemon watchdog pass is enabled and where state is written.
-```
-
-## webhooks: Run a localhost signed webhook receiver for routine triggers.
-
-```
-agents webhooks        Run a localhost signed webhook receiver for routine triggers.
-agents webhooks serve  Receive signed GitHub/Linear/Slack webhooks on /hooks/<source> and fire matching routines and handlers.
 ```
 
 ## workflows: Manage multi-agent pipeline workflows (WORKFLOW.md bundles)

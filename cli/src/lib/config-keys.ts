@@ -45,6 +45,7 @@ export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;
 export type MenubarSection = 'menu' | 'statusbar';
 
 export const MENUBAR_CONFIG_KEYS: readonly string[] = [
+  'menubar.enabled',
   'menubar.autoUpdate',
   ...MENUBAR_MENU_PROPERTIES.map((p) => `menubar.menu.${p}`),
   ...MENUBAR_STATUSBAR_PROPERTIES.map((p) => `menubar.statusbar.${p}`),
@@ -210,6 +211,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
+  if (raw === 'menubar.enabled') return { scope: 'menubar', property: 'enabled' };
   if (raw === 'menubar.autoUpdate') return { scope: 'menubar', property: 'autoUpdate' };
 
   const menubarMatch = raw.match(/^menubar\.(menu|statusbar)\.(.+)$/);
@@ -407,6 +409,7 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
     case 'menubar':
+      if (parsed.property === 'enabled') return 'devices/<self>/agents.yaml config.menubarEnabled';
       return `config.menubar${parsed.section === 'menu' ? 'Menu' : parsed.section === 'statusbar' ? 'Statusbar' : ''}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;
   }
 }

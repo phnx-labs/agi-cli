@@ -34,7 +34,6 @@ agents daemon start | stop | restart
 agents daemon enable | disable   # persisted device kill switch — see below
 agents daemon reload             # SIGHUP: reload routines + re-evaluate scheduler.enabled
 agents daemon services           # every hosted service + per-service toggles
-agents daemon webhooks list      # the signed webhook receivers this box hosts
 agents daemon logs -f --level warn --since 1h
 agents daemon doctor             # one-shot check, non-zero exit on problems
 ```
@@ -310,10 +309,11 @@ agents routines prune
 
 ### Webhook Triggers
 
-Routines can fire from signed GitHub or Linear webhooks instead of a cron
-schedule, and **Slack** deliveries fire webhook *handlers* (see
-[Slack — tag an agent](#slack--tag-an-agent-it-replies-in-your-thread) below).
-The same detached runner path is used as scheduled jobs.
+Routines can fire from a GitHub or Linear event payload instead of a cron
+schedule. `agents routines webhook` matches one payload against every trigger
+routine and fires the matches through the same detached runner path scheduled
+jobs use. agents-cli hosts no HTTP receiver; whatever receives the provider's
+webhook (a CI job, a relay, a shell script) hands the payload to that command.
 
 ```bash
 agents routines add agent-labeled-issue \
@@ -365,336 +365,19 @@ agents routines add ux-tests \
   --prompt "Run Playwright E2E and visual regression checks, then comment the results on the PR."
 ```
 
-#### Slack — tag an agent, it replies in your thread
-
-Slack is a third webhook source. A slash command (`/agents AGI: rebase my open PR
-and check CI`) or an `@mention` of your Slack app reaches `POST /hooks/slack`,
-runs the agent that holds that project's context **on your box**, and the agent
-replies in the same thread. Unlike GitHub/Linear (which fire routine `trigger`
-blocks), Slack matches a webhook **handler** in `~/.agents/webhooks/*.yml` — the
-handler is what routes the message to an agent.
-
-The receiver verifies Slack's `v0` request signature (with a 5-minute replay
-guard), answers the one-time `url_verification` handshake, and parses both slash
-commands and `app_mention` events. It exposes a `{{slack.*}}` substitution
-namespace — `prompt`, `project`, `channel`, `thread_ts`, `user`, `text`,
-`command`, `response_url` — where `project` and `prompt` come from a `PROJECT: rest` prefix in
-the message (`AGI: rebase …` → project `AGI`, prompt `rebase …`). A handler may
-template its `project`/`cwd` from that namespace, so one handler serves every
-project:
-
-```yaml
-# ~/.agents/webhooks/slack-agent.yml
-name: slack-agent
-source: slack
-command: /agents          # match this slash command (omit to also match @mentions)
-project: "{{slack.project}}"   # route to the project named in the message
-run:
-  agent: claude
-  prompt: |
-    A Slack request came in from <@{{slack.user}}> in channel {{slack.channel}}.
-    Project: {{slack.project}}
-    Request: {{slack.prompt}}
-
-    Read the project's prior context if useful (`agents sessions -p {{slack.project}}`),
-    do the work, then reply. A slash command carries a `response_url`, which Slack
-    accepts for 30 minutes with no token and no channel membership:
-    curl -s -X POST '{{slack.response_url}}' -H 'Content-type: application/json' \
-      -d '{"response_type":"in_channel","text":"<your result>"}'
-```
-
-`response_url` is empty on an `@mention` delivery — that reply goes into the thread
-through the Slack Web API (`chat.postMessage` with `SLACK_BOT_TOKEN`, which needs the
-bot in that channel), or through `agents send --channel slack`, which routes via the
-Rush daemon's Slack gateway rather than this app's token and so needs `rush` logged
-in there. The full example is in
-[`docs/examples/slack/slack-agent.yml`](examples/slack/slack-agent.yml). Restrict a
-handler to one channel with `channel: C0…`, or drop the `command`/`channel` filters
-to match every mention.
-
-Route with `{{slack.project}}`, not `{{slack.prompt}}`. The project token is a
-single bare word (no slashes, never `..`), so it is safe in `project:`/`cwd:`;
-`{{slack.prompt}}` is free text from the sender and must stay in the prompt body,
-never in an execution path. And note the blast radius: anyone who can message the
-app triggers a `mode: auto` (write-capable) run on the host box — that authority
-is the point, but scope it with `channel:`/`command:` filters and a project the
-handler trusts.
-
-**Setup (once per workspace).** Create the app at
-[api.slack.com/apps](https://api.slack.com/apps) — the manifest and handler in
-[`docs/examples/slack/`](examples/slack/) are ready to paste — then:
+#### Firing a trigger from a payload
 
 ```bash
-# 1. Signing secret (verify inbound). The bot token is only needed for an
-#    @mention reply, which posts through the Slack Web API into the thread —
-#    a slash command replies via `{{slack.response_url}}` and needs no token:
-agents secrets add slack SLACK_SIGNING_SECRET <from Slack "Basic Information">
-agents secrets add slack SLACK_BOT_TOKEN <xoxb-… from "OAuth & Permissions">
+# Which routines would this payload fire?
+agents routines webhook --source linear --event Issue --file payload.json --dry-run
 
-# 2. Host the receiver publicly (Funnel) on the box that holds your context:
-agents daemon webhooks add --secrets-bundle slack --port 8787 --funnel-port 443
-agents daemon restart
-
-# 3. Point the Slack app's slash-command + Events "Request URL" at:
-#    https://<box>.<tailnet>.ts.net/hooks/slack
+# Fire them (reads stdin when --file is omitted)
+agents routines webhook --source github --event pull_request < delivery.json
 ```
 
-#### Hosting the receiver — supervised (recommended) or foreground
-
-**Supervised.** Declare the receiver on the ingress box and the daemon hosts it
-as the `webhook-receiver` service, so it comes back after a reboot and after a
-crash:
-
-```bash
-agents daemon webhooks add --secrets-bundle webhooks --port 8787 --funnel-port 443
-agents daemon webhooks list
-agents daemon restart      # bind the change
-```
-
-The declarations live in `~/.agents/daemon/webhooks.yaml` — per-box operational
-state, deliberately outside the fleet-synced config, because a public receiver
-runs on exactly one machine. Port is the identity: a second `add` on a port
-edits that receiver. `agents daemon webhooks remove <port>` stops hosting it. A
-box with no declarations binds nothing, and the whole service can be turned off
-with `agents daemon services disable webhook-receiver`.
-
-The daemon resolves each receiver's signing secret through the standalone
-`secrets` CLI (an `agentOnly` read via `secrets-client.ts`, SEC-13), so a hosted
-receiver needs no `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. A bundle that is
-locked or holds neither webhook secret **fails that receiver loud** in
-`agents daemon logs` rather than binding ingress it cannot verify; the other
-receivers are unaffected.
-
-**Foreground.** For a one-off or for testing, run the receiver yourself — same
-HTTP surface, no supervision:
-
-```bash
-agents webhooks serve --secrets-bundle webhooks --port 8787
-```
-
-The bundle may contain any of `GITHUB_WEBHOOK_SECRET`, `LINEAR_WEBHOOK_SECRET`,
-and `SLACK_SIGNING_SECRET` (a Slack app also uses `SLACK_BOT_TOKEN` for the
-reply). The receiver accepts `POST /hooks/github`, `POST /hooks/linear`, and
-`POST /hooks/slack`, rejects unsigned deliveries, dedupes repeated delivery IDs,
-rate-limits each source, and binds `127.0.0.1` by default. Keep webhook signing
-keys in `agents secrets`; do not put keys in webhook URLs, path segments, query
-strings, routine YAML, or Funnel commands.
-
-#### The ack is asynchronous
-
-A verified delivery is answered `202 {"ok":true,"accepted":true,"deliveryId":…}`
-**immediately**, and the matched routines and handlers are dispatched after the
-response. Dispatch starts an agent run and takes 15-20 seconds, which exceeds
-Linear's delivery timeout — the receiver used to hold the socket open across it,
-so every real delivery logged a timeout and a retry on Linear's side.
-
-What this changes for a caller: the HTTP body no longer carries `fired` /
-`runs` / `handlers`, and a dispatch failure no longer surfaces as a 4xx. Fired
-routines appear in `agents daemon logs` (or the foreground receiver's stdout)
-and in the `webhook.fired` event; a failure after the ack is logged and emitted
-as `webhook.failed`.
-
-**A dispatch that fails after the ack does not retry itself.** The 4xx was what
-made GitHub and Linear re-send a delivery, and a sender does not retry a 202. The
-per-job ledger still records exactly which matches completed and the delivery
-stays unmarked, so re-sending it from the provider's UI runs only what did not —
-but nothing triggers that automatically. Watch `agents daemon logs` for
-`dispatch failed after ack`.
-
-Dedup is unchanged. `<source>:<delivery-id>` is still the key, a retry of a
-settled delivery is still answered `200 {"duplicate":true}`, and per-job marking
-still means a retry finishes only the matches that failed. A retry that arrives
-while the first is *still dispatching* is also answered as a duplicate, so the
-async window cannot double-fire.
-
-Expose the receiver publicly from a Linux/macOS Tailscale node with Funnel:
-
-```bash
-agents daemon funnel up yosemite-s0 --local-port 8787 --port 443
-agents daemon funnel status yosemite-s0
-```
-
-Funnel public ports are limited to `443`, `8443`, and `10000`; `agents daemon funnel up`
-validates that before running the remote Tailscale CLI.
-
-Operational runbook:
-
-1. Create or update the secret bundle on the ingress host:
-
-   ```bash
-   agents secrets create webhooks
-   agents secrets add webhooks GITHUB_WEBHOOK_SECRET
-   agents secrets add webhooks LINEAR_WEBHOOK_SECRET
-   ```
-
-   If a key already exists, replace the matching `add` command with
-   `agents secrets rotate webhooks <KEY>`.
-
-2. Host the receiver on the ingress host, bound to localhost:
-
-   ```bash
-   agents daemon webhooks add --secrets-bundle webhooks --port 8787
-   agents daemon restart
-   agents daemon webhooks list
-   ```
-
-3. Enable Funnel only after the receiver is listening:
-
-   ```bash
-   agents daemon funnel up yosemite-s0 --local-port 8787 --port 443
-   agents daemon funnel status yosemite-s0
-   ```
-
-4. Rotate a signing key source by source. Set the new source secret in the
-   `webhooks` bundle, update the provider webhook configuration to sign with the
-   new value, run `agents daemon restart`, then send one signed test delivery
-   before deleting the old provider secret.
-
-5. Disable public ingress before stopping or moving the receiver:
-
-   ```bash
-   agents daemon funnel down yosemite-s0 --port 443
-   agents daemon funnel status yosemite-s0
-   ```
-
-### Webhook handlers
-
-In addition to routine triggers, you can define one-off **webhook handlers** in
-`~/.agents/webhooks/*.yml`. A handler matches incoming webhooks the same way a
-routine trigger does, but instead of scheduling a recurring job it runs an
-agent, workflow, shell command, or an existing routine once.
-
-```yaml
-# ~/.agents/webhooks/linear-status-planner.yml
-name: linear-status-planner
-source: linear
-event: Issue
-action: update
-stateTo: Plan
-devices:
-  - mac-mini
-run:
-  agent: claude
-  prompt: |
-    Issue {{issue.identifier}} moved from {{updatedFrom.state.name}} to {{issue.state.name}}.
-    Create a concise implementation plan and post it as a Linear comment.
-```
-
-#### Handler YAML format
-
-| Field | Description |
-| --- | --- |
-| `name` | Unique handler name. |
-| `enabled` | Set to `false` to disable without deleting the file. |
-| `devices` | Same fleet allowlist as routines — only matching devices run the handler. |
-| `source` | `github` or `linear`. |
-| `event` | Source event name (e.g. `Issue`, `pull_request`). |
-| `action` | Webhook action (e.g. `update`, `opened`, `labeled`). |
-| `run` | One-of `agent`, `workflow`, or `command`, plus an optional `prompt` and `env`. |
-| `host` | Where the action executes: a device name, `fleet`, or `fleet/<platform>`. Omitted runs locally. |
-| `project` | Named `agents projects` execution anchor — a dispatched `agent`/`workflow` run lands in that project's base directory (so it has a repo checkout to edit). Ignored by `run.command`. |
-| `cwd` | Portable execution directory for the dispatched run. Relative resolves under `project`, otherwise the target's `$HOME`. |
-| `mode` | Permission mode for a dispatched `agent`/`workflow` run: `plan`, `edit`, `auto` (default), `skip`, or `full`. |
-| `routine` | Name of a routine to delegate to instead of `run`. `project`/`cwd`/`mode` set here override the routine's own. |
-
-#### Filters
-
-Handlers support the same filters as routine triggers:
-
-- `source`, `event`, `action` — always available.
-- Linear: `teamKey`, `label`, `stateTo`, `stateFrom`.
-- GitHub: `repo`, `branch`, `label`.
-
-`stateTo` matches a **transition into** that state, not merely sitting in it: the
-current state (`payload.data.state.name`) must equal the value AND this delivery's
-`updatedFrom` must record a state change (`payload.updatedFrom.state` or
-`payload.updatedFrom.stateId`), so a later edit that leaves the state unchanged does
-not re-fire. `stateFrom` matches the previous state (`payload.updatedFrom.state.name`).
-
-#### Actions
-
-- `run.agent` — run the agent headlessly with the substituted prompt.
-- `run.workflow` — run `agents run <workflow>` with the prompt.
-- `run.command` — run a shell command directly (the command string is also
-  variable-substituted). Substituted values are **shell-quoted**: the webhook
-  payload is external input, so `{{issue.title}}` and friends arrive as one inert
-  argument and cannot inject extra commands. Your own template is not quoted, so
-  pipes, redirects, and `&&` still work — write `grep {{issue.title}} log.txt`,
-  not `grep '{{issue.title}}' log.txt` (the quotes are added for you). On Windows
-  this path runs through `cmd.exe`, which these quoting rules do not cover, so a
-  `run.command` containing `{{…}}` is refused with an error; use `run.prompt` or
-  a command without placeholders there.
-- `routine` — load the named routine, substitute its prompt, and run it
-  detached. The handler's `devices` pin overrides the routine's for this fire.
-
-#### Environment and placement
-
-`run.env` injects environment variables into the spawned process, on top of the
-sandbox overlay's own. It applies to both the foreground and detached paths.
-
-`host` chooses where the action executes. It is distinct from `devices`:
-`devices` says which daemon may *fire* the handler, `host` says where the fired
-run *executes*.
-
-| `host` | Effect |
-| --- | --- |
-| omitted | run locally |
-| `yosemite-s0` | run on that device over SSH (or locally if it names this machine) |
-| `fleet` | pick any eligible online worker device |
-| `fleet/linux`, `linux/fleet`, `linux` | pick any eligible online worker on that platform |
-
-Platforms are `linux`, `macos`, `windows`. A fleet expression that matches no
-eligible device raises `no eligible online fleet device` rather than falling back
-to this machine — otherwise `fleet/linux` could silently land on a macOS box.
-
-```yaml
-# ~/.agents/webhooks/deploy-on-merge.yml
-source: github
-event: pull_request
-action: closed
-host: fleet/linux
-run:
-  agent: claude
-  prompt: "Deploy {{pull_request.title}}"
-  env:
-    DEPLOY_TARGET: staging
-```
-
-#### Prompt variables
-
-Use `{{dotted.path}}` placeholders in `run.prompt` (and in the delegated
-routine's prompt). For Linear webhooks the context is:
-
-```ts
-{
-  source: 'linear',
-  event: 'Issue',
-  action: 'update',
-  issue: payload.data,
-  updatedFrom: payload.updatedFrom,
-}
-```
-
-Examples: `{{issue.identifier}}`, `{{issue.state.name}}`,
-`{{updatedFrom.state.name}}`, `{{issue.title}}`, `{{issue.description}}`.
-
-For GitHub webhooks the context includes `repository`, `pull_request`, and
-`issue`.
-
-#### mac-mini ingress with funnel
-
-Handlers are fired by the same receiver as routine triggers. On a headless Mac
-(e.g. `mac-mini`), host it under the daemon and expose it with Tailscale Funnel:
-
-```bash
-# On mac-mini
-agents daemon webhooks add --secrets-bundle webhooks --port 8787 --funnel-port 443
-agents daemon restart
-```
-
-Then point Linear/GitHub at `https://mac-mini.<tailnet>.ts.net/hooks/<source>`.
-The handler's `devices: [mac-mini]` pin ensures only that machine dispatches the
-one-off agent run.
+`--event` is the GitHub `X-GitHub-Event` value or the Linear payload `type`. The
+command starts the daemon when it is enabled but not running, so the runs it fires
+are monitored, then prints each fired routine and its run id.
 
 ### Device activation
 
@@ -751,7 +434,7 @@ managed tmux sessions, were deleted in the same pass and have **no** daemon-core
 replacement timer. `tmux-reconcile`'s job is instead covered by two
 lifecycle-enforcement points that don't need a poll (RUSH-2435): the daemon
 repairs every managed session's hook once at startup, and `agents run
---resume`/`agents focus`/`agents go`/`agents tmux attach` each repair the ONE
+--resume`/`agents focus`/`agents go` each repair the ONE
 session they're about to attach to right before attaching
 (`ensureSessionHookRepaired`, `lib/tmux/session.ts`). A version-skew one-shot at
 upgrade time (`runMigration`, `lib/installations/migrate.ts`) covers a machine that upgrades

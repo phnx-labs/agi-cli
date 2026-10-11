@@ -10,7 +10,7 @@ import { DAEMON_SERVICE_IDS } from '../lib/daemon-services.js';
 
 const describeDaemon = DAEMON_TESTS_SUPPORTED ? describe : describe.skip;
 
-describeDaemon('agents daemon — services, broker, webhooks', () => {
+describeDaemon('agents daemon — services, broker', () => {
   it('services --json reports a reachability-only secrets-broker probe', () => {
     const res = run(makeHome(), ['services', '--json']);
     expect(res.status).toBe(0);
@@ -65,36 +65,6 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     expect(res.stdout).toContain('enabled');
   });
 
-  it('webhooks add/list/remove drive the real daemon/webhooks.yaml (RUSH-2548)', () => {
-    const home = makeHome();
-    const configPath = path.join(home, '.agents', 'daemon', 'webhooks.yaml');
-
-    const empty = run(home, ['webhooks', 'list', '--json']);
-    expect(empty.status).toBe(0);
-    expect(JSON.parse(empty.stdout)).toEqual([]);
-
-    const add = run(home, ['webhooks', 'add', '--secrets-bundle', 'linear-webhook', '--port', '8788', '--funnel-port', '443']);
-    expect(add.status).toBe(0);
-    expect(add.stdout).toContain('127.0.0.1:8788');
-    expect(fs.readFileSync(configPath, 'utf-8')).toContain('linear-webhook');
-
-    const listed = JSON.parse(run(home, ['webhooks', 'list', '--json']).stdout);
-    expect(listed).toEqual([{ bundle: 'linear-webhook', port: 8788, rateLimit: 60, funnelPort: 443 }]);
-
-    const removed = run(home, ['webhooks', 'remove', '8788']);
-    expect(removed.status).toBe(0);
-    expect(JSON.parse(run(home, ['webhooks', 'list', '--json']).stdout)).toEqual([]);
-  }, 90_000);
-  it('webhooks rejects a funnel port Tailscale cannot serve, and an unknown remove', () => {
-    const home = makeHome();
-    const bad = run(home, ['webhooks', 'add', '--secrets-bundle', 'b', '--funnel-port', '9999']);
-    expect(bad.status).toBe(1);
-    expect(bad.stderr).toContain('443, 8443, 10000');
-
-    const missing = run(home, ['webhooks', 'remove', '8787']);
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain('No receiver declared on port 8787');
-  });
   it('services disable writes the config and services list reflects it', () => {
     const home = makeHome();
     const disable = run(home, ['services', 'disable', 'watchdog']);

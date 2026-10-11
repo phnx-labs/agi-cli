@@ -5,8 +5,8 @@ import * as os from 'os';
 import * as yaml from 'yaml';
 import type { AgentId, SkillMetadata, InstalledSkill } from '../types.js';
 import { normalizeAliases } from '../resource-aliases.js';
-import { AGENTS, ensureSkillsDir, agentConfigDirName } from '../agents.js';
-import { capableAgents, isCapable } from '../capabilities.js';
+import { AGENTS, agentConfigDirName } from '../agents.js';
+import { capableAgents } from '../capabilities.js';
 import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from '../state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { listCommandSkillsInVersion } from '../command-skills.js';
@@ -219,68 +219,6 @@ export function discoverSkillsFromRepo(repoPath: string): DiscoveredSkill[] {
   }
 
   return skills;
-}
-
-export function installSkill(
-  sourcePath: string,
-  skillName: string,
-  agents: AgentId[],
-  method: 'symlink' | 'copy' = 'symlink'
-): { success: boolean; error?: string; warnings?: string[] } {
-  const metadata = parseSkillMetadata(sourcePath);
-  const validation = validateSkillMetadata(metadata, skillName);
-
-  if (!validation.valid) {
-    return {
-      success: false,
-      error: `Invalid skill: ${validation.errors.join(', ')}`,
-      warnings: validation.warnings,
-    };
-  }
-
-  ensureCentralSkillsDir();
-
-  const centralPath = path.join(getSkillsDir(), skillName);
-
-  if (!fs.existsSync(centralPath)) {
-    try {
-      fs.cpSync(sourcePath, centralPath, { recursive: true });
-    } catch (err) {
-      return { success: false, error: `Failed to copy skill: ${(err as Error).message}` };
-    }
-  }
-
-  for (const agentId of agents) {
-    if (!isCapable(agentId, 'skills')) {
-      continue;
-    }
-
-    ensureSkillsDir(agentId);
-    const agentSkillPath = path.join(getAgentSkillsDir(agentId), skillName);
-
-    if (fs.existsSync(agentSkillPath)) {
-      try {
-        fs.rmSync(agentSkillPath, { recursive: true, force: true });
-      } catch {
-      }
-    }
-
-    try {
-      if (method === 'symlink') {
-        fs.symlinkSync(centralPath, agentSkillPath, 'dir');
-      } else {
-        fs.cpSync(centralPath, agentSkillPath, { recursive: true });
-      }
-    } catch (err) {
-      return {
-        success: false,
-        error: `Failed to ${method} skill to ${agentId}: ${(err as Error).message}`,
-      };
-    }
-  }
-
-  emit('skill.install', { skill: skillName, agents });
-  return { success: true };
 }
 
 export function skillExists(agentId: AgentId, skillName: string): boolean {

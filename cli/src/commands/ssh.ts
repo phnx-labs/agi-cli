@@ -1997,7 +1997,7 @@ is reported \`failed\` (exit non-zero), never a stranded \`ok\`.
 
   devicesCmd
     .command('ps')
-    .description('List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.')
+    .description('List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents events logs <id>`.')
     .option('--json', 'Output JSON')
     .action((opts: { json?: boolean }) => doDeviceTaskPs(!!opts.json));
 
@@ -2267,7 +2267,7 @@ async function doDeviceTaskStop(ref: string): Promise<void> {
         '  ' + statusColor(stopped.status) +
         chalk.gray(` (${exitNote})`),
     );
-    console.log(chalk.gray(`Logs: agents logs ${stopped.id}`));
+    console.log(chalk.gray(`Logs: agents events logs ${stopped.id}`));
   } catch (err: any) {
     console.error(chalk.red(err?.message ?? err));
     process.exitCode = 1;

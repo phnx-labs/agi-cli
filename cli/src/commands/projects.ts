@@ -6,8 +6,7 @@ import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
 import { setHelpSections } from '../lib/help.js';
-import { getMainRepoRoot } from '../lib/git.js';
-import { parseOwnerRepoFromRemote } from '../lib/registry.js';
+import { getMainRepoRoot, parseOwnerRepoFromRemote } from '../lib/git.js';
 import { truncate } from '../lib/format.js';
 import { expandLocalHome, getProjectRoot, toHomeRelative } from '../lib/project-root.js';
 import { machineId } from '../lib/machine-id.js';

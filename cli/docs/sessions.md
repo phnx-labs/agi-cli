@@ -183,7 +183,7 @@ index agents writes (`agents sessions backfill tools` fills it for historical
 transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
 clause) exits 2 and names that command; reading one session's tool calls,
 `agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
-Following a live transcript is `sessions tail <id>` (`agents logs -f <id>` runs
+Following a live transcript is `sessions tail <id>` (`agents events logs -f <id>` runs
 it for a session).
 
 ## Off-box backup

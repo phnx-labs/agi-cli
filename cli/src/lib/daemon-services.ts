@@ -9,7 +9,6 @@ import { LOG_LEVELS, parseLogLevel, type LogLevel } from './daemon/diagnostics.j
 export type DaemonServiceId =
   | 'scheduler'
   | 'catchup'
-  | 'webhook-receiver'
   | 'self-heal'
   | 'self-update'
   | 'account-state'
@@ -48,11 +47,7 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     title: 'Catch-up recovery',
     description: 'Supervised pass that re-runs routines whose scheduled fire this device missed (sleep, wedge, or suspend). No-ops while the scheduler gate is off.',
   },
-  {
-    id: 'webhook-receiver',
-    title: 'Webhook receiver',
-    description: 'Hosts signed GitHub/Linear webhook ingress declared in daemon/webhooks.yaml, drawing signing secrets from the standalone secrets CLI; binds nothing when no receivers are declared.',
-  },
+
   {
     id: 'self-heal',
     title: 'Self-heal registry',
