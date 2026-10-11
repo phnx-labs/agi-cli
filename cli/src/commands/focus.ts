@@ -688,6 +688,7 @@ export async function openFocusTabs(
   const results = await open(
     openable.map((p) => ({
       cwd: cwdFor(p.s, byId),
+      project: cwdFor(p.s, byId),
       command: p.plan.command,
       agent: p.s.kind || undefined,
       sessionId: p.s.sessionId || undefined,
@@ -763,7 +764,7 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   }
 
   console.log(chalk.gray(`${shortId(s)} has no live terminal to attach — opening a new ${backend} tab and resuming a copy.`));
-  const results = await openSurfaces([{ cwd, command }], { backend, packing: 'tabs' });
+  const results = await openSurfaces([{ cwd, project: cwd, command }], { backend, packing: 'tabs' });
   const line = describeLaunch(results[0], { verb: 'Resumed', label: shortId(s) });
   if (results[0].ok) console.log(line);
   else {

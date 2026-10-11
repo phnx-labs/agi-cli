@@ -48,8 +48,9 @@ function ackFailure(ack: SpawnAck | undefined, req: LaunchRequest, timeoutMs: nu
   if (!ack) return `VSCodium didn't confirm a tab within ${Math.round(timeoutMs / 1000)}s`;
   if (!ackLandedIn(ack, req.project)) {
     const where = ack.workspaceName ?? (ack.windowFolders.join(', ') || 'an unknown window');
-    if (ack.status === 'failed') return `window "${where}" tried to open the tab but its process never started`;
-    if (ack.status === 'wrong-window') return `the request reached window "${where}", which does not hold ${req.project ?? 'the project'}; nothing was opened`;
+    const why = ack.reason ? ` (${ack.reason})` : '';
+    if (ack.status === 'failed') return `window "${where}" could not open the tab${why}`;
+    if (ack.status === 'wrong-window') return `the request reached window "${where}", which does not hold ${req.project ?? 'the project'}; nothing was opened${why}`;
     return `the tab opened in window "${where}", not ${req.project ?? 'the project window'}`;
   }
   return undefined;
@@ -66,6 +67,10 @@ export async function openSurface(req: LaunchRequest, opts: OpenOptions = {}): P
         throw new Error(`Cannot resolve directory ${req.cwd} on ${req.host}: ${(result.stderr || '').trim() || 'no absolute working directory returned'}`);
       }
       resolved = { ...req, cwd };
+    }
+    // The extension opens a /spawn only in the window holding its project.
+    if (req.backend === 'vscodium-agent' && !req.project) {
+      return { ok: false, request: req, error: `no local project folder for ${req.cwd}, so there is no VSCodium window to open it in` };
     }
     const nonce = req.backend === 'vscodium-agent' ? randomUUID() : undefined;
     for (const spec of specsForRequest(resolved, nonce)) {

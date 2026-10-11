@@ -245,7 +245,7 @@ running — the engine hands it a URL rather than scripting a GUI app:
 ```
 codium <project window>                                    # raise the window that holds the project
 codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
-# then wait up to 10 s for ~/.swarmify/agents/spawn-acks/<nonce>.json
+# then wait up to 15 s for ~/.swarmify/agents/spawn-acks/<nonce>.json
 ```
 
 - **The tab goes to the session's project window, not the frontmost one.** The
@@ -262,11 +262,13 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 - **Nothing is reported as opened without the extension's ack.** The payload
   carries a `nonce` and the `project` folder. The extension answers by writing
   `~/.swarmify/agents/spawn-acks/<nonce>.json` =
-  `{nonce, status: opened|focused-existing|wrong-window, windowFolders, workspaceName, terminalId, title, sessionId, pid, at}`
+  `{nonce, status: opened|focused-existing|wrong-window|failed, windowFolders, workspaceName, terminalId, title, sessionId, pid, reason, at}`
   (`SpawnAck`). `opened`/`focused-existing` in a window holding the project is
-  success and the CLI names the window and tab; no ack within 10 s, a
-  `wrong-window` ack, or a window without the project folder exits non-zero and
-  prints the in-terminal command that works instead.
+  success and the CLI names the window and tab; no ack within 15 s (longer than the
+  extension's own 10 s wait for the tab's process), a `wrong-window` or `failed` ack
+  (its `reason` is printed), or a window without the project folder exits non-zero and
+  prints the in-terminal command that works instead. A spawn with no resolvable local
+  project folder is refused before anything is sent.
 - **A session that already has a tab is focused, not duplicated.** The extension
   finds its live tab for `sessionId`, focuses it and acks `focused-existing`; the
   CLI prints `Already open → focused tab "…" in window "…"`. Before
