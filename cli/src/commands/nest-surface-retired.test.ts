@@ -169,7 +169,6 @@ describe('PHNX-4267 retired humans/reminders/modes/feedback/restore', () => {
       expect(isKnownTopLevelCommand(name), name).toBe(false);
       expect(RETIRED_TOP_LEVEL_COMMANDS.has(name), name).toBe(true);
     }
-
   });
 
   it('a bare `agents modes` is an unknown command, not an auto-correct to models', () => {
