@@ -51,7 +51,7 @@ export async function transcodeRecording(
   try {
     const result = await runProcess(ffmpeg, args, {
       signal,
-      onSpawn: (pid) => options.onStart?.({ pid, workDir: directory }),
+      onSpawn: (pid) => options.onStart?.({ pid, workDir: directory, ownerPid: process.pid }),
     });
     if (result.exitCode !== 0) throw processFailure('ffmpeg', args, result);
     return { filePath: output, cleanup: () => fs.rm(directory, { recursive: true, force: true }) };
@@ -67,12 +67,26 @@ export async function reapTranscode(job: TranscodeJob): Promise<{ killed: boolea
   }
   let killed = false;
   if (process.platform !== 'win32') {
-    const ps = await execFileBounded('ps', ['-o', 'args=', '-p', String(job.pid)], { timeoutMs: 5_000 });
+    const ps = await execFileBounded('ps', ['-ww', '-o', 'args=', '-p', String(job.pid)], { timeoutMs: 5_000 });
+    if (ps.timedOut) throw new Error(`ps timed out checking transcode pid ${job.pid}`);
     if (ps.code === 0 && ps.stdout.includes(path.join(job.workDir, OUTPUT_NAME))) {
-      process.kill(-job.pid, 'SIGKILL');
-      killed = true;
+      try {
+        process.kill(-job.pid, 'SIGKILL');
+        killed = true;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
     }
   }
   await fs.rm(job.workDir, { recursive: true, force: true });
   return { killed };
+}
+
+export function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }

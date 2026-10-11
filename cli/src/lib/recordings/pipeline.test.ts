@@ -42,6 +42,12 @@ async function fakeFfmpeg(directory: string, runMs: number): Promise<string> {
   return script;
 }
 
+async function exitedPid(): Promise<number> {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await new Promise((resolve) => child.once('exit', resolve));
+  return child.pid!;
+}
+
 function isAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -307,7 +313,8 @@ describe('recording artifacts contract', () => {
     directories.push(workDir);
     const orphan = spawn(ffmpeg, ['-i', item.path, path.join(workDir, 'recording.mp4')], { detached: true, stdio: 'ignore' });
     orphan.unref();
-    const orphanJob: TranscodeJob = { pid: orphan.pid!, workDir };
+    const deadOwner = await exitedPid();
+    const orphanJob: TranscodeJob = { pid: orphan.pid!, workDir, ownerPid: deadOwner };
     const strangerDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-recording-'));
     directories.push(strangerDir);
     const ledgerPath = path.join(directory, 'ledger.json');
@@ -316,7 +323,7 @@ describe('recording artifacts contract', () => {
     await previous.queue(item);
     await previous.queue(other);
     await previous.update(item.stem, item.path, { status: 'transcoding', transcode: orphanJob });
-    await previous.update(other.stem, other.path, { status: 'uploading', transcode: { pid: process.pid, workDir: strangerDir } });
+    await previous.update(other.stem, other.path, { status: 'uploading', transcode: { pid: process.pid, workDir: strangerDir, ownerPid: deadOwner } });
 
     const restarted = new RecordingPipeline({ ledger: new RecordingLedger(ledgerPath) });
     await expect(restarted.recoverInterrupted()).resolves.toEqual({ reaped: 1 });
@@ -365,5 +372,30 @@ describe('recording artifacts contract', () => {
     await waitFor(async () => { await pipeline.drain({ awaitUploads: false }); return started.length === 2 ? true : undefined; });
     expect(new Set(started)).toEqual(new Set([first.path, second.path]));
     await pipeline.stop();
+  });
+
+  it('leaves a transcode alone while the process that started it is still running (PHNX-4225)', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'recording-pipeline-'));
+    directories.push(directory);
+    const item = candidate(directory);
+    const ffmpeg = await fakeFfmpeg(directory, 60_000);
+    const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-recording-'));
+    directories.push(workDir);
+    const running = spawn(ffmpeg, ['-i', item.path, path.join(workDir, 'recording.mp4')], { detached: true, stdio: 'ignore' });
+    running.unref();
+    const ledgerPath = path.join(directory, 'ledger.json');
+    const owner = new RecordingLedger(ledgerPath);
+    await owner.queue(item);
+    await owner.update(item.stem, item.path, { status: 'transcoding', transcode: { pid: running.pid!, workDir, ownerPid: process.pid } });
+
+    const daemon = new RecordingPipeline({ ledger: new RecordingLedger(ledgerPath) });
+    try {
+      await expect(daemon.recoverInterrupted()).resolves.toEqual({ reaped: 0 });
+      expect(isAlive(running.pid!)).toBe(true);
+      expect((await fs.stat(workDir)).isDirectory()).toBe(true);
+      expect((await owner.list())[0]).toMatchObject({ status: 'transcoding', transcode: { pid: running.pid } });
+    } finally {
+      process.kill(-running.pid!, 'SIGKILL');
+    }
   });
 });

@@ -95,7 +95,7 @@ describe('AccountUsageService / AccountAuthService', () => {
     await supervisor.stopAll();
   });
 
-  it('a hung usage refresh breaches its deadline and exits the daemon for a supervised restart (12h usage-dark fix, PHNX-4116)', async () => {
+  it('a hung usage refresh is abandoned at its deadline and the next refresh runs, with no daemon exit (12h usage-dark fix, PHNX-4116, PHNX-4225)', async () => {
     const exit = vi.fn();
     const usage = vi.fn(async () => new Promise<void>(() => {}));
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
@@ -105,8 +105,11 @@ describe('AccountUsageService / AccountAuthService', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(usage).toHaveBeenCalledTimes(1);
 
-    await vi.advanceTimersByTimeAsync(2 * 60_000);
-    expect(exit).toHaveBeenCalledWith(70);
+    await vi.advanceTimersByTimeAsync(2 * 60_000 + USAGE_STATE_TICK_MS);
+    expect(usage.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(supervisor.health()['account-state'].lastError).toMatch(/deadline/);
+    await vi.advanceTimersByTimeAsync(20 * 60_000);
+    expect(exit).not.toHaveBeenCalled();
 
     await supervisor.stopAll();
   });

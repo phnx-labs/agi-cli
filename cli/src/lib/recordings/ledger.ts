@@ -106,18 +106,26 @@ export class RecordingLedger {
     });
   }
 
-  async recoverInterrupted(now = Date.now()): Promise<TranscodeJob[]> {
+  async recoverInterrupted(isOwnerAlive: (pid: number) => boolean, now = Date.now()): Promise<TranscodeJob[]> {
     return this.transaction((ledger) => {
       const orphaned: TranscodeJob[] = [];
       for (const row of ledger.rows) {
+        if (row.transcode && isOwnerAlive(row.transcode.ownerPid)) continue;
         if (row.transcode) orphaned.push(row.transcode);
-        delete row.transcode;
         if (row.status !== 'transcoding' && row.status !== 'uploading') continue;
         row.status = 'queued';
         row.error = 'Interrupted before completion; retrying.';
         row.updatedAt = new Date(now).toISOString();
       }
       return orphaned;
+    });
+  }
+
+  async forgetTranscode(job: TranscodeJob): Promise<void> {
+    await this.transaction((ledger) => {
+      for (const row of ledger.rows) {
+        if (row.transcode?.workDir === job.workDir) delete row.transcode;
+      }
     });
   }
 

@@ -15,6 +15,7 @@ export interface RecordingCandidate {
 export interface TranscodeJob {
   pid: number;
   workDir: string;
+  ownerPid: number;
 }
 
 export interface RecordingLedgerRow {

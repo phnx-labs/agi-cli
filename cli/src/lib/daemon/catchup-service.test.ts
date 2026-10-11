@@ -44,7 +44,7 @@ describe('CatchupService', () => {
     await supervisor.stopAll();
   });
 
-  it('a hung pass breaches its deadline and exits the daemon for a supervised restart (PHNX-4116)', async () => {
+  it('a hung pass exits the daemon for a supervised restart once it is a hang, not at its deadline (PHNX-4116, PHNX-4225)', async () => {
     const exit = vi.fn();
     const runPass = vi.fn(async () => new Promise<void>(() => {}));
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
@@ -55,6 +55,8 @@ describe('CatchupService', () => {
     expect(runPass).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(4 * 60_000);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(9 * 4 * 60_000);
     expect(exit).toHaveBeenCalledWith(70);
 
     await supervisor.stopAll();
@@ -80,7 +82,8 @@ describe('CatchupService', () => {
 
     await vi.advanceTimersByTimeAsync(4 * 60_000);
     expect(seen!.aborted).toBe(true);
-    expect(exit).toHaveBeenCalledWith(70);
+    await vi.advanceTimersByTimeAsync(10 * 4 * 60_000);
+    expect(exit).not.toHaveBeenCalled();
 
     await supervisor.stopAll();
   });

@@ -45,7 +45,7 @@ describe('RecordingLedger', () => {
     await firstProcess.update(candidate.stem, candidate.path, { status: 'uploading' });
 
     const restarted = new RecordingLedger(ledgerPath);
-    await restarted.recoverInterrupted(200);
+    await restarted.recoverInterrupted(() => false, 200);
     const pending = await restarted.pending(200);
 
     expect(pending).toHaveLength(1);

@@ -57,6 +57,14 @@ The ledger stores the source path, stem, slug, status, URL, and last error.
 Successful source fingerprints are not uploaded again after a restart;
 interrupted and failed rows retry.
 
+The daemon transcodes one recording at a time. While `ffmpeg` runs, its row also
+records the ffmpeg pid, its work directory, and the pid of the process that started
+it. `ffmpeg` runs in its own process group and outlives a daemon exit, so on start
+the daemon stops any leftover encode whose starting process has exited (only when
+that pid is still writing into the recorded work directory), deletes the work
+directory, and requeues the row. A transcode started by a still-running
+`agents recordings upload` is left alone (PHNX-4225).
+
 Before every non-empty batch, the service runs `artifacts auth whoami`. A signed-out
 or expired session leaves files queued. Public inbox domains such as Gmail, iCloud,
 Outlook, and Yahoo are refused for organization recordings. Either condition raises

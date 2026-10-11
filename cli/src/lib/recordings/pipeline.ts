@@ -5,7 +5,7 @@ import { RecordingIdentityError, verifyOrganizationIdentity } from './identity.j
 import { RecordingLedger } from './ledger.js';
 import { isNewerRecording, type RecordingCandidate, type RecordingLedgerRow, type TranscodeJob } from './model.js';
 import { processFailure, runProcess } from './process.js';
-import { reapTranscode, RecordingDependencyError, transcodeRecording, type TranscodedRecording } from './transcode.js';
+import { isProcessAlive, reapTranscode, RecordingDependencyError, transcodeRecording, type TranscodedRecording } from './transcode.js';
 
 type Transcode = (sourcePath: string, signal?: AbortSignal, onStart?: (job: TranscodeJob) => void) => Promise<TranscodedRecording>;
 
@@ -139,9 +139,10 @@ export class RecordingPipeline {
 
   async recoverInterrupted(): Promise<{ reaped: number }> {
     let reaped = 0;
-    for (const job of await this.ledger.recoverInterrupted()) {
+    for (const job of await this.ledger.recoverInterrupted(isProcessAlive)) {
       try {
         if ((await this.reapTranscode(job)).killed) reaped += 1;
+        await this.ledger.forgetTranscode(job);
       } catch (error) {
         this.reportError(`could not reap transcode pid ${job.pid}: ${error instanceof Error ? error.message : String(error)}`);
       }

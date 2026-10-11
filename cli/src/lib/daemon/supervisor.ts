@@ -151,7 +151,7 @@ export class ServiceSupervisor {
 
   runNow(id: DaemonServiceId): void {
     if (!this.registry.has(id)) throw new Error(`service '${id}' is not registered`);
-    void this.runTick(id);
+    void this.runTick(id, false);
   }
 
   health(): Record<string, ServiceHealth> {
@@ -238,13 +238,13 @@ export class ServiceSupervisor {
   }
 
   // Throws retry; an overrun is aborted and skipped until it settles; only a hang (HANG_DEADLINES) exits 70.
-  private async runTick(id: DaemonServiceId): Promise<void> {
+  private async runTick(id: DaemonServiceId, scheduled = true): Promise<void> {
     const entry = this.registry.get(id);
     const ctx = this.ctx;
     if (!entry || !ctx || entry.state !== 'running') return;
     if (!isPeriodicService(entry.service)) return;
     if (entry.inFlight) {
-      entry.skippedTicks += 1;
+      if (scheduled) entry.skippedTicks += 1;
       return;
     }
     const periodicService = entry.service;
@@ -287,7 +287,15 @@ export class ServiceSupervisor {
         recordSubsystemOk(id);
       }
     } catch (err) {
-      if (!overran) this.recordFailure(entry, id, err, Math.round(performance.now() - startedAt));
+      const durMs = Math.round(performance.now() - startedAt);
+      if (overran) {
+        const message = err instanceof Error ? err.message : String(err);
+        ctx.log('WARN', `service '${id}' overrun tick settled after ${durMs}ms by throwing: ${message}; ${entry.skippedTicks} tick(s) skipped`, {
+          event: 'tick.settled', service: id, durMs, deadlineMs, skippedTicks: entry.skippedTicks, error: message,
+        });
+      } else {
+        this.recordFailure(entry, id, err, durMs);
+      }
     } finally {
       this.clearTickTimers(entry);
       entry.activeTick = undefined;
