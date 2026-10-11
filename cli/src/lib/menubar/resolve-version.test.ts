@@ -13,8 +13,7 @@ import {
   readMenubarResolveCache,
 } from './resolve-version.js';
 
-// Captured from github.com/phnx-labs/agi-cli.git/git-upload-pack (protocol v2 ls-refs, refs/tags/menubar/).
-const LS_REFS = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'ls-refs-menubar.pkt'));
+const LS_REFS = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'ls-refs-menubar.txt'));
 
 function tmpCache(): string {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-resolve-')), 'latest.json');
