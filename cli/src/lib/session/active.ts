@@ -100,13 +100,13 @@ export function attributedSetLostPids(prev: Set<number>, next: Set<number>): boo
 export function filterCachedUnattributed(
   sessions: ActiveSession[],
   attributed: Set<number>,
-  alive: (pid: number, startedAtMs?: number) => boolean,
+  alive: (pid: number, processStartedAtMs?: number) => boolean,
   ppidMap?: Map<number, number>,
 ): ActiveSession[] {
   return sessions.filter((s) => {
     if (s.pid == null) return false;
     if (attributed.has(s.pid) || (ppidMap && hasAttributedAncestor(s.pid, ppidMap, attributed))) return false;
-    return alive(s.pid, s.startedAtMs);
+    return alive(s.pid, s.processStartedAtMs);
   });
 }
 
@@ -336,6 +336,7 @@ export interface ActiveSession {
   planFile?: string;
   sessionFile?: string;
   startedAtMs?: number;
+  processStartedAtMs?: number;
   version?: string;
   account?: string;
   accountLabel?: string;
@@ -525,17 +526,17 @@ export function processStartMs(pid: number, now: number = Date.now()): number | 
   return ms;
 }
 
-export function isPidAlive(pid: number, startedAtMs?: number): boolean {
+export function isPidAlive(pid: number, processStartedAtMs?: number): boolean {
   if (!pid || pid < 1) return false;
   try {
     process.kill(pid, 0);
   } catch (err: any) {
     if (err?.code !== 'EPERM') return false;
   }
-  if (startedAtMs && startedAtMs > 0) {
+  if (processStartedAtMs && processStartedAtMs > 0) {
     // A live recycled PID must not revive an unrelated dead session.
     const procStartMs = processStartMs(pid);
-    if (procStartMs !== null && procStartMs > startedAtMs + PID_REUSE_TOLERANCE_MS) {
+    if (procStartMs !== null && procStartMs > processStartedAtMs + PID_REUSE_TOLERANCE_MS) {
       return false;
     }
   }
@@ -1319,6 +1320,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       const stateRec = readStateSessionRecord(pid, entry?.startedAtMs);
       if (stateRec) exactId = stateRec.session_id;
     }
+    const launchId = entry?.launchId ?? hookRec?.launch_id;
+    if (!exactId && !launchId) continue;
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
     const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
@@ -1344,10 +1347,11 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       tokPerSec,
       sessionFile,
       startedAtMs: hookRec?.ts ?? birthtimeMs,
+      processStartedAtMs: parseStartMs(procByPid.get(pid)?.startTime ?? '') ?? undefined,
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
       owner: resolveOwner(entry?.actor, resolvedId),
-      launchId: entry?.launchId ?? hookRec?.launch_id,
+      launchId,
       terminalId: entry?.terminalId ?? hookRec?.terminal_id,
       originTerminal: entry?.originTerminal,
     }, state, sessionFile, true));
