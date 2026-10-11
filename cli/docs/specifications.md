@@ -1681,11 +1681,14 @@ normative — a change that widens/narrows a cell is a spec change.
     `dedupeByMachineSession` MUST keep the row that is not an offload shim
     (`offloadedFrom` unset), so the merged fleet view never trades a real
     transcript for a `[host/<peer>]` placeholder. A shim whose owner ANSWERED
-    the sweep (`answered` in `lib/remote-agents-json.ts`) without that session
-    MUST be dropped: the owner is the authority for what runs there, and the
+    the sweep (`answered` in `lib/remote-agents-json.ts`: a parseable JSON array;
+    a banner, an object, or empty stdout from an exit-0 peer is `parseFailed`,
+    not an answer) without that session MUST be dropped: the owner is the authority for what runs there, and the
     shim is a desktop tab bound to a run that is no longer live (37 such
     `unknown` rows on one desktop, 2026-10-11). Only a shim whose owner went
-    unheard survives, as `unknown` (SES-18), never as running. This is the
+    unheard survives, as `unknown` (SES-18), never as running. A remote
+    teammate (`context: 'teams'`) is exempt: the worker is not shown to report
+    the teammate's id. This is the
     rule `SessionProjection` (`lib/session/projection.ts`) applies to the
     watch stream. The general seam is still open.
 - **SES-GAP-6.** Whole-**file** JSON parse failure is inconsistent: Gemini throws

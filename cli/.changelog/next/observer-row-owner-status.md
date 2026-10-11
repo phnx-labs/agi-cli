@@ -5,5 +5,6 @@
   runs there, so the fleet merge now drops that tab's row when the worker answered
   and lacks the session; a live session still shows as one row with the worker's
   status, and a worker that went unheard still leaves the tab as `unknown`, never
-  running. Same rule `agents feed watch` already applied. Source:
+  running. A worker whose reply is not a JSON array (a login banner, an error
+  object) does not count as an answer. Same rule `agents feed watch` already applied. Source:
   `cli/src/commands/ps-roster.ts`, `cli/src/lib/remote-agents-json.ts`.

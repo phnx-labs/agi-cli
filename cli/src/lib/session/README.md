@@ -189,8 +189,9 @@ gets the browser (`sessions-browser.ts`), everything else gets the static
 `gatherRemoteActive` (`remote-active.ts`), deduped by `${machine}:${sessionId}`
 (`dedupeByMachineSession`, `commands/ps-roster.ts`). The executing machine owns an
 offloaded session: its row replaces the dispatcher's `offloadedFrom` shim, and a
-shim whose owner answered the sweep without that session is dropped (the tab is
-bound to a run that is no longer live there). Only a shim whose owner went unheard
+shim whose owner answered the sweep (a parseable JSON array) without that session
+is dropped (the tab is bound to a run that is no longer live there); remote
+teammates are exempt. Only a shim whose owner went unheard
 survives, as `unknown`. `SessionProjection` (`projection.ts`) applies the same rule
 to the watch stream, folding the tab into the owner row's `observerTerminals`.
 

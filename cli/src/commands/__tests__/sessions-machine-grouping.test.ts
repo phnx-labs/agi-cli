@@ -151,6 +151,11 @@ describe('dedupeByMachineSession', () => {
     expect(dedupeByMachineSession([zionTab, m6Same], ['yosemite-m6'])).toEqual([m6Same]);
   });
 
+  it('keeps a remote teammate whose worker answered without it (the worker need not report its id)', () => {
+    const teammate = mk({ context: 'teams', machine: 'yosemite-m6', offloadedFrom: 'zion', sessionId: 'team-remote-id', status: 'running' });
+    expect(dedupeByMachineSession([teammate], ['yosemite-m6'])).toEqual([teammate]);
+  });
+
   it('keeps the shim when it is the only row for that session (peer unreachable)', () => {
     const out = dedupeByMachineSession([
       mk({ machine: 'yosemite-s0', sessionId: 'off', offloadedFrom: 'zion' }),

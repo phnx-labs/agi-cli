@@ -106,3 +106,13 @@ describe.skipIf(tmuxSkip)('gatherLiveTargets — skip fleet on unique local live
     expect(opts?.earlyExit).toBeUndefined();
   });
 });
+
+describe('gatherLiveTargets — an answering owner retires its dead offload shim', () => {
+  const shim = { context: 'terminal', kind: 'claude', status: 'unknown', sessionId: 'f00dfeed-0000-4000-8000-00000000f00d', machine: 'worker-a', offloadedFrom: 'desktop-b', pid: process.pid, pidAlive: true };
+
+  it.each([[['worker-a'], false], [[], true]])('answered=%j keeps the shim: %s', async (answered, kept) => {
+    gatherRemoteActiveMock.mockResolvedValueOnce({ sessions: [shim], deviceCount: 1, skipped: [], answered, discoveryFailed: false } as never);
+    const { activeById } = await gatherLiveTargets(false, { includeCloud: true });
+    expect(activeById.has(shim.sessionId)).toBe(kept);
+  });
+});

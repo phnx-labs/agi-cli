@@ -1,17 +1,17 @@
-import { gatherRemoteAgentsJson } from '../remote-agents-json.js';
+import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import type { ActiveSession } from './active.js';
 import { parseViewingIn } from './viewing-in.js';
 
 export const NO_FANOUT_ENV = 'AGENTS_SESSIONS_LOCAL';
 
-export function parseRemoteActive(stdout: string, machine: string): ActiveSession[] {
+export function parseRemoteActive(stdout: string, machine: string): RemoteAgentsJsonParseResult<ActiveSession> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return [];
+    return { items: [], valid: false };
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) return { items: [], valid: false };
   const out: ActiveSession[] = [];
   for (const x of parsed) {
     if (x && typeof x === 'object' && !Array.isArray(x)) {
@@ -24,7 +24,7 @@ export function parseRemoteActive(stdout: string, machine: string): ActiveSessio
       out.push(row);
     }
   }
-  return out;
+  return { items: out, valid: true };
 }
 
 interface RemoteActiveResult {

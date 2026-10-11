@@ -299,7 +299,7 @@ export function dedupeByMachineSession(sessions: ActiveSession[], answered: read
     }
     if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
   }
-  return out.filter(s => !(s.sessionId && s.offloadedFrom && s.machine && heard.has(normalizeHost(s.machine))));
+  return out.filter(s => !(s.sessionId && s.offloadedFrom && s.context !== 'teams' && s.machine && heard.has(normalizeHost(s.machine))));
 }
 
 export function filterActiveSessionsByHostScope(
