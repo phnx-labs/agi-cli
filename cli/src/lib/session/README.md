@@ -186,8 +186,13 @@ for the `formatMetaOnlyBody` reason above.
 gets the browser (`sessions-browser.ts`), everything else gets the static
 `renderActiveSessions` dump. Both funnel through one fleet sweep, `gatherActiveSessions`
 (`sessions.ts:947`) = local `getActiveSessions()` + remote SSH fan-out
-`gatherRemoteActive` (`remote-active.ts:62`), deduped by `${machine}:${sessionId}`
-(`sessions.ts:711`).
+`gatherRemoteActive` (`remote-active.ts`), deduped by `${machine}:${sessionId}`
+(`dedupeByMachineSession`, `commands/ps-roster.ts`). The executing machine owns an
+offloaded session: its row replaces the dispatcher's `offloadedFrom` shim, and a
+shim whose owner answered the sweep without that session is dropped (the tab is
+bound to a run that is no longer live there). Only a shim whose owner went unheard
+survives, as `unknown`. `SessionProjection` (`projection.ts`) applies the same rule
+to the watch stream, folding the tab into the owner row's `observerTerminals`.
 
 The interactive running-filter live set is fleet-wide: the browser builds `live` from
 the same `gatherActiveSessions` (`sessions-browser.ts:446`), not the old local-only
