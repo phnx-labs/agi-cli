@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.10
+
+- **A desktop tab showing a session that runs on another machine is listed once, as that session.** An ssh tab opened by `agents sessions resume` (AGI EXT opens remote sessions this way) used to appear in `agents feed watch` and `agents ps` as a second session on the desktop with status `unknown` and nothing to read, beside the real one on the worker. The resume hop now records the owner machine for its tab, and the stream projection folds a tab with no transcript of its own into the device that reports the session's transcript, so the tab shows up in that session's `observerTerminals`. Tabs opened before this release fold in the same way. Source: `cli/src/commands/resume.ts`, `cli/src/lib/session/active.ts`, `cli/src/lib/session/projection.ts`.
+
 ## 1.23.9
 
 - Session status no longer reads an idle session as working: the bundled sessions reader moves to 0.8.3, which judges working vs idle by event timestamps instead of the transcript's file time (Claude's bookkeeping writes kept old sessions looking active). Formats without per-line timestamps (grok, cursor) still date their last event by the file time, so a waiting grok question still reads as waiting.
