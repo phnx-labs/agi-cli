@@ -103,7 +103,7 @@ export const SCENES: Scene[] = [
     caption: 'Register MCP servers across every agent at once.',
     clear: true,
     lines: [
-      { text: '$ agents install mcp:com.linear/linear', color: W, typing: true, delay: 0 },
+      { text: '$ agents mcp add linear', color: W, typing: true, delay: 0 },
       { text: "Added MCP server 'linear' to manifest", color: G, delay: 30 },
       { text: 'Registering across agents...', color: D, delay: 40, spinner: true },
       { text: '  + Claude Code@2.1.187', color: G, delay: 55, indent: 2 },
@@ -111,7 +111,7 @@ export const SCENES: Scene[] = [
       { text: '  + Grok CLI@0.2.32', color: G, delay: 65, indent: 2 },
       { text: '  + Kimi CLI@0.19.2', color: G, delay: 70, indent: 2 },
       { text: '', delay: 80 },
-      { text: 'Run: agents mcp register to apply', color: D, delay: 85 },
+      { text: 'Run: agents sync --mcp to apply', color: D, delay: 85 },
     ],
     durationFrames: 110,
   },

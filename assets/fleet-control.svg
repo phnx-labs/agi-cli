@@ -136,14 +136,13 @@
     <rect x="820" y="628" width="700" height="376" rx="18" fill="url(#cardFill)" stroke="url(#cardRim)" stroke-width="1"/>
   </g>
   <rect x="820.5" y="628.5" width="699" height="1" fill="#3a3a3a" opacity="0.6"/>
-  <text x="850" y="674" class="cardtitle">agents message</text>
+  <text x="850" y="674" class="cardtitle">agents send</text>
   <text x="1490" y="674" text-anchor="end" class="cardmeta">STEER MID-RUN</text>
   <line x1="850" y1="696" x2="1490" y2="696" stroke="#1e1e1e" stroke-width="1"/>
 
   <rect x="850" y="722" width="640" height="46" rx="12" fill="#0e0e0e" stroke="#2a2a2a"/>
   <text x="872" y="751" class="mono-sm-muted">$</text>
-  <text x="892" y="751" class="mono-sm">agents message tester</text>
-  <text x="1160" y="751" class="mono-sm-accent">&quot;also cover the null case&quot;</text>
+  <text x="892" y="751" class="mono-sm">agents send --channel mailbox --to tester --text &quot;…&quot;</text>
 
   <path d="M 1170 768 L 1170 802" stroke="#B6E84A" fill="none" stroke-width="2" marker-end="url(#arrowLime)" filter="url(#limeGlow)"/>
   <text x="1190" y="794" class="edge">ARRIVES AT ITS NEXT TOOL CALL</text>
