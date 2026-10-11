@@ -121,5 +121,9 @@ export async function openRunInTerminal(params: OpenRunSurfaceParams): Promise<O
     cwd: params.cwd,
     command,
   });
-  return { ok: result.ok, choice, description: describeBackendChoice(choice), error: result.error };
+  const ack = result.ack;
+  const landed = ack && result.ok
+    ? ` → window "${ack.workspaceName ?? ack.windowFolders[0] ?? 'unknown'}", ${ack.status === 'focused-existing' ? 'existing' : 'new'} tab "${ack.title ?? ack.terminalId ?? 'untitled'}"`
+    : '';
+  return { ok: result.ok, choice, description: describeBackendChoice(choice) + landed, error: result.error };
 }

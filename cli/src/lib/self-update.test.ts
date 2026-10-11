@@ -33,6 +33,7 @@ import {
   resolveRunningPackageRoot,
   saveUpdateCheck,
   shouldPromptUpgrade,
+  isPeerHop,
   sweepStaleInstallStaging,
   TOUCH_ID_STORM_FIXED_SINCE,
   verifyInstalledVersion,
@@ -1148,5 +1149,12 @@ describe('installLooksSettled', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-settled-none-'));
     roots.push(root);
     expect(installLooksSettled(root, 60_000)).toBe(false);
+  });
+});
+
+describe('isPeerHop — startup prompts never block a CLI-made SSH hop', () => {
+  it('is set only by the hop marker', () => {
+    expect(isPeerHop({ AGENTS_PEER_HOP: '1' })).toBe(true);
+    expect(isPeerHop({})).toBe(false);
   });
 });

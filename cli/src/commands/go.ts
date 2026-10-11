@@ -287,9 +287,9 @@ async function focusEditorTab(tab: ActiveSession): Promise<boolean> {
       return false;
     }
   }
-  console.log(chalk.gray(
-    `Sent ${shortId(tab)} → ${sessionHeadline(tab) || tab.terminalId} (${path.basename(tab.workspaceDir!)}) to ${variant.label}.`,
-  ));
+  console.log(
+    `Already open → tab "${sessionHeadline(tab) || tab.terminalId}" in ${variant.label} window "${path.basename(tab.workspaceDir!)}" (focus requested; /focus sends no confirmation).`,
+  );
   return true;
 }
 

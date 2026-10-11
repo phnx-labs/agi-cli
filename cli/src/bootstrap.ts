@@ -186,6 +186,7 @@ import {
   saveUpdateCheck,
   dismissUpdateVersion,
   shouldPromptUpgrade,
+  isPeerHop,
   resolveMultiInstallInventory,
   remediateStaleAgentsCliInstalls,
   resolveRunningPackageRoot,
@@ -333,11 +334,11 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   }
 }
 
-async function promptUpgrade(latestVersion: string): Promise<void> {
+async function promptUpgrade(latestVersion: string, peerHop: boolean): Promise<void> {
   const { default: ora } = await import('ora');
   const { confirm, select } = await import('@inquirer/prompts');
   const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
-  if (!isInteractiveTerminal()) {
+  if (peerHop || !isInteractiveTerminal()) {
     console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: agents upgrade --yes`));
     return;
   }
@@ -408,7 +409,7 @@ function refreshUpdateCacheInBackground(): void {
     });
 }
 
-async function checkForUpdates(): Promise<void> {
+async function checkForUpdates(peerHop: boolean): Promise<void> {
   if (process.env.AGENTS_CLI_DISABLE_AUTO_UPDATE) return;
 
   maybeWarnMultiInstall();
@@ -421,7 +422,7 @@ async function checkForUpdates(): Promise<void> {
 
   if (shouldPromptUpgrade(cache, VERSION)) {
     try {
-      await promptUpgrade(cache!.latestVersion);
+      await promptUpgrade(cache!.latestVersion, peerHop);
     } catch (err) {
       const { isPromptCancelled } = await import('./commands/utils.js');
       if (isPromptCancelled(err)) return;
@@ -826,10 +827,12 @@ const isReadOnlyUpdatePreview =
    passedArgs.find((arg) => !arg.startsWith('-')) === 'menubar' ||
    (passedArgs[0] === 'config' && passedArgs.includes('menubar.autoUpdate')));
 
+const peerHop = isPeerHop();
+
 if (!isDocumentationRequest) {
   bootMark('bootstrap:evaluated');
   if (!isReadOnlyUpdatePreview) {
-    await checkForUpdates();
+    await checkForUpdates(peerHop);
 
     const { spawnDetachedSync } = await import('./lib/auto-pull.js');
     spawnDetachedSync();

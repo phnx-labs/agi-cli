@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import {
   SSH_OPTS,
   controlOpts,
+  sshExec,
   assertValidSshTarget,
   shellQuote,
   SSH_CONN_FAILURE_CODE,
@@ -19,6 +20,7 @@ import { NO_FANOUT_ENV } from '../remote-active.js';
 import { terminalWidth } from '../../text/width.js';
 import { sanitizeForTerminal } from '../../redact.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
+import { PEER_HOP_ENV } from '../../types.js';
 
 export function remoteListCommand(forwardedArgs: string[], os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
@@ -222,8 +224,19 @@ export function parsePeerPreviewDigest(parsed: unknown): unknown | undefined {
   return preview;
 }
 
-export function peerHopOutcome(code: number | null): 'ok' | 'unreachable' {
-  return code === SSH_CONN_FAILURE_CODE || code === null ? 'unreachable' : 'ok';
+const PEER_PROBE_TIMEOUT_MS = 15_000;
+
+// ssh exits 255 both when it never connected and when the remote side died under a
+// running session (killed shell, sshd restart, a dropped link that is back). Only a
+// failed fresh connection means the host is unreachable.
+export function peerHopOutcome(code: number | null, hostAnswers: () => boolean): 'ok' | 'unreachable' {
+  if (code === null) return 'unreachable';
+  if (code !== SSH_CONN_FAILURE_CODE) return 'ok';
+  return hostAnswers() ? 'ok' : 'unreachable';
+}
+
+export function peerAnswers(target: string): boolean {
+  return sshExec(target, 'true', { multiplex: false, timeoutMs: PEER_PROBE_TIMEOUT_MS }).code === 0;
 }
 
 export function peerHopCloseNotice(
@@ -250,14 +263,20 @@ export async function runOnPeer(
   assertValidSshTarget(peer.target);
 
   const cols = terminalWidth();
-  const env: Record<string, string> = { ...(cols > 0 ? { COLUMNS: String(cols) } : {}), ...opts.env };
+  const env: Record<string, string> = {
+    ...(cols > 0 ? { COLUMNS: String(cols) } : {}),
+    [PEER_HOP_ENV]: '1',
+    ...opts.env,
+  };
   const assignments = Object.entries(env).map(([k, v]) => `${k}=${shellQuote(v)}`);
   const invocation = assignments.concat(['agents', ...args].map(shellQuote)).join(' ');
   const remoteCmd = remoteShellFor(peer.os) === 'powershell'
     ? buildWindowsAgentsCommand({ args, env: assignments.length ? env : undefined, remapExit255: true })
     : `bash -lc ${shellQuote(`${invocation}; agents_rc=$?; if [ "$agents_rc" -eq 255 ]; then exit 254; fi; exit "$agents_rc"`)}`;
 
-  const sshArgs = [...SSH_OPTS, ...controlOpts()];
+  // A long-lived TTY session owns its connection: riding a shared master ties it to
+  // that master's lifetime and to sshd's per-connection MaxSessions (default 10).
+  const sshArgs = [...SSH_OPTS, ...(opts.tty ? [] : controlOpts())];
   if (opts.tty) sshArgs.push('-tt');
   sshArgs.push(peer.target, remoteCmd);
 
@@ -270,7 +289,7 @@ export async function runOnPeer(
     child.on('close', (code) => {
       const notice = peerHopCloseNotice(opts, machine, code);
       if (notice) process.stderr.write(notice);
-      resolve(peerHopOutcome(code));
+      resolve(peerHopOutcome(code, () => peerAnswers(peer.target)));
     });
   });
 }

@@ -18,6 +18,7 @@ import {
   pidSessionEntryMatchesLiveProcess,
   readLivePidSessionEntry,
   processStartTimesMatch,
+  liveSessionProcesses,
 } from './pid-registry.js';
 
 const FAKE_PID = 999_000_001;
@@ -209,6 +210,20 @@ describe('pid session registry', () => {
     prunePidSessionRegistry();
     expect(readPidSessionEntry(process.pid)).toBeUndefined();
     expect(() => process.kill(process.pid, 0)).not.toThrow();
+  });
+
+  it('liveSessionProcesses names a still-running process for the session and drops it once it exits', async () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    const sid = '9bef2ef9-06ec-41f7-9037-a8f4a9479ef4';
+    writePidSessionEntry({ pid: child.pid!, agent: 'claude', sessionId: sid, startedAtMs: Date.now() });
+    writePidSessionEntry({ pid: process.pid, agent: 'claude', sessionId: 'another-session', startedAtMs: Date.now() });
+    try {
+      expect(liveSessionProcesses(sid).map((e) => e.pid)).toEqual([child.pid]);
+    } finally {
+      child.kill('SIGKILL');
+      await new Promise<void>(resolve => child.once('exit', () => resolve()));
+    }
+    expect(liveSessionProcesses(sid)).toEqual([]);
   });
 
   it('prunes a real exited child in its owning namespace', async () => {

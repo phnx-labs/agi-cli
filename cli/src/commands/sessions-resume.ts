@@ -27,7 +27,10 @@ import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionRecoveryPeer, sessionTranscriptReadable } from '../lib/session/recovery.js';
 import { buildResumeRemoteArgs, runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
-import { toRemotePortable } from '../lib/project-root.js';
+import { localProjectFolder, toRemotePortable } from '../lib/project-root.js';
+import * as path from 'node:path';
+import type { LaunchResult } from '../lib/terminal/types.js';
+import { liveSessionProcesses } from '../lib/session/pid-registry.js';
 import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import { stripRoutingFlags, type StripSpec } from '../lib/hosts/remote-cmd.js';
@@ -284,11 +287,34 @@ export async function sessionsResumeAction(
     process.exitCode = 1;
     return;
   }
-  const items = resumable.map((session) => buildSelectedResumeSurface(session, prompt, options));
+  let items = resumable.map((session) => buildSelectedResumeSurface(session, prompt, options));
 
   const ctx = currentContext();
   const backend = await resolveBackend(options, ctx, items.length);
   if (backend === 'cancel') return;
+
+  if (backend === 'vscodium-agent' && !options.device) {
+    // A tab already showing the session is the extension's call: it focuses that tab
+    // and acks focused-existing instead of opening a duplicate.
+    const pending: typeof items = [];
+    for (const it of items) {
+      if (!it.project && it.session.project) {
+        const { editorFolderNamed, storageJsonFor, EDITOR_VARIANTS } = await import('../lib/terminal/backends/vscodium-agent.js');
+        const folder = editorFolderNamed(it.session.project, storageJsonFor(EDITOR_VARIANTS[0]));
+        if (folder) Object.assign(it, { project: folder, cwd: fs.existsSync(it.cwd) && it.cwd !== process.cwd() ? it.cwd : folder });
+      }
+      if (!it.project) {
+        console.error(chalk.red(`Can't open ${it.session.shortId}: no local folder matches ${it.session.cwd ?? `project "${it.session.project ?? 'unknown'}"`}, so there is no VSCodium window to put it in.`));
+        console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${it.session.id}`));
+        process.exitCode = 1;
+        continue;
+      }
+      await reportLiveProcesses(it.session);
+      pending.push(it);
+    }
+    items = pending;
+    if (items.length === 0) return;
+  }
 
   if (items.length > CONFIRM_THRESHOLD) {
     const proceed = await confirm({
@@ -327,15 +353,20 @@ export async function sessionsResumeAction(
   let opened = 0;
   results.forEach((r, i) => {
     const s = items[i].session;
-    if (r.ok) {
+    if (r.ack) {
+      if (r.ok) opened++;
+      console.log(r.ok ? describeEditorLanding(s, r) : chalk.red(`Failed ${s.shortId}: ${r.error}.`));
+      if (!r.ok) console.log(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
+    } else if (r.ok) {
       opened++;
       const shape = r.request.layout === 'tab' ? 'tab' : 'split';
       console.log(chalk.green(`  opened ${s.shortId}`) + chalk.gray(` — ${shape} — ${items[i].command.join(' ')}`));
     } else {
       console.log(chalk.red(`  failed ${s.shortId} — ${r.error}`));
+      if (backend === 'vscodium-agent') console.log(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
     }
   });
-  console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
+  if (backend !== 'vscodium-agent') console.log(chalk.gray(`\nOpened ${opened}/${items.length} in ${where}.`));
   if (opened !== items.length) process.exitCode = 1;
 }
 
@@ -475,14 +506,46 @@ export function buildSelectedResumeSurface(
   if (options.device && !requestedCwd) {
     throw new Error(`Cannot open ${session.shortId} on ${options.device} without a recorded working directory. Pass --cwd <path>.`);
   }
+  const project = options.device ? undefined : localProjectFolder(requestedCwd);
   const cwd = options.device
     ? requestedCwd!
-    : requestedCwd && fs.existsSync(requestedCwd) ? requestedCwd : process.cwd();
+    : requestedCwd && fs.existsSync(requestedCwd) ? requestedCwd : project ?? process.cwd();
   return {
     session,
     cwd,
+    project,
     command: ['agents', ...buildSelectedResumeArgs(session.id, prompt, options)].map(shellQuote),
   };
+}
+
+export function describeEditorLanding(session: SessionMeta, result: LaunchResult): string {
+  const ack = result.ack!;
+  const window = ack.workspaceName ?? path.basename(ack.windowFolders[0] ?? result.request.project ?? '');
+  const tab = ack.title ?? ack.terminalId ?? 'untitled';
+  if (ack.status === 'focused-existing') return `Already open → focused tab "${tab}" in VSCodium window "${window}".`;
+  const headline = sessionHeadline(session);
+  const where = session.machine ? ` (${session.machine})` : '';
+  return `Resumed ${session.shortId}${headline ? ` "${headline}"` : ''}${where} → VSCodium window "${window}", new tab "${tab}".`;
+}
+
+async function reportLiveProcesses(session: SessionMeta): Promise<void> {
+  const self = machineId();
+  const host = session.machine && session.machine !== self ? session.machine : undefined;
+  let pids: number[];
+  if (!host) {
+    pids = liveSessionProcesses(session.id).map((p) => p.pid);
+  } else {
+    const { gatherRemoteActive } = await import('../lib/session/remote-active.js');
+    const remote = await gatherRemoteActive([host], { quiet: true }).catch(() => undefined);
+    pids = (remote?.sessions ?? [])
+      .filter((a) => a.sessionId === session.id && a.pidAlive !== false && typeof a.pid === 'number')
+      .map((a) => a.pid!);
+  }
+  if (pids.length === 0) return;
+  console.log(chalk.yellow(
+    `${session.shortId} is already running on ${host ?? self} as pid ${pids.join(', ')}, with no editor tab here. `
+    + `The new tab resumes a second copy; the old process is left alone.`,
+  ));
 }
 
 export function resumeHostMismatch(

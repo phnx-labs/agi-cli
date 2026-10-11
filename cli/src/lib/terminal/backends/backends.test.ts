@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { EngineContext } from '../types.js';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import type { EngineContext, LaunchSpec } from '../types.js';
 import { itermTabScript, itermSplitScript, itermBackend } from './iterm.js';
 import { ghosttyTabScript, ghosttySplitScript, ghosttyBackend } from './ghostty.js';
 import { tmuxTabArgv, tmuxSplitArgv, tmuxBackend } from './tmux.js';
@@ -9,6 +12,14 @@ import {
   spawnUri,
   focusTabSpecs,
   EDITOR_VARIANTS,
+  parseSpawnAck,
+  awaitSpawnAck,
+  ackLandedIn,
+  spawnAckRelPath,
+  editorWindowFor,
+  editorFolderNamed,
+  storageJsonFor,
+
 } from './vscodium-agent.js';
 import { detectCurrentBackend, availableBackends, BACKENDS } from './index.js';
 
@@ -74,11 +85,15 @@ const payloadOf = (url: string): any => {
 };
 
 describe('vscodium-agent backend', () => {
-  it('tab: codium --open-url with a vscodium:// spawn URI carrying cwd + raw command (no zsh wrap)', () => {
-    const argv = vscodiumAgentBackend.buildTab('/Users/me/dev', CMD);
-    expect(argv.argv[0]).toBe('codium');
-    expect(argv.argv[1]).toBe('--open-url');
-    const url = argv.argv[2];
+  const cliName = (argv: string[]): string => argv[0].split('/').pop()!;
+
+  it('tab: raises the cwd window, then sends the spawn URI carrying cwd + raw command (no zsh wrap)', () => {
+    const [raise, open] = vscodiumAgentBackend.buildTab('/Users/me/dev', CMD) as LaunchSpec[];
+    expect(cliName(raise.argv)).toBe('codium');
+    expect(raise.argv.slice(1)).toEqual(['/Users/me/dev']);
+    expect(cliName(open.argv)).toBe('codium');
+    expect(open.argv[1]).toBe('--open-url');
+    const url = open.argv[2];
     expect(url.startsWith('vscodium://swarmify.swarm-ext/spawn?p=')).toBe(true);
     expect(url).not.toContain('zsh');
     const payload = payloadOf(url);
@@ -86,9 +101,11 @@ describe('vscodium-agent backend', () => {
     expect(payload.command).toBe('claude@2.1.187 --resume cad0e546');
     expect(payload.split).toBeUndefined();
   });
-  it('split: carries the direction so the extension splits beside the prior pane', () => {
-    expect(payloadOf(vscodiumAgentBackend.buildSplit('/d', CMD, 'right').argv[2]).split).toBe('right');
-    expect(payloadOf(vscodiumAgentBackend.buildSplit('/d', CMD, 'down').argv[2]).split).toBe('down');
+  it('split: raises the cwd window and carries the direction so the extension splits beside the prior pane', () => {
+    const [raise, right] = vscodiumAgentBackend.buildSplit('/d', CMD, 'right') as LaunchSpec[];
+    expect(raise.argv.slice(1)).toEqual(['/d']);
+    expect(payloadOf(right.argv[2]).split).toBe('right');
+    expect(payloadOf((vscodiumAgentBackend.buildSplit('/d', CMD, 'down') as LaunchSpec[])[1].argv[2]).split).toBe('down');
   });
   it('spawnUri survives &, spaces, and = in cwd + command (base64url payload, URL-safe)', () => {
     const url = spawnUri('vscodium', '/Users/me/my project', ['claude', '--resume', 'a b&c=d']);
@@ -114,21 +131,30 @@ describe('vscodium-agent backend', () => {
     expect(payload.command).toContain('ssh');
   });
   it('buildTab forwards meta into the spawn URI', () => {
-    const argv = vscodiumAgentBackend.buildTab('/d', ['ssh', 'x'], {
+    const [, open] = vscodiumAgentBackend.buildTab('/d', ['ssh', 'x'], {
       agent: 'grok',
       sessionId: 'abc',
-    });
-    const payload = payloadOf(argv.argv[2]);
+    }) as LaunchSpec[];
+    const payload = payloadOf(open.argv[2]);
     expect(payload.agent).toBe('grok');
     expect(payload.sessionId).toBe('abc');
   });
   it('makeVscodiumAgentBackend binds a variant CLI + scheme (Cursor, VS Code)', () => {
-    const cursor = makeVscodiumAgentBackend(EDITOR_VARIANTS[1]);
-    expect(cursor.buildTab('/d', CMD).argv[0]).toBe('cursor');
-    expect(cursor.buildTab('/d', CMD).argv[2].startsWith('cursor://')).toBe(true);
-    const code = makeVscodiumAgentBackend(EDITOR_VARIANTS[2]);
-    expect(code.buildTab('/d', CMD).argv[0]).toBe('code');
-    expect(code.buildTab('/d', CMD).argv[2].startsWith('vscode://')).toBe(true);
+    const variant = { cli: 'cursor', scheme: 'cursor', app: '/nonexistent/Cursor.app', label: 'Cursor' };
+    const [raise, open] = makeVscodiumAgentBackend(variant).buildTab('/d', CMD) as LaunchSpec[];
+    expect(raise.argv).toEqual(['cursor', '/d']);
+    expect(open.argv[0]).toBe('cursor');
+    expect(open.argv[2].startsWith('cursor://')).toBe(true);
+  });
+  it('raises the session project window (not the cwd) and carries nonce + project in the payload', () => {
+    const [raise, open] = vscodiumAgentBackend.buildTab('/Users/me/agents', CMD, {
+      sessionId: 'b64b7320', project: '/Users/me/src/svatlas', nonce: 'n-1',
+    }) as LaunchSpec[];
+    expect(raise.argv.slice(1)).toEqual(['/Users/me/src/svatlas']);
+    const payload = payloadOf(open.argv[2]);
+    expect(payload.project).toBe('/Users/me/src/svatlas');
+    expect(payload.nonce).toBe('n-1');
+    expect(payload.cwd).toBe('/Users/me/agents');
   });
   it('is darwin-only (VSCodium.app presence checked at runtime)', () => {
     expect(vscodiumAgentBackend.isAvailable(ctx({}, 'linux'))).toBe(false);
@@ -178,3 +204,88 @@ describe('focusTabSpecs — raise the owning window, then focus the tab in it', 
   });
 });
 
+
+describe('spawn ack — the contract agi-ext writes back for a /spawn nonce', () => {
+  // Same bytes as agi-ext src/core/testdata/spawn-ack.json: change both or neither.
+  const fixture = fs.readFileSync(new URL('./testdata/spawn-ack.json', import.meta.url), 'utf8');
+  const full = JSON.parse(fixture);
+
+  it('lives at ~/.swarmify/agents/spawn-acks/<nonce>.json', () => {
+    expect(spawnAckRelPath(full.nonce)).toBe(`.swarmify/agents/spawn-acks/${full.nonce}.json`);
+  });
+  it('reads the shared fixture field for field', () => {
+    expect(parseSpawnAck(fixture, full.nonce)).toEqual(full);
+    for (const status of ['opened', 'focused-existing', 'wrong-window', 'failed']) {
+      expect(parseSpawnAck(JSON.stringify({ ...full, status }), full.nonce)?.status).toBe(status);
+    }
+  });
+  it('treats the extension\'s nulls as absent', () => {
+    const ack = parseSpawnAck(JSON.stringify({ ...full, status: 'wrong-window', terminalId: null, title: null, sessionId: null, pid: null, workspaceName: null }), full.nonce)!;
+    expect(ack).toMatchObject({ status: 'wrong-window', terminalId: undefined, title: undefined, pid: undefined, workspaceName: undefined });
+  });
+  it('rejects an ack for another nonce, an unknown status, or broken JSON', () => {
+    expect(parseSpawnAck(fixture, 'other')).toBeUndefined();
+    expect(parseSpawnAck(JSON.stringify({ ...full, status: 'done' }), full.nonce)).toBeUndefined();
+    expect(parseSpawnAck('{"nonce":', full.nonce)).toBeUndefined();
+  });
+  it('waits for an ack file that appears after the request, and gives up at the deadline', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-ack-'));
+    const file = path.join(dir, 'ack.json');
+    const read = () => { try { return fs.readFileSync(file, 'utf8'); } catch { return undefined; } };
+    setTimeout(() => fs.writeFileSync(file, fixture), 300);
+    expect((await awaitSpawnAck(full.nonce, read, 3000))?.title).toBe(full.title);
+    const started = Date.now();
+    expect(await awaitSpawnAck('n-9', read, 400)).toBeUndefined();
+    expect(Date.now() - started).toBeGreaterThanOrEqual(400);
+  });
+  it('counts a landing only in a window that holds the project folder', () => {
+    const ack = parseSpawnAck(fixture, full.nonce)!;
+    expect(ackLandedIn(ack, '/Users/dev/src/projB')).toBe(true);
+    expect(ackLandedIn(ack, '/Users/dev/src/projB/.agents/worktrees/x')).toBe(true);
+    expect(ackLandedIn({ ...ack, windowFolders: ['/Users/dev/src/projA'] }, '/Users/dev/src/projB')).toBe(false);
+    expect(ackLandedIn({ ...ack, windowFolders: ['/Users/dev/src/proj'] }, '/Users/dev/src/projB')).toBe(false);
+    expect(ackLandedIn({ ...ack, status: 'wrong-window' }, '/Users/dev/src/projB')).toBe(false);
+    expect(ackLandedIn({ ...ack, status: 'failed' }, '/Users/dev/src/projB')).toBe(false);
+  });
+});
+
+describe('editorWindowFor — which window `codium <x>` must raise for a project folder', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-windows-'));
+  const ws = path.join(dir, 'Workspaces', '1791504977807', 'workspace.json');
+  fs.mkdirSync(path.dirname(ws), { recursive: true });
+  fs.writeFileSync(ws, JSON.stringify({ folders: [{ path: '/Users/me/src/agents-cli' }, { path: '/Users/me/src/agi-menu' }] }));
+  const storage = path.join(dir, 'storage.json');
+  fs.writeFileSync(storage, JSON.stringify({
+    windowsState: {
+      lastActiveWindow: { folder: 'file:///Users/me/src/agents' },
+      openedWindows: [
+        { folder: null, workspaceIdentifier: { id: 'x', configURIPath: `file://${ws}` } },
+        { folder: 'file:///Users/me/src/agents' },
+        { folder: 'file:///Users/me/src/sv%20atlas' },
+      ],
+    },
+  }));
+
+  it('raises the multi-root workspace window through its workspace file', () => {
+    expect(editorWindowFor('/Users/me/src/agents-cli', storage)).toBe(ws);
+    expect(editorWindowFor('/Users/me/src/agents-cli/.agents/worktrees/x', storage)).toBe(ws);
+  });
+  it('raises a single-folder window by its folder (URI-decoded)', () => {
+    expect(editorWindowFor('/Users/me/src/agents', storage)).toBe('/Users/me/src/agents');
+    expect(editorWindowFor('/Users/me/src/sv atlas', storage)).toBe('/Users/me/src/sv atlas');
+  });
+  it('finds the one open root named after a peer session project (resolver rows carry no path)', () => {
+    expect(editorFolderNamed('agents-cli', storage)).toBe('/Users/me/src/agents-cli');
+    expect(editorFolderNamed('sv atlas', storage)).toBe('/Users/me/src/sv atlas');
+    expect(editorFolderNamed('svatlas', storage)).toBeUndefined();
+  });
+  it('reads a portable editor\'s window state from VSCODE_PORTABLE', () => {
+    const variant = EDITOR_VARIANTS[0];
+    expect(storageJsonFor(variant, { VSCODE_PORTABLE: '/p' })).toBe('/p/user-data/User/globalStorage/storage.json');
+    expect(storageJsonFor(variant, {})).toBe(path.join(os.homedir(), 'Library', 'Application Support', 'VSCodium', 'User', 'globalStorage', 'storage.json'));
+  });
+  it('falls back to the folder itself when no open window holds it, or the state is unreadable', () => {
+    expect(editorWindowFor('/Users/me/src/agents-dashboard', storage)).toBe('/Users/me/src/agents-dashboard');
+    expect(editorWindowFor('/Users/me/src/agents', path.join(dir, 'missing.json'))).toBe('/Users/me/src/agents');
+  });
+});

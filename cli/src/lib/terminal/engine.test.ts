@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planLayouts } from './policy.js';
-import { specForRequest, buildRequests, openSurface } from './engine.js';
+import { specsForRequest, buildRequests, openSurface } from './engine.js';
 import { remoteCommand } from './transport.js';
 import type { LaunchRequest } from './types.js';
 
@@ -31,18 +31,18 @@ describe('buildRequests', () => {
   });
 });
 
-describe('specForRequest', () => {
+describe('specsForRequest', () => {
   const base: LaunchRequest = { backend: 'iterm', layout: 'tab', cwd: '/d', command: CMD };
   it('tab → buildTab, split-right → split vertically', () => {
-    expect(specForRequest({ ...base, layout: 'tab' }).argv.join(' ')).toContain('create tab with default profile');
-    expect(specForRequest({ ...base, layout: 'split-right' }).argv.join(' ')).toContain('split vertically');
-    expect(specForRequest({ ...base, layout: 'split-down' }).argv.join(' ')).toContain('split horizontally');
+    expect(specsForRequest({ ...base, layout: 'tab' })[0].argv.join(' ')).toContain('create tab with default profile');
+    expect(specsForRequest({ ...base, layout: 'split-right' })[0].argv.join(' ')).toContain('split vertically');
+    expect(specsForRequest({ ...base, layout: 'split-down' })[0].argv.join(' ')).toContain('split horizontally');
   });
   it('tmux request produces a tmux argv', () => {
-    expect(specForRequest({ ...base, backend: 'tmux', layout: 'tab' }).argv[0]).toBe('tmux');
+    expect(specsForRequest({ ...base, backend: 'tmux', layout: 'tab' })[0].argv[0]).toBe('tmux');
   });
   it('unknown backend throws', () => {
-    expect(() => specForRequest({ ...base, backend: 'nope' as any })).toThrow(/unknown backend/);
+    expect(() => specsForRequest({ ...base, backend: 'nope' as any })).toThrow(/unknown backend/);
   });
 });
 

@@ -38,6 +38,19 @@ export function homeRemainder(p: string): string | null {
   return null;
 }
 
+const FOREIGN_HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/;
+const WORKTREE_RE = /\/\.agents\/worktrees\/[^/]+(?:\/.*)?$/;
+
+// The local folder a session's recorded cwd belongs to: a peer's /home/<u>/x or
+// /Users/<u>/x becomes $HOME/x here, and a .agents/worktrees/<slug> cwd folds to its
+// repo. Undefined when no such folder exists on this machine.
+export function localProjectFolder(cwd: string | undefined, home: string = HOME): string | undefined {
+  if (!cwd) return undefined;
+  const local = cwd.startsWith(home + '/') || cwd === home ? cwd : cwd.replace(FOREIGN_HOME_RE, home);
+  const folder = local.replace(WORKTREE_RE, '');
+  return folder !== home && fs.existsSync(folder) ? folder : undefined;
+}
+
 export function deriveMirroredCwd(localCwd: string): string | undefined {
 
   const portable = toRemotePortable(localCwd);

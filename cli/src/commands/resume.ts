@@ -5,6 +5,7 @@ import { resolveSessionMetadataValue } from '../lib/session/selection.js';
 import { sessionOwnerDevice, consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 import { machineId } from '../lib/machine-id.js';
 import { takeOverDetachedSession } from '../lib/session/detached.js';
+import { liveSessionProcesses, type PidSessionEntry } from '../lib/session/pid-registry.js';
 
 const RESUME_SOURCE_ENV = 'AGENTS_RESUME_SOURCE_JSON';
 
@@ -152,7 +153,16 @@ export async function runStrictResume(
 
   const localSession = pinnedHere ? resumeLocalFallbackSource(outcome.session) : outcome.session;
   await takeOverDetachedSession(localSession.id);
+  for (const running of liveSessionProcesses(localSession.id)) {
+    process.stderr.write(chalk.yellow(stillRunningNotice(localSession.shortId, running, machineId())));
+  }
   process.exitCode = await delegateLocalResume(localSession, prompt, options);
+}
+
+export function stillRunningNotice(shortId: string, running: Pick<PidSessionEntry, 'pid' | 'startedAtMs'>, host: string): string {
+  const started = new Date(running.startedAtMs).toISOString().replace('T', ' ').slice(0, 16);
+  return `[agents] ${shortId} is still running on ${host} as pid ${running.pid} (started ${started} UTC). `
+    + `Resuming opens a second copy and leaves that process alone. Stop it with: kill ${running.pid}\n`;
 }
 
 async function delegateLocalResume(

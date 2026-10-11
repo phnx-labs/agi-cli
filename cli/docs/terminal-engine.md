@@ -64,7 +64,7 @@ Each backend opens either a **tab** or a **split** (`right` = side-by-side,
 | `iterm` | macOS + `/Applications/iTerm.app` | `create tab … command` (a window if none open) | `split vertically`/`split horizontally … command` |
 | `ghostty` | macOS + `/Applications/Ghostty.app` | `new tab … with configuration cfg` | `split (focused terminal of selected tab of front window) direction …` |
 | `tmux` | inside tmux (`$TMUX` set) | `tmux new-window -c <cwd>` | `tmux split-window -h`/`-v -c <cwd>` |
-| `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<payload>'` | same URL, payload carries `split` |
+| `vscodium-agent` | macOS + `/Applications/VSCodium.app` | `codium <project window>` then `codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<payload>'`, then waits for the spawn ack | same, payload carries `split` |
 | `terminal` | macOS + Terminal.app, and NOT over SSH (`osascript` can't reach the GUI login there) | `do script … in front window` (a window if none open) | none — Terminal.app has no scriptable split, so a split request opens a **tab** |
 
 `terminal` is registered **last** deliberately: it exists on every Mac, so it is
@@ -243,10 +243,36 @@ running VSCodium (or Cursor / VS Code) window, driven by the **swarmify**
 running — the engine hands it a URL rather than scripting a GUI app:
 
 ```
+codium <project window>                                    # raise the window that holds the project
 codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
+# then wait up to 10 s for ~/.swarmify/agents/spawn-acks/<nonce>.json
 ```
 
-- **The payload is one base64url-encoded JSON param** (`{command, cwd, split?}`),
+- **The tab goes to the session's project window, not the frontmost one.** The
+  editor routes an `--open-url` to its last-focused window and `/spawn` opens the
+  tab wherever the URL lands, so the engine first raises the project's window
+  (the same two-step `/focus` uses). The project is the session's own recorded
+  folder mapped onto this machine (`localProjectFolder`: a peer's `/home/<u>/x`
+  becomes `$HOME/x`, a `.agents/worktrees/<slug>` cwd folds to its repo), or, for a
+  fleet resolver row that carries only a project name, the one open editor root with
+  that name; never the caller's cwd. `editorWindowFor` reads the editor's open
+  windows from `globalStorage/storage.json`: a folder that is one root of a
+  multi-root workspace is raised through its workspace file, because `codium
+  <folder>` would open a new window instead.
+- **Nothing is reported as opened without the extension's ack.** The payload
+  carries a `nonce` and the `project` folder. The extension answers by writing
+  `~/.swarmify/agents/spawn-acks/<nonce>.json` =
+  `{nonce, status: opened|focused-existing|wrong-window, windowFolders, workspaceName, terminalId, title, sessionId, pid, at}`
+  (`SpawnAck`). `opened`/`focused-existing` in a window holding the project is
+  success and the CLI names the window and tab; no ack within 10 s, a
+  `wrong-window` ack, or a window without the project folder exits non-zero and
+  prints the in-terminal command that works instead.
+- **A session that already has a tab is focused, not duplicated.** The extension
+  finds its live tab for `sessionId`, focuses it and acks `focused-existing`; the
+  CLI prints `Already open → focused tab "…" in VSCodium window "…"`. Before
+  opening, `sessions resume --vscodium` also says when the session still has a live
+  process on its host (host + pid).
+- **The payload is one base64url-encoded JSON param** (`{command, cwd, split?, agent?, sessionId?, title?, nonce?, project?}`),
   not one param per field. VS Code percent-*decodes* `uri.query` once before the
   extension parses it, so a `command`/`cwd` containing `&` or `=` would be
   mis-split by a multi-param query; base64url (`[A-Za-z0-9_-]`) survives that
