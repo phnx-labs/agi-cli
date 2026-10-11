@@ -14,7 +14,7 @@ import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '..
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { gatherRemoteActive } from '../lib/session/remote-active.js';
+import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { hostToken, remoteHostsToDial, shouldIncludeLocal } from '../lib/session/remote-list.js';
 import { loadFleetActiveSessions, loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
@@ -422,7 +422,8 @@ export async function gatherActiveSessions(
   remoteDiscoveryFailed?: boolean;
 }> {
   const forceRefresh = opts.forceRefresh === true
-    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1';
+    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1'
+    || process.env[NO_FANOUT_ENV] === '1';
   const scoped = (opts.hosts?.length ?? 0) > 0;
 
   if (opts.local && !scoped) {

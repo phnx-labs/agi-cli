@@ -8,6 +8,8 @@ import {
   foldSubordinateAgents,
   listUnattributedActive,
   clearActiveScanCachesForTest,
+  setActiveScanClockForTest,
+  processStartMs,
   type AgentCandidate,
 } from './active.js';
 import { sessionIdFromLivePid } from './pid-registry.js';
@@ -32,10 +34,11 @@ afterEach(() => {
   }
   tmpDirs = [];
   clearActiveScanCachesForTest();
+  setActiveScanClockForTest();
 });
 
 
-function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?: string } = {}): ChildProcess {
+function spawnHoldingSessionId(sessionId: string | undefined, opts: { binName?: string; cwd?: string; flag?: string } = {}): ChildProcess {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-2384-'));
   tmpDirs.push(dir);
   const binName = opts.binName ?? 'claude';
@@ -48,7 +51,7 @@ function spawnHoldingSessionId(sessionId: string, opts: { binName?: string; cwd?
   }
   const child = spawn(
     bin,
-    ['-e', 'setInterval(() => {}, 60_000)', '--', '--session-id', sessionId, '-p', 'MISSION: hold'],
+    ['-e', 'setInterval(() => {}, 60_000)', '--', ...(sessionId ? [opts.flag ?? '--session-id', sessionId] : []), '-p', 'MISSION: hold'],
     {
       cwd: opts.cwd ?? dir,
       stdio: 'ignore',
@@ -179,6 +182,42 @@ describe('live --session-id recovery (RUSH-2384 real process)', () => {
     if (hit!.cwd) {
       expect(hit!.cwd).toContain('teams-reliability-recovered');
     }
+  });
+
+  posixOnly('a resumed session stays live across cached rescans though its session predates the process', async (ctx) => {
+    const child = spawnHoldingSessionId(UUID_B, { flag: '--resume' });
+    const pid = child.pid!;
+    let t = 5_000_000;
+    setActiveScanClockForTest(() => t);
+    const hit = await waitFor(async () => {
+      clearActiveScanCachesForTest();
+      return (await listUnattributedActive(new Set())).find((r) => r.pid === pid);
+    });
+    if (!hit) {
+      ctx.skip(`ps never classified pid ${pid} as an agent — see RUSH-2508`);
+      return;
+    }
+    expect(hit.processStartedAtMs).toBe(processStartMs(pid));
+    hit.startedAtMs = hit.processStartedAtMs! - 3 * 24 * 60 * 60_000;
+    t += 1_000;
+    const cached = await listUnattributedActive(new Set());
+    expect(cached.map((r) => r.pid)).toContain(pid);
+  });
+
+  posixOnly('an agent binary with no session id and no launch record is not a session', async (ctx) => {
+    const helper = spawnHoldingSessionId(undefined);
+    const control = spawnHoldingSessionId(UUID);
+    let rows: Awaited<ReturnType<typeof listUnattributedActive>> = [];
+    const seen = await waitFor(async () => {
+      clearActiveScanCachesForTest();
+      rows = await listUnattributedActive(new Set());
+      return rows.some((r) => r.pid === control.pid);
+    });
+    if (!seen) {
+      ctx.skip(`ps never classified the control holder as an agent — see RUSH-2508`);
+      return;
+    }
+    expect(rows.find((r) => r.pid === helper.pid)).toBeUndefined();
   });
 
   it('foldSubordinateAgents keeps a live-session child when registry is empty', () => {

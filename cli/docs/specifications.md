@@ -363,6 +363,13 @@ SSH access (§7); rendering sessions that no harness produced.
   this lookup to the published terminals' descendants; it adds no per-tab probes.
   Windows does not adopt descendants because its PID-liveness check cannot
   exclude a recycled descendant PID.
+  An unattributed row records its process start (`processStartedAtMs`) apart
+  from the session start (`startedAtMs`), and the cached rescan's PID-reuse check
+  compares against the process start only. A `--resume`d session's process starts
+  days after its session did, so comparing against the session start dropped every
+  resumed session on each cached pass (2026-10-11). An agent binary with no
+  session id and no launch record is a harness helper (an app-server, a daemon, an
+  embedded child) and MUST NOT become a row.
 
   Live/watch rows carry optional `accountLabel`, the human native account-slot name
   (such as `gmail` in `claude#gmail`). Index backfill resolves recorded `accountId`
@@ -1683,7 +1690,10 @@ normative — a change that widens/narrows a cell is a spec change.
     transcript for a `[host/<peer>]` placeholder. A shim whose owner ANSWERED
     the sweep (`answered` in `lib/remote-agents-json.ts`: a parseable JSON array;
     a banner, an object, or empty stdout from an exit-0 peer is `parseFailed`,
-    not an answer) without that session MUST be dropped: the owner is the authority for what runs there, and the
+    not an answer) without that session MUST be dropped. The answer MUST come
+    from a fresh scan: a peer answering a sweep (`AGENTS_SESSIONS_LOCAL=1`)
+    bypasses its active-sessions snapshot (`gatherActiveSessions`,
+    `commands/ps-roster.ts`), so an absence is evidence, not a stale cache: the owner is the authority for what runs there, and the
     shim is a desktop tab bound to a run that is no longer live (37 such
     `unknown` rows on one desktop, 2026-10-11). Only a shim whose owner went
     unheard survives, as `unknown` (SES-18), never as running. A remote

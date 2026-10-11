@@ -10,6 +10,8 @@ import {
   unattributedFullRescanCountForTest,
   listUnattributedActive,
   hostFromPid,
+  isPidAlive,
+  processStartMs,
   type ActiveSession,
 } from './active.js';
 
@@ -46,16 +48,37 @@ describe('filterCachedUnattributed', () => {
     expect(out.map((s) => s.pid)).toEqual([10]);
   });
 
-  it('passes startedAtMs to the alive predicate (pid-reuse guard)', () => {
+  it('checks pid reuse against the process start, not the session start', () => {
     const sessions: ActiveSession[] = [
-      { context: 'headless', kind: 'claude', status: 'running', pid: 42, startedAtMs: 1_700_000_000_000 },
+      { context: 'headless', kind: 'claude', status: 'running', pid: 42, startedAtMs: 1_600_000_000_000, processStartedAtMs: 1_700_000_000_000 },
     ];
-    const seen: Array<{ pid: number; startedAtMs?: number }> = [];
-    filterCachedUnattributed(sessions, new Set(), (pid, startedAtMs) => {
-      seen.push({ pid, startedAtMs });
+    const seen: Array<{ pid: number; processStartedAtMs?: number }> = [];
+    filterCachedUnattributed(sessions, new Set(), (pid, processStartedAtMs) => {
+      seen.push({ pid, processStartedAtMs });
       return true;
     });
-    expect(seen).toEqual([{ pid: 42, startedAtMs: 1_700_000_000_000 }]);
+    expect(seen).toEqual([{ pid: 42, processStartedAtMs: 1_700_000_000_000 }]);
+  });
+
+  it('keeps a resumed session whose process started days after the session was born', () => {
+    const procStart = processStartMs(process.pid);
+    expect(procStart).not.toBeNull();
+    const resumed: ActiveSession = {
+      context: 'headless', kind: 'claude', status: 'idle', pid: process.pid,
+      startedAtMs: procStart! - 3 * 24 * 60 * 60_000,
+      processStartedAtMs: procStart!,
+    };
+    expect(filterCachedUnattributed([resumed], new Set(), isPidAlive)).toEqual([resumed]);
+  });
+
+  it('drops a row whose pid now belongs to a process started after the recorded one', () => {
+    const procStart = processStartMs(process.pid);
+    expect(procStart).not.toBeNull();
+    const recycled: ActiveSession = {
+      context: 'headless', kind: 'claude', status: 'idle', pid: process.pid,
+      processStartedAtMs: procStart! - 3 * 24 * 60 * 60_000,
+    };
+    expect(filterCachedUnattributed([recycled], new Set(), isPidAlive)).toEqual([]);
   });
 
   it('drops a cached child when its shell becomes attributed', () => {
