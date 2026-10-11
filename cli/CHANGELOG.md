@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.6
+
+- **Live sessions no longer drop out of `sessions --active` (roster liveness).** A resumed session was dropped from the roster on every cached rescan because the PID-reuse check compared the live process against when the session was born, so fleet workers flipped between listing their sessions and listing none. The check now uses the process's own start time. A peer answering a fleet sweep scans fresh rather than serving its snapshot, and agent-named helper processes with no session or launch record (embedded app-servers, daemons) are no longer listed as sessions. Source: `cli/src/lib/session/active.ts`, `cli/src/commands/ps-roster.ts`.
+
 ## 1.23.5
 
 - **`agents ps` drops a dead offloaded tab once its owner answers.** A desktop editor
