@@ -2,9 +2,8 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import { getBrowserRuntimeDir, getCacheDir } from '../state.js';
+import { getActivityDir, getBrowserRuntimeDir, getCacheDir } from '../state.js';
 import { getEventsDir } from './events.js';
-import { readRecentActivity } from './activity.js';
 import { span, spanSync } from '../daemon/diagnostics.js';
 import { invocation as browserInvocation, resolveBrowserBin } from '../browser-client.js';
 import { invocation as computerInvocation, resolveComputerBin } from '../computer-client.js';
@@ -89,62 +88,132 @@ export async function readStandaloneComputerRows(): Promise<ComputerRunRow[]> {
 }
 
 export const TOOL_LINK_TTL_MS = 60_000;
+export const TOOL_LINK_MISS_TTL_MS = 10_000;
+const LINK_YIELD_EVERY = 64;
+const ACTIVITY_LAUNCH_TAIL_BYTES = 64 * 1024;
 
 interface ToolLinkCache {
-  metas: Map<string, { meta: SessionMeta; at: number }>;
+  metas: Map<string, { meta: SessionMeta | null; expiresAt: number }>;
   launches: Map<string, string>;
   indexBuiltAt: number;
+  activity: Map<string, { stamp: string; pairs: Map<string, { sessionId: string; atMs: number }> }>;
+  refreshing?: Promise<void>;
 }
 
-const linkCache: ToolLinkCache = { metas: new Map(), launches: new Map(), indexBuiltAt: -Infinity };
+const linkCache: ToolLinkCache = { metas: new Map(), launches: new Map(), indexBuiltAt: -Infinity, activity: new Map() };
 
-function buildLaunchSessionIndex(): Map<string, string> {
-  return spanSync('feed.tools.launch-index', buildLaunchSessionIndexNow);
+export function _resetToolLinkCacheForTest(): void {
+  linkCache.metas.clear();
+  linkCache.launches = new Map();
+  linkCache.activity.clear();
+  linkCache.indexBuiltAt = -Infinity;
 }
 
-function buildLaunchSessionIndexNow(): Map<string, string> {
-  const byLaunchId = new Map<string, string>();
-  for (const event of readRecentActivity({ maxBytesPerSession: 64 * 1024 })) {
-    if (event.launchId && event.sessionId) byLaunchId.set(event.launchId, event.sessionId);
+const yieldToLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+function expiryJitterMs(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return hash % TOOL_LINK_TTL_MS;
+}
+
+type LaunchPairs = Map<string, { sessionId: string; atMs: number }>;
+
+function keepEarliest(into: LaunchPairs, launchId: string, sessionId: string, atMs: number): void {
+  const prior = into.get(launchId);
+  if (!prior || atMs < prior.atMs) into.set(launchId, { sessionId, atMs });
+}
+
+async function readLaunchPairs(file: string): Promise<LaunchPairs> {
+  const handle = await fs.promises.open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - ACTIVITY_LAUNCH_TAIL_BYTES);
+    const buf = Buffer.alloc(size - start);
+    await handle.read(buf, 0, buf.length, start);
+    const pairs: LaunchPairs = new Map();
+    for (const line of buf.toString('utf8').split('\n')) {
+      if (!line.includes('"launchId"')) continue;
+      let event: { launchId?: unknown; sessionId?: unknown; event?: unknown; ts?: unknown };
+      try { event = JSON.parse(line) as typeof event; } catch { continue; }
+      if (typeof event.launchId !== 'string' || !event.launchId || typeof event.sessionId !== 'string' || !event.sessionId) continue;
+      if (!event.event || typeof event.ts !== 'string') continue;
+      const atMs = Date.parse(event.ts);
+      if (Number.isFinite(atMs)) keepEarliest(pairs, event.launchId, event.sessionId, atMs);
+    }
+    return pairs;
+  } finally {
+    await handle.close();
   }
-  for (const [launchId, record] of loadHookSessionIndex().byLaunchId) {
-    if (record.session_id) byLaunchId.set(launchId, record.session_id);
-  }
-  for (const entry of listPidSessionEntries()) {
-    if (entry.launchId && entry.sessionId) byLaunchId.set(entry.launchId, entry.sessionId);
-  }
-  return byLaunchId;
 }
 
-export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs = Date.now()): T[] {
-  return spanSync('feed.tools.link-sessions', () => linkToolSessionsNow(rows, nowMs), () => ({ rows: rows.length }));
+async function refreshLaunchIndex(nowMs: number): Promise<void> {
+  const dir = getActivityDir();
+  let names: string[];
+  try {
+    names = (await fs.promises.readdir(dir)).filter((name) => name.endsWith('.jsonl'));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    names = [];
+  }
+  const present = new Set(names);
+  for (const name of linkCache.activity.keys()) if (!present.has(name)) linkCache.activity.delete(name);
+  for (const name of names) {
+    const file = path.join(dir, name);
+    let stat: fs.Stats;
+    try { stat = await fs.promises.stat(file); } catch { linkCache.activity.delete(name); continue; }
+    const stamp = `${stat.size}:${stat.mtimeMs}`;
+    if (linkCache.activity.get(name)?.stamp === stamp) continue;
+    linkCache.activity.set(name, { stamp, pairs: await readLaunchPairs(file) });
+  }
+  const earliest: LaunchPairs = new Map();
+  for (const { pairs } of linkCache.activity.values()) {
+    for (const [launchId, { sessionId, atMs }] of pairs) keepEarliest(earliest, launchId, sessionId, atMs);
+  }
+  const next = new Map<string, string>();
+  for (const [launchId, { sessionId }] of earliest) next.set(launchId, sessionId);
+  spanSync('feed.tools.launch-index.local', () => {
+    for (const [launchId, record] of loadHookSessionIndex().byLaunchId) {
+      if (record.session_id) next.set(launchId, record.session_id);
+    }
+    for (const entry of listPidSessionEntries()) {
+      if (entry.launchId && entry.sessionId) next.set(entry.launchId, entry.sessionId);
+    }
+  });
+  linkCache.launches = next;
+  linkCache.indexBuiltAt = nowMs;
 }
 
-function linkToolSessionsNow<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs: number): T[] {
-  const cache = linkCache;
-  const sessionFor = (id: string): SessionMeta | null => {
-    const hit = cache.metas.get(id);
-    if (hit && nowMs - hit.at < TOOL_LINK_TTL_MS) return hit.meta;
+export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs = Date.now()): Promise<T[]> {
+  return span('feed.tools.link-sessions', () => linkToolSessionsNow(rows, nowMs), () => ({ rows: rows.length }));
+}
+
+async function linkToolSessionsNow<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs: number): Promise<T[]> {
+  for (const [id, entry] of linkCache.metas) if (entry.expiresAt <= nowMs) linkCache.metas.delete(id);
+  if (rows.some((row) => row.launchId) && nowMs - linkCache.indexBuiltAt >= TOOL_LINK_TTL_MS) {
+    linkCache.refreshing ??= span('feed.tools.launch-index', () => refreshLaunchIndex(nowMs))
+      .finally(() => { linkCache.refreshing = undefined; });
+    await linkCache.refreshing;
+  }
+  let lookups = 0;
+  const sessionFor = async (id: string): Promise<SessionMeta | null> => {
+    const hit = linkCache.metas.get(id);
+    if (hit) return hit.meta;
+    if (++lookups % LINK_YIELD_EVERY === 0) await yieldToLoop();
     const meta = getSessionById(id);
-    if (meta) cache.metas.set(id, { meta, at: nowMs });
-    else cache.metas.delete(id);
+    linkCache.metas.set(id, { meta, expiresAt: nowMs + (meta ? TOOL_LINK_TTL_MS + expiryJitterMs(id) : TOOL_LINK_MISS_TTL_MS) });
     return meta;
   };
-  const sessionIdForLaunch = (launchId: string): string | undefined => {
-    const known = cache.launches.get(launchId);
-    if (known || nowMs - cache.indexBuiltAt < TOOL_LINK_TTL_MS) return known;
-    for (const [lid, sid] of buildLaunchSessionIndex()) cache.launches.set(lid, sid);
-    cache.indexBuiltAt = nowMs;
-    return cache.launches.get(launchId);
-  };
-  return rows.map((row) => {
-    let linked = row.sessionId ? sessionFor(row.sessionId) : null;
+  const out: T[] = [];
+  for (const row of rows) {
+    let linked = row.sessionId ? await sessionFor(row.sessionId) : null;
     if (!linked && row.launchId) {
-      const sessionId = sessionIdForLaunch(row.launchId);
-      linked = sessionId ? sessionFor(sessionId) : null;
+      const sessionId = linkCache.launches.get(row.launchId);
+      linked = sessionId ? await sessionFor(sessionId) : null;
     }
-    return linked ? { ...row, linkedSession: linked } : row;
-  });
+    out.push(linked ? { ...row, linkedSession: linked } : row);
+  }
+  return out;
 }
 
 export interface ToolDiff {
