@@ -10,6 +10,7 @@ import { promisify } from 'util';
 const execFileAsync = promisify(execFile);
 import { compareVersions } from './agent-spec/primitives.js';
 import { needsWindowsShell } from './platform/index.js';
+import { PEER_HOP_ENV } from './types.js';
 
 export const NPM_PACKAGE_NAME = '@phnx-labs/agents-cli';
 
@@ -81,6 +82,12 @@ export function dismissUpdateVersion(file: string, version: string): void {
     );
   } catch {
   }
+}
+
+// Inherited on purpose: the agents run that a routed resume delegates to is the same
+// hop and must not prompt either.
+export function isPeerHop(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[PEER_HOP_ENV] === '1';
 }
 
 export function shouldPromptUpgrade(cache: UpdateCheckCache | null, currentVersion: string): boolean {

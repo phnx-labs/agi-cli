@@ -16,6 +16,7 @@ import {
   sshCapture,
   peerHopCloseNotice,
   peerHopOutcome,
+  peerAnswers,
 } from './remote-list.js';
 import { SSH_CONN_FAILURE_CODE, RemoteUtf8Accumulator } from '../../ssh-exec.js';
 import type { DeviceProfile } from '../../devices/registry.js';
@@ -342,14 +343,23 @@ describe('peerHopCloseNotice — TTY hop leaves the session id (RUSH-3227)', () 
 });
 
 describe('peerHopOutcome — offline-device fallback discriminator (PHNX-3626)', () => {
-  it('reports unreachable when the SSH connection itself failed (255) or never settled (null)', () => {
-    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE)).toBe('unreachable');
-    expect(peerHopOutcome(null)).toBe('unreachable');
+  const answers = () => true;
+  const silent = () => false;
+  it('reports unreachable only when ssh exited 255 and a fresh connection also fails, or never settled (null)', () => {
+    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE, silent)).toBe('unreachable');
+    expect(peerHopOutcome(null, answers)).toBe('unreachable');
   });
-  it('reports ok when the hop reached the peer, whatever the remote command exit code', () => {
-    expect(peerHopOutcome(0)).toBe('ok');
-    expect(peerHopOutcome(1)).toBe('ok');
-    expect(peerHopOutcome(130)).toBe('ok');
-    expect(peerHopOutcome(254)).toBe('ok');
+  it('a 255 from a session whose remote side died while the host still answers is not unreachable', () => {
+    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE, answers)).toBe('ok');
+  });
+  it('reports ok when the hop reached the peer, whatever the remote command exit code, without probing', () => {
+    const never = () => { throw new Error('probed'); };
+    expect(peerHopOutcome(0, never)).toBe('ok');
+    expect(peerHopOutcome(1, never)).toBe('ok');
+    expect(peerHopOutcome(130, never)).toBe('ok');
+    expect(peerHopOutcome(254, never)).toBe('ok');
+  });
+  it.skipIf(process.platform === 'win32')('peerAnswers is false for a host that does not exist', () => {
+    expect(peerAnswers('nobody@host.invalid')).toBe(false);
   });
 });

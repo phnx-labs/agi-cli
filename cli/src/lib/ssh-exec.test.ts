@@ -13,6 +13,7 @@ import {
   sshConnectOpts,
   sshExec,
   sshExecAsync,
+  sshStream,
   SSH_TIMEOUT_KILL_GRACE_MS,
   sshExecRawStream,
   TERMINAL_MODE_RESET, restoreLocalTerminal, saveLocalTerminal,
@@ -110,6 +111,28 @@ describe('controlOpts (connection multiplexing)', () => {
     const OLD_COLD_WINDOW_SECONDS = 60;
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThanOrEqual(5 * 60);
     expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(OLD_COLD_WINDOW_SECONDS);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('sshStream connection sharing (PATH ssh stub)', () => {
+  function argsOf(tty: boolean): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
+    const out = path.join(dir, 'args');
+    fs.writeFileSync(path.join(dir, 'ssh'), `#!/bin/sh\nprintf "%s " "$@" > ${JSON.stringify(out)}\n`, { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = dir + path.delimiter + prevPath;
+    try {
+      sshStream('testhost', 'agents run claude --resume x', { tty });
+      return fs.readFileSync(out, 'utf8');
+    } finally {
+      process.env.PATH = prevPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  it('a TTY session gets its own connection; a non-TTY stream still rides the shared master', () => {
+    expect(argsOf(true)).not.toContain('ControlMaster');
+    expect(argsOf(true)).toContain('-tt');
+    expect(argsOf(false)).toContain('ControlMaster=auto');
   });
 });
 

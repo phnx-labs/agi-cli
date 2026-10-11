@@ -12,6 +12,7 @@ import {
   inferProjectRoot,
   resolveProjectRef,
   resolveProjectDirs,
+  localProjectFolder,
 } from './project-root.js';
 import { writeProjectDef } from './projects.js';
 
@@ -203,5 +204,25 @@ describe('inferProjectRoot', () => {
     } finally {
       fs.rmSync(nonRepo, { recursive: true, force: true });
     }
+  });
+});
+
+describe('localProjectFolder — the local window folder for a session cwd', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lpf-home-'));
+  const repo = path.join(home, 'src', 'github.com', 'me', 'svatlas');
+  fs.mkdirSync(repo, { recursive: true });
+
+  it('maps a peer home (/home/<u> or /Users/<u>) onto this home', () => {
+    expect(localProjectFolder('/home/muqsit/src/github.com/me/svatlas', home)).toBe(repo);
+    expect(localProjectFolder('/Users/someone/src/github.com/me/svatlas', home)).toBe(repo);
+  });
+  it('keeps a cwd that is already local, and folds a worktree to its repo', () => {
+    expect(localProjectFolder(repo, home)).toBe(repo);
+    expect(localProjectFolder('/home/muqsit/src/github.com/me/svatlas/.agents/worktrees/fix-x/cli', home)).toBe(repo);
+  });
+  it('is undefined when no local copy exists or the cwd is just the home', () => {
+    expect(localProjectFolder('/home/muqsit/src/github.com/me/missing', home)).toBeUndefined();
+    expect(localProjectFolder('/home/muqsit', home)).toBeUndefined();
+    expect(localProjectFolder(undefined, home)).toBeUndefined();
   });
 });

@@ -242,6 +242,13 @@ export function listPidSessionEntries(): PidSessionEntry[] {
   return out;
 }
 
+export function liveSessionProcesses(sessionId: string): PidSessionEntry[] {
+  return listPidSessionEntries()
+    .filter((entry) => entry.sessionId === sessionId)
+    .map((entry) => readLivePidSessionEntry(entry.pid))
+    .filter((entry): entry is PidSessionEntry => entry?.sessionId === sessionId);
+}
+
 export function prunePidSessionRegistry(isAlive?: (pid: number, startedAtMs?: number) => boolean | undefined): void {
   let files: string[];
   try {

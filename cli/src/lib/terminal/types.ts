@@ -22,6 +22,10 @@ export interface SurfaceMeta {
   agent?: string;
   sessionId?: string;
   title?: string;
+  // Editor backends: the local folder whose window must host the tab, and the
+  // token the extension echoes back in its spawn ack.
+  project?: string;
+  nonce?: string;
 }
 
 export interface LaunchRequest {
@@ -33,18 +37,20 @@ export interface LaunchRequest {
   agent?: string;
   sessionId?: string;
   title?: string;
+  project?: string;
 }
 
 export interface LaunchResult {
   ok: boolean;
   request: LaunchRequest;
   error?: string;
+  ack?: import('./backends/vscodium-agent.js').SpawnAck;
 }
 
 export interface TerminalBackend {
   readonly id: Backend;
   readonly label: string;
   isAvailable(ctx: EngineContext): boolean;
-  buildTab(cwd: string, command: string[], meta?: SurfaceMeta): LaunchSpec;
-  buildSplit(cwd: string, command: string[], direction: SplitDirection, meta?: SurfaceMeta): LaunchSpec;
+  buildTab(cwd: string, command: string[], meta?: SurfaceMeta): LaunchSpec | LaunchSpec[];
+  buildSplit(cwd: string, command: string[], direction: SplitDirection, meta?: SurfaceMeta): LaunchSpec | LaunchSpec[];
 }
