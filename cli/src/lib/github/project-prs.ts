@@ -178,7 +178,7 @@ export async function listOpenMergeStates(
   const [owner, name] = repo.split('/');
   const out = await gh([
     'api', 'graphql', '--paginate', '--cache', '60s',
-    '-f', OPEN_MERGE_STATE_QUERY, '-F', `owner=${owner}`, '-F', `name=${name}`,
+    '-f', OPEN_MERGE_STATE_QUERY, '-f', `owner=${owner}`, '-f', `name=${name}`,
     '--jq', '.data.repository.pullRequests.nodes[] | {number, mergeable, mergeStateStatus}',
   ]);
   const states = new Map<number, Pick<ProjectPr, 'mergeable' | 'mergeableState'>>();

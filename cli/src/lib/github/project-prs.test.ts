@@ -168,8 +168,21 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
+  const mergeStateRead = (pages: string[]) => (args: string[]) => {
+    const pair = (flag: string, value: string) => args.some((a, i) => a === flag && args[i + 1] === value);
+    const query = args.find((a) => a.startsWith('query=')) ?? '';
+    expect(args).toContain('--paginate');
+    expect(pair('--cache', '60s')).toBe(true);
+    expect(pair('-f', 'owner=acme')).toBe(true);
+    expect(pair('-f', 'name=mono')).toBe(true);
+    expect(query).toContain('$endCursor: String');
+    expect(query).toContain('after: $endCursor');
+    expect(query).toContain('pageInfo { hasNextPage endCursor }');
+    return pages.join('');
+  };
+
   it('carries mergeable and mergeableState from one merge-state read per repo, not one per PR', async () => {
-    const { gh, asked } = recordedGh(soloRoutes());
+    const { gh, asked } = recordedGh({ ...soloRoutes(), graphql: mergeStateRead([REST.graphql as string]) });
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
       [1, false, 'dirty'],
@@ -178,6 +191,18 @@ describe('CI at a glance and recently merged PRs', () => {
     ]);
     expect(asked.filter((e) => e === 'graphql')).toHaveLength(1);
     expect(asked.filter((e) => /^repos\/acme\/mono\/pulls\/[123]$/.test(e))).toEqual([]);
+  });
+
+  it('merges the rows of every page the paginated merge-state read prints', async () => {
+    const page1 = `${JSON.stringify({ number: 1, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })}\n`;
+    const page2 = `${JSON.stringify({ number: 2, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' })}\n${JSON.stringify({ number: 3, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' })}\n`;
+    const { gh } = recordedGh({ ...soloRoutes(), graphql: mergeStateRead([page1, page2]) });
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
+      [1, false, 'dirty'],
+      [2, true, 'behind'],
+      [3, true, 'clean'],
+    ]);
   });
 
   it('keeps the list when the merge-state read fails, naming the failure', async () => {
