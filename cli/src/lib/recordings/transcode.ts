@@ -2,7 +2,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { findInPath } from '../agent-spec/agents.js';
+import { execFileBounded } from '../exec-bounded.js';
+import type { TranscodeJob } from './model.js';
 import { processFailure, runProcess } from './process.js';
+
+const WORK_DIR_PREFIX = 'agents-recording-';
+const OUTPUT_NAME = 'recording.mp4';
 
 export const FFMPEG_INSTALL_HINT = process.platform === 'darwin'
   ? 'Install it with `brew install ffmpeg`.'
@@ -30,11 +35,11 @@ export interface TranscodedRecording {
 export async function transcodeRecording(
   sourcePath: string,
   signal?: AbortSignal,
-  options: { ffmpegBin?: string; platform?: NodeJS.Platform } = {},
+  options: { ffmpegBin?: string; platform?: NodeJS.Platform; onStart?: (job: TranscodeJob) => void } = {},
 ): Promise<TranscodedRecording> {
   const ffmpeg = options.ffmpegBin ?? resolveFfmpegBin();
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'agents-recording-'));
-  const output = path.join(directory, 'recording.mp4');
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), WORK_DIR_PREFIX));
+  const output = path.join(directory, OUTPUT_NAME);
   const codec = (options.platform ?? process.platform) === 'darwin' ? 'h264_videotoolbox' : 'libx264';
   const args = [
     '-hide_banner', '-loglevel', 'error', '-y', '-i', sourcePath,
@@ -44,11 +49,32 @@ export async function transcodeRecording(
     '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', output,
   ];
   try {
-    const result = await runProcess(ffmpeg, args, { signal });
+    const result = await runProcess(ffmpeg, args, {
+      signal,
+      onSpawn: (pid) => options.onStart?.({ pid, workDir: directory }),
+    });
     if (result.exitCode !== 0) throw processFailure('ffmpeg', args, result);
     return { filePath: output, cleanup: () => fs.rm(directory, { recursive: true, force: true }) };
   } catch (error) {
     await fs.rm(directory, { recursive: true, force: true });
     throw error;
   }
+}
+
+// A daemon that exits mid-transcode leaves its detached ffmpeg running. Kill it only when the pid
+// still writes into that job's work dir (a reused pid never does), then delete the work dir.
+export async function reapTranscode(job: TranscodeJob): Promise<{ killed: boolean }> {
+  if (!path.basename(job.workDir).startsWith(WORK_DIR_PREFIX)) {
+    throw new Error(`Refusing to reap a transcode outside an ${WORK_DIR_PREFIX}* work dir: ${job.workDir}`);
+  }
+  let killed = false;
+  if (process.platform !== 'win32') {
+    const ps = await execFileBounded('ps', ['-o', 'args=', '-p', String(job.pid)], { timeoutMs: 5_000 });
+    if (ps.code === 0 && ps.stdout.includes(path.join(job.workDir, OUTPUT_NAME))) {
+      process.kill(-job.pid, 'SIGKILL');
+      killed = true;
+    }
+  }
+  await fs.rm(job.workDir, { recursive: true, force: true });
+  return { killed };
 }

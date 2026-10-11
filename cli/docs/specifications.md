@@ -3461,8 +3461,12 @@ a machine-wide process sweep.)
   `StartLimitIntervalSec=0` deliberately REMOVES the old burst cap, so a repeatedly
   deadline-breaching daemon is restarted every ~30s forever rather than parked in `failed`
   and left dark until a human intervenes. This is the owner requirement that a wedged
-  daemon always recovers on its own: a supervised deadline breach is what forces the exit
-  (`ServiceSupervisor.exitForRestart` exits code 70, `lib/daemon/supervisor.ts`), and the
+  daemon always recovers on its own: a supervised HANG (a tick unsettled at 10x its
+  deadline, or a lifecycle call past its deadline) is what forces the exit
+  (`ServiceSupervisor.exitForRestart` exits code 70, `lib/daemon/supervisor.ts`). A tick that
+  merely overruns its deadline MUST NOT exit: it is aborted, logged as `tick.breach`, and the
+  service skips ticks until it settles (PHNX-4225), because restarting for a slow tick made
+  the restart itself the load on a busy box. The
   exit IS the recovery, not a failure to give up on. Separately, `ensureDaemonStarted` MUST
   still stop initiating IMPLICIT foreground auto-starts after a bounded number of
   consecutive failures until its circuit breaker resets — that bounds the busy-operator
@@ -3904,8 +3908,9 @@ not the watchdog's.
   `daemon.ts`), re-checking `watchdog.enabled` inside each tick — the daemon remains the
   sole scheduler/executor; the supervisor now also owns the per-tick deadline and error
   boundary for this pass. A thrown pass is recorded and re-runs on the next tick; a pass
-  that breaches its deadline exits the daemon for a supervised OS restart (PHNX-4116),
-  with no `parked` state or in-process backoff.
+  that overruns its deadline is aborted and skipped until it settles (PHNX-4225), and only
+  a pass that hangs (unsettled at 10x its deadline) exits the daemon for a supervised OS
+  restart (PHNX-4116), with no `parked` state or in-process backoff.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
 - **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`

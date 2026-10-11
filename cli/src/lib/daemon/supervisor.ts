@@ -7,6 +7,7 @@ import { syncSpansBetween, type LogFields } from './diagnostics.js';
 import { performance } from 'perf_hooks';
 
 const DEADLINE_EXIT_CODE = 70;
+const HANG_DEADLINES = 10;
 
 interface ServiceSupervisorOptions {
   lifecycleDeadlineMs?: number;
@@ -28,7 +29,9 @@ interface RegisteredService {
   timer?: ReturnType<typeof setInterval>;
   startupTimer?: ReturnType<typeof setTimeout>;
   deadlineTimer?: ReturnType<typeof setTimeout>;
+  hangTimer?: ReturnType<typeof setTimeout>;
   tickStartedAt?: number;
+  skippedTicks: number;
 }
 
 interface RegisterServiceOptions {
@@ -80,6 +83,7 @@ export class ServiceSupervisor {
       inFlight: false,
       everStarted: false,
       idleWaiters: [],
+      skippedTicks: 0,
     });
   }
 
@@ -209,10 +213,7 @@ export class ServiceSupervisor {
       clearTimeout(entry.startupTimer);
       entry.startupTimer = undefined;
     }
-    if (entry.deadlineTimer) {
-      clearTimeout(entry.deadlineTimer);
-      entry.deadlineTimer = undefined;
-    }
+    this.clearTickTimers(entry);
     entry.state = 'stopped';
     recordSubsystemState(id, 'stopped');
     entry.activeController?.abort();
@@ -236,59 +237,82 @@ export class ServiceSupervisor {
     entry.timer = setInterval(() => { void this.runTick(id); }, entry.service.intervalMs);
   }
 
-  // Thrown ticks retry; a deadline may never settle, so record it durably and exit 70 for supervised restart instead of parking.
+  // A thrown tick retries on its interval. An overrun is aborted, logged and recorded, and the
+  // service skips ticks until it settles; only a tick still unsettled after HANG_DEADLINES deadlines
+  // is a hang that exits 70 for a supervised restart (PHNX-4225; PHNX-4116 for the hang).
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     const ctx = this.ctx;
-    if (!entry || !ctx || entry.state !== 'running' || entry.inFlight) return;
+    if (!entry || !ctx || entry.state !== 'running') return;
     if (!isPeriodicService(entry.service)) return;
+    if (entry.inFlight) {
+      entry.skippedTicks += 1;
+      return;
+    }
     const periodicService = entry.service;
+    const deadlineMs = periodicService.deadlineMs;
     entry.inFlight = true;
+    entry.skippedTicks = 0;
     const startedAt = performance.now();
     entry.tickStartedAt = startedAt;
     const controller = new AbortController();
     entry.activeController = controller;
-    let timedOut = false;
+    let overran = false;
     ctx.log('DEBUG', `service '${id}' tick start`, { event: 'tick.start', service: id });
-    const tickPromise = periodicService.tick(ctx, controller.signal);
-    entry.activeTick = tickPromise;
+    entry.deadlineTimer = setTimeout(() => {
+      entry.deadlineTimer = undefined;
+      overran = true;
+      this.recordOverrun(entry, id, deadlineMs, startedAt);
+      controller.abort();
+      entry.hangTimer = setTimeout(() => {
+        entry.hangTimer = undefined;
+        this.exitForRestart(id, new Error(`tick did not settle within ${deadlineMs * HANG_DEADLINES}ms (${HANG_DEADLINES}x its ${deadlineMs}ms deadline)`), startedAt);
+      }, deadlineMs * (HANG_DEADLINES - 1));
+    }, deadlineMs);
     try {
-      const deadline = new Promise<never>((_, reject) => {
-        entry.deadlineTimer = setTimeout(
-          () => {
-            timedOut = true;
-            reject(new Error(`tick exceeded deadline of ${periodicService.deadlineMs}ms`));
-          },
-          periodicService.deadlineMs,
-        );
-      });
-      await Promise.race([tickPromise, deadline]);
+      const tickPromise = periodicService.tick(ctx, controller.signal);
+      entry.activeTick = tickPromise;
+      await tickPromise;
       const durMs = Math.round(performance.now() - startedAt);
-      const tickFields = { service: id, durMs, deadlineMs: periodicService.deadlineMs };
-      if (durMs * 2 > periodicService.deadlineMs) {
-        ctx.log('WARN', `service '${id}' tick took ${durMs}ms, over half its ${periodicService.deadlineMs}ms deadline`, { event: 'tick.slow', ...tickFields, inFlight: this.inFlightTicks() });
+      const tickFields = { service: id, durMs, deadlineMs };
+      if (overran) {
+        ctx.log('WARN', `service '${id}' overrun tick settled after ${durMs}ms; ${entry.skippedTicks} tick(s) skipped`, { event: 'tick.settled', ...tickFields, skippedTicks: entry.skippedTicks });
+      } else if (durMs * 2 > deadlineMs) {
+        ctx.log('WARN', `service '${id}' tick took ${durMs}ms, over half its ${deadlineMs}ms deadline`, { event: 'tick.slow', ...tickFields, inFlight: this.inFlightTicks() });
       } else {
         ctx.log('DEBUG', `service '${id}' tick ok in ${durMs}ms`, { event: 'tick.ok', ...tickFields });
       }
-      entry.consecutiveFailures = 0;
-      entry.lastError = undefined;
       entry.lastRunMs = Date.now();
-      recordSubsystemOk(id);
-    } catch (err) {
-      const stoppedDuringTick = this.registry.get(id)?.state === 'stopped';
-      if (timedOut && !stoppedDuringTick) {
-        controller.abort();
-        this.exitForRestart(id, err, startedAt);
-        return;
+      if (!overran) {
+        entry.consecutiveFailures = 0;
+        entry.lastError = undefined;
+        recordSubsystemOk(id);
       }
-      if (!timedOut) this.recordFailure(entry, id, err, Math.round(performance.now() - startedAt));
+    } catch (err) {
+      if (!overran) this.recordFailure(entry, id, err, Math.round(performance.now() - startedAt));
     } finally {
-      if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
+      this.clearTickTimers(entry);
       entry.activeTick = undefined;
       entry.activeController = undefined;
       entry.tickStartedAt = undefined;
       this.clearInFlight(entry);
     }
+  }
+
+  private recordOverrun(entry: RegisteredService, id: DaemonServiceId, deadlineMs: number, startedAt: number): void {
+    const cause = `tick exceeded deadline of ${deadlineMs}ms`;
+    entry.consecutiveFailures += 1;
+    entry.lastError = cause;
+    recordSubsystemError(id, cause);
+    this.ctx?.log('ERROR', `service '${id}' breached its deadline (${cause}); aborted it and skipping ticks until it settles`, {
+      ...this.breachSnapshot(id, startedAt),
+      consecutiveFailures: entry.consecutiveFailures,
+    });
+  }
+
+  private clearTickTimers(entry: RegisteredService): void {
+    if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
+    if (entry.hangTimer) { clearTimeout(entry.hangTimer); entry.hangTimer = undefined; }
   }
 
   private recordFailure(entry: RegisteredService, id: DaemonServiceId, err: unknown, durMs: number): void {
@@ -326,7 +350,10 @@ export class ServiceSupervisor {
     }
     recordSubsystemError(id, cause);
     recordDaemonRestart(id, cause);
-    this.ctx?.log('ERROR', `service '${id}' breached its deadline (${cause}); exiting (code ${DEADLINE_EXIT_CODE}) for a supervised restart`, this.breachSnapshot(id, startedAt));
+    this.ctx?.log('ERROR', `service '${id}' hung (${cause}); exiting (code ${DEADLINE_EXIT_CODE}) for a supervised restart`, {
+      ...this.breachSnapshot(id, startedAt),
+      event: 'tick.hang',
+    });
     this.freezeTimers();
     this.exit(DEADLINE_EXIT_CODE);
   }
@@ -335,7 +362,7 @@ export class ServiceSupervisor {
     for (const entry of this.registry.values()) {
       if (entry.timer) { clearInterval(entry.timer); entry.timer = undefined; }
       if (entry.startupTimer) { clearTimeout(entry.startupTimer); entry.startupTimer = undefined; }
-      if (entry.deadlineTimer) { clearTimeout(entry.deadlineTimer); entry.deadlineTimer = undefined; }
+      this.clearTickTimers(entry);
     }
   }
 }

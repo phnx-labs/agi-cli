@@ -135,14 +135,21 @@ record of `null` for it.
   never escapes to the process-wide crash handler. A THROWN tick is recoverable:
   it is recorded (`recordFailure`) and the service keeps ticking on its own
   interval, so a transient failure retries in place and no sibling is disturbed.
-  A tick — or a `start()`/`restart()` lifecycle call — that BREACHES its deadline
-  is a hang that can never be retried in-process (its promise may never settle),
-  so the supervisor records the cause, flushes it to `daemon-health.ts`, and EXITS
-  the process (code 70); systemd (`Restart=always`, `RestartSec=30`,
-  `StartLimitIntervalSec=0`) / launchd (`KeepAlive` + `ThrottleInterval=30`)
-  restart the whole daemon within ~30s (PHNX-4116). There is NO `parked` state and
-  NO in-process backoff restart — a wedged daemon is handed back to its OS
-  supervisor rather than left sitting unresponsive. SIGHUP control transitions
+  A tick that OVERRUNS its deadline is aborted (its `AbortSignal` fires), logged
+  as `tick.breach` with the in-flight snapshot, and recorded as a failure; the
+  service then skips its interval ticks until that tick settles and resumes on its
+  own, with no process exit (PHNX-4225). A slow tick is not a wedged daemon: on an
+  overloaded box the first `getActiveSessions` after boot routinely took 10-15 s,
+  and exiting for that made the restart itself the load (see the recordings note
+  below). Only a tick still unsettled at 10x its deadline (`HANG_DEADLINES`), or a
+  `start()`/`restart()` lifecycle call past `lifecycleDeadlineMs`, is a HANG whose
+  promise may never settle, so the supervisor records the cause, flushes it to
+  `daemon-health.ts`, logs `tick.hang`, and EXITS the process (code 70); systemd
+  (`Restart=always`, `RestartSec=30`, `StartLimitIntervalSec=0`) / launchd
+  (`KeepAlive` + `ThrottleInterval=30`) restart the whole daemon within ~30s
+  (PHNX-4116). There is NO `parked` state and NO in-process backoff restart — a
+  wedged daemon is handed back to its OS supervisor rather than left sitting
+  unresponsive. SIGHUP control transitions
   queue on `awaitIdle()` rather than polling, so a requested toggle applies after
   real settlement without another timer owner.
   `getServiceSupervisorHealth()` (`daemon.ts:60`)
@@ -176,8 +183,8 @@ record of `null` for it.
   was async, but `runSelfHeal` → `heal` → `diffVersionResources` byte-compares
   every synced resource in every version home with `readFileSync`. On an operator
   box with 23 version homes that held the loop for over a minute, so
-  `attention-notify` breached its 10 s deadline, the supervisor exited (code 70),
-  and the restart ran self-heal again 30 s later: 1,843 restarts in under three
+  `attention-notify` breached its 10 s deadline, the supervisor exited (code 70,
+  the pre-PHNX-4225 overrun policy), and the restart ran self-heal again 30 s later: 1,843 restarts in under three
   days with a core pinned. The static guard below cannot see a callee, so a
   heavy synchronous pass belongs in a child: the tick now spawns
   `agents __self-heal-run` ([`../self-heal/child.ts`](../self-heal/child.ts))
@@ -267,9 +274,10 @@ one health mirror both the daemon (writer) and `agents daemon` /
 `recordSubsystemOk`/`recordSubsystemError` (ok/error streak + last
 error/timestamp) and, since RUSH-3193 P4, `recordSubsystemState` (the
 supervisor's `idle`/`running`/`stopped` lifecycle state, written on
-every transition in `supervisor.ts`'s `startOne`/`stopOne`). A deadline breach
-does not write a new state — it records the cause via `recordSubsystemError` +
-`recordDaemonRestart` and exits (PHNX-4116). Only supervised services call
+every transition in `supervisor.ts`'s `startOne`/`stopOne`). A deadline overrun
+does not write a new state — it records the cause via `recordSubsystemError`; only
+a hang also writes `recordDaemonRestart` and exits (PHNX-4116, PHNX-4225), so
+`agents daemon status`'s restart count is real exits, not slow ticks. Only supervised services call
 `recordSubsystemState`, so a `SubsystemHealth` record's `state` field being
 present is itself the signal `agents daemon services` uses to render
 "measured" vs "inferred" (`commands/daemon.ts`'s `buildServiceRows`).
@@ -281,9 +289,10 @@ failure-streak increment used by the auto-start circuit breaker.
 **Crash model: any uncaught error in the process kills and restarts the
 whole daemon, not just the failing service — except for a supervised service's
 THROWN tick, which the supervisor's own try/catch isolates (the service keeps
-ticking).** A supervised tick or lifecycle call that BREACHES its deadline is the
-one case the supervisor deliberately exits the process for, so systemd/launchd
-restart the wedged daemon (PHNX-4116). A throw that escapes an INLINE service's
+ticking).** A supervised tick that HANGS (unsettled at 10x its deadline) or a
+lifecycle call past its deadline is the one case the supervisor deliberately exits
+the process for, so systemd/launchd restart the wedged daemon (PHNX-4116); a tick
+that merely overruns is aborted and skipped, never an exit (PHNX-4225). A throw that escapes an INLINE service's
 local try/catch is still uncaught at the process level. `cli/src/index.ts:96-102` installs the
 top-level handlers:
 
@@ -394,11 +403,25 @@ leave it on only while diagnosing, and read a stall at `debug` with that in mind
 | `tick.start`, `tick.ok` | debug | `ServiceSupervisor.runTick` | every supervised tick and its duration |
 | `tick.slow` | warn | `runTick` | a tick that used over half its deadline, with the other in-flight ticks |
 | `tick.failed` | warn | `recordFailure` | a thrown tick: error, duration, consecutive failures |
-| `tick.breach` | error | `exitForRestart` | the restart cause: elapsed time, every in-flight tick, the synchronous sections that ran during the tick, span totals since the last vitals line, and a vitals snapshot |
+| `tick.breach` | error | `recordOverrun` | a tick past its deadline, aborted and skipped until it settles (no exit): elapsed time, every in-flight tick, the synchronous sections that ran during the tick, span totals since the last vitals line, and a vitals snapshot |
+| `tick.settled` | warn | `runTick` | an overrun tick finally settling: its duration and how many interval ticks were skipped meanwhile |
+| `tick.hang` | error | `exitForRestart` | the restart cause: a tick unsettled at 10x its deadline or a lifecycle call past its deadline, with the same snapshot as `tick.breach`; the process exits 70 |
 | `span.slow` | warn | `diagnostics.ts` `spanSync` | one synchronous section that held the event loop past 250 ms |
 | `span` | debug | `spanSync` / `span` | every instrumented section and its duration |
 | `loop.stall` | warn | `DaemonVitals` | the event loop did not run for over 1 s, and which instrumented sections ran in that window (or that none did: uninstrumented code, or the process was descheduled) |
 | `vitals` | info | `DaemonVitals.report`, once a minute | event-loop delay p50/p99/max, process CPU %, RSS, heap, load average, in-flight ticks, and the top sections by total time |
+
+**Recordings encode one file at a time and reap what a dead daemon left
+(PHNX-4225).** `ffmpeg` runs detached in its own process group, so a daemon exit
+never takes it down. Before the fix every exit orphaned the in-flight encodes and
+the next boot started a fresh encode of every queued recording at once: on one
+operator laptop that was 21 concurrent full-resolution encodes (about 1,260
+threads) and load 200-400 on 18 cores, and attention-notify's first tick after
+every boot ran past 10 s, which exited again. The pipeline now records each
+transcode's pid and work dir on its ledger row (`TranscodeJob`),
+`recoverInterrupted` kills a pid that still writes into that work dir and deletes
+the dir before requeueing, and `drain` starts one recording only when none is
+active.
 
 **A deadline breach is usually starvation, not a slow service.** The supervisor's
 deadline is a timer on the same event loop as every other service and the feed
