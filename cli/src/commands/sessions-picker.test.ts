@@ -917,3 +917,73 @@ describe('renderLastResponse — wraps overflowing lines to the pane (RUSH-2757)
     expect(out).toEqual(['short enough']);
   });
 });
+
+describe('preview digest checklist, subagents and images (PHNX-4326)', () => {
+  const fixture = fs.readFileSync(path.join(import.meta.dirname, 'testdata', 'preview-digest-claude.jsonl'), 'utf8');
+  const sessionId = '4326aaaa-0000-4000-8000-000000000001';
+
+  function writeSession(dir: string): SessionMeta {
+    const filePath = path.join(dir, 'session.jsonl');
+    fs.writeFileSync(filePath, fixture.replaceAll('__DIR__', dir));
+    fs.writeFileSync(path.join(dir, 'before.png'), 'png');
+    fs.writeFileSync(path.join(dir, 'after.png'), 'png');
+    return mk({ id: sessionId, shortId: '4326aaaa', filePath, cwd: dir });
+  }
+
+  it('folds TaskCreate/TaskUpdate into todos, lists each spawn with its outcome, and keeps only images that exist', () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-4326-')));
+    try {
+      const { digest, error } = loadSessionPreviewDigest(writeSession(dir));
+      expect(error).toBeUndefined();
+      expect(digest!.todos).toMatchObject({ done: 1, total: 2, items: [
+        { content: 'Trace the feed', status: 'completed' },
+        { content: 'Add preview fields', status: 'in_progress' },
+      ] });
+
+      expect(digest!.subAgentCount).toBe(3);
+      expect(digest!.subAgents).toEqual([
+        { id: 'toolu_explore', description: 'Map the watch stream', agentType: 'Explore', status: 'completed', startedAt: '2026-10-11T10:01:00.000Z', durationMs: 150_000 },
+        { id: 'toolu_review', description: 'Review the diff', agentType: 'code-reviewer', status: 'failed', startedAt: '2026-10-11T10:04:00.000Z', durationMs: 10_000 },
+        { id: 'toolu_bg', description: 'Watch CI', status: 'running', startedAt: '2026-10-11T10:05:00.000Z' },
+      ]);
+
+      const images = digest!.images!;
+      expect(images.map(i => [i.source, path.basename(i.path)])).toEqual([
+        ['attached', expect.stringMatching(/^[0-9a-f]{64}\.png$/)],
+        ['read', 'before.png'],
+        ['produced', 'after.png'],
+      ]);
+      expect(images[0].path.startsWith(path.join(process.env.HOME!, '.agents', '.cache', 'attachments', sessionId))).toBe(true);
+      expect(fs.existsSync(images[0].path)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('lists Claude subagent transcripts when the session has them, keeping the count equal to the list', () => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-4326-files-')));
+    try {
+      const session = writeSession(dir);
+      const children = path.join(dir, 'session', 'subagents');
+      fs.mkdirSync(children, { recursive: true });
+      fs.writeFileSync(path.join(children, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Map the watch stream', toolUseId: 'toolu_explore' }));
+      fs.writeFileSync(path.join(children, 'agent-a1.jsonl'), [
+        { type: 'user', timestamp: '2026-10-11T10:01:01.000Z', message: { role: 'user', content: 'Find feed watch' } },
+        { type: 'assistant', timestamp: '2026-10-11T10:03:29.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'found it' }] } },
+      ].map(l => JSON.stringify(l)).join('\n') + '\n');
+      fs.writeFileSync(path.join(children, 'agent-a2.meta.json'), JSON.stringify({ agentType: 'general-purpose', description: 'Unmatched child', toolUseId: 'toolu_elsewhere' }));
+      fs.writeFileSync(path.join(children, 'agent-a2.jsonl'), JSON.stringify({ type: 'user', timestamp: '2026-10-11T10:02:00.000Z', message: { role: 'user', content: 'go' } }) + '\n');
+      const childEnd = new Date('2026-10-11T10:02:45.000Z');
+      fs.utimesSync(path.join(children, 'agent-a2.jsonl'), childEnd, childEnd);
+
+      const { digest } = loadSessionPreviewDigest(session);
+      expect(digest!.subAgentCount).toBe(2);
+      expect(digest!.subAgents).toEqual([
+        { id: 'agent-a1', description: 'Map the watch stream', agentType: 'Explore', status: 'completed', startedAt: '2026-10-11T10:01:01.000Z', durationMs: 150_000 },
+        { id: 'agent-a2', description: 'Unmatched child', agentType: 'general-purpose', status: 'completed', startedAt: '2026-10-11T10:02:00.000Z', durationMs: 45_000 },
+      ]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

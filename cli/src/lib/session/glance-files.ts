@@ -292,3 +292,130 @@ export function enrichGlanceFiles(rows: ActiveSession[], nowMs = Date.now()): vo
     }
   }
 }
+
+export interface PreviewSubAgent {
+  id?: string;
+  description: string;
+  agentType?: string;
+  status: 'running' | 'completed' | 'failed';
+  startedAt?: string;
+  durationMs?: number;
+}
+
+export interface PreviewImage {
+  path: string;
+  source: 'attached' | 'produced' | 'read';
+  at?: string;
+}
+
+const PREVIEW_SUBAGENTS_MAX = 30;
+const PREVIEW_IMAGES_MAX = 6;
+
+const IMAGE_PATH_RE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|svg)$/i;
+const IMAGE_READ_TOOLS = new Set(['Read', 'read_file', 'view_file', 'view_image', 'cat_file', 'get_file']);
+
+export function previewSubAgentsFromEvents(events: SessionEvent[], isSubAgent: (tool: string, command: string) => boolean): PreviewSubAgent[] {
+  type Row = PreviewSubAgent & { background?: boolean };
+  const rows: Row[] = [];
+  const byCall = new Map<string, Row>();
+  for (const event of events) {
+    if (event.type === 'tool_use' && !event._local && isSubAgent(event.tool ?? '', event.command ?? '')) {
+      const args = event.args ?? {};
+      const text = (value: unknown): string | undefined => typeof value === 'string' && value.trim() ? value.replace(/\s+/g, ' ').trim() : undefined;
+      const row: Row = {
+        ...(event.callId ? { id: event.callId } : {}),
+        description: (text(args.description) ?? text(args.prompt) ?? text(event.command) ?? event.tool ?? 'subagent').slice(0, 200),
+        ...(text(args.subagent_type) ? { agentType: text(args.subagent_type) } : {}),
+        status: 'running',
+        ...(event.timestamp ? { startedAt: event.timestamp } : {}),
+        ...(args.run_in_background === true ? { background: true } : {}),
+      };
+      rows.push(row);
+      if (event.callId) byCall.set(event.callId, row);
+    } else if ((event.type === 'tool_result' || event.type === 'error') && event.callId) {
+      const row = byCall.get(event.callId);
+      if (!row) continue;
+      row.status = event.type === 'error' || event.success === false ? 'failed' : row.background ? 'running' : 'completed';
+      const started = row.startedAt ? Date.parse(row.startedAt) : NaN;
+      const ended = Date.parse(event.timestamp);
+      if (row.status !== 'running' && Number.isFinite(started) && Number.isFinite(ended) && ended >= started) row.durationMs = ended - started;
+    }
+  }
+  return rows.slice(-PREVIEW_SUBAGENTS_MAX).map(({ background: _background, ...row }) => row);
+}
+
+export function previewSubAgentsFromFiles(sessionFile: string, fromEvents: readonly PreviewSubAgent[], nowMs = Date.now()): PreviewSubAgent[] | undefined {
+  const children = readSessionSubagents(sessionFile, true, [], nowMs);
+  if (!children?.length) return undefined;
+  const settled = new Map(fromEvents.filter(row => row.id && row.status !== 'running').map(row => [row.id!, row]));
+  return children.map((child) => {
+    const metaPath = child.transcriptPath.replace(/\.jsonl$/, '.meta.json');
+    let toolUseId: string | undefined;
+    try { toolUseId = JSON.parse(fs.readFileSync(metaPath, 'utf8')).toolUseId; } catch {  }
+    const result = toolUseId ? settled.get(toolUseId) : undefined;
+    const status: PreviewSubAgent['status'] = result?.status ?? (child.status === 'failed' ? 'failed' : child.status === 'running' ? 'running' : 'completed');
+    let endedAtMs: number | undefined;
+    try { endedAtMs = fs.statSync(child.transcriptPath).mtimeMs; } catch {  }
+    const durationMs = result?.durationMs
+      ?? (child.startedAtMs !== undefined && endedAtMs !== undefined && endedAtMs >= child.startedAtMs ? Math.round(endedAtMs - child.startedAtMs) : undefined);
+    return {
+      id: child.id,
+      description: child.description,
+      ...(child.agentType ? { agentType: child.agentType } : {}),
+      status,
+      ...(child.startedAtMs !== undefined ? { startedAt: new Date(child.startedAtMs).toISOString() } : {}),
+      ...(durationMs !== undefined && status !== 'running' ? { durationMs } : {}),
+    };
+  });
+}
+
+export function previewImagesFromEvents(events: SessionEvent[], changes: ReadonlyArray<{ path: string; op: string }>, cwd?: string): PreviewImage[] {
+  const resolve = (p: string): string => path.isAbsolute(p) || !cwd ? p : path.resolve(cwd, p);
+  const out: PreviewImage[] = [];
+  const lastTouch = new Map<string, string>();
+  for (const event of events) {
+    if (event.type === 'attachment' && event.path && (event.mediaType ?? '').startsWith('image/')) {
+      out.push({ path: resolve(event.path), source: 'attached', ...(event.timestamp ? { at: event.timestamp } : {}) });
+      continue;
+    }
+    if (event.type !== 'tool_use' || event._local) continue;
+    const raw = event.path || event.args?.file_path || event.args?.path;
+    if (typeof raw !== 'string' || !IMAGE_PATH_RE.test(raw)) continue;
+    const abs = resolve(raw);
+    if (event.timestamp) lastTouch.set(abs, event.timestamp);
+    if (IMAGE_READ_TOOLS.has(event.tool ?? '')) out.push({ path: abs, source: 'read', ...(event.timestamp ? { at: event.timestamp } : {}) });
+  }
+  for (const change of changes) {
+    if (change.op === 'deleted' || !IMAGE_PATH_RE.test(change.path)) continue;
+    const abs = resolve(change.path);
+    const at = lastTouch.get(abs);
+    out.push({ path: abs, source: 'produced', ...(at ? { at } : {}) });
+  }
+  return mergePreviewImages(out.filter(image => fs.existsSync(image.path)));
+}
+
+export function cachedAttachmentImages(sessionId: string, root = path.join(getUserAgentsDir(), '.cache', 'attachments')): PreviewImage[] {
+  if (!sessionId || path.basename(sessionId) !== sessionId) return [];
+  const dir = path.join(root, sessionId);
+  try {
+    return fs.readdirSync(dir)
+      .filter(name => IMAGE_PATH_RE.test(name))
+      .map((name) => {
+        const file = path.join(dir, name);
+        return { path: file, source: 'attached' as const, at: new Date(fs.statSync(file).mtimeMs).toISOString() };
+      });
+  } catch {
+    return [];
+  }
+}
+
+export function mergePreviewImages(...lists: PreviewImage[][]): PreviewImage[] {
+  const byPath = new Map<string, PreviewImage>();
+  for (const image of lists.flat()) {
+    const prior = byPath.get(image.path);
+    if (!prior || (image.at ?? '') >= (prior.at ?? '')) byPath.set(image.path, prior?.source === 'attached' ? { ...image, source: 'attached' } : image);
+  }
+  return [...byPath.values()]
+    .sort((a, b) => (a.at ?? '').localeCompare(b.at ?? ''))
+    .slice(-PREVIEW_IMAGES_MAX);
+}

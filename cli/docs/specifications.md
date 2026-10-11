@@ -1120,6 +1120,20 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   or a timer (`lib/session/timeline-pass.ts`, `lib/session/glance-files.ts`;
   `lib/session/glance-files.test.ts`, `lib/session/timeline-pass.test.ts`,
   `lib/session/db.timelines.test.ts`).
+- **SES-58 (MUST, PHNX-4326).** The `sessions preview --json` digest MUST carry
+  `todos` from `extractTodoProgressFromEvents`, the fold the watch rows use, and
+  MAY carry `subAgents` and `images`, each absent when empty. For a Claude session
+  with `subagents/agent-*.jsonl` children, `subAgents` MUST be those children and
+  `subAgentCount` its length (SES-57); otherwise it is the newest 30 calls that
+  `isSubAgentTool` counts. `images` MUST list only files that exist, newest 6.
+  Subagent children and cached pasted images are read per call, never frozen in
+  the digest cache (`commands/sessions-picker.ts`, `lib/session/glance-files.ts`;
+  `commands/sessions-picker.test.ts`).
+- **SES-59 (MUST, PHNX-4326).** An unattributed live row's `startedAtMs` MUST be
+  its process start, not its transcript's birthtime: the cached-tick pid-reuse
+  guard compares against it, and a resumed session's transcript predates its
+  process (`lib/session/active.ts` `listUnattributedActiveLive`;
+  `lib/session/active.unattrib-cache.test.ts`).
 - **SES-43 (MUST).** The default stream MUST hold one long-lived local subscription
   and one long-lived SSH subscription per dialable compute device. `--local` MUST
   suppress peer subscriptions. Neither path may poll transcript history or invoke

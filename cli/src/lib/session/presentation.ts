@@ -802,6 +802,8 @@ export interface SessionPreviewDigest {
   planFile: string;
   todos?: TodoProgress;
   subAgentCount: number;
+  subAgents?: import('./glance-files.js').PreviewSubAgent[];
+  images?: import('./glance-files.js').PreviewImage[];
   backgroundShellCount?: number;
   toolTags: string[];
   changes: ReturnType<typeof changeCounts>;
