@@ -116,13 +116,6 @@ function buildLaunchSessionIndexNow(): Map<string, string> {
   return byLaunchId;
 }
 
-/**
- * The tools record a session or launch id; only agents-cli's index can say which agent session that was.
- * Thousands of rows point at a few hundred sessions and rarely change, so a found session is reused for
- * TOOL_LINK_TTL_MS and the launch index is rebuilt at most once per window: this runs on the daemon's
- * event loop on every tool reprojection (PHNX-4225). A miss is never cached, so a newly indexed session
- * links on the next pass.
- */
 export function linkToolSessions<T extends { sessionId?: string; launchId?: string; linkedSession?: SessionMeta }>(rows: T[], nowMs = Date.now()): T[] {
   return spanSync('feed.tools.link-sessions', () => linkToolSessionsNow(rows, nowMs), () => ({ rows: rows.length }));
 }
