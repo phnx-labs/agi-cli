@@ -1,5 +1,6 @@
 
 import { execFile } from 'child_process';
+import * as fs from 'fs';
 import { promisify } from 'util';
 import { getVersionDir } from './store.js';
 import { hasLiveLaunchLease } from './shims.js';
@@ -42,6 +43,26 @@ async function listCommandLinesPosix(): Promise<string[]> {
   }
 }
 
+export function listProcessRowsFromProc(procRoot = '/proc'): ProcessRow[] {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(procRoot);
+  } catch (err) {
+    throw new Error(`could not read the process table (${procRoot}: ${(err as Error).message})`);
+  }
+  return entries.flatMap((name) => {
+    if (!/^\d+$/.test(name)) return [];
+    let raw: string;
+    try {
+      raw = fs.readFileSync(`${procRoot}/${name}/cmdline`, 'utf8');
+    } catch {
+      return [];
+    }
+    const args = raw.replace(/\0+$/, '').split('\0').join(' ');
+    return args ? [{ pid: Number(name), args }] : [];
+  });
+}
+
 async function listCommandLinesWindows(): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync(
@@ -57,10 +78,16 @@ async function listCommandLinesWindows(): Promise<string[]> {
 }
 
 export const realProcessSnapshot: ProcessSnapshot = {
-  listCommandLines: () => (process.platform === 'win32' ? listCommandLinesWindows() : listCommandLinesPosix()),
-  listProcessRows: async () => (process.platform === 'win32'
-    ? (await listCommandLinesWindows()).map((args) => ({ args }))
-    : listProcessRowsPosix()),
+  listCommandLines: async () => {
+    if (process.platform === 'win32') return listCommandLinesWindows();
+    if (process.platform === 'linux') return listProcessRowsFromProc().map((row) => row.args);
+    return listCommandLinesPosix();
+  },
+  listProcessRows: async () => {
+    if (process.platform === 'win32') return (await listCommandLinesWindows()).map((args) => ({ args }));
+    if (process.platform === 'linux') return listProcessRowsFromProc();
+    return listProcessRowsPosix();
+  },
 };
 
 export function installationLooksActive(installation: Pick<Installation, 'agent' | 'label'>, commandLines: string[]): boolean {
