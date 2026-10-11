@@ -62,3 +62,25 @@ describe('describeInstallationActivity', () => {
     expect(activeCheck.formatInUseDeferral('Claude@2.1.219', broken)).toContain('ps failed');
   });
 });
+
+describe('listProcessRowsFromProc', () => {
+  it('reads pid and full argv from a /proc tree without ps, and fails loud when /proc is unreadable', async () => {
+    const { activeCheck, store } = await load();
+    const proc = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-proc-'));
+    try {
+      const dir = store.getVersionDir('opencode', 'main');
+      fs.mkdirSync(path.join(proc, '4242'));
+      fs.writeFileSync(path.join(proc, '4242', 'cmdline'), `${dir}/node_modules/.bin/opencode\0run\0--model\0x\0`);
+      fs.mkdirSync(path.join(proc, '7'));
+      fs.writeFileSync(path.join(proc, '7', 'cmdline'), '');
+      fs.mkdirSync(path.join(proc, 'self'));
+      const rows = activeCheck.listProcessRowsFromProc(proc);
+      expect(rows).toEqual([{ pid: 4242, args: `${dir}/node_modules/.bin/opencode run --model x` }]);
+      expect(activeCheck.installationLooksActive({ agent: 'opencode', label: 'main' }, rows.map((r) => r.args))).toBe(true);
+      expect(activeCheck.installationLooksActive({ agent: 'opencode', label: '1.0.0' }, rows.map((r) => r.args))).toBe(false);
+      expect(() => activeCheck.listProcessRowsFromProc(path.join(proc, 'missing'))).toThrow(/could not read the process table/);
+    } finally {
+      fs.rmSync(proc, { recursive: true, force: true });
+    }
+  });
+});
