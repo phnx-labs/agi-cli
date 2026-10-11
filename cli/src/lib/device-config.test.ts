@@ -319,7 +319,7 @@ describe('validation', () => {
 
   it('stores the AGI Menu pin, tab, and milestone preferences as YAML lists and refuses malformed ones', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
-    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'secrets', 'projects', 'github', 'sessions', 'inbox']);
+    expect(getConfigValue('menubar.menu.tabOrder').spec.defaultValue).toEqual(['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox']);
     expect(getConfigValue('menubar.menu.hiddenTabs').spec.defaultValue).toEqual(['secrets']);
     expect(getConfigValue('menubar.menu.groupTicketsByMilestone').spec.defaultValue).toBe(false);
 
@@ -329,7 +329,7 @@ describe('validation', () => {
     setConfigValue('menubar.menu.groupTicketsByMilestone', true);
     expect(readCentral()).toMatch(/menubarMenuPinnedProjects:\n\s+- Rush\n/);
     expect(getConfigValue('menubar.menu.pinnedProjects').value).toEqual(['Rush', 'AGI Menu, legacy']);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'goals', 'sessions', 'inbox', 'secrets', 'github']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'goals', 'sessions', 'inbox', 'secrets', 'linear', 'github']);
     expect(getConfigValue('menubar.menu.hiddenTabs').value).toEqual(['inbox']);
     expect(getConfigValue('menubar.menu.groupTicketsByMilestone').value).toBe(true);
     setConfigValue('menubar.menu.pinnedProjects', []);
@@ -343,14 +343,14 @@ describe('validation', () => {
     expect(() => setConfigValue('menubar.menu.tabOrder', ['home', 'goals', 'sessions', 'inbox', 'projects', 'settings'])).toThrow(/exactly once/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['settings'])).toThrow(/"settings" is not one of/);
     expect(() => setConfigValue('menubar.menu.hiddenTabs', ['inbox', 'inbox'])).toThrow(/twice/);
-    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'secrets', 'github', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
+    expect(() => setConfigValue('menubar.menu.hiddenTabs', ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox', 'projects'])).toThrow(/every tab/);
     expect(() => setConfigValue('menubar.menu.groupTicketsByMilestone', 'on')).toThrow(/expects a boolean/);
   });
 
   it('reads a tab order saved before the Goals and Secrets tabs with both appended, as the menu resolves it (PHNX-4291, PHNX-4269)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'github']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github']);
 
     const central = readCentral().replace(
       /menubarMenuTabOrder:\n(\s+- \w+\n)+/,
@@ -358,7 +358,7 @@ describe('validation', () => {
     );
     expect(central).toContain('- calendar');
     writeCentral(central);
-    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals', 'secrets', 'github']);
+    expect(getConfigValue('menubar.menu.tabOrder').value).toEqual(['inbox', 'home', 'sessions', 'projects', 'goals', 'secrets', 'linear', 'github']);
   });
 
   it('stores what the GitHub tab hides as org logins or owner/repo slugs and refuses anything else (PHNX-4269)', async () => {
@@ -410,8 +410,13 @@ describe('validation', () => {
     expect(getConfigValue('menubar.menu.headlessPlacement').spec.defaultValue).toBe('auto');
   });
 
-  it('validates the Home session-updates and device-sort preferences', async () => {
+  it('validates the Sessions kind switches, Home session-updates and device-sort preferences', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
+    expect(getConfigValue('menubar.menu.showBrowserSessions').spec.defaultValue).toBe(true);
+    expect(getConfigValue('menubar.menu.showComputerSessions').spec.defaultValue).toBe(true);
+    setConfigValue('menubar.menu.showBrowserSessions', false);
+    expect(getConfigValue('menubar.menu.showBrowserSessions').value).toBe(false);
+    expect(() => setConfigValue('menubar.menu.showComputerSessions', 'off')).toThrow(/expects a boolean/);
     setConfigValue('menubar.menu.sessionUpdates', false);
     expect(getConfigValue('menubar.menu.sessionUpdates').value).toBe(false);
     expect(() => setConfigValue('menubar.menu.sessionUpdates', 'off')).toThrow(/expects a boolean/);
@@ -485,6 +490,8 @@ describe('listConfig', () => {
       'menubar.menu.projectScope',
       'menubar.menu.projectSort',
       'menubar.menu.sessionUpdates',
+      'menubar.menu.showBrowserSessions',
+      'menubar.menu.showComputerSessions',
       'menubar.menu.showPreviews',
       'menubar.menu.showPullRequests',
       'menubar.menu.tabOrder',

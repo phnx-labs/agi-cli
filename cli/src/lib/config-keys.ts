@@ -21,6 +21,8 @@ export const MENUBAR_MENU_PROPERTIES = [
   'ticketSort',
   'showPullRequests',
   'sessionUpdates',
+  'showBrowserSessions',
+  'showComputerSessions',
   'deviceSort',
   'headlessAgent',
   'headlessFallbackAgent',
