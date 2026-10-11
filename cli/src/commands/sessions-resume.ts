@@ -298,8 +298,8 @@ export async function sessionsResumeAction(
     const pending: typeof items = [];
     for (const it of items) {
       if (!it.project && it.session.project) {
-        const { editorFolderNamed, storageJsonFor, EDITOR_VARIANTS } = await import('../lib/terminal/backends/vscodium-agent.js');
-        const folder = editorFolderNamed(it.session.project, storageJsonFor(EDITOR_VARIANTS[0]));
+        const { editorFolderNamed, storageJsonFor, vscodiumAgentBackend } = await import('../lib/terminal/backends/vscodium-agent.js');
+        const folder = editorFolderNamed(it.session.project, storageJsonFor(vscodiumAgentBackend.variant));
         if (folder) Object.assign(it, { project: folder, cwd: fs.existsSync(it.cwd) && it.cwd !== process.cwd() ? it.cwd : folder });
       }
       if (!it.project) {

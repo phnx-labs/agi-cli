@@ -288,7 +288,7 @@ async function focusEditorTab(tab: ActiveSession): Promise<boolean> {
     }
   }
   console.log(
-    `Already open → tab "${sessionHeadline(tab) || tab.terminalId}" in ${variant.label} window "${path.basename(tab.workspaceDir!)}" (focus requested; /focus sends no confirmation).`,
+    `Sent focus to tab "${sessionHeadline(tab) || tab.terminalId}" in ${variant.label} window "${path.basename(tab.workspaceDir!)}". ${variant.label} does not confirm a focus.`,
   );
   return true;
 }

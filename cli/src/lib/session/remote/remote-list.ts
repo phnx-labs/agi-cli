@@ -21,6 +21,7 @@ import { terminalWidth } from '../../text/width.js';
 import { sanitizeForTerminal } from '../../redact.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { PEER_HOP_ENV } from '../../types.js';
+import { markAgentStarted } from '../../launch-log.js';
 
 export function remoteListCommand(forwardedArgs: string[], os?: string): string {
   if (remoteShellFor(os) === 'powershell') {
@@ -302,6 +303,8 @@ export async function runOnPeer(
   if (opts.tty) sshArgs.push('-tt');
   sshArgs.push(peer.target, remoteCmd);
 
+  // A TTY hop hands the launch to the peer, which reports its own failures.
+  if (opts.tty) markAgentStarted();
   const code = await spawnHop(sshArgs);
   if (code === null) {
     process.stderr.write(chalk.red(`Failed to reach ${machine}: ssh failed to launch\n`));

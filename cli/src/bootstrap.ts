@@ -829,9 +829,11 @@ const isReadOnlyUpdatePreview =
    passedArgs.find((arg) => !arg.startsWith('-')) === 'menubar' ||
    (passedArgs[0] === 'config' && passedArgs.includes('menubar.autoUpdate')));
 
-// A hop the CLI made for itself, or a tab that must open straight into the agent
-// (`--quiet`), says nothing unless it fails: everything goes to a per-launch log.
-const quietStart = isPeerHop() || passedArgs.includes('--quiet') || Boolean(process.env[LAUNCH_LOG_ENV]);
+// A command that launches an agent, on a hop the CLI made for itself or in a tab that
+// must open straight into the agent (`--quiet`), says nothing unless the launch fails:
+// everything goes to a per-launch log. Any other command keeps its own output.
+const quietStart = launchesAgent(passedArgs)
+  && (isPeerHop() || passedArgs.includes('--quiet') || Boolean(process.env[LAUNCH_LOG_ENV]));
 if (quietStart) startQuietLaunch(passedArgs);
 
 if (!isDocumentationRequest) {

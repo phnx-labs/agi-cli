@@ -153,8 +153,9 @@ export function focusTabSpecs(variant: EditorVariant, folder: string, terminalId
   return inFolderWindowSpecs(variant, folder, focusUri(variant.scheme, terminalId));
 }
 
-export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBackend {
+export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBackend & { variant: EditorVariant } {
   return {
+    variant,
     id: 'vscodium-agent',
     label: `${variant.label} agent`,
     isAvailable(ctx: EngineContext): boolean {
@@ -171,7 +172,7 @@ export function makeVscodiumAgentBackend(variant: EditorVariant): TerminalBacken
   };
 }
 
-export const vscodiumAgentBackend: TerminalBackend = makeVscodiumAgentBackend(EDITOR_VARIANTS[0]);
+export const vscodiumAgentBackend = makeVscodiumAgentBackend(EDITOR_VARIANTS[0]);
 
 // The extension's answer to a /spawn carrying `nonce`: it writes
 // ~/.swarmify/agents/spawn-acks/<nonce>.json once it opened the tab, focused the one
