@@ -1,5 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { extractTaskId } from './codex.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import { extractTaskId, CodexCloudProvider } from './codex.js';
+import { getShimsDir } from '../state.js';
+
+describe('CodexCloudProvider spawn failure', () => {
+  it('turns an unrunnable codex binary into a failed call, not an unhandled spawn error', async () => {
+    const shim = path.join(getShimsDir(), 'codex');
+    fs.mkdirSync(path.dirname(shim), { recursive: true });
+    fs.writeFileSync(shim, '#!/bin/sh\n', { mode: 0o644 });
+    try {
+      await expect(new CodexCloudProvider().status('task_x'))
+        .rejects.toThrow(/codex cloud status failed: could not run .*EACCES/);
+    } finally {
+      fs.rmSync(shim, { force: true });
+    }
+  });
+});
 
 describe('extractTaskId', () => {
   it('reads the id from JSON output', () => {

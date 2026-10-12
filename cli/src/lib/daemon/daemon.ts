@@ -1308,8 +1308,7 @@ function waitForPid(timeoutMs: number): number | null {
   while (Date.now() - start < timeoutMs) {
     const pid = readDaemonPid();
     if (pid) return pid;
-    const waitUntil = Date.now() + 200;
-    while (Date.now() < waitUntil) {}
+    sleepSync(200);
   }
   return readDaemonPid();
 }

@@ -44,6 +44,9 @@ function runCodex(args: string[], env?: Record<string, string>): Promise<{ stdou
     let stderr = '';
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString(); });
     proc.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+    proc.on('error', (err) => {
+      resolve({ stdout, stderr: `could not run ${bin}: ${err.message}`, code: 127 });
+    });
     proc.on('close', (code) => {
       resolve({ stdout, stderr, code: code ?? 1 });
     });
