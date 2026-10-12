@@ -121,6 +121,13 @@ error only mentions usage-window resets when a device was genuinely turned away
 for one. Check `tailscale status` for `relay "<region>"` on rows you expect to be
 direct; restoring a direct path removes the latency rather than masking it.
 
+When placement runs for a named harness, the sign-in probe (8 s budget) is
+proof of reachability too: a worker that answers it is eligible even if its
+load probe timed out, and ranks with unknown load (`mergePlacementSignal`,
+`teams/placement-probe.ts`). A short stall on the launching machine can push
+every load probe past 2.5 s at once. Before this, that stall alone refused the
+whole fleet while every worker was signed in and answering.
+
 Roles live in that device's tracked `devices/<name>/agents.yaml` `config.role`
 and travel with `agents repo push` / `pull`. Per-device files are
 conflict-free because each machine writes only its own folder; a role set

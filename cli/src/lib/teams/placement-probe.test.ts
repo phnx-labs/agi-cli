@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { probePoolSignals, clearPlacementSignalCache, SIGNAL_TTL_MS } from './placement-probe.js';
+import { probePoolSignals, clearPlacementSignalCache, mergePlacementSignal, SIGNAL_TTL_MS } from './placement-probe.js';
 
 describe('probePoolSignals — degrade + cache', () => {
   beforeEach(() => clearPlacementSignalCache());
@@ -25,5 +25,26 @@ describe('probePoolSignals — degrade + cache', () => {
     const first = await probePoolSignals(pool, 'claude', { now: 2_000 });
     const forced = await probePoolSignals(pool, 'claude', { now: 2_000, force: true });
     expect(forced).not.toBe(first);
+  });
+});
+
+describe('mergePlacementSignal', () => {
+  const timedOutStats = { host: 'm6', reachable: false, timedOut: true, fetchedAt: 0 };
+  const ready = { answered: true, installed: true, signedIn: true, pickerEligible: true };
+
+  it('a host that answered the ready probe is reachable even when its stats probe timed out', () => {
+    const signal = mergePlacementSignal(timedOutStats, ready);
+    expect(signal.reachable).toBe(true);
+    expect(signal.timedOut).toBeUndefined();
+    expect(signal.headroom).toBe('unknown');
+    expect(signal.signedIn).toBe(true);
+  });
+
+  it('keeps the stats timeout when the ready probe also got no answer', () => {
+    const signal = mergePlacementSignal(timedOutStats, {
+      answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined,
+    });
+    expect(signal.reachable).toBe(false);
+    expect(signal.timedOut).toBe(true);
   });
 });
