@@ -39,7 +39,7 @@ import { LOG_LEVELS, levelRank, parseLogLevel } from '../lib/daemon/diagnostics.
 import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
-import { parseDuration } from '../lib/hooks/cache.js';
+import { parseSince } from '../lib/hooks/cache.js';
 import { registerDaemonIndexCommand } from './daemon-index.js';
 
 
@@ -491,7 +491,7 @@ function runLogLevel(level: string | undefined, opts: { json?: boolean }): void 
 
 async function runLogs(opts: { lines?: string; follow?: boolean; level?: string; since?: string; json?: boolean }): Promise<void> {
   assertLogLevelOption(opts.level);
-  const sinceMs = opts.since ? Date.now() - (parseDuration(opts.since) ?? 0) * 1000 : undefined;
+  const sinceMs = opts.since ? parseSince(opts.since).getTime() : undefined;
   const lineCount = opts.lines ? parseInt(opts.lines, 10) : 50;
 
   if (opts.follow) {
@@ -872,7 +872,7 @@ export function registerDaemonCommand(program: Command): void {
     .option('-n, --lines <number>', 'Show this many recent lines', '50')
     .option('-f, --follow', 'Stream new lines as they are written (like tail -f)')
     .option('--level <level>', 'Minimum level to show: debug | info | warn | error')
-    .option('--since <dur>', 'Only lines newer than this (e.g. 1h, 30m)')
+    .option('--since <dur>', 'Only lines newer than this (e.g. 1h, 30m, 1w, or an ISO date)')
     .option('--json', 'Emit each line as JSON')
     .action(async (opts, command) => {
       const merged = command.optsWithGlobals();

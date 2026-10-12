@@ -6,6 +6,7 @@ import { getLogsPath, stats, rotate, type EventRecord, type EventType, type Even
 import { readUnifiedEvents } from '../lib/event-stream.js';
 import { parseFamilyList, EVENT_FAMILIES, type EventFamily } from '../lib/event-families.js';
 import { ingestBatch } from '../lib/events-ingest.js';
+import { parseSince } from '../lib/hooks/cache.js';
 import { setHelpSections } from '../lib/help.js';
 import { registerAuditCommands } from './audit.js';
 import { registerEventsLogsCommand } from './events-logs.js';
@@ -39,20 +40,6 @@ export interface EventsOptions {
   follow?: boolean;
   include?: string;
   exclude?: string;
-}
-
-function parseSince(s: string): Date {
-  const m = s.match(/^(\d+)([smhdw])$/);
-  if (m) {
-    const n = parseInt(m[1], 10);
-    const unitMs: Record<string, number> = {
-      s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000,
-    };
-    return new Date(Date.now() - n * unitMs[m[2]]);
-  }
-  const ms = Date.parse(s);
-  if (isNaN(ms)) throw new Error(`Invalid --since value: ${s} (use e.g. 2h, 7d, or an ISO date)`);
-  return new Date(ms);
 }
 
 function originLabel(r: EventRecord): string {

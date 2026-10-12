@@ -32,15 +32,24 @@ function parseShorthand(s: string): HookCacheConfig | null {
 export function parseDuration(d: number | string | undefined): number | null {
   if (d == null) return null;
   if (typeof d === 'number') return Number.isFinite(d) && d > 0 ? Math.floor(d) : null;
-  const m = d.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days)?$/i);
+  const m = d.trim().match(/^(\d+)\s*(s|sec|secs|m|min|mins|h|hr|hrs|d|day|days|w|wk|wks|week|weeks)?$/i);
   if (!m) return null;
   const value = parseInt(m[1], 10);
   if (!Number.isFinite(value) || value <= 0) return null;
   const unit = (m[2] || 's').toLowerCase();
+  if (unit.startsWith('w')) return value * 604800;
   if (unit.startsWith('d')) return value * 86400;
   if (unit.startsWith('h')) return value * 3600;
   if (unit.startsWith('m')) return value * 60;
   return value;
+}
+
+export function parseSince(raw: string): Date {
+  const seconds = parseDuration(raw);
+  if (seconds != null) return new Date(Date.now() - seconds * 1000);
+  const ms = Date.parse(raw);
+  if (Number.isNaN(ms)) throw new Error(`Invalid --since value: ${raw} (use e.g. 2h, 7d, 1w, or an ISO date)`);
+  return new Date(ms);
 }
 
 // Shim names become path segments; validation is the traversal boundary.
