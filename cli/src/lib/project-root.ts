@@ -41,8 +41,6 @@ export function homeRemainder(p: string): string | null {
 const FOREIGN_HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/;
 const WORKTREE_RE = /\/\.agents\/worktrees\/[^/]+(?:\/.*)?$/;
 
-// A path recorded on another box (`/home/<u>/...` on a Linux worker, `/Users/<u>/...` on
-// a Mac) names the same home-relative location here. Non-home absolute paths are left alone.
 export function localizeHome(p: string, home: string = HOME): string {
   if (p === home || p.startsWith(home + '/')) return p;
   return p.replace(FOREIGN_HOME_RE, home);

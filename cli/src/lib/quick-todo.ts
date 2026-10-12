@@ -227,7 +227,6 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
 }
 
 export interface ListOptions {
-  /** An agents project or Linear project name: list that project's open issues instead of your quick to-dos. */
   project?: string;
   defs?: readonly ProjectDef[];
 }
