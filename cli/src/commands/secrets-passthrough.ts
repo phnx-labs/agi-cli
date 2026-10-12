@@ -20,7 +20,7 @@ export async function rewriteDeviceToHost(argv: string[]): Promise<string[]> {
 export function registerSecretsCommands(program: Command): void {
   forwardsHelp(program
     .command('secrets')
-    .description('Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.')
+    .description('Named bundles of env variables — legacy passthrough to the standalone `secrets` CLI. Call `secrets` directly (`secrets --help`); install it with `agents setup secrets`.')
     .allowUnknownOption()
     .allowExcessArguments()
     .action(async () => {

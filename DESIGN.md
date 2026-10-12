@@ -107,7 +107,7 @@ The brand is **one lime on a near-black canvas.** `#a3e635` — confirmed on the
 
 ### Terminal (ANSI via chalk)
 
-The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output respects the user's own terminal theme. What's fixed is **meaning**, and the meaning is remarkably consistent across the codebase (usage counts from `src/`):
+The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output respects the user's own terminal theme. What's fixed is **meaning**, and the meaning is remarkably consistent across the codebase (usage counts from `cli/src/`):
 
 | Role | chalk color | Used for | Frequency |
 |---|---|---|---|
@@ -159,7 +159,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 Primary button: solid lime (`#a3e635`), near-black text (`#0a0a0a`), `4px` radius — the one call-to-action per view. Panels are `#141414` on `#0f0f0f` wells, hairlined in `#333333`; wordmark in JetBrains Mono, everything else in the system `ui-monospace` stack. Keep web chrome minimal — the landing sells the terminal, so it should read like one.
 
 ### Terminal
-- **Status line** — glyph + colored label + gray detail: `✓ Menu bar helper enabled.` then dim follow-up.
+- **Status line** — colored label (with a `✓`/`✗` glyph when it reports a check) + gray detail: `AGI Menu enabled.` then a gray `Look for the agents mark in your menu bar.`
 - **Spinner** — `ora` for any async step (installs, syncs, network); resolve it to a `green ✓` or `red ✗` line, never leave it spinning.
 - **Table** — `bold` UPPERCASE header row, `.padEnd()` columns, `cyan` names, `gray` metadata, status glyphs in the state column.
 - **Hint** — two-space-indented gray line with a `backtick` command, appended after an action so the user always knows the next move.

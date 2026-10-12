@@ -242,37 +242,37 @@ function configureTraceCommand(cmd: Command): Command {
 
   setHelpSections(cmd, {
     examples: `# Open one session's trajectory in a browser (a person at a terminal)
-agents sessions trace a1b2c3d4
+agents trace a1b2c3d4
 
-# The compact text trajectory an agent reads in-context
-agents sessions trace a1b2c3d4 --text
+# The compact text trajectory an agent reads in-context (standalone sessions CLI)
+sessions trace a1b2c3d4
 
 # Just the failures and their neighbours — for a triaging agent
-agents sessions trace a1b2c3d4 --text --errors-only
+sessions trace a1b2c3d4 --errors-only
 
 # What the agent said it was doing, step by step — the sidebar's timeline as text
-agents sessions trace a1b2c3d4 --steps
+agents trace a1b2c3d4 --steps
 
 # The stable JSON envelope for the AGI EXT Fleet panel or a tool
-agents sessions trace a1b2c3d4 --json
+agents trace a1b2c3d4 --json
 
 # Write the self-contained HTML to a file without opening it
-agents sessions trace a1b2c3d4 --html -o trace.html --no-open
+agents trace a1b2c3d4 --html -o trace.html --no-open
 
 # Two selectors — compare where a passing run and a failing one diverge
-agents sessions trace a1b2c3d4 e5f6a7b8
+agents trace a1b2c3d4 e5f6a7b8
 
 # The compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text
+agents trace a1b2c3d4 e5f6a7b8 --text
 
 # The team an orchestrator spawned, as a graph (one selector + --tree)
-agents sessions trace a1b2c3d4 --tree
+agents trace a1b2c3d4 --tree
 
 # The same lineage as an indented tree an agent can read
-agents sessions trace a1b2c3d4 --tree --text`,
+agents trace a1b2c3d4 --tree --text`,
     notes: `Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
 the compact text trajectory prints when piped or headless (an agent). The HTML is self-contained
-(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.
+(no CDN, no external asset) and redacted by default, as safe to share as a 'sessions share' page.
 
 One selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
 the first divergence point, and the step-level diff); one selector with --tree renders its lineage —

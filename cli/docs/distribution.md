@@ -20,7 +20,8 @@ name is the package version.
    it inherits that suite result; otherwise it runs the current bounded impact plan
    across every change since the newest retained tested ancestor. Before either path,
    it rejects every diff outside `cli/**`, `apps/cli/**`,
-   `packages/session-tracker/**`, and `scripts/ci-scope.ts` between that attested
+   `packages/session-tracker/**`, `scripts/ci-scope.ts`, and the root `CHANGELOG.md`
+   between that attested
    commit and the release head, including any `.github/**` change;
 2. runs `release-attestation-produce.sh` in inherit or impact mode, then binds the
    passing result to the exact release tree;

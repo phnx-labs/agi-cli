@@ -58,7 +58,7 @@ flowchart LR
 ```
 
 1. **Publish** (in agi-menu, on a Mac with the signing identity):
-   `agents secrets exec apple.com -- scripts/release.sh <x.y.z>`. Helper releases
+   `secrets exec apple.com -- scripts/release.sh <x.y.z>`. Helper releases
    are immutable — the script refuses an already-published tag.
 2. **Pin** (here): bump `menubar` in `src/lib/helper-versions.ts` to `<x.y.z>`.
    The tag makes the build downloadable; the floor is what makes a CLI ask for

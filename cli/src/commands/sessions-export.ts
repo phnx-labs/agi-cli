@@ -67,30 +67,30 @@ export function registerSessionsExportCommand(sessionsCmd: Command): void {
 
   setHelpSections(cmd, {
     examples: `# Bundle the last week of sessions to a file
-agents sessions export --since 7d -o week.bundle
+sessions export --since 7d -o week.bundle
 
 # Bundle two specific sessions
-agents sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
+sessions export 4f8a2b1c 9d3e7a55 -o pair.bundle
 
 # Encrypt + pipe straight into another machine over SSH
-agents sessions export --since 7d --stdout --encrypt | agents ssh boxB 'agents sessions import - --decrypt <key>'
+sessions export --since 7d --stdout --encrypt | agents ssh boxB 'sessions import - --decrypt <key>'
 
 # Back the last month up off-box (managed Phoenix store — no bucket to set up)
-agents sessions export --since 30d --to-r2
+sessions export --since 30d --to-r2
 
 # Or to your own r2.backups bucket (R2_SYNC_ENC_KEY keeps it zero-knowledge)
-agents sessions export --since 30d --to-r2 --byo`,
-    notes: `Selection uses the same flags as 'agents sessions' (--since, -n/--limit, --all,
+sessions export --since 30d --to-r2 --byo`,
+    notes: `Selection uses the same flags as 'sessions' (--since, -n/--limit, --all,
 -a/--agent, --no-redact). Bundles are self-describing NDJSON: a header line + one
 line per transcript file. Secrets are redacted by default. Dir-shaped sessions
-(Kimi) carry all their files. Restore with 'agents sessions import'.
+(Kimi) carry all their files. Restore with 'sessions import'.
 
 --to-r2 backs each session up off-box, one encrypted object per transcript keyed
 by machine/agent/session. When you are signed in ('agents auth login') it uploads
 to the MANAGED Phoenix store — no Cloudflare or r2.backups bucket to set up — and
 every body is sealed with a per-account key (mandatory; never plaintext). --byo
 forces your own r2.backups bucket instead; with R2_SYNC_ENC_KEY, neither Phoenix
-nor the storage provider can decrypt it. Restore with 'agents sessions import --from-r2'.`,
+nor the storage provider can decrypt it. Restore with 'sessions import --from-r2'.`,
   });
 
   cmd.action(async (selectors: string[], _options: unknown, command: Command) => {

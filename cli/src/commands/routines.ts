@@ -2152,7 +2152,7 @@ export function registerRoutinesCommands(program: Command): void {
 
   routinesCmd
     .command('stop')
-    .description('Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.')
+    .description('Stop only the scheduler service. The shared daemon and its other services (usage sync, session index, watchdog, and the rest) stay running.')
     .action(() => {
       const daemonRunning = isDaemonRunning();
       setDaemonServiceEnabled('scheduler', false);

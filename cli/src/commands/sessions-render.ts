@@ -98,15 +98,15 @@ export function registerSessionsRenderCommand(sessionsCmd: Command): void {
 
   setHelpSections(cmd, {
     examples: `# Render one redacted session for a confidential gist
-agents sessions render a1b2c3d4 -o session.md
+sessions render a1b2c3d4 -o session.md
 
 # Combine several sessions into one Markdown document
-agents sessions render a1b2c3d4 d4c3b2a1 -o delivery-sessions.md
+sessions render a1b2c3d4 d4c3b2a1 -o delivery-sessions.md
 
 # Keep reasoning locally in collapsible sections and opt out of redaction
-agents sessions render a1b2c3d4 --reasoning fold --no-redact`,
+sessions render a1b2c3d4 --reasoning fold --no-redact`,
     notes: `Markdown is redacted by default, including credential-shaped values and local home paths.
-The preview at the top is the same preview shown by 'agents sessions'. Tool output is truncated
+The preview at the top is the same preview shown by 'sessions preview'. Tool output is truncated
 with an explicit note. Use --no-redact only for local output that will not be shared.`,
   });
 

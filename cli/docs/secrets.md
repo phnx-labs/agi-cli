@@ -14,7 +14,7 @@ agents clis install secrets
 # or: agents setup secrets
 ```
 
-`agents secrets <anything>` is a thin exec passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to the installed binary. The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
+Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`). The legacy `agents secrets <anything>` spelling is a thin exec passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to the installed binary. The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
 
 Read `secrets-client.md` for the process-client architecture (the wire
 protocol, the sync/async transports, the environment contract). This page
@@ -51,9 +51,8 @@ modules:
   since `secrets` never drives anything but ssh). `secrets-passthrough.ts`
   (`rewriteDeviceToHost`) resolves the name against the fleet and rewrites the
   forwarded argv before exec; an explicit `--host` the caller already typed is
-  left untouched.
-- **Browser profile secrets.** `agents browser` resolves a profile's stored
-  credentials the same way — through the client, scoped by harness.
+  left untouched. Called directly, the standalone takes the address itself:
+  `secrets list --host <alias|user@host>`.
 - **Accounts.** `agents accounts` reads and writes provider/native credentials
   as secrets bundles (`account-registry.ts`, `claude-account-token.ts`), and
   the reserved per-harness stores (`__<harness>__`, plus the legacy `auth`
@@ -101,12 +100,14 @@ into the generic bucket, which used to send operators back to `claude
 setup-token` for a remedy that cannot work (#2987); a cache that has not been
 read yet reports the distinct `usage pending`.
 
-The one exception is a **foreground human `agents view` on a `personal` device**
-(`selfConfiguredDeviceRole() === 'personal'` **and** `process.stdout.isTTY`): the
+The one exception is a **foreground human `agents view` on a headed device**
+(`isHeadedDeviceRole(selfConfiguredDeviceRole())`, i.e. `personal` or `desktop`,
+**and** `process.stdout.isTTY`; `allowInteractiveUsageLogin` in
+`commands/view.ts`): the
 read falls through to the interactive OAuth login — the only credential
 carrying `user:profile` — so `agents view --refresh` repopulates a live session
 (5h) + week (7d) bar for every signed-in account. This mirrors the
-exec-credential role gate (EXEC-2a): the personal box authenticates from its
+exec-credential role gate (EXEC-2a): a headed box authenticates from its
 interactive login; unattended loops and machine readers never touch it. A
 usage read never *refreshes* an access token — an expired interactive login
 reports `expired-credential`, not a silent refresh.

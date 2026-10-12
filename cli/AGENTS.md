@@ -8,7 +8,7 @@ OpenCode, OpenClaw, Grok, Droid, …).
 > compact architecture, concepts, execution, and subsystem decision documents.
 
 This is the **internal architecture** map. The user-facing feature tour is
-[README.md](README.md) (pin versions, run, sessions, hosts, teams, workflows,
+[README.md](../README.md) (pin versions, run, sessions, devices, teams, workflows,
 plugins, browser, secrets, routines). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
@@ -54,8 +54,10 @@ command group, the managed share Worker, and the `lib/share/` engine were remove
 (PHNX-3992); publishing an HTML artifact now lives entirely in the standalone
 `artifacts` CLI (`@phnx-labs/artifacts-cli`), driven as `artifacts share …` /
 `artifacts auth login`, mirroring the secrets (PHNX-3989) and computer (PHNX-4075)
-extractions. What stays here is `agents sessions share <id>`, which renders the
-transcript locally and shells out to `artifacts share`.
+extractions. The standalone `sessions share <id>` publishes a transcript the same
+way; what stays here is the legacy `agents sessions share <id>`
+(`src/commands/sessions-share.ts`), which renders the transcript locally and
+shells out to `artifacts share`.
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
 composes the existing session watcher with feed attention, activity, and **tool
@@ -305,7 +307,7 @@ Two rules are not negotiable in a consumer or a future change:
 
 ### Session request + timeline on every row (PHNX-3939)
 
-Every session row — `agents sessions --active --json`, `sessions watch --json`,
+Every session row — `agents ps --json`, `agents sessions watch --json`,
 `feed watch --json`, history rows, and the fleet session mirror — carries three
 optional fields the AGI EXT sidebar renders directly:
 
@@ -371,7 +373,8 @@ command text when a call wrote no `description`, and `mirror.ts` publishes the
 resulting row into `~/.agents/devices/<device>/daemon-state.json`, which the
 usage-sync tick **sends to every fleet peer** over SSH — so an unscrubbed label is
 a credential copied onto every box (root `AGENTS.md` §Security). Note `sanitizeEvents` does NOT
-run on the fold's parse path (only `tail.ts` / `stream-render.ts` call it), so
+run on the fold's parse path (the reader's `tail` / `stream-render` modules and
+agents-cli's `session/glance-files.ts` call it), so
 nothing downstream may assume the events arrived pre-scrubbed.
 
 **The parser keeps the per-tool label every harness writes.** `SessionEvent`
@@ -385,7 +388,7 @@ reader, `parseCodexItemsContent` — deliberately NOT merged into
 `parseCodexContent`, because a rollout writes the same turn twice (measured:
 648 `custom_tool_call` + 60 `function_call` records AND 1,038 `CommandExecution`
 items in one file), so folding both would double-count every call for every
-consumer. `agents sessions trace <id> --steps` prints the same fold as text.
+consumer. `agents trace <id> --steps` prints the same fold as text.
 
 `extractSessionTopic` and `cleanFirstUserMessage` now consult **one** skip list,
 which is what stops a `/model` echo (`<local-command-stdout>`) or a skill body
@@ -414,7 +417,7 @@ deliberately **not** an association: a repo nobody registered would still invent
 project out of a folder name. `null` means Uncategorized — the row is still listed,
 it is just not filed under a project nobody bound it to. It is resolved on the
 device that owns the path (a definition root is a local path), and rides the live
-row, the history row, and `sessions --active --json`, so every consumer reads the
+row, the history row, and `agents ps --json`, so every consumer reads the
 same verdict. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
 beside `firstUserMessage`, and `deriveSessionRecap` classifies that raw turn —
 with the row's attachments in hand — rather than the already-collapsed `topic`.
@@ -540,7 +543,8 @@ channel:
   since a truncated id would 404), and every `TEAM-N` key the title or body *names*
   — not just the session's own `ticketId` — becomes
   `<https://linear.app/<ws>/issue/<KEY>|<KEY>>` in place
-  (`linearIssueKeys`/`LINEAR_KEY_DENYLIST` in `session/linear.ts`, the same
+  (`linearIssueKeys`/`LINEAR_KEY_DENYLIST` in the `@phnx-labs/sessions-cli/reader`
+  `linear` module, the same
   canonical detector `detectTicket` uses).
 - **iMessage / `command:` / desktop / the owner sink / every other channel →
   plain.** They cannot render a labeled link and a dumped naked URL reads as noise,
@@ -791,8 +795,8 @@ fixers or escalates to a human — there is no merge action); the teammate's own
 
 **An agent conversation from a session-capable harness MUST remain a session,
 whether launched interactively, headlessly, as a teammate, or by a routine.** A
-caller MUST preserve the harness transcript and make it discoverable by `agents
-sessions`; it MUST NOT replace or hide that conversation record with its own
+caller MUST preserve the harness transcript and make it discoverable by
+`sessions`; it MUST NOT replace or hide that conversation record with its own
 execution metadata. This applies to `SESSION_AGENTS`, not a harness such as Warp
 that exposes no local transcript. The indexed session row carries the relationship
 when the harness and launch path provide one:
@@ -818,8 +822,8 @@ Enforced by [`sessions-cli/src/lib/session/team-filter.test.ts`](https://github.
 
 Team-origin sessions are durable session rows but are excluded from the ordinary
 historical listing by default to keep an orchestrator's fan-out from flooding it;
-`agents sessions --teams` includes them, while live teammates appear in
-`agents sessions --active` with `context: teams`. That is a presentation filter,
+`sessions --teams` includes them, while live teammates appear in
+`agents ps` with `context: teams`. That is a presentation filter,
 never permission to omit the transcript from the session index.
 
 **Current routine-archive gap:** `readRoutineArchiveMeta` indexes Claude, Codex,
@@ -941,8 +945,8 @@ takes ~57 rows down to ~16, and the rules are unit-pinned in
   with the same `(device, agent, kind, severity, account, message)` into a single
   row carrying `versions`, rendered `claude (5 versions)`, and widens the
   remediation to the agent-wide sweep. Three exclusions, each because the widened
-  remediation would be wrong: **isolated copies** (`runFix` skips them, so the
-  sweep would leave one broken — the caller passes `isolatedVersions` from
+  remediation would be wrong: **isolated copies** (the agent-wide
+  `agents sync <agent>@all` sweep skips them, so it would leave one broken — the caller passes `isolatedVersions` from
   `isVersionIsolated`); **findings with no agent** (their `version` is a repo
   alias); and **logouts** (`NEVER_COLLAPSED`) — a login is inherently per-version,
   there is no `@all` for it, and dropping the version falls back to the bare
@@ -950,7 +954,7 @@ takes ~57 rows down to ~16, and the rules are unit-pinned in
 - **Orphans are one line per machine.** They are cleanup-only and
   `agents prune cleanup --all` fixes every version at once — **`--all` is load
   bearing**: without it cleanup sweeps only each agent's default version
-  (`commands/prune.ts:351`).
+  (`commands/prune.ts:298`).
 - **Duplicate version-home hooks are one line per (agent, severity).**
   `agents sync <agent>@all --yes` reconciles every copy at once, and a
   machine with five installed claudes otherwise emits two dozen identical rows.
@@ -991,12 +995,12 @@ logs back in with `agents accounts login <harness>#<name>` on a headed device**
 installations that still isolate a login per home — `--` forwards verbatim into
 that home. **Open the command definition and check arity, flags, and scope before
 writing a remediation string.** `agents sync <agent>` targets
-only the default/sole installed version (`commands/sync.ts:8`), so a row collapsed
+only the default/sole installed version (`commands/sync.ts:836`), so a row collapsed
 across versions uses the `@all` selector — `agents sync <agent>@all --yes`. A fleet
 resource gap is absent from that box's *central repos*, so the central-to-home
 `agents sync` cannot close it — and neither `agents repo pull` nor the sync
-umbrella touches the **system** repo (`commands/repo.ts:1186`,
-`lib/sync-umbrella.ts:104`), which moves with the npm package instead, so that row
+umbrella touches the **system** repo (`commands/repo.ts:1002`,
+`lib/sync-umbrella.ts:64`), which moves with the npm package instead, so that row
 names both paths rather than one command that quietly covers half the cases. A
 `repo-drift` row carries the repo alias (`user` / `system`) rather than hardcoding
 one.
@@ -1188,8 +1192,8 @@ marked `worker` folds peers' digests into its local `sessions` index as mirror
 rows. Only topic/label,
 a first-user-message snippet, last-activity, agent+version, cwd, ticket, and PR
 ride — never a transcript — and the mirror is bounded (200 recent sessions per
-box) and pruned by age (14 days). This is what lets the picker / `agents sessions`
-/ `focus` render a remote-host row's topic and preview INLINE (no per-row SSH),
+box) and pruned by age (14 days). This is what lets the session picker and
+`agents ps focus` render a remote-host row's topic and preview INLINE (no per-row SSH),
 and keep showing the last-synced preview when the peer is offline. Publish/consume
 + prune live in [`src/lib/session/mirror.ts`](src/lib/session/mirror.ts), the DB
 mirror writer/pruner in [`src/lib/session/db.ts`](src/lib/session/db.ts)
@@ -1255,7 +1259,7 @@ agents config set run.claude@2.1.45.model claude-opus-4-8
 agents config set run.claude@*.mode auto
 agents config set run.claude@*.effort high
 agents config set interactive.host zion
-agents browser use work
+agents config set browser.profile work
 agents config set auto.pool workers
 agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
@@ -1303,11 +1307,12 @@ registered agent id, validated at write time, unset = the menu's own default and
 name; `auto` is `agents run --device auto`, which already refuses a `personal` or
 `desktop` box). Four keys shape the Projects tab and the tab bar:
 `pinnedProjects` (project names pinned to the top, in pin order; default `[]`),
-`tabOrder` (every one of `home`, `goals`, `secrets`, `projects`, `sessions`, `inbox`
-exactly once; default in that order — an order saved before Goals or Secrets existed may
+`tabOrder` (every one of `home`, `goals`, `secrets`, `projects`, `github`, `sessions`,
+`inbox` exactly once; default in that order — an order saved before Goals, Secrets or
+GitHub existed may
 omit them, and every read resolves the stored list the way the menu's `TabLayout.resolve`
 does: unknown and repeated ids dropped, a missing tab appended in built-in order),
-`hiddenTabs` (any of those six but not all; default `["secrets"]`, so the Secrets tab
+`hiddenTabs` (any of those seven but not all; default `["secrets"]`, so the Secrets tab
 starts hidden), and
 `groupTicketsByMilestone` (default `false`, a flat ticket list). Two keys drive Goals
 (PHNX-4291): `homeGoals` (the goal levels Home shows — any of `company`, `week`,
@@ -1316,8 +1321,11 @@ starts hidden), and
 `menubar.menu.` prefix, parsed as section `statusbar`, listed in
 `MENUBAR_CONFIG_KEYS`). `prGroupOpen` and
 `prGroupMerged` (`none` | `type` | `day`; defaults `none` and `day`) group the PR board's
-open filters and its Merged filter. Settings is never in
-either tab list: it is always shown. The four list keys are `string-list` keys stored
+open filters and its Merged filter. Three keys shape the GitHub tab (PHNX-4269):
+`githubHidden` (org/account logins or `owner/repo` slugs it leaves out; default `[]`),
+`githubDrafts` and `githubBots` (show drafts, show bot-opened PRs; both default
+`false`). Settings is never in
+either tab list: it is always shown. The five list keys are `string-list` keys stored
 as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
 from a JSON array (`'["Rush","Ops, west"]'`, what the menu writes) or comma-separated
 items (what a person types), and the order, membership, and duplicate rules are
@@ -1330,7 +1338,7 @@ the list so the menu falls back to its own baked-in default (the defaults in
 `menubar.menu.*` and `menubar.statusbar.*` key → its effective value, i.e. the stored value or the registered
 default; `defaultProject` omitted when unset) so the menu consumes preferences from
 the snapshot it already polls rather than a second read path. That map is scalar-only:
-the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`) ride a separate
+the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`, `githubHidden`) ride a separate
 `menuListPreferences` map, because a shipped menu decodes `menuPreferences` values as
 string/number/bool and a single array would fail its whole snapshot decode. On macOS, a one-shot
 sentinel-gated migration (`menubar/migrate-prefs.ts`, run from the snapshot compute)
@@ -1392,7 +1400,7 @@ dispatcher exports `AGENTS_REMOTE_INTERACTIVE=1` (`REMOTE_INTERACTIVE_ENV`,
 refused (`undurable`) rather than started as something a blink would kill.
 
 `--no-tmux`, `--raw`, and `AGENTS_NO_TMUX=1` remain per-run opt-outs and beat the
-durability rule too, so the escape hatch keeps working over `--device`. The gate
+forced wrap too, so the escape hatch keeps working over `--device`. The gate
 is `resolveTmuxWrap` ([`src/lib/exec.ts`](src/lib/exec.ts)) — three outcomes
 (`wrap` / `bare` / `undurable`), reading `isTmuxEnabled()` and the marker.
 
@@ -1529,14 +1537,13 @@ every box's account labels) has no path to recur.
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
 `agents repo push/pull`, and answers "which device shows me artifacts?" It is
-intentionally not a per-device key. To see it in the per-device view, use
-`agents devices config <name> --inherited`.
+intentionally not a per-device key. Read it with
+`agents config get interactive.host`.
 
-Two older spellings still work but are deprecated and print a warning pointing
+One older spelling still works but is deprecated and prints a warning pointing
 at the replacement:
 
 - `agents models tier` → `agents config set run.<agent@version>.tier.<tier>`
-- `agents browser profiles set-default` → `agents browser use <name>`
 
 `agents devices set-interactive` and `agents devices configure` are gone:
 `agents config set interactive.host <name>` and `agents config set
@@ -1558,18 +1565,18 @@ Antigravity CLI, Grok CLI, OpenCode — features target these six first.
 | Harness | `id` | hooks | mcp | allowlist | skills | commands | plugins | subagents | workflows |
 |---|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
 | ★ Claude Code | `claude` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| ★ Codex CLI | `codex` | ≥0.116 | ✓ | — | ✓ | <0.117 | ≥0.128 | ≥0.117 | — |
+| ★ Codex CLI | `codex` | ≥0.116 | ✓ | ≥0.138 | ✓ | <0.117 | ≥0.128 | ≥0.117 | — |
 | ★ Kimi CLI | `kimi` | ✓ | ✓ | ✓ | ✓ | — | ✓ | ≥0.29.0 | ✓ |
 | ★ Antigravity CLI | `antigravity` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥1.0.16 | ≥1.0.6 |
 | ★ Grok CLI | `grok` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥0.2.111 |
-| ★ OpenCode | `opencode` | ≥0.3.130 | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | — | — |
+| ★ OpenCode | `opencode` | ≥0.3.130 | ✓ | ≥1.1.1 | ✓ | ✓ | ✓ | ✓ | — |
 | Cursor | `cursor` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥2026.1.22 | — |
 | OpenClaw | `openclaw` | — | ✓ | ✓ | ✓ | — | ✓ | ✓ | ✓ |
 | Copilot | `copilot` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ≥0.0.353 | — |
 | Amp | `amp` | — | ✓ | — | ✓ | ✓ | — | — | — |
-| Goose | `goose` | ≥1.34 | ✓ | — | ≥1.25 | — | ✓ | — | ✓ |
+| Goose | `goose` | ≥1.34 | ✓ | — | ≥1.25 | ✓ | ✓ | ✓ | ✓ |
 | Droid | `droid` | ✓ | ✓ | ≥0.57.5 | ≥0.26 | ✓ | ✓ | ✓ | — |
-| Hermes | `hermes` | ≥0.11 | ✓ | — | ✓ | — | — | — | — |
+| Hermes | `hermes` | ≥0.11 | ✓ | ✓ | ✓ | — | ✓ | — | — |
 | Muse Code | `muse` | ✓ | ✓ | — | ✓ | — | ✓ | — | — |
 | Warp Agent CLI | `warp` | — | ✓ | — | ✓ | — | — | — | — |
 
@@ -1642,7 +1649,7 @@ src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
                        #   ps.ts + ps-roster.ts: `agents ps`, the live roster (gatherActiveSessions/renderActiveSessions)
-                       #   and the stop/focus/detach/migrate verbs; `sessions --active` calls the same runLiveRoster (PHNX-4227)
+                       #   and the stop/focus/detach/migrate verbs; the legacy `agents sessions --active` calls the same runLiveRoster (PHNX-4227)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
@@ -1657,21 +1664,21 @@ src/
     browser/           # `agents browser` CONSUMER of the standalone `browser` engine (@phnx-labs/browser-cli, PHNX-4101):
                        #   context.ts (the fd-3 JSON handed to the engine — the --device target resolved against the fleet,
                        #   session identity, remote-control consent). The engine keeps its own action history, so agents-cli
-                       #   opens no events pipe. `agents browser sessions` is the engine's own picker, and the feed reads its `--json` (PHNX-4227).
+                       #   opens no events pipe. `agents browser sessions` forwards to the engine's own `browser sessions` picker, and the feed reads its `--json` (PHNX-4227).
                        #   The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
                        #   store, the task index AND the whole remote SSH path live in the engine. The subprocess client is
                        #   `lib/browser-client.ts` (fd-3 context only, no fallback), mirroring `computer-client.ts`.
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
     project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
-    session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents insights resources` (also `agents sessions stats`) + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias) — including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by `bash-command.ts`'s `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
+    session/           # session discovery, index writer and live identity (the parse/render reader is `@phnx-labs/sessions-cli/reader`, see the note below); also `migrate-targets.ts` (the `agents ps migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents insights resources` + `agents daemon index backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key). The cached multi-harness friction/correction/automation facets behind `agents insights` come from the reader's `insights` module (`@phnx-labs/sessions-cli/reader`), including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by its `bash-command` module's `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --device;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
-    cloud/             # Provider registry (Rush / Codex / Factory / Antigravity)
+    cloud/             # Provider registry (Rush / Codex / Factory / Antigravity / Cursor / host)
     teams/             # `agents teams` orchestration
     computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
                        #   policy.ts (permissions → the allow-list file), context.ts (the fd-3 JSON handed to
                        #   the engine, incl. the --device target resolved against the fleet), record.ts (fd-4
-                       #   action events → `computer.action` feed events). `agents computer sessions` is the engine's own picker. The
+                       #   action events → `computer.action` feed events). `agents computer sessions` forwards to the engine's own `computer sessions` picker. The
                        #   daemons, RPC, RFB/VNC, the model loop AND the whole remote path — Windows
                        #   provisioning, the helper token, the ssh -L tunnel — live in the engine.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
@@ -1693,16 +1700,19 @@ tool-call index; searching it is the standalone `sessions --include tools`, PHNX
 `remote*`, `projection.ts`, `session-cache.ts`), CLI/fleet selector resolution
 (`selection.ts`), and `migrate-targets.ts`. `sync/`
 (the off-box backup client and the managed Worker template) is still a copy of
-sessions-cli's `./backup` module and goes once that export is published.
+sessions-cli's `./backup` module; the pinned `@phnx-labs/sessions-cli` 0.7.0
+already publishes that export, but nothing here imports it yet.
 Read queries (`agents sessions <query> [--json]`) exec the `sessions` bin from the
 `@phnx-labs/sessions-cli` dependency (`src/index.ts`, `lib/sessions-client.ts`);
 when no bin resolves they fail loud, with no in-process read. The
 live-session **writer** is a separate package,
-[`packages/session-tracker`](../../packages/session-tracker) — different data,
+[`packages/session-tracker`](../packages/session-tracker) — different data,
 different consumer; see its AGENTS.md.
 
 ### `agents sessions` preview architecture (map before you touch it)
 
+This maps agents-cli's own legacy `agents sessions` UI; users browse and read
+transcripts with the standalone `sessions` CLI and the live roster with `agents ps`.
 The interactive UI is three picker variants in `src/lib/picker.ts`: `itemPicker`
 (single-select, `space` toggles preview), `dynamicPicker` (async data source, used
 by the session browser, `tab` toggles preview), and a multi-select variant. All
@@ -1723,7 +1733,7 @@ re-derives its own ordering. `generatedTitle` is produced ONCE per session by th
 daemon's `session-title` service with a cheap model and persisted in
 `sessions.generated_title` beside the hash of the user text it came from, so a
 titled session never costs another model call and re-titles only when that first
-user message changes (or on `agents sessions backfill titles --refresh`). It
+user message changes (or on `agents daemon index backfill titles --refresh`). It
 rides the existing streams — the watch row spread and the PHNX-3792 session
 mirror — so remote rows show the same title with no per-row SSH and no client
 generates one itself.
@@ -1800,10 +1810,10 @@ quietly resumed in `process.cwd()` (RUSH-2022, PHNX-3481).
 `sessionOwnerDevice`
 ([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one
 answer to "may this resume run here?". Every path that starts a harness from a picked
-row consults it first: `agents sessions resume` and the `agents sessions` picker hop to the
-owner. The batch
+row consults it first: the legacy `agents sessions resume` and the `agents sessions` picker hop to the
+owner (the user spellings are `agents ps focus <id>` and `agents run auto --resume <id>`). The batch
 `sessions resume` mostly inherits it for free: every TAB it opens runs the
-canonical `agents sessions resume <id>` (`lib/session/resume-command.ts`), whose docblock
+`agents sessions resume <id>` argv from `lib/session/resume-command.ts`, whose docblock
 already promised source-device routing — this is what makes that true. Its
 no-tab-backend path (`inplace`, which any Linux box in a plain ssh shell lands on)
 never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
@@ -1825,7 +1835,7 @@ The hop uses `runOnPeer` ([`src/lib/session/remote/remote-list.ts`](src/lib/sess
 not the `--device` passthrough. Two reasons: the passthrough re-discovers locally and
 dead-ends for a session that exists only on the peer, and it marks the run
 `AGENTS_FLEET_REMOTE` — a one-shot command may carry that consent marker, but a
-resumed session would inherit it for its whole life and `agents browser start` inside
+resumed session would inherit it for its whole life and `browser start` inside
 it would be refused as a cross-machine drive.
 
 The signal is only as good as what wrote it: `machine` on a host-dispatched run is
@@ -1878,7 +1888,7 @@ bun install && bun run build && bun test
 
 Tests are `*.test.ts` next to source; integration in `tests/`. Every PR to `main`
 runs the real suite cheaply on Linux — `test`
-([`../../.github/workflows/tests.yml`](../../.github/workflows/tests.yml)) plus
+([`../.github/workflows/tests.yml`](../.github/workflows/tests.yml)) plus
 `gitleaks`; those two are the required checks. The full cross-platform matrix
 (ubuntu + macOS + Windows × Node 22/24, `ci.yml`) runs **nightly** plus manual
 `workflow_dispatch` — deliberately **off** the release path. It used to fire on
@@ -1900,14 +1910,14 @@ catalog — none of which needs a live browser or a Windows runner.
 **Local dev build:** `scripts/install.sh --skip-tests` builds the working tree,
 installs it at `$HOME/.local/agents-cli-dev/`, and exposes it as
 `$HOME/.local/bin/agents-dev` (plus `ag-dev`). Drive it by name — `agents-dev
-sessions --active`. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
+ps`. Version stamps as `0.0.0-dev.<sha>[-dirty]`.
 
 The production command is never created or overwritten: the script must not write
 `$HOME/.local/bin/{agents,ag,browser}`, and it deletes any such link an older
 revision of itself left pointing into the dev prefix (including a dangling one,
 which is what a cleaned dev prefix leaves behind). A dev build that answered to
 `agents` made PATH order decide which code ran — see the root
-[AGENTS.md](../../AGENTS.md) §Never install a dev build over the user's `agents`.
+[AGENTS.md](../AGENTS.md) §Never install a dev build over the user's `agents`.
 
 The routines daemon is **shared** (scheduler, feed stream, session/usage sync,
 and more), so the install leaves it on production code. `--bounce-daemon`
@@ -1922,9 +1932,10 @@ every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball fi
 mode and does NOT auto-chmod — 644 surfaces as `zsh: permission denied: agents`.
 
 The `files` allowlist in [`package.json`](package.json) is a **whitelist** — only
-`dist/**` (JS/d.ts/JSON/sh) and the postinstall scripts + README/LICENSE ship. No native
+`dist/**` (JS/d.ts/JSON/sh), `scripts/postinstall.js`, and CHANGELOG/README/LICENSE
+ship (`prepack` copies the repo-root README in). No native
 binary is in it (RUSH-3100).
-Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarball.
+Nothing from sibling `packages/` can leak into the tarball.
 
 ## Releasing
 
@@ -2065,7 +2076,8 @@ whose `cli/**` executable inputs, `packages/session-tracker/**`, and
 commit's parent. It keeps the release branch on fresh `origin/main`, then asks
 `release-attestation-produce.sh --inherit-suite-from` to re-bind that proof. The
 publisher first rejects every change from the selected attested commit through the
-release head that falls outside `cli/**`, `apps/cli/**`,
+release head that falls outside `cli/**`, `apps/cli/**` (the CLI's path
+before it moved to `cli/`, kept so older attested ancestors still compare),
 `packages/session-tracker/**`, or `scripts/ci-scope.ts`; this includes `.github/**`
 and the publishing workflow itself. The derive command then fails closed if any CLI
 source, dependency, packaged session-tracker, policy, or other non-release metadata
@@ -2149,19 +2161,20 @@ published menu-bar helper** (`scripts/stage-menubar-helper.sh`, no build — see
 below); its `--device <name>` selects the signing Mac independently of the npm
 release workflow.
 
-**Provisioning the `apple.com` bundle on a headless sign host.** A Linux-driven
-release offloads macOS signing to a sign host over SSH, which needs the `apple.com`
-secrets bundle *on that host*. Push it with the **file backend** —
-`agents secrets export apple.com --device <signer> --remote-backend file` (**no
-passphrase required** — the remote keys it under a machine-local key it
-auto-provisions and reads it headlessly; `AGENTS_SECRETS_PASSPHRASE` is never
-forwarded) — **not** the default
+**Provisioning the `apple.com` bundle on a headless sign host.**
+`scripts/remote-sign-mac.sh` signs on a Mac over SSH with
+`agents secrets exec apple.com`, so that Mac needs the `apple.com` secrets bundle
+*on that host*. Push it with the standalone engine's **file backend** —
+`secrets export apple.com --host <signer> --remote-backend file` (**no
+passphrase required**: the remote keys it under a machine-local key and reads it
+headlessly; `SECRETS_PASSPHRASE` is never forwarded) — **not** the default
 keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
-the bundle metadata but no readable secret items (`secrets export --device` now
-read-back-verifies a keychain push and fails loudly if it didn't persist, pointing
-at this fix). `--device` / `-D` is the fleet routing flag (legacy `--host` is stripped but not registered) on the secrets remote
-commands. See [`docs/secrets.md`](docs/secrets.md) → *Pushing to a headless sign host*.
+the bundle metadata but no readable secret items (the engine read-back-verifies a
+keychain push and fails loudly if it did not persist). The standalone takes
+`--host`; `agents secrets … --device <name>` rewrites `--device` to `--host`
+before exec. See [`docs/secrets.md`](docs/secrets.md) for what agents-cli still
+owns.
 
 **Why the tarball no longer needs a Mac (RUSH-3100).** It used to bundle
 `dist/lib/secrets/Agents CLI.app` — a `swiftc`-compiled keychain helper, Developer-ID
@@ -2348,7 +2361,7 @@ Bumping it would un-deprecate a retired package.
 - Real services only — no mocking. Tests exercise the actual critical path.
 - `agents repo push` / `pull` operates on `~/.agents/` only. System updates ride
   `npm update -g @phnx-labs/agents-cli`.
-- No sensitive data in any DotAgents repo — use `agents secrets` (Keychain-backed).
+- No sensitive data in any DotAgents repo — use the standalone `secrets` CLI (Keychain-backed).
 
 ## Contracts (source-of-truth spec — read before touching sessions/secrets)
 
@@ -2359,7 +2372,7 @@ deviating from an unwritten contract. When code and the spec disagree, one is a
 bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementing
 `file:line`, and carries Given/When/Then scenarios that map to tests. Sections:
 
-- **[`docs/specifications.md` §Sessions](docs/specifications.md#sessions)** — the `agents sessions`
+- **[`docs/specifications.md` §Sessions](docs/specifications.md#sessions)** — the sessions
   contract. Load-bearing invariants: discovery MUST parse **every** harness in
   `SESSION_AGENTS` (all 12) and a malformed line MUST be skipped, never thrown
   (SES-1, SES-3); every list row MUST show a **non-empty preview** — live turn →
@@ -2371,10 +2384,10 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   clauses match distinct calls, tool queries never parse transcripts, and exact
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
-  (SES-31..SES-37, SES-IF-4a); `agents sessions insights` emits aggregate-only
-  actions and keeps `agents insights` as its top-level alias (SES-IF-4c); `agents insights resources` (older spelling `agents sessions stats`) emits its own versioned
+  (SES-31..SES-37, SES-IF-4a); `agents insights` (also reachable as `agents sessions insights`) emits aggregate-only
+  actions (SES-IF-4c); `agents insights resources` (older spelling `agents sessions stats`) emits its own versioned
   `sessions-stats` rollup of skill/command usage and never the list/detail shape
-  (SES-IF-4b); `agents sessions
+  (SES-IF-4b); `sessions
   export --encrypt` seals every transcript
   body client-side with AES-256-GCM under the shared `r2.backups` bundle key, or
   an ephemeral one when unconfigured (SES-24, SES-25); the off-box backup target
@@ -2383,7 +2396,7 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   bucket to set up**, every body sealed under a mandatory per-account escrowed DEK
   (never plaintext), while `--byo` keeps the zero-knowledge own-bucket path
   (SES-50, SES-51, SES-52).
-- **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the `agents secrets`
+- **[`docs/specifications.md` §Secrets](docs/specifications.md#secrets)** — the secrets
   contract. Load-bearing invariants: **inject into the child, never materialize
   to the agent** — every command is on one side of the boundary by construction
   (SEC-6, SEC-7); the master passphrase MUST be stripped from the child env
@@ -2399,8 +2412,8 @@ carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 
 Beyond the two above, the document also specifies **§Agent execution**,
 **§Scheduling & execution singularity**, and **§Watchdog**. It does **not** cover
-every command group — `hosts`, `teams`, and `cloud` have design docs but zero
-RFC-2119 requirements, and surfaces like `wallet` and `sync`/`apply`
+every command group — `teams` and `cloud` have design docs but zero
+RFC-2119 requirements, and surfaces like `sync`, `feed`, and `send`
 have neither. The
 [coverage inventory](docs/specifications.md#coverage-inventory) says which row a
 surface sits in; check it before treating a behavior as guaranteed.

@@ -608,7 +608,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '--secrets <bundle>',
-      'Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `agents secrets`.',
+      'Inject a secrets bundle (repeatable). Values resolve from macOS Keychain at run time. See `secrets --help`.',
       (val: string, prev: string[]) => [...prev, val],
       []
     )
@@ -652,7 +652,7 @@ export function registerRunCommand(program: Command): void {
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',
-      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
+      "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents ps` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
     )
     .option('--verbose', 'Show detailed execution logs')
     .option('--raw', 'Keep this interactive run direct when the device has opted into tmux wrapping. A no-op under the default tmux-off configuration; equivalent to AGENTS_NO_TMUX=1.')
@@ -896,15 +896,15 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
       Fallback: --fallback codex,antigravity retries on rate-limit failure via /continue handoff. Each entry accepts @version.
 
       Cloud placement: --cloud sends the run to the agent's native vendor cloud
-        (claude→rush, codex→codex, droid→factory, antigravity→antigravity) — the
+        (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity) — the
         same dispatch as agents cloud run --agent <agent>, tracked by agents
         cloud list/status/logs/cancel/message. --provider overrides the routing;
         --repo/--branch/--cloud-env refine the task. Agents without a native
-        cloud (kimi, grok, cursor, opencode, …) fail loud unless --provider is
+        cloud (kimi, grok, opencode, …) fail loud unless --provider is
         given. --cloud is mutually exclusive with --device/--lease and with
         local-run flags (--loop, --resume, --secrets, --terminal, …).
 
-      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. agents sessions resume <id> infers the harness too. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.
+      Resume: --resume <id> resolves full IDs locally first, then fleet-wide, and recovers on the source device with its cwd/mode. Resume preserves the conversation account and uses the installed binary; starting a new conversation from archived context requires an explicit choice. With auto as the agent (agents run auto --resume <id>) the harness is inferred from the session; a named agent must match it. A bare --resume opens the session picker for the last 30 days of this project (up to 200 rows); --all widens it to every directory and lifts the 30d window, --teams adds team-spawned sessions, --since <time> and -n/--limit <n> set the window and row cap. These four only filter the picker: they are refused next to --resume <id> or without --resume.
 
       Passthrough: everything after -- is forwarded verbatim to the underlying agent CLI.
         agents run kimi -- --plan --some-native-flag value

@@ -18,7 +18,7 @@ const BROWSER_HELP_GROUPS = [
 ] as const;
 
 export const BROWSER_PASSTHROUGH_VERBS: ReadonlyArray<{ name: string; description: string }> = [
-  { name: 'use', description: 'Pick the profile `agents browser start` uses when no --profile is passed' },
+  { name: 'use', description: 'Pick the profile `browser start` uses when no --profile is passed' },
   { name: 'start', description: 'Start a browser task — --profile/--url/--record/--title, and --device <name> to bind a remote box' },
   { name: 'done', description: 'Complete a task and close its tabs (resolves from caller identity when --task is omitted)' },
   { name: 'status', description: 'Show browser service state and running browser tasks' },
@@ -114,41 +114,41 @@ function registerPassthroughVerbs(program: Command): void {
 export function registerBrowserCommand(program: Command): void {
   const browser = program
     .command('browser')
-    .description('Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box');
+    .description('Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture. Legacy passthrough: call the standalone `browser` CLI directly');
 
   registerPassthroughVerbs(browser);
   registerCommandGroups(browser, BROWSER_HELP_GROUPS);
   setHelpSections(browser, {
     examples: `
       # One-time: install the engine, then pick a profile
-      npm i -g @phnx-labs/browser-cli
-      agents browser profiles create work --browser chromium
-      agents browser use work
+      agents clis install browser
+      browser profiles create work --browser chromium
+      browser use work
 
       # Start a task, drive it, capture, close
-      agents browser start --profile work
-      agents browser navigate https://example.com
-      agents browser screenshot -o /tmp/shot.png
-      agents browser done
+      browser start --profile work
+      browser navigate https://example.com
+      browser screenshot -o /tmp/shot.png
+      browser done
 
       # A remote box over the fleet (device bound at start)
-      agents browser start --device box --profile work
-      agents browser navigate https://example.com
-      agents browser done
+      browser start --device box --profile work
+      browser navigate https://example.com
+      browser done
     `,
     notes: `
-      The engine is the standalone \`browser\` CLI (npm i -g @phnx-labs/browser-cli);
-      agents-cli supplies --device fleet resolution, remote-control consent, and the
-      agent-session link on the feed. Per-verb flags are the engine's — \`agents browser
-      screenshot --help\` asks it directly.
+      The engine is the standalone \`browser\` CLI (npm i -g @phnx-labs/browser-cli), and
+      it is the canonical spelling: every verb here forwards to it unchanged, adding
+      only fleet --device resolution, remote-control consent, and the agent-session
+      link on the feed. Per-verb flags are the engine's — \`browser screenshot --help\`.
 
       \`--device\` is bound once at \`start\`; page verbs run against the task's bound
       device. \`--device local\` forces this machine.
 
-      Another fleet machine may drive this browser only after \`agents browser
+      Another fleet machine may drive this browser only after \`browser
       remote-control on\` here (device-local, never synced; default off).
 
-      \`agents browser sessions\` is the engine's own task and capture history
+      \`browser sessions\` is the engine's own task and capture history
       (\`browser sessions --help\`); the feed stream reads the same rows.
     `,
   });

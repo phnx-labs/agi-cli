@@ -55,7 +55,7 @@ list unless `--provider` is given. Both surfaces call the shared dispatch core
 (`executeCloudDispatch` in `src/lib/cloud/dispatch.ts` via
 `src/commands/run-cloud.ts`), so tracking, streaming, and the budget
 kill-switch are identical to `agents cloud run`. See
-[concepts.md#placement](concepts.md#placement) for the placement model.
+[concepts.md](concepts.md#devices-placement-and-projects) for the placement model.
 
 ### Pre-provisioned targets (env / computer)
 
@@ -96,7 +96,7 @@ CLI (agents cloud run ...)
   │    reads cloud.default_provider  from ~/.agents/agents.yaml
   │    returns CloudProvider impl
   │
-  ├─ provider.dispatch(options)      rush.ts | codex.ts | cursor.ts | factory.ts
+  ├─ provider.dispatch(options)      rush.ts | codex.ts | cursor.ts | factory.ts | antigravity.ts | host.ts
   │    POST to remote API
   │    returns CloudTask { id, status, ... }
   │
@@ -136,14 +136,23 @@ agents cloud providers
 |---|---|
 | `--provider <id>` | Cloud backend: `rush`, `codex`, `cursor`, `factory`, `antigravity`, `host` |
 | `--agent <name>` | Agent to run; native cloud routing includes `claude`, `codex`, `cursor`, `droid`, and `antigravity` |
-| `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Rush Cloud only) |
+| `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Rush or Cursor Cloud) |
 | `--branch <name>` | Target git branch |
+| `--on <event>` | Register the run as a trigger-bound routine instead of dispatching now: `pull_request` (`pr`), `push`, `issue_comment`, `workflow_run` |
+| `--action <name>` / `--label <name>` | GitHub webhook action / label filter for `--on` triggers |
+| `--name <name>` | Routine name to register under (with `--on`) |
 | `-p, --prompt <text>` | Inline prompt (alternative to positional argument) |
 | `--timeout <duration>` | Kill after duration (e.g., `30m`, `2h`) |
 | `--model <model>` | Model override |
 | `--env <id>` | Codex Cloud environment ID |
 | `--computer <name>` | Factory/Droid computer target |
+| `--device <name>` | One of your machines as the target (registered device, capability tag, or `user@host`); implies `--provider host` |
+| `--remote-cwd <dir>` | Working directory on the device (`--provider host` only) |
+| `--any` | With a capability-tag `--device`, pick any matching device instead of erroring |
+| `--autonomy <level>` | Factory/Droid autonomy: `low`, `medium`, `high` (default `high`) |
 | `--mode <mode>` | Execution mode (`plan`, `edit`, `full`) |
+| `--image <path>` | Attach an image (`.png`/`.jpg`/`.webp`); repeatable, up to 5 (Rush Cloud only) |
+| `--skill <id>` | Ride-along skill by id (or `id@version`); repeatable (Rush Cloud only) |
 | `-b, --balanced` | Shortcut for `--strategy balanced` |
 | `--strategy <strategy>` | Account selection strategy for factory: `balanced` — rotates across all healthy accounts on rate-limit |
 | `--json` | Structured JSON output |
@@ -204,6 +213,7 @@ Six providers, including the `host` machine backend, are registered at startup (
 | `factory` | Factory (Droid) | Droid Computer (`--computer`) via relay SSH + `droid exec` | No |
 | `antigravity` | Antigravity (Gemini) | Gemini Managed Agents remote sandbox | No — raw sandbox, no repo → PR |
 | `cursor` | Cursor Cloud Agents | Cursor-hosted agent with optional GitHub repos | Yes — up to the API limit |
+| `host` | Host (your machines) | One of your own devices (`--device`, `--remote-cwd`) | No |
 
 The default provider is read from `cloud.default_provider` in
 `~/.agents/agents.yaml`. If unset, it falls back to `rush`. Note that an
@@ -218,14 +228,15 @@ Computers) or register a machine with `droid computer register`.
 
 **Antigravity (Gemini).** Talks to the Interactions API
 (`POST /v1beta/interactions`, agent `antigravity-preview-05-2026`). The Gemini
-API key comes from an `agents secrets` bundle named in
+API key comes from a `secrets` bundle named in
 `cloud.providers.antigravity.secretsBundle` (or `GEMINI_API_KEY` /
 `GOOGLE_API_KEY` in the env). It is a raw sandbox — no GitHub repo → PR; pass a
 repo and it routes you to `--provider rush` instead.
 
 **Cursor.** Talks directly to `https://api.cursor.com/v1`; it does not invoke
 `cursor-agent --cloud`. The API key comes from `CURSOR_API_KEY` in the
-`agents secrets` bundle named by `cloud.providers.cursor.secretsBundle`.
+`secrets` bundle named by `cloud.providers.cursor.secretsBundle` (or
+`CURSOR_API_KEY` in the env).
 Free-plan keys fail with a paid-plan requirement instead of a generic auth error.
 
 ### Provider configuration (`~/.agents/agents.yaml`)
@@ -241,18 +252,18 @@ cloud:
       computer: linux-vm-1   # default Droid Computer name
       autonomy: high         # droid exec --auto level (low|medium|high; default high)
     antigravity:
-      secretsBundle: gemini.com   # agents secrets bundle holding GEMINI_API_KEY
+      secretsBundle: gemini.com   # secrets bundle holding GEMINI_API_KEY
       # model: antigravity-preview-05-2026   # optional managed-agent override
     cursor:
-      secretsBundle: cursor    # agents secrets bundle holding CURSOR_API_KEY
+      secretsBundle: cursor    # secrets bundle holding CURSOR_API_KEY
 ```
 
-Rush Cloud uses the session token injected by `agents` — no separate config
-key is needed.
+Rush Cloud reads the session token from `~/.rush/user.yaml` (written by
+`rush login`); no separate config key is needed.
 
 ## Task Lifecycle
 
-Task status values (from `src/lib/cloud/types.ts:19-27`):
+Task status values (from `src/lib/cloud/types.ts:6-14`):
 
 ```
 queued
@@ -279,7 +290,8 @@ states (`completed`, `failed`, `cancelled`) which cannot re-enter `running`.
 
 `agents cloud logs` and the post-dispatch follow mode consume a Server-Sent
 Events stream decoded into typed `CloudEvent` values
-(`src/lib/cloud/stream.ts:16-57`):
+(the `CloudEvent` union in `src/lib/cloud/types.ts`, decoded by
+`src/lib/cloud/stream.ts`):
 
 | Event type | Content |
 |---|---|
@@ -344,7 +356,7 @@ agents cloud list
 # Filter by provider and status
 agents cloud list --provider rush --status running
 
-# Machine-readable (used by the observability layer)
+# Machine-readable
 agents cloud list --json
 ```
 
@@ -382,27 +394,25 @@ agents cloud run "benchmark three JSON parsers and report the fastest" --agent a
 
 ## Budget Guardrails
 
-Cloud dispatches **inherit the local project's budget caps** (see
-[docs/observability.md](./observability.md#budget-guardrails-agents-budget)).
-Before a run is POSTed, its estimated cost is projected onto current spend;
-under `on_exceed: block`, a dispatch that would breach a cap is **refused
-client-side** with a `[budget] BLOCKED cloud dispatch …` error — the run never
-starts. The target repo slug is the project attribution key, so caps span every
-agent dispatched against that repo.
+Cloud dispatches use the same `budget:` caps as local runs (`per_run`,
+`per_day`, `per_project`, `per_agent`, `on_exceed`), read from the `agents.yaml`
+files walking up from the current directory and from `~/.agents/agents.yaml`
+(`src/lib/budget/config.ts`). The target repo slug is the project
+attribution key, so caps span every agent dispatched against that repo.
 
-Cloud budgeting is **pre-flight only** in v1: the client-side estimate blocks a
-dispatch before it is POSTed, but agents-cli does **not** apply its own live
-mid-run hard-cap kill to a running cloud task — once a task starts on the
-provider, the provider's own controls govern it. The agents-cli live mid-run
-kill applies to local headless `agents run` today; a live cloud kill is a
-planned follow-up.
-
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/cloud.mp4"></video>
+- **Pre-flight (Rush Cloud only).** Before a Rush dispatch is POSTed, its
+  estimated cost is projected onto current spend; under `on_exceed: block`
+  (the default), a dispatch that would breach a cap is **refused client-side**
+  with a `[budget] BLOCKED cloud dispatch …` error and never starts
+  (`src/lib/cloud/rush.ts`).
+- **Live (while following).** When `agents cloud run` streams the task (no
+  `--no-follow`), `usage` events feed a live spend watcher; on the first
+  breach the CLI cancels the task through the provider, prints
+  `[budget] cap … exceeded — cancelled cloud task <id>`, and exits 7
+  (`src/lib/budget/live-cloud.ts`). A task dispatched with `--no-follow` is
+  governed only by the provider's own controls once it starts.
 
 ## See Also
 
 - [docs/concepts.md](./concepts.md) — DotAgents repos, resource kinds, `agents.yaml` structure
-- [docs/observability.md](./observability.md) — `agents cloud list --json` as a fleet observability source
 - [docs/teams.md](./teams.md) — use `--cloud rush|codex|factory` on `agents teams add` to dispatch cloud teammates from a DAG

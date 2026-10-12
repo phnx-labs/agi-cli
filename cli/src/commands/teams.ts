@@ -1298,7 +1298,7 @@ export function registerTeamsCommands(program: Command): void {
     `,
     notes: `
       A team is a named group of agents working in the background on a shared task.
-      Teammate sessions show in 'agents sessions --teams' tagged [team/name · mode].
+      Teammate sessions show in 'sessions --teams' tagged [team/name · mode].
 
       Teammate syntax:
         'claude'           the default Claude version on this machine

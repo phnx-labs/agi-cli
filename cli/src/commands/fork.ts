@@ -35,16 +35,16 @@ function defaultDeps(): ForkDeps {
 const FORK_HELP = {
   examples: `
     # Fork a session by (partial) id — launches a same-harness sibling seeded with a recap
-    agents sessions fork 4f3a9c21
+    agents fork 4f3a9c21
 
     # Name the fork's session label
-    agents sessions fork 4f3a9c21 --name "try redis instead"
+    agents fork 4f3a9c21 --name "try redis instead"
 
     # Place the sibling on a fleet worker instead of here
-    agents sessions fork 4f3a9c21 --device auto
+    agents fork 4f3a9c21 --device auto
 
     # Open the sibling in a fresh terminal tab where you work
-    agents sessions fork 4f3a9c21 --terminal
+    agents fork 4f3a9c21 --terminal
   `,
   notes: `
     - 'resume' continues the SAME conversation; 'fork' launches a NEW same-harness
@@ -133,7 +133,7 @@ export function registerSessionsForkCommand(sessionsCmd: Command): void {
 export function registerForkCommand(program: Command): void {
   const cmd = program
     .command('fork <session>', { hidden: true })
-    .description('Alias for `agents sessions fork` — branch a session into a new same-harness sibling.')
+    .description('Branch a session into a new same-harness sibling, seeded with a recap so it continues the work (also `agents sessions fork`).')
     .option('--name <label>', 'Session label for the fork (default: "fork of <original>")')
     .option('--device <host>', 'Place the sibling on a fleet device (name or "auto"); defaults to here')
     .option('--terminal [backend]', 'Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place');

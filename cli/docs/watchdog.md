@@ -94,7 +94,7 @@ precedence `tmux > iterm > vscodium`, then injected by `injectIntoTerminal`
 (`lib/terminal/inject.ts`). VSCodium/Cursor/VS Code integrated terminals are addressed via
 the extension's `/inject` URI handler. When no addressable split exists the tick falls back
 to a mailbox enqueue or a headless `--resume`, and refuses (flags for the menu-bar) only
-when nothing can reach the session. `agents sessions inject` shares this same resolver, so
+when nothing can reach the session. `agents send --channel session` shares this same resolver, so
 the manual unblock path and the watchdog agree.
 
 **Confirmed delivery.** A nudge counts as landed — booked in the cooldown ledger and logged
@@ -117,7 +117,7 @@ capped account. The tick routes it to the **rotate** path instead:
    time-of-day form).
 2. **Gate (first-party).** Before touching the terminal, the tick runs the *same*
    selection `agents run auto` would — `collectHarnessCandidates` +
-   `pickHarnessWeighted` (`lib/rotate.ts`, cache-only; no `agents view` subprocess, no
+   `pickHarnessWeighted` (`lib/accounting/rotate.ts`, cache-only; no `agents view` subprocess, no
    Keychain probe). Zero healthy → ONE `rotate` skip event per cooldown window in
    `watchdog.log` (cooldown = `earliestResetAcross` from the candidates, else the parsed
    tail reset, else 30m) and the terminal is left untouched.
@@ -163,9 +163,10 @@ full id or prefix.
 
 ## Fleet model
 
-The watchdog reads the **whole fleet** (`agents sessions --active --json` fans out to every
-device, status computed on each origin host) but delivers **locally** on each session's
-origin box, where injection is reliable. Enable it per host with
+Each box's watchdog reads only its **own** live sessions (`loadWatchdogSessions` in
+`lib/watchdog/service.ts`, a local-only gather with no fleet fan-out) and delivers
+**locally**, where injection is reliable. A session is watched by the daemon on the box it
+runs on, so watch a fleet by enabling it on each host with
 `agents watchdog enable|disable`; this writes the device-local `watchdog.enabled` setting under
 `~/.agents/devices/<hostname>/agents.yaml`. The menu bar only renders the daemon's
 persisted result and never executes a pass.
@@ -179,7 +180,8 @@ persisted result and never executes a pass.
 
 | File | Role |
 |---|---|
-| `lib/daemon/daemon.ts` | Sole automatic scheduler: one non-overlapping pass every three minutes. |
+| `lib/daemon/watchdog-service.ts` | Sole automatic scheduler (registered by `lib/daemon/daemon.ts`): one non-overlapping pass every three minutes. |
+| `lib/watchdog/service.ts` | `runWatchdogPass` and `loadWatchdogSessions`: the pass the daemon and `agents watchdog --nudge` share. |
 | `lib/watchdog/runner.ts` | One tick: enumerate → classify → decide (batched agent) → deliver (confirmed) → log. |
 | `lib/watchdog/watchdog-agent.ts` | The agent decider: batches every idle candidate into ONE `agents run --mode plan` call, maps verdicts by terminalId. |
 | `lib/watchdog/watchdog.ts` | `WATCHDOG_SYSTEM_PROMPT`, playbook composition, prompt render, response parse. |
@@ -187,7 +189,7 @@ persisted result and never executes a pass.
 | `lib/watchdog/watchdogTail.ts` | Summarize a tail into last-user / last-assistant for the brain + log. |
 | `lib/watchdog/rotate.ts` | In-place rotate: limit detection, exit-sequence table, state machine, health gate. |
 | `lib/watchdog/log.ts`, `history.ts` | Persist, parse, and safely select the Watchdog audit history. |
-| `commands/watchdog.ts` | `agents watchdog` — timestamped attention view, `--verbose`, `on`/`off`/`status`/`history`/`policy`/`--nudge`/`--watch`. |
+| `commands/watchdog.ts` | `agents watchdog` — timestamped attention view, `--verbose`, `enable`/`disable`/`rotate`/`status`/`history`/`policy`/`--nudge`/`--watch`. |
 | `sessions-cli/src/lib/session/state.ts`, `lib/session/active.ts` | Status inference (`working`/`waiting_input`/`idle`) the watchdog reads. |
 | `lib/terminal/resolve.ts`, `inject.ts` | Resolve the exact split and deliver the nudge. |
 
