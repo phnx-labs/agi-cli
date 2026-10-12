@@ -209,12 +209,22 @@ describe('account auth transition notification', () => {
     try {
       const { addNativeAccount } = await import('../account-registry.js');
       const { setConfiguredDeviceRole } = await import('../device-config.js');
+      const { updateMeta } = await import('../state.js');
       const created = addNativeAccount('socials-row', 'grok', 'grok:user=row:org=row', 'social@getrush.ai', 'version');
+      const portable = addNativeAccount('portable-row', 'claude', 'claude:org=portable', 'p@example.com', 'version');
+      updateMeta((meta) => ({ ...meta, accounts: { ...meta.accounts, native: {
+        ...meta.accounts?.native,
+        [created.id]: { ...meta.accounts!.native![created.id]!, provisioning: 'per-device',
+          workerCredential: { bundle: '__x', key: 'K', kind: 'api-key', mintedAt: '2026-10-12T00:00:00Z' } as never },
+      } } }));
       const file = path.join(root, 'devices', 'account-row-device', 'daemon-state.json');
       setConfiguredDeviceRole('account-row-device', 'personal');
       await publishAccountDaemonStateRows([], root);
       const headed = JSON.parse(fs.readFileSync(file, 'utf-8'));
-      expect(headed.accounts.native.map((r: { id: string }) => r.id)).toContain(created.id);
+      const ids = headed.accounts.native.map((r: { id: string }) => r.id);
+      expect(ids).toContain(created.id);
+      expect(ids).not.toContain(portable.id);
+      expect(headed.accounts.native.find((r: { id: string }) => r.id === created.id).workerCredential).toBeUndefined();
       setConfiguredDeviceRole('account-row-device', 'worker');
       await publishAccountDaemonStateRows([], root);
       expect(JSON.parse(fs.readFileSync(file, 'utf-8')).accounts.native).toBeUndefined();

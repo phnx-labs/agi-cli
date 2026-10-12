@@ -14,6 +14,7 @@ import { withFileLockAsync } from '../fs-atomic.js';
 import { machineId } from '../machine-id.js';
 import { getConfigValueAsync, isHeadedDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
+import { peerAccountRow, PEER_ACCOUNT_ROW_LIMIT } from '../account-registry.js';
 
 export const USAGE_STATE_TICK_MS = 60_000;
 export const AUTH_STATE_TICK_MS = 3 * 60_000;
@@ -134,7 +135,10 @@ export async function publishAccountDaemonStateRows(
     checkedAt: new Date(row.health.checkedAt).toISOString(),
   }));
   const native = headed
-    ? Object.values(readMeta().accounts?.native ?? {}).filter((account) => account.scope === 'version')
+    ? Object.values(readMeta().accounts?.native ?? {})
+      .filter((account) => account.scope === 'version' && account.provisioning === 'per-device')
+      .slice(0, PEER_ACCOUNT_ROW_LIMIT)
+      .map(peerAccountRow)
     : undefined;
   await withFileLockAsync(file, async () => {
     const raw = await fsp.readFile(file, 'utf-8');
