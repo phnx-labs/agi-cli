@@ -78,7 +78,6 @@ const GRAPHQL = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-graph
 };
 const OPEN = 'graphql acme/mono';
 const ndjson = (rows: readonly unknown[]) => rows.map((r) => JSON.stringify(r)).join('\n');
-/** A bare open-PR node: no checks, mergeability not yet computed. */
 const prNode = (number: number, sha: string, extra: Record<string, unknown> = {}) => ({
   number, title: `PR ${number}`, url: `https://github.com/acme/mono/pull/${number}`, isDraft: false,
   state: 'OPEN', createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', body: '',
@@ -215,6 +214,26 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(envelope.partial).toBe(true);
     expect(envelope.repositories[0]).toMatchObject({ pullRequests: [] });
     expect(envelope.repositories[0].error).toMatch(/rate limit|Command failed/);
+  });
+
+  it('asks GitHub for open PRs newest-created first, the order the REST list returned', async () => {
+    let query = '';
+    const { gh } = recordedGh({ ...soloRoutes(), [OPEN]: (args) => {
+      query = args.find((a) => a.startsWith('query=')) ?? '';
+      return ndjson([prNode(2, 'h2'), prNode(1, 'h1')]);
+    } });
+    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(query).toContain('orderBy: {field: CREATED_AT, direction: DESC}');
+    expect(repo.pullRequests.map((pr) => pr.number)).toEqual([2, 1]);
+  });
+
+  it('past 100 check contexts the CI state is GitHub\'s own rollup, so a later failing check is not lost', () => {
+    const passing = Array.from({ length: 100 }, (_, i) => ({ __typename: 'CheckRun', name: `c${i}`, status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: '' }));
+    const rollup = (hasNextPage: boolean) => prNode(7, 'h7', { commits: { nodes: [{ commit: { statusCheckRollup: {
+      state: 'FAILURE', contexts: { pageInfo: { hasNextPage }, nodes: passing },
+    } } }] } });
+    expect(prFromNode(rollup(true)).pr.ciState).toBe('FAILURE');
+    expect(prFromNode(rollup(false)).pr.ciState).toBe('SUCCESS');
   });
 
   it('maps a GraphQL node to the REST shape: bot suffix, lowercased merge state, check run over a same-named status', () => {

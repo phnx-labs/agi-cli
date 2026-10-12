@@ -605,7 +605,14 @@ take 97.9 s and 39 CPU-seconds. The rule above targets poll loops and per-item
 GraphQL calls; a bounded read that removes a per-item REST fan-out spends less of
 both budgets. GitHub computes `mergeable` lazily, so a cold read can report
 `UNKNOWN` (null here) until the next one, exactly as the REST `pulls/{n}` read did.
-Merged-PR and default-branch checks still use the cached REST rollup.
+The tradeoff: when the GraphQL budget is exhausted the list itself fails, so that
+repository (or owner) reads empty with `error` set and the envelope `partial`,
+where the REST list kept the PRs and only lost CI. AGI Menu keeps its last good read
+on disk and shows it with its age in that case. The list asks newest-created first,
+the REST order, and a PR with more than 100 check contexts takes GitHub's own
+rollup `state` so a later failing check is not lost. AGI Menu reads at most once a
+minute while a tab showing PRs is open: 2 to 6 points per read. Merged-PR and
+default-branch checks still use the cached REST rollup.
 
 The `agents projects prs` write verbs follow the same budget rule
 ([`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts), documented in

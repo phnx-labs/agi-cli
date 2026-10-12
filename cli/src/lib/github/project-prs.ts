@@ -155,16 +155,13 @@ export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
   };
 }
 
-// One GraphQL page carries 100 PRs with their merge state and check rollup for
-// 2 points, where the per-PR REST reads it replaced cost three requests and three
-// gh processes for each PR.
 export const PR_NODE_FIELDS = `
   number title url isDraft state createdAt updatedAt body
   author { __typename login avatarUrl }
   repository { nameWithOwner }
   headRefName baseRefName headRefOid mergeable mergeStateStatus
   autoMergeRequest { enabledBy { login } mergeMethod }
-  commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+  commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { pageInfo { hasNextPage } nodes {
     __typename
     ... on CheckRun { name status conclusion detailsUrl }
     ... on StatusContext { context state targetUrl }
@@ -172,7 +169,7 @@ export const PR_NODE_FIELDS = `
 
 const OPEN_PRS_QUERY = `query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 100, after: $endCursor) {
+    pullRequests(states: OPEN, first: 100, after: $endCursor, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes { ${PR_NODE_FIELDS} }
     }
@@ -196,14 +193,15 @@ function rollupFromContexts(contexts: Array<Record<string, unknown>>): RollupIte
   return [...byName.values()];
 }
 
-/** A `PR_NODE_FIELDS` node as the REST-shaped `ProjectPr`, CI folded in, with its repository's slug. */
 export function prFromNode(node: Record<string, unknown>): { slug: string; pr: ProjectPr } {
   const rec = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
   const author = rec(node.author);
   const auto = isRecord(node.autoMergeRequest) ? node.autoMergeRequest : null;
   const commits = rec(node.commits).nodes;
   const commit = rec(rec(Array.isArray(commits) ? commits[0] : null).commit);
-  const contexts = rec(rec(commit.statusCheckRollup).contexts).nodes;
+  const rollup = rec(commit.statusCheckRollup);
+  const contexts = rec(rollup.contexts).nodes;
+  const truncated = rec(rec(rollup.contexts).pageInfo).hasNextPage === true;
   const pr = rowToProjectPr({
     ...node,
     login: `${author.login ?? ''}${author.__typename === 'Bot' ? '[bot]' : ''}`,
@@ -214,7 +212,9 @@ export function prFromNode(node: Record<string, unknown>): { slug: string; pr: P
     autoMerge: auto ? { enabledBy: rec(auto.enabledBy).login ?? '', method: String(auto.mergeMethod ?? '').toLowerCase() } : null,
   });
   const items = rollupFromContexts(Array.isArray(contexts) ? contexts.filter(isRecord) : []);
-  return { slug: String(rec(node.repository).nameWithOwner ?? ''), pr: { ...pr, ...ciFromRollupItems(items) } };
+  const ci = { ...ciFromRollupItems(items) };
+  if (truncated && typeof rollup.state === 'string') ci.ciState = rollup.state as CiState;
+  return { slug: String(rec(node.repository).nameWithOwner ?? ''), pr: { ...pr, ...ci } };
 }
 
 export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<ProjectPr[]> {
