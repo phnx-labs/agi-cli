@@ -8,7 +8,7 @@ import {
   DEFAULT_SESSIONS_BUCKET_NAME,
   DEFAULT_SESSIONS_DOMAIN,
   DEFAULT_SESSIONS_WORKER_NAME,
-} from '../lib/session/sync/managed-config.js';
+} from '@phnx-labs/sessions-cli/backup';
 import { setHelpSections } from '../lib/help.js';
 
 interface BackupSetupOptions {

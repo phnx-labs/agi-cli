@@ -41,6 +41,8 @@ import { mapBounded } from '../concurrency.js';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { viewingInLabel } from './viewing-in.js';
 import { claudeProjectDirName } from '../project-key.js';
+import { gatherRemoteActive, NO_FANOUT_ENV } from './remote-active.js';
+import { hostToken, remoteHostsToDial, shouldIncludeLocal } from './remote-list.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1881,4 +1883,107 @@ export function dedupeBySession(sessions: ActiveSession[]): ActiveSession[] {
     }
   }
   return out;
+}
+
+export function dedupeByMachineSession(sessions: ActiveSession[], answered: readonly string[]): ActiveSession[] {
+  const heard = new Set(answered.map(normalizeHost));
+  const seen = new Map<string, number>();
+  const out: ActiveSession[] = [];
+  for (const s of sessions) {
+    if (!s.sessionId) { out.push(s); continue; }
+    const key = `${s.machine ?? ''}:${s.sessionId}`;
+    const at = seen.get(key);
+    if (at === undefined) {
+      seen.set(key, out.length);
+      out.push(s);
+      continue;
+    }
+    if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
+  }
+  return out.filter(s => !(s.sessionId && s.offloadedFrom && s.context !== 'teams' && s.machine && heard.has(normalizeHost(s.machine))));
+}
+
+export function filterActiveSessionsByHostScope(
+  sessions: ActiveSession[],
+  hosts: string[] | undefined,
+  self: string,
+): ActiveSession[] {
+  if (!hosts || hosts.length === 0) return sessions;
+  const wanted = new Set(hosts.map(hostToken));
+  return sessions.filter((s) => wanted.has(s.machine ?? self));
+}
+
+export async function gatherActiveSessions(
+  opts: { local?: boolean; hosts?: string[]; forceRefresh?: boolean } = {},
+): Promise<{
+  sessions: ActiveSession[];
+  remoteDeviceCount: number;
+  remoteSkipped?: string[];
+  remoteDiscoveryFailed?: boolean;
+}> {
+  const forceRefresh = opts.forceRefresh === true
+    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1'
+    || process.env[NO_FANOUT_ENV] === '1';
+  const scoped = (opts.hosts?.length ?? 0) > 0;
+
+  if (opts.local && !scoped) {
+    const { loadLocalActiveSessions } = await import('./session-cache.js');
+    const loaded = await loadLocalActiveSessions({ forceRefresh });
+
+    const self = machineId();
+    for (const s of loaded.sessions) if (!s.machine) s.machine = self;
+    return { sessions: loaded.sessions, remoteDeviceCount: 0 };
+  }
+
+  if (!opts.local && !scoped) {
+    const { loadFleetActiveSessions } = await import('./session-cache.js');
+    const loaded = await loadFleetActiveSessions({
+      forceRefresh,
+      gather: () => gatherActiveSessionsLive({ local: false }),
+    });
+    return {
+      sessions: loaded.sessions,
+      remoteDeviceCount: loaded.remoteDeviceCount,
+      remoteSkipped: loaded.remoteSkipped,
+      remoteDiscoveryFailed: loaded.remoteDiscoveryFailed,
+    };
+  }
+
+  return gatherActiveSessionsLive(opts);
+}
+
+async function gatherActiveSessionsLive(
+  opts: { local?: boolean; hosts?: string[] } = {},
+): Promise<{
+  sessions: ActiveSession[];
+  remoteDeviceCount: number;
+  remoteSkipped: string[];
+  remoteDiscoveryFailed: boolean;
+}> {
+  const self = machineId();
+  const local = shouldIncludeLocal(opts.hosts, self)
+    ? await getActiveSessions({ localOnly: opts.local })
+    : [];
+  for (const s of local) if (!s.machine) s.machine = self;
+
+  let remoteDeviceCount = 0;
+  let remoteSkipped: string[] = [];
+  let remoteDiscoveryFailed = false;
+  let merged = local;
+  if (!opts.local) {
+    const remoteHosts = remoteHostsToDial(opts.hosts, self);
+    if (!opts.hosts?.length || (remoteHosts && remoteHosts.length > 0)) {
+      const remote = await gatherRemoteActive(remoteHosts);
+      remoteDeviceCount = remote.deviceCount;
+      remoteSkipped = remote.skipped;
+      remoteDiscoveryFailed = remote.discoveryFailed;
+      merged = dedupeByMachineSession([...local, ...remote.sessions], remote.answered);
+    }
+  }
+  return {
+    sessions: filterActiveSessionsByHostScope(merged, opts.hosts, self),
+    remoteDeviceCount,
+    remoteSkipped,
+    remoteDiscoveryFailed,
+  };
 }

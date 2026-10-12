@@ -1,6 +1,6 @@
 
 import { describe, it, expect } from 'vitest';
-import { filterActiveSessionsByHostScope } from '../ps-roster.js';
+import { filterActiveSessionsByHostScope } from '../../lib/session/active.js';
 import { shouldIncludeLocal, remoteHostsToDial } from '../../lib/session/remote-list.js';
 import type { ActiveSession } from '../../lib/session/active.js';
 

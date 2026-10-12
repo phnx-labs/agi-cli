@@ -1672,7 +1672,7 @@ re-probes to confirm it took. Run it once per fleet worker
 src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
-                       #   ps.ts + ps-roster.ts: `agents ps`, the live roster (gatherActiveSessions/renderActiveSessions)
+                       #   ps.ts + ps-roster.ts: `agents ps`, the live roster (renderActiveSessions over lib/session/active.ts gatherActiveSessions)
                        #   and the stop/focus/detach/migrate/preview/watch verbs (PHNX-4227)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
@@ -1715,8 +1715,9 @@ tool-call index; searching it is the standalone `sessions --include tools`, PHNX
 `tool-store.ts`, `timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`,
 `discover.ts`, `pid-registry.ts`, `recovery.ts`, `mirror.ts`, `presence.ts`, `watch.ts`,
 `remote*`, `projection.ts`, `session-cache.ts`), CLI/fleet selector resolution
-(`selection.ts`), and `migrate-targets.ts`. `sync/` keeps only the managed
-session-backup Worker template and its provisioning (`agents setup session-backup`);
+(`selection.ts`), and `migrate-targets.ts`. `sync/` keeps only the provisioning of
+the managed session-backup Worker (`agents setup session-backup`); the Worker script
+and its `DEFAULT_SESSIONS_*` names come from `@phnx-labs/sessions-cli/backup`, and
 the backup client itself is the standalone `sessions export --to-r2` / `import --from-r2`.
 Transcript reads are the standalone `sessions` CLI; agents-cli runs its bin
 (`lib/sessions-client.ts`) only for its own surfaces (`agents events logs`, the

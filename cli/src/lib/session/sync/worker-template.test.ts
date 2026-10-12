@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { renderSessionsWorkerScript } from './worker-template.js';
+import { renderSessionsWorkerScript } from '@phnx-labs/sessions-cli/backup';
 
 
 describe('renderSessionsWorkerScript', () => {

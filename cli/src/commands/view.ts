@@ -15,7 +15,6 @@ import {
   getAllCliStates,
   getUnmanagedCliState,
   getAccountInfo,
-  credentialPresence,
   resolveAgentName,
   formatAgentError,
   agentLabel,
@@ -25,7 +24,6 @@ import type { AccountInfo, CliState } from '../lib/agents.js';
 import { ambientClaudeToken, loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import { machineId } from '../lib/machine-id.js';
-import { authCacheKey, readAuthHealthCache } from '../lib/auth-health.js';
 import {
   deriveUsageStatusFromSnapshot,
   formatUsageSection,
@@ -34,7 +32,6 @@ import {
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
-  usageErrorForDisplay,
   viewUsageSummaryOptions,
 } from '../lib/accounting/usage.js';
 import { OVERVIEW_MAX_USAGE_WINDOWS } from '../lib/account-catalog.js';
@@ -68,22 +65,22 @@ import { resolveVersionFilter, AgentSpecError } from '../lib/agent-spec/index.js
 import { listCliStatus } from '../lib/cli-resources.js';
 import { isCapable } from '../lib/capabilities.js';
 import { discoverPlugins, pluginSupportsAgent } from '../lib/plugins/plugins.js';
-import { getAgentsDir, getUserAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
+import { getAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMeta } from '../lib/state.js';
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
-import { ACCOUNT_LISTING_LEGEND, accountListJson, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
+import { ACCOUNT_LISTING_LEGEND, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { addSupported } from '../lib/accounts/add.js';
 import { readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
 import { selectUpdateStrategy } from '../lib/installations/strategies.js';
-import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
-import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
-import { getConfiguredRunStrategy, isLaunchableSignedIn, collectRunCandidates, readinessFromCandidate } from '../lib/accounting/rotate.js';
+import { getConfiguredRunStrategy } from '../lib/accounting/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
-import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion, ViewJsonRunReady } from '../lib/view-types.js';
+import type { ResourceSection, SyncState } from '../lib/view-types.js';
+import { collectAgentsJson, getHarnesses, loadResourceSyncData, resolveResourceSyncState } from '../lib/installations/inventory-json.js';
+import { compareVersionLabels, planDuplicatePrune } from '../lib/installations/duplicate-prune.js';
 export type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
-import { listProfiles, profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
+import { profileExists, profileSummary, readProfile, type Profile, type ProfileSummary } from '../lib/profiles.js';
 import { getByokUsageForHarness, hasByokProvider, renderByokBar, type ByokUsageResult } from '../lib/byok-usage.js';
 import { renderHarnessDetail } from './harness.js';
 import { confirm } from '@inquirer/prompts';
@@ -125,17 +122,13 @@ export function compareAccountOrderedVersions(
     if (emailOrder !== 0) return emailOrder;
   }
 
-  return compareVersions(b.version, a.version);
+  return compareVersionLabels(b.version, a.version);
 }
 
 export function joinViewColumns(cols: string[]): string {
   let end = cols.length;
   while (end > 0 && cols[end - 1] === '') end--;
   return cols.slice(0, end).join('  ');
-}
-
-function getHarnesses(): ProfileSummary[] {
-  return listProfiles().map(profileSummary);
 }
 
 function harnessVersionLabel(harness: ProfileSummary, globalDefault: string | null): string {
@@ -186,16 +179,6 @@ function formatLastActive(date: Date | null): string {
   return chalk.gray(`${days}d ago`);
 }
 
-
-function compareVersions(a: string, b: string): number {
-  const partsA = a.split('.').map(Number);
-  const partsB = b.split('.').map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (partsA[i] > partsB[i]) return 1;
-    if (partsA[i] < partsB[i]) return -1;
-  }
-  return 0;
-}
 
 function getProjectVersionFromCwd(agent: AgentId): string | null {
   const manifestPath = path.join(process.cwd(), '.agents', 'agents.yaml');
@@ -1091,108 +1074,6 @@ async function showAgentResources(
 
 const ALL_RESOURCE_SECTIONS: ResourceSection[] = ['commands', 'skills', 'mcp', 'memory', 'hooks', 'workflows', 'plugins'];
 
-type ResourceSyncType = 'commands' | 'skills' | 'hooks' | 'memory';
-
-interface ResourceSyncData {
-  hasGitRepo: boolean;
-  commands: Awaited<ReturnType<typeof getGitSyncStatus>>;
-  skills: Awaited<ReturnType<typeof getGitSyncStatus>>;
-  hooks: Awaited<ReturnType<typeof getGitSyncStatus>>;
-  memory: Awaited<ReturnType<typeof getGitSyncStatus>>;
-}
-
-async function loadResourceSyncData(): Promise<ResourceSyncData> {
-  const userAgentsDir = getUserAgentsDir();
-  const hasGitRepo = isGitRepo(userAgentsDir);
-  return {
-    hasGitRepo,
-    commands: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'commands') : null,
-    skills: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'skills') : null,
-    hooks: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'hooks') : null,
-    memory: hasGitRepo ? await getGitSyncStatus(userAgentsDir, 'rules') : null,
-  };
-}
-
-function resolveResourceSyncState(
-  agentId: AgentId,
-  resourceName: string,
-  resourceType: ResourceSyncType,
-  syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
-): SyncState | undefined {
-  if (!syncStatus) return undefined;
-
-  let relativePath: string;
-  if (resourceType === 'commands') {
-    relativePath = `commands/${resourceName}.md`;
-  } else if (resourceType === 'skills') {
-    relativePath = `skills/${resourceName}`;
-  } else if (resourceType === 'hooks') {
-    relativePath = `hooks/${resourceName}`;
-  } else {
-    const centralName = getCentralRulesFileName(agentId);
-    relativePath = `rules/${centralName}`;
-  }
-
-  const matchesPath = (f: string) => f === relativePath || f.startsWith(relativePath + '/');
-
-  if (syncStatus.new.some(matchesPath) || syncStatus.staged.some(matchesPath)) return 'new';
-  if (syncStatus.modified.some(matchesPath)) return 'modified';
-  if (syncStatus.deleted.some(matchesPath)) return 'deleted';
-  if (syncStatus.synced.some(matchesPath)) return 'synced';
-  return 'new';
-}
-
-function collectVersionResources(
-  agentId: AgentId,
-  home: string,
-  cwd: string,
-  cliInstalled: boolean,
-  sections: Set<ResourceSection>,
-  sync: ResourceSyncData,
-): VersionResourcesJson {
-  const res = getAgentResources(agentId, { cwd, scope: 'all', cliInstalled, home });
-  const out: VersionResourcesJson = {};
-
-  const withSync = (
-    r: { name: string; scope: 'user' | 'project'; description?: string },
-    type: ResourceSyncType,
-    syncStatus: Awaited<ReturnType<typeof getGitSyncStatus>>,
-  ): ResourceItemJson => {
-    const item: ResourceItemJson = { name: r.name, scope: r.scope };
-    if (r.scope !== 'project') {
-      const s = resolveResourceSyncState(agentId, r.name, type, syncStatus);
-      if (s) item.syncState = s;
-    }
-    if (r.description) item.description = r.description;
-    return item;
-  };
-
-  if (sections.has('commands')) out.commands = res.commands.map((r) => withSync(r, 'commands', sync.commands));
-  if (sections.has('skills')) {
-    out.skills = res.skills.map((r) => {
-      const item = withSync(r, 'skills', sync.skills);
-      if (r.ruleCount && r.ruleCount > 0) item.ruleCount = r.ruleCount;
-      return item;
-    });
-  }
-  if (sections.has('mcp')) {
-    out.mcp = res.mcp.map((r) => {
-      const item: ResourceItemJson = { name: r.name, scope: r.scope };
-      if (r.scope !== 'project') item.syncState = 'synced';
-      return item;
-    });
-  }
-  if (sections.has('memory')) out.memory = res.memory.map((r) => withSync(r, 'memory', sync.memory));
-  if (sections.has('hooks')) out.hooks = res.hooks.map((r) => withSync(r, 'hooks', sync.hooks));
-  if (sections.has('workflows')) out.workflows = res.workflows.map((r) => ({ name: r.name, scope: r.scope }));
-  if (sections.has('plugins')) {
-    out.plugins = discoverPlugins()
-      .filter((p) => pluginSupportsAgent(p, agentId))
-      .map((p) => ({ name: p.name }));
-  }
-  return out;
-}
-
 export function parseResourceSections(
   options: { resources?: string | boolean; detailed?: boolean } & ViewSectionFilter,
   jsonMode: boolean,
@@ -1225,177 +1106,6 @@ export function parseResourceSections(
   return set;
 }
 
-export async function computeAgentRunReady(agentId: AgentId): Promise<ViewJsonRunReady | undefined> {
-  const candidates = await collectRunCandidates(agentId);
-  if (candidates.length === 0) return undefined;
-  const accounts = candidates.map((c) => {
-    const readiness = readinessFromCandidate(c);
-    const name = c.nativeAccount || c.accountLabel || c.email || c.version;
-    return { name, ready: readiness.ready, reason: readiness.ready ? 'ready' : readiness.reason };
-  });
-  const readyAccount = accounts.find((a) => a.ready);
-  let reason: string;
-  if (readyAccount) {
-    reason = `ready (${readyAccount.name})`;
-  } else {
-    const reasons = [...new Set(accounts.map((a) => a.reason))];
-    reason = reasons.length === 1 ? `all ${reasons[0]}` : reasons.join(', ');
-  }
-  return { ready: !!readyAccount, reason, accounts };
-}
-
-export async function collectAgentsJson(
-  filterAgentId?: AgentId,
-  resourceSections?: Set<ResourceSection>,
-  opts?: { forceRefresh?: boolean },
-): Promise<ViewJsonAgent[]> {
-  const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
-  const authCache = readAuthHealthCache();
-  const host = machineId();
-  const wantResources = !!resourceSections && resourceSections.size > 0;
-  const resourceSync = wantResources ? await loadResourceSyncData() : null;
-  const cliStates = wantResources ? await getAllCliStates() : null;
-  const infoFetches: Promise<{ agentId: AgentId; version: string; home: string; info: AccountInfo }>[] = [];
-  for (const agentId of agentsToShow) {
-    for (const ver of listInstalledVersions(agentId)) {
-      const home = getVersionHomePath(agentId, ver);
-      infoFetches.push(
-        getAccountInfo(agentId, home).then((info) => ({ agentId, version: ver, home, info }))
-      );
-    }
-  }
-  const infoResults = await Promise.all(infoFetches);
-
-  const globalReleases = new Map<AgentId, string>();
-  await Promise.all(agentsToShow.filter(isGlobalBinaryAgent).map(async (agent) => {
-    if (!infoResults.some((row) => row.agentId === agent)) return;
-    const release = await getLiveVersion(agent);
-    if (release) globalReleases.set(agent, release);
-  }));
-  const actualRelease = (agent: AgentId, label: string): string =>
-    globalReleases.get(agent) ?? readInstallation(agent, label)?.releaseVersion ?? label;
-
-  const { canonicalByUsageKey, usageByKey } = await getUsageInfoByIdentity(
-    infoResults.map(({ agentId, home, version, info }) => ({
-      agentId,
-      home,
-      cliVersion: version,
-      info,
-    })),
-    { forceRefresh: opts?.forceRefresh === true },
-  );
-
-  const mergeCanonical = (info: AccountInfo): AccountInfo => {
-    const key = getUsageLookupKey(info);
-    if (!key) return info;
-    const canon = canonicalByUsageKey.get(key);
-    if (!canon) return info;
-    return {
-      ...info,
-      plan: usageByKey.get(key)?.snapshot?.plan ?? canon.plan,
-      usageStatus: deriveUsageStatusFromSnapshot(usageByKey.get(key)?.snapshot),
-      overageCredits: canon.overageCredits,
-    };
-  };
-
-  const byAgent = new Map<AgentId, ViewJsonVersion[]>();
-  for (const { agentId, version, home, info: rawInfo } of infoResults) {
-    const info = mergeCanonical(rawInfo);
-    const globalDefault = getGlobalDefault(agentId);
-    const usageKey = getUsageLookupKey(info);
-    const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
-    const snapshot = usageInfo?.snapshot ?? null;
-
-    const authHealth = authCache[authCacheKey(host, agentId, version)];
-    const entry: ViewJsonVersion = {
-      version,
-      releaseVersion: actualRelease(agentId, version),
-      isDefault: version === globalDefault,
-      isolated: isVersionIsolated(agentId, version),
-      isIsolatedDefault: getIsolatedDefault(agentId) === version,
-      signedIn: info.signedIn,
-      launchable: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
-      authVerdict: authHealth?.verdict ?? null,
-      authCheckedAt: authHealth?.checkedAt ?? null,
-      email: info.email,
-      accountId: info.accountId,
-      organizationType: info.organizationType ?? null,
-      organizationName: info.organizationName ?? null,
-      plan: info.plan,
-      usageStatus: info.usageStatus,
-      usageCapturedAt: snapshot?.capturedAt?.toISOString() ?? null,
-      overageCredits: info.overageCredits,
-      usageError: usageErrorForDisplay(usageInfo?.error),
-      windows: snapshot
-        ? snapshot.windows.map((w) => ({
-            key: w.key,
-            label: w.label,
-            usedPercent: w.usedPercent,
-            resetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
-          }))
-        : [],
-      unavailable: snapshot?.unavailable
-        ? {
-            reason: snapshot.unavailable.reason,
-            resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
-          }
-        : undefined,
-      lastActive: info.lastActive ? info.lastActive.toISOString() : null,
-      path: getVersionDir(agentId, version),
-      configuredModel: resolveConfiguredModel(agentId, version),
-    };
-
-    if (wantResources && resourceSync) {
-      entry.resources = collectVersionResources(
-        agentId,
-        home,
-        process.cwd(),
-        cliStates?.[agentId]?.installed ?? false,
-        resourceSections!,
-        resourceSync,
-      );
-    }
-
-    const existing = byAgent.get(agentId);
-    if (existing) existing.push(entry);
-    else byAgent.set(agentId, [entry]);
-  }
-
-  const harnesses = filterAgentId ? [] : getHarnesses();
-  const catalog = await loadAccountCatalog();
-  const note = secretsUnavailableNote(catalog);
-  if (note) console.error(chalk.yellow(note));
-  const runReadyByAgent = new Map<AgentId, ViewJsonRunReady>();
-  await Promise.all(
-    agentsToShow.map(async (agentId) => {
-      const runReady = await computeAgentRunReady(agentId);
-      if (runReady) runReadyByAgent.set(agentId, runReady);
-    }),
-  );
-
-  const out: ViewJsonAgent[] = [];
-  for (const agentId of agentsToShow) {
-    const versions = byAgent.get(agentId) ?? [];
-    versions.sort((a, b) => {
-      if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1;
-      return compareVersions(b.version, a.version);
-    });
-    const accounts = accountListJson(
-      catalog.native.filter((row) => row.agent === agentId),
-      catalog.provider.filter((row) => row.harnesses.includes(agentId)),
-      agentId,
-    ).accounts;
-    out.push({
-      agent: agentId,
-      versions,
-      accounts,
-      runReady: runReadyByAgent.get(agentId),
-      harnesses: harnesses.filter((h) => h.agent === agentId),
-    });
-  }
-  return out;
-}
-
 interface PrunePlanEntry {
   agentId: AgentId;
   version: string;
@@ -1408,94 +1118,6 @@ interface PrunePlanEntry {
 interface AgentPrunePlan {
   agentId: AgentId;
   toPrune: PrunePlanEntry[];
-}
-
-export function pruneGroupKey(
-  info: Pick<AccountInfo, 'accountKey' | 'email'>
-): string | null {
-  return info.accountKey ?? info.email?.toLowerCase() ?? null;
-}
-
-export interface PruneCandidate {
-  version: string;
-  release: string;
-  email: string | null;
-  accountKey: string | null;
-  signedIn: boolean;
-  hasBinary: boolean;
-}
-
-export interface DuplicatePruneEntry {
-  version: string;
-  email: string;
-  keeper: string;
-}
-
-/**
- * PURE duplicate-home detection: given every installed home for one agent, decide
- * which are redundant duplicates of the SAME logical account and which single home
- * to keep per account. Extracted from buildAgentPrunePlan so the keeper/merge rules
- * are unit-tested without touching disk.
- *
- * Two rules, both conservative:
- *  - GROUPING. A home with a captured `accountKey` groups by it (account+org, so a
- *    personal Max and a Team seat on the same email stay separate). A home with NO
- *    accountKey folds into a same-email account ONLY when a sibling home for that
- *    email IS identified — that email-only home is an incompletely-captured re-login
- *    of the known account, not a distinct seat (PHNX-3887). Otherwise it groups by
- *    its bare email and only ever collapses against another equally-bare home.
- *  - KEEPER. Within a group the keeper is the home that best represents the account:
- *    captured identity first, then a signed-in credential, then the newest RUNNING
- *    release, then the highest dir label as a stable tiebreak. This is deliberately
- *    NOT "highest dir-name semver" — in the wild that is the freshly re-logged-in
- *    duplicate that never captured its identity or usage, and keeping it while
- *    trashing the identified home is the exact bug this replaces.
- */
-export function planDuplicatePrune(candidates: PruneCandidate[]): DuplicatePruneEntry[] {
-  const installed = candidates.filter((c) => c.hasBinary && c.email);
-
-  const emailToAccountKeys = new Map<string, Set<string>>();
-  for (const c of installed) {
-    if (!c.accountKey) continue;
-    const email = c.email!.toLowerCase();
-    (emailToAccountKeys.get(email) ?? emailToAccountKeys.set(email, new Set()).get(email)!).add(c.accountKey);
-  }
-  const groupKeyFor = (c: PruneCandidate): string | null => {
-    if (c.accountKey) return c.accountKey;
-    const email = c.email?.toLowerCase();
-    const keys = email ? emailToAccountKeys.get(email) : undefined;
-    if (keys && keys.size === 1) return [...keys][0];
-    if (keys && keys.size >= 2) return `ambiguous:${c.email!.toLowerCase()}:${c.version}`;
-    return pruneGroupKey(c);
-  };
-
-  const byAccount = new Map<string, PruneCandidate[]>();
-  for (const c of installed) {
-    const key = groupKeyFor(c);
-    if (!key) continue;
-    (byAccount.get(key) ?? byAccount.set(key, []).get(key)!).push(c);
-  }
-
-  const rank = (c: PruneCandidate): [number, number] => [c.accountKey ? 1 : 0, c.signedIn ? 1 : 0];
-  const better = (a: PruneCandidate, b: PruneCandidate): number => {
-    const [aa, ab] = rank(a);
-    const [ba, bb] = rank(b);
-    if (aa !== ba) return ba - aa;
-    if (ab !== bb) return bb - ab;
-    if (a.release !== b.release) return compareVersions(b.release, a.release);
-    return compareVersions(b.version, a.version);
-  };
-
-  const out: DuplicatePruneEntry[] = [];
-  for (const group of byAccount.values()) {
-    if (group.length < 2) continue;
-    const sorted = [...group].sort(better);
-    const keeper = sorted[0].version;
-    for (const dup of sorted.slice(1)) {
-      out.push({ version: dup.version, email: dup.email as string, keeper });
-    }
-  }
-  return out;
 }
 
 async function buildAgentPrunePlan(agentId: AgentId): Promise<AgentPrunePlan> {

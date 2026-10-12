@@ -107,14 +107,13 @@ export async function computeSnapshot(
 ): Promise<FleetSnapshot> {
   const localOnly = opts.hosts?.length ? false : opts.local !== false;
 
-  const [{ collectAgentsJson }, rosterMod, { serializeActiveSessionsForJson }] = await Promise.all([
-    import('../commands/view.js'),
-    import('../commands/ps-roster.js'),
+  const [{ collectAgentsJson }, { gatherActiveSessions, serializeActiveSessionsForJson }] = await Promise.all([
+    import('./installations/inventory-json.js'),
     import('./session/active.js'),
   ]);
 
   const inventoryP = collectAgentsJson(opts.agent);
-  const sessionsP = rosterMod.gatherActiveSessions({
+  const sessionsP = gatherActiveSessions({
     local: localOnly,
     hosts: opts.hosts,
   });

@@ -150,8 +150,13 @@ export async function resolveDeviceAuto(
 
   const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
   if (!agent && !opts.probe) {
-    const { collectFleetHarnesses } = await import('../commands/ssh.js');
-    const inventory = await collectFleetHarnesses({ devices: pool });
+    const { collectFleetHarnesses } = await import('./devices/harness-inventory.js');
+    const { isInteractiveTerminal } = await import('./format.js');
+    const { default: ora } = await import('ora');
+    const inventory = await collectFleetHarnesses({
+      devices: pool,
+      spinner: isInteractiveTerminal() ? (text) => ora(text).start() : undefined,
+    });
     const byHost = new Map(inventory.map((result) => [normalizeHost(result.host), result]));
     for (const key of pool) {
       const result = byHost.get(key);

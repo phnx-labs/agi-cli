@@ -68,10 +68,11 @@ import {
   runFleet,
   runOnDevice,
   runLocalCommand,
+  raceFleetPingDeadline,
   skipLabel,
   upgradeCommand,
-  type FanOutDeviceTarget,
   type FleetRunResult,
+  type FleetStatusTarget,
 } from '../lib/devices/fleet.js';
 import {
   isRolloutSuccess,
@@ -105,12 +106,11 @@ import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import {
+  collectFleetHarnesses,
   collectLocalHarnessInventory,
   groupByAccount,
   renderAccountsMatrix,
   renderHarnessMatrix,
-  type HarnessRow,
-  type HostHarnessResult,
 } from '../lib/devices/harness-inventory.js';
 import { usageErrorForDisplay } from '../lib/accounting/usage.js';
 import { crabboxList, crabboxFind, crabboxSshArgv, type CrabboxBox } from '../lib/crabbox/cli.js';
@@ -536,13 +536,6 @@ interface RemoteDoctorJson {
   fleet?: FleetHealthRow['inventory'];
 }
 
-interface FleetStatusTarget extends FanOutDeviceTarget {
-  platform?: string;
-  dialTarget: string;
-  extraSshArgs?: string[];
-}
-
-
 async function localHealthRow(self: string, stats?: DeviceStats): Promise<FleetHealthRow> {
   return {
     name: self,
@@ -735,27 +728,6 @@ async function probeRemoteAuth(target: FleetStatusTarget): Promise<AuthProbeRow[
   return parsed.rows ?? [];
 }
 
-export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget>(
-  fanOut: Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]>,
-  remoteTargets: Target[],
-  overallTimeoutMs: number,
-): Promise<import('../lib/devices/fleet.js').FanOutDeviceResult<T>[]> {
-  const overallDeadline = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), overallTimeoutMs),
-  );
-  try {
-    return await Promise.race([fanOut, overallDeadline]);
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    return remoteTargets.map((t) => ({
-      name: t.name,
-      status: t.skip ? ('skipped' as const) : ('failed' as const),
-      reason: t.skip,
-      error: t.skip ? undefined : errMsg,
-    }));
-  }
-}
-
 async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: boolean; strict?: boolean }): Promise<void> {
   const self = machineId();
   const { refreshLocalFleetAuthState } = await import('../lib/daemon-ticks.js');
@@ -837,77 +809,6 @@ export interface HarnessInventoryOpts {
   local?: boolean;
 }
 
-async function probeRemoteHarnesses(
-  target: FleetStatusTarget,
-  refresh: boolean,
-): Promise<HarnessRow[]> {
-  const isWin = /^win/i.test((target.platform ?? '').trim());
-  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
-  const args = ['devices', 'harnesses', '--local', '--json'];
-  if (refresh) args.push('--refresh');
-  const cmd = buildRemoteAgentsInvocation(args, undefined, isWin ? 'windows' : undefined, env);
-  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
-  if (res.code !== 0) {
-    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
-  }
-  const parsed = JSON.parse(res.stdout) as { host: string; rows: HarnessRow[] };
-  return parsed.rows ?? [];
-}
-
-export async function collectFleetHarnesses(opts: HarnessInventoryOpts): Promise<HostHarnessResult[]> {
-  const self = machineId();
-  const want = opts.devices?.length ? new Set(opts.devices) : null;
-  const results: HostHarnessResult[] = [];
-
-  if (!want || want.has(self)) {
-    const localRows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
-    results.push({ host: self, rows: localRows });
-  }
-
-  const reg = await loadDevices();
-  const planned = planFleetTargets(reg);
-  let remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
-    name: t.device.name,
-    platform: resolveDeviceProfile(t.device).platform,
-    skip: t.skip,
-    dialTarget: fleetDialTarget(t.device),
-    extraSshArgs: deviceIdentityArgs(t.device),
-  }));
-  if (want) remoteTargets = remoteTargets.filter((t) => want.has(t.name));
-
-  if (remoteTargets.length > 0) {
-    const probeable = remoteTargets.filter((t) => !t.skip).length;
-    const spinner = isInteractiveTerminal() && !opts.json
-      ? ora(`Probing ${probeable} device${probeable === 1 ? '' : 's'}…`).start()
-      : undefined;
-    let remote: Awaited<ReturnType<typeof fanOutDevices<HarnessRow[], FleetStatusTarget>>>;
-    try {
-      const fanOut = fanOutDevices(
-        remoteTargets,
-        (t) => probeRemoteHarnesses(t, !!opts.refresh),
-        { perDeviceTimeoutMs: 15_000 },
-      );
-      remote = await raceFleetPingDeadline(fanOut, remoteTargets, 30_000);
-    } finally {
-      spinner?.stop();
-    }
-    for (const r of remote) {
-      if (r.status === 'ok' && r.value) {
-        results.push({ host: r.name, rows: r.value });
-      } else {
-        results.push({
-          host: r.name,
-          rows: [],
-          error: r.error,
-          skipped: r.reason ? String(r.reason) : undefined,
-        });
-      }
-    }
-  }
-
-  return results;
-}
-
 async function runDevicesHarnesses(opts: HarnessInventoryOpts): Promise<void> {
   if (opts.local) {
     const rows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
@@ -917,7 +818,12 @@ async function runDevicesHarnesses(opts: HarnessInventoryOpts): Promise<void> {
     } else for (const line of renderHarnessMatrix([{ host: machineId(), rows }])) console.log(line);
     return;
   }
-  const results = await collectFleetHarnesses(opts);
+  const results = await collectFleetHarnesses({
+    agents: opts.agents,
+    devices: opts.devices,
+    refresh: opts.refresh,
+    spinner: isInteractiveTerminal() && !opts.json ? (text) => ora(text).start() : undefined,
+  });
   if (opts.json) {
     const sanitized = results.map((result) => ({
       ...result,
@@ -934,7 +840,12 @@ export async function runDevicesAccounts(opts: HarnessInventoryOpts): Promise<vo
     else for (const line of renderAccountsMatrix([{ host: machineId(), rows }])) console.log(line);
     return;
   }
-  const results = await collectFleetHarnesses(opts);
+  const results = await collectFleetHarnesses({
+    agents: opts.agents,
+    devices: opts.devices,
+    refresh: opts.refresh,
+    spinner: isInteractiveTerminal() && !opts.json ? (text) => ora(text).start() : undefined,
+  });
   if (opts.json) {
     const grouped = results.map((r) => ({
       host: r.host,

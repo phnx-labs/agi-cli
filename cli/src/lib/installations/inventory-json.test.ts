@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { collectAgentsJson, computeAgentRunReady } from './view.js';
-import { collectRunCandidates } from '../lib/accounting/rotate.js';
-import { viewAgentAccountEligibility } from '../lib/hosts/ready.js';
-import { writeClaudeUsageCache, type UsageSnapshot } from '../lib/accounting/usage.js';
-import { getVersionsDir } from '../lib/state.js';
-import { invalidateInstalledVersionsCache, getVersionHomePath } from '../lib/installations/versions.js';
+import { collectAgentsJson, computeAgentRunReady } from './inventory-json.js';
+import { collectRunCandidates } from '../accounting/rotate.js';
+import { viewAgentAccountEligibility } from '../hosts/ready.js';
+import { writeClaudeUsageCache, type UsageSnapshot } from '../accounting/usage.js';
+import { getVersionsDir } from '../state.js';
+import { invalidateInstalledVersionsCache, getVersionHomePath } from './versions.js';
 
 describe.skipIf(process.platform === 'darwin')('agents view --json runReady — one readiness gate (PHNX-4116)', () => {
   const planted: string[] = [];

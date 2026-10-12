@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderSessionsWorkerScript } from './worker-template.js';
+import { renderSessionsWorkerScript } from '@phnx-labs/sessions-cli/backup';
 import { provisionSessions } from './provision.js';
 
 afterEach(() => vi.unstubAllGlobals());
