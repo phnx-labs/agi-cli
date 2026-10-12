@@ -13,7 +13,7 @@ over RFB/VNC with `--vnc`.
 Use this when you need to drive an app that has no web interface and no CDP
 endpoint — a desktop finance tool, a native editor, a VM window, or an app that
 Electron automation cannot reach cleanly. For the web, use
-[`agents browser`](browser.md).
+[`browser`](browser.md).
 
 **The engine is a separate CLI.** Since PHNX-4075 the helper daemons, the
 JSON-RPC transport, the RFB/VNC client, and the autonomous `run` loop all live
@@ -31,7 +31,7 @@ release trains the split exists to separate.
 ## Architecture
 
 agents-cli contributes what only the fleet CLI can know; the engine does the
-driving. The two meet over three inherited file descriptors on one spawn.
+driving. The two meet over two extra file descriptors (fd 3 and fd 4) on one spawn.
 
 ```
 agent process
@@ -59,8 +59,8 @@ agent process
 The action events on fd 4 come back to agents-cli, which appends each one to the
 feed as a `computer.action` event (that is how a session is marked as having driven
 the desktop). Run history itself is the engine's:
-`agents computer sessions` runs the engine's own picker, and the feed's computer
-rows come from `computer sessions --json`.
+`computer sessions` is the engine's own picker (`agents computer sessions`
+forwards to it), and the feed's computer rows come from `computer sessions --json`.
 
 ### What lives where
 
@@ -83,7 +83,7 @@ optional so an older engine keeps working.
 
 | Field | Meaning |
 |---|---|
-| `permissions` | `{ allow: string[] }` — the bundle ids `Computer(<bundle-id>)` rules grant |
+| `permissions` | `{ allow: string[] }` — the bundle ids `Computer(<bundle-id>)` rules grant. Sent only for a local invocation; absent with `--device`, `--host`, `COMPUTER_HELPER_TCP` or `COMPUTER_HELPER_VNC` |
 | `peers` | `{ allow: string[] }` — the executable paths the daemon accepts a connection from |
 | `target` | The resolved `--device` target: `alias`, `host` (`user@host`), `user`, `hostname`, `platform`, `sshArgs`. Absent for a local invocation |
 | `session` | `actor`, `sessionId`, `launchId` — who is acting |
@@ -129,11 +129,12 @@ The helper reads an allow-list policy file
 By default the policy is deny-all. You must explicitly whitelist each app the
 daemon may drive.
 
-agents-cli renders that file from `Computer(<bundle-id>)` rules in
-`~/.agents/permissions/groups/` before any lifecycle verb, so an edit is in
-force after `agents computer reload`. The rule grammar is an agents-cli
-concept, which is why the engine is handed the rendered answer rather than the
-rules.
+agents-cli derives the allow list from `Computer(<bundle-id>)` rules in
+`~/.agents/permissions/groups/` on every local invocation and hands it to the
+engine in the fd-3 context (`permissions.allow`); the engine writes the policy
+file, so an edit is in force after `agents computer reload`. The rule grammar
+is an agents-cli concept, which is why the engine is handed the resolved answer
+rather than the rules.
 
 A peer-auth list (`~/.agents/.cache/helpers/computer-peers.json`) controls
 which caller executables may connect to the socket — the standalone engine, the
@@ -224,6 +225,12 @@ Verbs are grouped the way `agents computer --help` groups them.
 | `reload` | Reload the allow-list policy from ~/.agents/permissions/groups/ (SIGHUP the daemon); with `--device`, restart the remote Windows daemon |
 | `status` | Report install state, daemon state, TCC trust, policy, and peer list; with `--device`, tunnel + liveness of the remote Windows daemon |
 
+### Autonomous
+
+| Command | Description |
+|---------|-------------|
+| `run` | Drive an app from a natural-language task (the engine's model loop over the computer verbs) |
+
 ### Observe
 
 | Command | Description |
@@ -267,7 +274,7 @@ fullscreen Space reports shifted global coordinates.
 | `focus` | Set AX keyboard focus to an element |
 | `wait` | Sleep (`--duration`) or poll an element/locator until `exists`/`enabled`/`disappears` |
 
-Shared flags: every interact verb takes `--bundle`/`--pid`; reads take
+Shared flags: every interact verb except `launch` takes `--bundle`/`--pid`; reads take
 `--json`. `click`/`type-text`/`key`/`drag`/`scroll` accept `--raise` to bring
 the target frontmost before acting.
 
@@ -311,16 +318,16 @@ agents computer type-text --bundle <id> --text "..." --require-frontmost
 
 | Command | Description |
 |---------|-------------|
-| `agents computer sessions` | Browse computer-driving history, grouped by run — forwards to the engine's own `computer sessions`. |
+| `computer sessions` | Browse computer-driving history, grouped by run — one row per `computer` invocation. |
 
-`agents computer sessions` forwards its arguments verbatim to the engine, so its
-flags are the engine's (`agents computer sessions --help` asks it): among them
+`computer sessions` is the engine's own picker; `agents computer sessions`
+forwards its arguments to it verbatim. Its flags (`computer sessions --help`):
 `--machine <name>`, `--since`/`--until`, `--limit <n>`, `--search <text>`,
 `--open <selector>`, `--json` and `--no-interactive`. The engine keeps its own
 run history (`~/.agents/.history/computer/history.db` summaries plus its 30-day
 action ledger under `~/.agents/.cache/computer/actions/`); agents-cli keeps no
 second reader of it. `agents sessions --computer` was removed (PHNX-4227); run
-`computer sessions` or `agents computer sessions` instead.
+`computer sessions` instead.
 
 The feed stream (`agents feed watch --json`) reads `computer sessions --json
 --no-interactive --limit 500` and adds the agent session behind each run: a row is

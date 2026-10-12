@@ -115,14 +115,14 @@ function configureStatsCommand(stats: Command, spelling: string): void {
       ${spelling} --plugin rush --bottom
 
       # Backfill historical sessions first if coverage is low
-      agents sessions backfill resources
+      agents daemon index backfill resources
     `,
     notes: `
       - The signal captures EXPLICIT invocations only: slash commands and \`Skill\` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means "never explicitly invoked", not "never loaded".
       - Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.
-      - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run \`agents sessions backfill resources\` once to fold in historical sessions (a low coverage line means it hasn't run).
-      - --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level \`agents sessions --plugin\` which filters SESSIONS.
-      - The window is all time unless --since narrows it. \`agents insights resources\` and \`agents sessions stats\` are the same report; --json keeps \`kind: "sessions-stats"\` under either spelling.
+      - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run \`agents daemon index backfill resources\` once to fold in historical sessions (a low coverage line means it hasn't run).
+      - --plugin filters the resource rows (this plugin's skills/commands), distinct from \`sessions --plugin\`, which filters SESSIONS.
+      - The window is all time unless --since narrows it. \`agents insights resources\` is the canonical spelling of this report (\`agents sessions stats\` is the legacy one); --json keeps \`kind: "sessions-stats"\` under either spelling.
     `,
   });
 }

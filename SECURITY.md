@@ -24,9 +24,9 @@ We will acknowledge receipt within 48 hours and aim to release a fix within
 
 agi-cli runs locally and manages agent CLI binaries, config files, and credentials on your machine. Security-sensitive areas include:
 
-- **Keychain integration** (`src/lib/secrets.ts`) -- stores API keys in the macOS Keychain
-- **Shim scripts** (`src/lib/installations/shims.ts`) -- generated shell scripts that route agent commands
-- **Cloud dispatch** (`src/lib/cloud/`) -- sends prompts to remote providers via authenticated APIs
+- **Secrets client** (`cli/src/lib/secrets-client.ts`, `cli/src/commands/secrets-passthrough.ts`) -- resolves bundles through the standalone `secrets` CLI (`@phnx-labs/secrets-cli`), which owns the keychain and encrypted-file stores
+- **Shim scripts** (`cli/src/lib/installations/shims.ts`) -- generated shell scripts that route agent commands
+- **Cloud dispatch** (`cli/src/lib/cloud/`) -- sends prompts to remote providers via authenticated APIs
 
 ## Supported Versions
 

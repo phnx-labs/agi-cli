@@ -11,13 +11,13 @@ Ghostty, or tmux, on this machine or a remote host over SSH. Lives in
 The engine is deliberately narrow. A **terminal surface** is *attended and live*
 — you watch it and type into it. That is a different thing from a **cloud
 provider** ([`src/lib/cloud/`](../src/lib/cloud/): Rush Cloud, Codex Cloud,
-Factory, Antigravity), which dispatches an *autonomous, headless* task and hands
+Factory, Antigravity, Cursor), which dispatches an *autonomous, headless* task and hands
 back a run id and a PR.
 
 | | Terminal engine | Cloud providers |
 |---|---|---|
 | Opens | a tab / split you attach to now | a queued autonomous task |
-| Backends | iTerm, Ghostty, tmux, Terminal.app, VSCodium | Rush / Codex / Factory / Antigravity |
+| Backends | iTerm, Ghostty, tmux, Terminal.app, VSCodium | Rush / Codex / Factory / Antigravity / Cursor |
 | Interface | `buildTab/buildSplit(cwd, command) → argv` | `dispatch(repo, branch, task) → runId` |
 | Lifecycle | foreground, immediate | fire-and-forget, poll later |
 
@@ -73,7 +73,7 @@ user actually installed still wins the available-backend fallback.
 
 Registering it changes the two existing consumers of the registry, not just
 `--terminal`: on a Mac with none of iTerm / Ghostty / VSCodium installed,
-`agents sessions focus` ([`focus.ts`](../src/commands/focus.ts)) and
+`agents ps focus` ([`focus.ts`](../src/commands/focus.ts)) and
 `agents sessions resume` ([`sessions-resume.ts`](../src/commands/sessions-resume.ts))
 used to have no backend and resumed in the current process — they now open a
 Terminal.app tab. `resume`'s picker also gains a Terminal row.
@@ -104,10 +104,10 @@ natively via the surface configuration; iTerm/tmux `cd` inside the wrapped shell
 
 `runRemote` serializes the backend argv into one POSIX-quoted string and runs it
 through [`sshExec`](../src/lib/ssh-exec.ts) — the same hardened primitive
-`agents sessions --device` and the browser driver use (target-injection guard,
-connection multiplexing). Host aliases resolve via the `~/.ssh/config.d/agents`
-include that `agents devices` / `agents hosts` maintain, so `--device zion` "just
-works".
+`agents run --device` and the `lib/hosts/` dispatch helpers use (target-injection
+guard, connection multiplexing). Host aliases resolve via the
+`~/.ssh/config.d/agents` include that `agents devices render --write` maintains,
+so `--device zion` "just works".
 
 Caveat: driving a GUI app (iTerm/Ghostty) over SSH needs the remote user logged
 into the Mac's GUI session — `osascript` reaches the app through it. `tmux` over
@@ -157,7 +157,7 @@ path — which names no terminal at all. Direct runs are the default.
 `toHostSamples` ([`run-surface.ts`](../src/lib/terminal/run-surface.ts)) fills in
 `viewingApp` for those from `resolveViewingIn`
 ([`session/viewing-in.ts`](../src/lib/session/viewing-in.ts)) — the same resolver
-behind `agents sessions`' "viewing in Ghostty tab 2" — by walking the attached
+behind `agents ps`' "viewing in Ghostty tab 2" — by walking the attached
 tmux client's pid to its host app. `viewingApp` takes precedence over `host`. A
 detached session (no client attached) has no viewer and keeps `tmux`, which a GUI
 caller cannot drive, so it correctly contributes nothing.

@@ -44,21 +44,21 @@ export function registerSessionsImportCommand(sessionsCmd: Command): void {
 
   setHelpSections(cmd, {
     examples: `# Preview what a bundle would restore
-agents sessions import week.bundle --dry-run
+sessions import week.bundle --dry-run
 
 # Restore it
-agents sessions import week.bundle
+sessions import week.bundle
 
 # Pull straight off another machine (one command, over SSH)
-agents sessions import --from-host yosemite-s1 --since 7d
+sessions import --from-host yosemite-s1 --since 7d
 
 # Or the equivalent raw pipe
-agents ssh boxB 'agents sessions export --since 7d --stdout' | agents sessions import -
+agents ssh boxB 'sessions export --since 7d --stdout' | sessions import -
 
 # Restore everything backed up to R2 (e.g. on a fresh box)
-agents sessions import --from-r2`,
+sessions import --from-r2`,
     notes: `Sessions land under the cross-machine mirror keyed by their origin machine, so
-they show up in 'agents sessions' tagged with that machine and never overwrite
+they show up in 'sessions' tagged with that machine and never overwrite
 your own local sessions. Byte-exact duplicates are skipped. --from-host reuses
 the same SSH transport as the cross-machine listing (no R2, no daemon).
 

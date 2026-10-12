@@ -51,18 +51,20 @@ evidence and the next supervisor wave evaluates placement again. A pending node 
 ```mermaid
 stateDiagram-v2
   [*] --> Pending
-  Pending --> Ready: dependencies satisfied
-  Ready --> Running: execution claimed
+  Pending --> Running: dependencies completed, launch claimed
+  Pending --> Failed: placement failure or dependency-failed
   Running --> Completed: process exits successfully
   Running --> Failed: terminal failure
-  Running --> Waiting: input required
-  Waiting --> Running: resumed
-  Failed --> Ready: explicit retry
+  Running --> Stopped: agents teams stop
+  Completed --> Running: agents teams resume
+  Failed --> Running: agents teams resume
+  Stopped --> Running: agents teams resume
 ```
 
-Supervision advances ready nodes, observes execution truth, resumes a known teammate,
-and surfaces failures. Retry preserves team/member identity and records a new attempt
-rather than rewriting the previous outcome.
+Supervision advances ready nodes, observes execution truth, and surfaces failures.
+`agents teams resume <team> <teammate>` re-enters the teammate's own session with a
+new message, keeping its team/member identity; it clears the previous failure record
+rather than keeping it as attempt history.
 
 ## Distributed teams
 
@@ -93,5 +95,5 @@ a parallel execution engine. Budget and repository-freshness gates run before sp
 - A failed runnable node cannot prevent an independent ready branch from advancing.
 - Failed or missing dependencies terminalize descendants with explicit blocker evidence.
 - Local and remote members cross the same capability and execution boundaries.
-- Cancellation and retry are explicit state transitions with durable history.
+- Stop and resume are explicit state transitions (`agents teams stop` / `agents teams resume`).
 - A workflow or subagent cannot bypass team supervision or the execution engine.

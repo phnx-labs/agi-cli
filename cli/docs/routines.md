@@ -11,17 +11,23 @@ Scheduled agent execution with sandboxed permissions and scheduler-driven cron e
     daily-review.yml        # Job config (YAML)
     weekly-cleanup.yml
   daemon/
-    state.json              # Daemon PID, last reload timestamp
+    services.yaml           # Per-service enable toggles
+    webhooks.yaml           # Supervised webhook receivers on this box
+  .cache/helpers/daemon/
+    daemon.pid              # Running daemon PID
+    health.json             # Per-subsystem health records
 ```
 
 Each job is a YAML file in `~/.agents/routines/`. A background scheduler parses cron expressions with [croner](https://github.com/hucsm/croner), spawns agent processes at trigger time, and captures output.
 
 ### Daemon runtime — `agents daemon`
 
-The scheduler above is one job the daemon runs; the daemon itself also hosts
-browser IPC and the watchdog pass (RUSH-2354). The secrets broker is **not** one
-of them — the standalone `secrets` CLI owns its own broker lifecycle (PHNX-3989),
-and the daemon reaches secrets only as a client, through `secrets-client.ts`.
+The scheduler above is one service the daemon runs; it also hosts catch-up, the
+webhook receiver, the watchdog pass, and the session and fleet sync services
+(`agents daemon services` lists them). The secrets broker and the browser IPC
+service are **not** among them: the standalone `secrets` CLI owns its broker
+(PHNX-3989) and the standalone `browser` CLI owns its IPC service (PHNX-4101). The
+daemon reaches secrets only as a client, through `secrets-client.ts`.
 `agents routines start`/`stop`/`status`/`scheduler-logs` remain as
 scheduler-scoped convenience wrappers, but the daemon's own runtime surface is
 `agents daemon`:
@@ -46,8 +52,8 @@ failure detail instead of duplicating it.
 not the same thing:
 
 - `scheduler.enabled` (device config) gates only the routines `JobScheduler`
-  inside an already-running daemon — browser IPC and the watchdog keep running
-  when it is off.
+  inside an already-running daemon — the watchdog and the other services keep
+  running when it is off.
 - `daemon.enabled` (device config, new) is the daemon-wide kill switch. With it
   `false`, nothing **auto-starts** the daemon — not `routines add`, not
   `routines start`, not `routines catchup`, not a webhook trigger. `agents daemon
@@ -57,20 +63,20 @@ not the same thing:
 A per-subsystem health record (`{subsystem, lastError, lastErrorAt,
 consecutiveFailures, lastOkAt}`, persisted at
 `~/.agents/.cache/helpers/daemon/health.json`) backs `agents daemon status` and
-`services`: browser IPC and the other hosted services record a success/failure on
+`services`: the hosted services record a success/failure on
 every (re)start attempt, so a failure survives past whatever line of the daemon
 log it would otherwise scroll out of.
 
 A third subsystem, `daemon-start`, records the daemon's own startup and is the
 one record that also **gates** behaviour rather than just reporting. It is
 written from both sides: the launching CLI marks every start it issues as a
-failure up front, and only a daemon that has finished booting — scheduler,
-browser IPC, broker decision and every background tick up — clears it. A daemon
+failure up front, and only a daemon that has finished booting, with every
+startup subsystem live, clears it. A daemon
 that spawns and then dies therefore leaves the streak growing, which a check on
 the launch's own return value could never see (the spawn succeeded). After five
 consecutive such starts the **implicit** auto-start refuses: the background
-callers that opportunistically bring the daemon up (`secrets unlock`, `browser
-start`, the watchdog) stop relaunching a daemon that never lives, and point at
+callers that opportunistically bring the daemon up (`agents feed watch`,
+`agents watchdog`, `agents recordings`) stop relaunching a daemon that never lives, and point at
 `agents daemon doctor`, which reports the streak and the recorded cause. An
 already-running daemon is still reported, and `agents daemon start` — the
 explicit override — is never gated.
@@ -101,7 +107,7 @@ What `enable` does for a project routine:
 2. Turns on the device flag (`meta.deviceRoutines`), which is the only thing that makes the daemon (user + system layers) fire it.
 3. Hand-authored user routines of the same name are never overwritten — `enable` refuses with an error if the name collides with a foreign-source routine.
 
-`agents routines list` groups terminal output by effective device/host scope so it is clear what runs on the current machine, the fleet, cloud, named devices, and named hosts. Use `agents routines list --flat` for the legacy single table, or `--json` for the flat machine-readable payload. Project-sourced routines still show the source repo (and `@branch` when known) in the Repo column; `--json` includes `source`, `sourceRepo`, `sourceBranch`, `hostStrategy`, `oneShot`, and `expired`.
+`agents routines list` groups terminal output by project by default; `--group-by device` groups it by effective device/host scope so it is clear what runs on the current machine, the fleet, cloud, named devices, and named hosts (see [Legacy device allowlists](#legacy-device-allowlists)). Use `agents routines list --flat` for the legacy single table, or `--json` for the flat machine-readable payload. Project-sourced routines still show the source repo (and `@branch` when known) in the Repo column; `--json` includes `source`, `sourceRepo`, `sourceBranch`, `hostStrategy`, `oneShot`, and `expired`.
 
 When a routine's last run did not simply complete, the `Last Status` cell names **why** inline — `failed — auth_failed: Please run /login`, `skipped — wedged: a prior run is still active`, `blocked — <readiness>`, or `missed — scheduler was not running when it came due` — so a failing routine is diagnosable from the list without a drill-in. The interactive detail's Recent runs and the `agents routines logs` header (a `reason:` line) surface the same signal, drawn from the run record's `errorMessage` / `readiness` / `skipReason` already on disk (`--json`'s `failureReason` is unchanged).
 
@@ -177,7 +183,7 @@ version: 2.0.65               # Optional: pin to an exact version (or --agent cl
 strategy: balanced            # Optional: per-routine selection policy (pinned | available | balanced) —
                               # beats the firing box's run.<agent>.strategy; conflicts with version:
 mode: auto                    # auto (default), plan (read-only), edit, or skip
-effort: default               # fast, default, or detailed
+effort: auto                  # low, medium, high, xhigh, max, or auto (default)
 timeout: 10m
 runOnce: false                # true for one-shot jobs (--at)
 endAt: "2026-12-31T23:59:00Z" # optional: auto-disable on/after this time
@@ -418,14 +424,14 @@ device manifest.
 ### Daemon-core housekeeping (not a routine you manage)
 
 The daemon's own housekeeping — session-cache warming, device probing, and the
-watchdog — runs as plain `setInterval` timers in `lib/daemon/daemon.ts`
-(`runActiveSessionsWarm`, `runDeviceProbeTick`, `runWatchdogTick`), not as
-entries under `agents routines`. This replaced an earlier `builtin-routines.ts`
+watchdog — runs as supervised daemon services (`session-state`, `device-probe`,
+`watchdog`; each a periodic service under `lib/daemon/`, listed by
+`agents daemon services`), not as entries under `agents routines`. This replaced an earlier `builtin-routines.ts`
 registry that surfaced them as `(built-in)`-tagged routines with
 `agents routines pause`/`devices` support; that registry, the
 `__daemon-tick <name>` entrypoint, and the `JobConfig.builtin` field were torn
 out (RUSH-2495) because they doubled a scheduling layer the plain timers already
-covered. `agents routines list` no longer shows them — housekeeping is invisible
+covered (the plain timers have since become those services). `agents routines list` no longer shows them — housekeeping is invisible
 to that command, not degraded.
 
 The `auto-dispatch` and `launch-health` routines, and the **5-minute
@@ -615,20 +621,17 @@ for a single unordered table.
 
 > **Grouping (`projects`) is not the execution anchor.** The `projects:` list above
 > only organises the routine in listings — it never decides *where* the body runs.
-> The execution directory comes from placement (`devices` / `hostStrategy` / the
-> planned singular `project` anchor below), not from these tags. See
+> The execution directory comes from placement (`devices` / `hostStrategy`) and the
+> singular `project` anchor below, not from these tags. See
 > [Execution context and readiness](#execution-context-and-readiness).
 
 ### Execution context and readiness
 
-> **Status: planned (RUSH-2290).** The singular `project` anchor, the routine-level
-> `cwd`, the readiness/pause behaviour, and the `blocked`/`skipped` run statuses
-> described here are the routine reliability contract and are **not yet on `main`**.
-> They are specified normatively in
+> The singular `project` anchor, the routine-level `cwd`, the readiness/pause
+> behaviour, and the `blocked`/`skipped` run statuses described here are the routine
+> reliability contract (RUSH-2290), specified normatively in
 > [specifications.md §Routine execution & readiness](specifications.md#routine-execution--readiness)
-> (RT-1..RT-11, RT-GAP-1). Today a routine carries only the `projects` grouping list
-> and `remoteCwd` for `host`/`fleet` body placement. This section documents the target
-> so hand-authored YAML and downstream tools can align now.
+> (RT-1..RT-11).
 
 An **agent** or **workflow** routine needs a working directory to run in. Two fields
 set it, and they are deliberately separate from the `projects` grouping tags:
@@ -697,7 +700,7 @@ agents routines list --device yosemite-s0
 # Trigger a job on a specific machine right now
 agents routines run drain --device yosemite-s0
 
-# Create a job pre-assigned to two hosts, then confirm it looks right on one
+# Create a job on yosemite-s0, pinned to fire only there
 agents routines add drain --schedule "0 3 * * *" --agent claude \
   --devices yosemite-s0 --prompt "Drain queue" --device yosemite-s0
 ```
@@ -705,7 +708,7 @@ agents routines add drain --schedule "0 3 * * *" --agent claude \
 When you try to run a job on a host outside its allowlist, the CLI prints:
 
 ```
-Job 'drain' can only run on: yosemite-s0, mac-mini
+Job 'drain' can only run on: yosemite-s0
   agents routines run drain --device yosemite-s0
 ```
 
@@ -724,6 +727,14 @@ The agent can only:
 - See directories listed in `allow.dirs`
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
+
+**Claude is the exception (PHNX-3406).** `buildRoutineSpawnEnv` launches a
+Claude routine with the operator's real `HOME` and the selected version's
+`CLAUDE_CONFIG_DIR`, the same environment as an ordinary `agents run`, so its
+native login and `~/...` hook paths resolve. The overlay is still prepared, and
+`allow.dirs` are passed to the agent as `--add-dir`-style flags, but a Claude
+routine is not confined to the overlay `HOME`. Codex gets `CODEX_HOME` inside
+the overlay.
 
 **GitHub CLI auth the overlay would otherwise hide is forwarded** (RUSH-2860):
 `prepareJobHome` links this machine's `~/.config/gh` (or `$GH_CONFIG_DIR`) into
@@ -753,19 +764,19 @@ run metadata:
 ~/.agents/.history/runs/<routine>/<run-id>/sessions/<agent>/...
 ```
 
-Those archives are indexed by `agents sessions` with `origin: "routine"`,
-`routineName`, and `routineRunId`. Use `agents sessions --routine` (or the
+Those archives are indexed as sessions with `origin: "routine"`,
+`routineName`, and `routineRunId`. Use `sessions --routine` (or the
 `--routines` alias) to pick a routine interactively, or pass a fuzzy name such
-as `agents sessions --routine nightly-review`, to list them. Routine discovery
+as `sessions --routine nightly-review`, to list them. Routine discovery
 spans every working directory because a scheduled run is not tied to the shell
 where its history is inspected. The picker
 includes last-run and session-count context, and the selected view groups sessions
-by run ID and timestamp. Use `agents sessions <run-id>` to render the existing session summary view
+by run ID and timestamp. Use `sessions <run-id>` to render the existing session summary view
 for a specific routine run.
 
-Archiving is per-agent (`ROUTINE_TRANSCRIPT_SPECS` in `runner.ts`, mirroring
-`SESSION_ROOT_SPECS` in `session/discover.ts`) and covers every on-disk session
-agent: claude, codex, cursor, gemini, antigravity, droid, kimi, grok. `opencode`
+Archiving is per-agent (`ROUTINE_TRANSCRIPT_SPECS` in `lib/daemon/runner.ts`) and
+covers every on-disk session agent: claude, codex, cursor, antigravity, droid,
+kimi, grok, muse. `opencode`
 is the one exception — its transcripts live in one incrementally-scanned SQLite
 db (`~/.local/share/opencode/opencode.db`), not a per-session file tree, so
 there's nothing for this mechanism to copy out.
@@ -773,11 +784,13 @@ there's nothing for this mechanism to copy out.
 ### Account auth for routines
 
 A native Claude identity is pinned to its installed version home:
-`buildRoutineSpawnEnv` sets `CLAUDE_CONFIG_DIR` to that home (`runner.ts`), so even
-under the sandbox overlay — which gives the spawn a clean `HOME` — Claude Code
-resolves the credential it owns from `CLAUDE_CONFIG_DIR`. The routine removes an
-ambient `CLAUDE_CODE_OAUTH_TOKEN`; agents-cli neither copies nor converts native
-OAuth material.
+`buildRoutineSpawnEnv` (`runner.ts`) builds the spawn env through `buildExecEnv`,
+which sets `CLAUDE_CONFIG_DIR` to that version's `.claude`, so Claude Code resolves
+the credential it owns from there. Which token rides the env is keyed on device
+role: on a headed (`personal`/`desktop`) box the version's setup-token is stripped
+from `CLAUDE_CODE_OAUTH_TOKEN` and the native login is used; on a worker the
+setup-token is injected as `CLAUDE_CODE_OAUTH_TOKEN`, and with no setup-token the
+variable is removed. agents-cli neither copies nor converts native OAuth material.
 
 A provider account follows the same adapter path as interactive `agents run`: its
 device-local secret bundle supplies the configured API key, setup token, or bearer
@@ -857,18 +870,18 @@ Temporal sequence from cron fire to report saved.
 
 ```
 croner            JobScheduler          runner.ts           sandbox.ts       spawned agent       filesystem
-(library)         scheduler.ts:20       executeJob          prepareJobHome   (claude/codex/      ~/.agents-system/runs/
+(library)         scheduler.ts          executeJobDetached  prepareJobHome   (claude/codex/      ~/.agents/.history/runs/
                                                                               kimi)
 
      │                  │                  │                    │                │                    │
      ●──fire callback──▶│                  │                    │                │                    │
      │                  │                  │                    │                │                    │
      │                  │──onTrigger(cfg)──▶                    │                │                    │
-     │                  │  (scheduler.ts:42)                    │                │                    │
+     │                  │  (scheduler.ts)                       │                │                    │
      │                  │                  │                    │                │                    │
      │                  │                  │──resolveJobPrompt──│                │                    │
      │                  │                  │  + buildJobCommand │                │                    │
-     │                  │                  │  (runner.ts:40)    │                │                    │
+     │                  │                  │  (runner.ts)       │                │                    │
      │                  │                  │                    │                │                    │
      │                  │                  │  if sandbox≠false: │                │                    │
      │                  │                  │──prepareJobHome───▶│                │                    │
@@ -884,7 +897,7 @@ croner            JobScheduler          runner.ts           sandbox.ts       spa
      │                  │                  │──buildSpawnEnv─────▶│                │                    │
      │                  │                  │  HOME=overlay      │                │                    │
      │                  │                  │  + ENV_ALLOWLIST   │                │                    │
-     │                  │                  │  (sandbox.ts:19)   │                │                    │
+     │                  │                  │  (sandbox.ts)      │                │                    │
      │                  │                  │                    │                │                    │
      │                  │                  ├─mkdir runDir, open stdout fd────────────────────────────▶│ runs/{job}/{runId}/
      │                  │                  ├─writeRunMeta(status='running')──────────────────────────▶│   meta.json
@@ -894,11 +907,11 @@ croner            JobScheduler          runner.ts           sandbox.ts       spa
      │                  │                  │    stdio:[ign,     │                │                    │
      │                  │                  │          fd, fd],  │                │                    │
      │                  │                  │    env: spawnEnv   │                │                    │
-     │                  │                  │  })  runner.ts:159─────────────────▶●                    │
+     │                  │                  │  })  ──────────────────────────────▶●                    │
      │                  │                  │                    │                │──stdout────────────▶│ stdout.log
      │                  │                  │                    │                │                    │
      │                  │                  │  setTimeout(timeout)                │                    │
-     │                  │                  │  runner.ts:170     │                │                    │
+     │                  │                  │                    │                │                    │
      │                  │                  │                    │                ●──agent runs──       │
      │                  │                  │                    │                │   prompt, uses     │
      │                  │                  │                    │                │   allowed tools    │
@@ -908,7 +921,7 @@ croner            JobScheduler          runner.ts           sandbox.ts       spa
      │                  │                  ├─writeRunMeta(status=code===0 ? 'completed' : 'failed')──▶│ meta.json
      │                  │                  │                    │                │                    │
      │                  │                  ├─extractAndSaveReport(stdoutPath, agent, runDir)─────────▶│ report.md
-     │                  │                  │  runner.ts:271     │                │                    │
+     │                  │                  │  (skipped on timeout)                │                    │
      │                  │                  │                    │                │                    │
      │                  │◀──resolve────────│                    │                │                    │
      │                  │                  │                    │                │                    │
@@ -918,10 +931,10 @@ croner            JobScheduler          runner.ts           sandbox.ts       spa
      ▼                  ▼                  ▼                    ▼                ▼                    ▼
 ```
 
-On timeout: the setTimeout at `runner.ts:170` fires, sends `SIGTERM` to the
-process group (`process.kill(-child.pid, 'SIGTERM')`), waits 5s, then
-`SIGKILL`. Report extraction runs regardless — a truncated stdout is still
-valuable.
+On timeout, a scheduled (detached) run kills the process group with `SIGKILL`
+(`terminateRoutineTree`) and records `timeout` without extracting a report. A
+foreground `agents routines run` sends `SIGTERM` to the process group, waits 5s,
+then sends `SIGKILL`, and still extracts the report from the truncated stdout.
 
 ## Run State Machine
 
@@ -935,7 +948,7 @@ one-shot — a run never re-enters `running` once it leaves.
                                │
                                ▼
               writeRunMeta(status='running')
-              runner.ts:149
+
                                │
                                │
          ┌─────────────────────┼─────────────────────┐
@@ -943,7 +956,7 @@ one-shot — a run never re-enters `running` once it leaves.
          │                     │                     │
          ▼                     ▼                     ▼
     exit code=0          exit code≠0         timeout fires
-    runner.ts:200        runner.ts:200       runner.ts:184
+
          │                     │                     │
          ▼                     ▼                     ▼
     ┌─────────┐           ┌────────┐            ┌─────────┐
@@ -951,13 +964,14 @@ one-shot — a run never re-enters `running` once it leaves.
     └─────────┘           └────────┘            └─────────┘
                                                       │
                                                       │
-                                             SIGTERM → wait 5s → SIGKILL
-                                             report still extracted from
-                                             partial stdout
+                                             detached: SIGKILL, no report
+                                             foreground: SIGTERM → 5s →
+                                             SIGKILL, report extracted
 ```
 
-Plus one error branch: `child.on('error')` at `runner.ts:208` (spawn itself
-failed — binary not found, EACCES, etc.) → `status='failed'` with `exitCode=null`.
+Plus one error branch: `child.on('error')` (spawn itself failed — binary not
+found, EACCES, etc.) → `status='failed'` with `exitCode=1`. The `missed`,
+`blocked`, and `skipped` statuses below are written without a spawn.
 
 ### `missed` — the run that never started
 
@@ -971,17 +985,14 @@ lands at the right point in `agents routines runs <name>`.
 Without it a miss left no trace at all, and the listing kept showing the previous
 run's `completed` as though it were current.
 
-### `blocked` and `skipped` — planned attempt records (RUSH-2290)
+### `blocked` and `skipped` — attempt records with no process (RUSH-2290)
 
-> **Status: planned.** These two statuses and the pre-session attempt records they
-> describe are the routine reliability contract, not yet on `main` (today the status
-> set stops at `missed`). Specified in
-> [specifications.md §Routine execution & readiness](specifications.md#routine-execution--readiness)
-> (RT-6, RT-7) and [§Scheduling & execution singularity](specifications.md#scheduling--execution-singularity) (SING-13).
+Specified in
+[specifications.md §Routine execution & readiness](specifications.md#routine-execution--readiness)
+(RT-6, RT-7) and [§Scheduling & execution singularity](specifications.md#scheduling--execution-singularity) (SING-13).
 
-Two operational states are today invisible because no process spawns for them, and
-the reliability plan makes each its own terminal run so it shows up in
-`agents routines runs` before any session exists:
+Two operational states spawn no process, so each is recorded as its own terminal
+run and shows up in `agents routines runs` before any session exists:
 
 - **`blocked`** — a **readiness** check failed at fire time (a dead account, an
   untrusted Codex workspace, a missing anchor/cwd), so the body never ran. Distinct
@@ -996,8 +1007,10 @@ the reliability plan makes each its own terminal run so it shows up in
   any still-usable or indeterminate verdict, so a stale probe never wedges a routine
   (RT-12).
 - **`skipped`** — the routine was **already running** when its next slot arrived
-  (self-overlap). Rather than launch a second concurrent instance, the new occurrence
-  records a `skipped` run linked to the still-active run.
+  (self-overlap), the slot was already claimed, or another device owns the
+  routine. Rather than launch a second concurrent instance, the new occurrence
+  records a `skipped` run (`skipReason`: `active_run`, `duplicate_slot`, or
+  `wrong_owner`); an `active_run` skip links to the still-active run.
 
 Run history is the canonical record of what a routine did — a session transcript,
 log, report, or artifact is an *optional child* of a run, not the record itself. That
@@ -1007,12 +1020,11 @@ attached.
 ### One fire launches once
 
 A single scheduled occurrence launches a routine **at most once**, even if the same
-UTC slot is evaluated by two timer callbacks or replayed on a daemon restart. The
-landed guarantee for the catch-up path is the atomic `mkdir` claim below (a `missed`
-record's run directory is a test-and-set). The reliability plan (RUSH-2290) extends
-the same idea to the primary scheduled path: one atomic claim on the occupancy
-identity `(routine, scheduledFor)` before dispatch, kept separate from the
-active-run claim that prevents self-overlap (`SING-13`, `SING-15`, `SING-16`).
+UTC slot is evaluated by two timer callbacks or replayed on a daemon restart.
+Scheduled and catch-up deliveries both take one atomic claim on the occupancy
+identity `(routine, scheduledFor)` before dispatch (`claimRunSlot`, the run
+directory for that slot is a test-and-set), kept separate from the active-run
+claim that prevents self-overlap (`SING-13`, `SING-15`, `SING-16`).
 
 ## Catching up a missed fire
 
@@ -1105,7 +1117,7 @@ Input:  JobConfig                                Output:  ~/.agents/routines/{na
 │ name: daily-review       │                    │ (cleanJobHome removes any prior overlay)│
 │ agent: claude            │                    │                                         │
 │ mode: plan               │  prepareJobHome    │ .claude/                                │
-│ allow:                   │  sandbox.ts:74     │   settings.json  ← generateClaudeConfig │
+│ allow:                   │  sandbox.ts        │   settings.json  ← generateClaudeConfig │
 │   dirs:                  │                    │                    - mode → permMode    │
 │     - ~/projects/myapp   │ ─────────────────▶ │                    - allow.tools        │
 │   tools:                 │                    │                    - SAFE_TOOLS expand  │
@@ -1116,23 +1128,28 @@ Input:  JobConfig                                Output:  ~/.agents/routines/{na
 └──────────────────────────┘                    └─────────────────────────────────────────┘
 
                                                  Env handed to child process:
-                                                 (sandbox.ts:52, buildSpawnEnv)
+                                                 (sandbox.ts, buildSpawnEnv)
                                                  ┌─────────────────────────────────────────┐
                                                  │ HOME=~/.agents/routines/daily-review/home│
+                                                 │ AGENTS_USER_DIR=~/.agents               │
                                                  │ + forwarded from parent only if in      │
-                                                 │   ENV_ALLOWLIST (sandbox.ts:19):        │
-                                                 │   PATH, SHELL, TERM, LANG, LC_*, USER,  │
-                                                 │   TMPDIR, XDG_*, NVM_DIR, NODE_PATH,    │
-                                                 │   BUN_INSTALL, EDITOR, VISUAL, NO_COLOR │
-                                                 │   FORCE_COLOR                           │
+                                                 │   ENV_ALLOWLIST (sandbox.ts):           │
+                                                 │   PATH, SHELL, TERM, LANG, LC_ALL,      │
+                                                 │   LC_CTYPE, USER, LOGNAME, TMPDIR,      │
+                                                 │   XDG_RUNTIME_DIR, XDG_CONFIG_HOME,     │
+                                                 │   XDG_DATA_HOME, XDG_CACHE_HOME,        │
+                                                 │   NODE_PATH, NVM_DIR, BUN_INSTALL,      │
+                                                 │   EDITOR, VISUAL, NO_COLOR, FORCE_COLOR,│
+                                                 │   GH_TOKEN, GH_HOST, GH_ENTERPRISE_TOKEN│
+                                                 │   GITHUB_TOKEN, GH_CONFIG_DIR           │
                                                  │ + TZ (if config.timezone)               │
                                                  │                                         │
                                                  │ Everything else (AWS_*, OPENAI_API_KEY, │
-                                                 │ GITHUB_TOKEN, etc.) is DROPPED.         │
+                                                 │ etc.) is DROPPED.                       │
                                                  └─────────────────────────────────────────┘
 ```
 
-Tools in `allow.tools` are expanded per two small tables at `sandbox.ts:43-49`:
+Tools in `allow.tools` are expanded per two small tables in `sandbox.ts`:
 
 - `SAFE_TOOLS` — safe wildcards (`web_search` → `WebSearch(*)`, `web_fetch` → `WebFetch(*)`)
 - `DIR_SCOPED_TOOLS` — always scoped, never wildcarded (`read`, `write`, `edit`, `glob`, `grep`, `notebook_edit`). A bare `Read` in config expands to `Read(dir1)`, `Read(dir2)`… for each entry in `allow.dirs`.
@@ -1147,14 +1164,14 @@ no `~/.gitconfig`, no ambient AWS/OPENAI keys.
 Each execution creates a run directory with structured output:
 
 ```
-~/.agents/
+~/.agents/.history/
   runs/
     daily-review/
-      2026-04-17T09:00:00.000Z/
-        stdout.log                    # Full terminal output
-        stderr.log                    # Error output
-        exit-code                     # Exit status (0, 1, etc.)
+      2026-04-17T09-00-00-000Z/
+        stdout.log                    # Full terminal output (stdout and stderr)
+        exit-code                     # Exit status, written by detached command routines
         report.md                     # Extracted report
+        sessions/<agent>/...          # Archived agent transcript
         meta.json                     # RunMeta: { agent, version, mode, status, duration, ... }
 ```
 
@@ -1258,7 +1275,7 @@ agents routines logs <name> --run <id>  # Show specific run
 agents routines logs <name> --full    # Show raw stdout from latest run
 agents routines report <name>         # Show report from latest run
 agents routines report <name> --run <id>  # Show specific run report
-agents sessions <run-id>              # Show the archived agent transcript summary
+sessions <run-id>                     # Show the archived agent transcript summary
 
 # Scheduler service (manual controls; the shared daemon stays up)
 agents routines start                 # Enable/reload the scheduler service
@@ -1267,13 +1284,9 @@ agents routines status                # Show scheduler + shared-daemon status an
 agents routines scheduler-logs        # Read scheduler log output
 ```
 
-> **Planned (RUSH-2290), not yet on `main`:** the readiness contract above adds an
-> execution anchor and a diagnose/repair command —
-> `agents routines add|edit <name> --project-anchor <name> --cwd <dir>` to set the
-> singular anchor and working directory, and `agents routines doctor [name] [--fix]`
-> to re-check readiness and repair blockers. `--project-anchor` is deliberately
-> distinct from the existing repeatable `--project` grouping flag. See
-> [Execution context and readiness](#execution-context-and-readiness).
+`--project-anchor` (the singular execution anchor) is deliberately distinct from the
+repeatable `--project` grouping flag. See
+[Execution context and readiness](#execution-context-and-readiness).
 
 ### Non-Interactive Usage
 
@@ -1331,7 +1344,7 @@ sandbox construction, readiness, or dispatch. `blocked` means the readiness gate
 prevented entry into placement; `failed` means placement, dispatch, or execution
 failed after the run path began;
 `skipped` means another slot/active/owner claim won. Routine history is therefore
-complete even when no transcript was created. `agents sessions --routines` builds
+complete even when no transcript was created. `sessions --routines` builds
 its routine picker from definitions and run directories so zero-session routines
 remain selectable, but its result rows are archived sessions. Use `agents routines
 runs <name>` for canonical attempt history, including attempts with no transcript.
@@ -1344,13 +1357,13 @@ The status output includes the resolved daemon binary. Startup rejects bun virtu
 
 | Function | File | Purpose |
 |------|------|------|
-| `listJobs()` | routines.ts | List all configured jobs |
-| `writeJob()` / `readJob()` | routines.ts | Persist job config |
-| `executeJob()` | runner.ts | Run job with sandbox isolation |
-| `createOverlay()` | sandbox.ts | Create HOME overlay with permissions |
-| `scheduleJob()` | scheduler.ts | Register cron trigger |
-| `signalDaemonReload()` | daemon.ts | Notify daemon to reload config |
-| `parseAtTime()` | routines.ts | Parse --at time strings to cron |
-| `getLatestRun()` / `listRuns()` | routines.ts | Query execution history |
-| `jobRunsOnThisDevice()` | routines.ts | Check if job is eligible on current machine |
-| `routineStats()` | routines.ts | Fold `listRuns()` into `{count, failed, missed, avgMs, p50, p95}` — `agents routines stats` |
+| `listJobs()` | scheduling/routines.ts | List all configured jobs |
+| `writeJob()` / `readJob()` | scheduling/routines.ts | Persist job config |
+| `executeJob()` / `executeJobDetached()` | daemon/runner.ts | Run job (foreground / detached) with sandbox isolation |
+| `prepareJobHome()` | sandbox.ts | Create HOME overlay with permissions |
+| `JobScheduler.schedule()` | scheduler.ts | Register cron trigger |
+| `signalDaemonReload()` | daemon/daemon.ts | Notify daemon to reload config |
+| `parseAtTime()` | scheduling/routines.ts | Parse --at time strings to cron |
+| `getLatestRun()` / `listRuns()` | scheduling/routines.ts | Query execution history |
+| `jobRunsOnThisDevice()` | scheduling/routines.ts | Check if job is eligible on current machine |
+| `routineStats()` | scheduling/routines.ts | Fold `listRuns()` into `{count, failed, missed, avgMs, p50, p95}` — `agents routines stats` |

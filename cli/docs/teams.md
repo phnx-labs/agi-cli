@@ -44,7 +44,7 @@ user
                                    └── repeat until drained
 ```
 
-Teammate state transitions (from `src/lib/teams/agents.ts:109-115`):
+Teammate state transitions (from `src/lib/teams/agents.ts:113-117`):
 
 ```
 PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0──▶ COMPLETED
@@ -62,12 +62,13 @@ PENDING ──deps resolved──▶ spawned ──▶ RUNNING ──exit 0─�
 | `agents teams status [team]` | `s`, `st`, `check` | Check team progress |
 | `agents teams active` | — | All teammates running right now, across all teams |
 | `agents teams start [team]` | — | Launch pending teammates whose deps are satisfied |
+| `agents teams pr-watch [team]` | — | Watch the PRs a team opened: red CI spawns a fix teammate, a new review comment routes a bugfix teammate |
 | `agents teams message <team> <teammate> <message>` | — | Send a follow-up: steers a running teammate via its mailbox, resumes a stopped one |
 | `agents teams resume <team> <teammate> [message]` | — | Resume a stopped teammate (re-enter its own session with the message) |
 | `agents teams stop [team] [teammate]` | — | Stop a running teammate (resume it later with `teams resume`) |
-| `agents teams remove [team] [teammate]` | `rm` | Remove a stopped teammate's logs |
+| `agents teams remove [team] [teammate]` | `rm` | Remove a stopped teammate's logs and metadata |
 | `agents teams disband [team]` | `d` | Stop all teammates and delete the team |
-| `agents teams logs [teammate]` | `log` | Read a teammate's raw stdout |
+| `agents teams logs [teammate]` | `log` | Show a teammate's concise session summary (`--full` or `-n` for raw stdout) |
 | `agents teams doctor` | `dr` | Check which agent CLIs are installed |
 
 ### `teams list` options
@@ -79,7 +80,7 @@ a team or running `agents teams status <team>` performs the full status read.
 | Flag | Description |
 |---|---|
 | `-a, --agent <agent>` | Filter to teams containing this agent (e.g. `claude` or `claude@2.1.112`) |
-| `--status <status>` | Filter by team status: `working`, `done`, `failed`, `empty` |
+| `--status <status>` | Filter by team status: `working`, `done`, `stranded`, `failed`, `empty` |
 | `--since <time>` | Teams active after this time (e.g. `2h`, `7d`, ISO date) |
 | `--until <time>` | Teams active before this time |
 | `-n, --limit <n>` | Max results (default 20) |
@@ -92,7 +93,7 @@ a team or running `agents teams status <team>` performs the full status read.
 | `-d, --description <text>` | One-line summary of what this team is working on |
 | `--enable-worktrees` | Each teammate works in its own git worktree |
 | `--use-worktree <path>` | All teammates share this existing worktree path |
-| `--devices <a,b,c>` | Distributed teams: pool of machines the team may run teammates on (alias `--hosts`). See [Distributed teams](#distributed-teams). |
+| `--devices <a,b,c>` | Distributed teams: pool of machines the team may run teammates on. See [Distributed teams](#distributed-teams). |
 | `--repo <url\|path>` | How each **remote** (`--device`) teammate gets the code — one git URL/path for the whole team. Defaults to the local checkout's `origin`. **A team is single-repo:** for work spanning repos, make one team per repo. See [Placement & repos](#placement-and-repos). |
 | `--project <slug>` | Work the team on a defined project (`agents projects`). Its primary directory becomes each local teammate's base cwd; its other bound directories are attached as `--add-dir` grants. Validated at create time, so a slug that does not resolve fails here rather than at the first `teams add`. |
 | `--json` | Machine-readable JSON |
@@ -139,7 +140,7 @@ remote home for you.
 | Flag | Description |
 |---|---|
 | `-n, --name <name>` | Friendly name (required when using `--after`) |
-| `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `full` (write + skip prompts). Default: `edit` |
+| `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `auto` (more autonomous than edit, per-harness) \| `skip` (bypass all permission prompts; `full` is an alias). Default: `edit`. kimi/grok/antigravity have no headless plan mode and downgrade `plan` to `auto` |
 | `-e, --effort <effort>` | `low` \| `medium` \| `high` \| `xhigh` \| `max` \| `auto`. Default: `medium` |
 | `--model <model>` | Cost tier (`cheap`\|`default`\|`best`\|`ultra`) or a concrete id (e.g. `claude-opus-4-8`); tiers resolve per harness+version to a supported model. See Model tiers. |
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |
@@ -151,6 +152,7 @@ remote home for you.
 | `--cloud <provider>` | Dispatch to cloud backend: `rush` \| `codex` \| `factory` |
 | `--repo <owner/repo>` | GitHub repository (required for `--cloud rush`) |
 | `--branch <name>` | Target branch for cloud dispatch |
+| `--force` | Skip the advisory "may not be signed in" / "account throttled" warnings |
 | `--confirm` | Proceed even when the base checkout/repo is behind `origin/main`. Without it, a stale base [blocks the add](#stale-repo-guard). |
 | `--json` | Machine-readable JSON |
 
@@ -188,6 +190,7 @@ pointed the team at so you keep it in sync.
 | `--watch` | Keep polling; fire new waves as deps complete; exit when DAG drains |
 | `--interval <seconds>` | Seconds between waves in `--watch` mode (default 8) |
 | `--max-waves <n>` | Safety cap on waves (default 1000) |
+| `--force` | Skip the advisory "may not be signed in" / "account throttled" warnings for staged teammates |
 | `--json` | Emit one JSON object per wave |
 
 ### `teams status` options
@@ -197,6 +200,7 @@ pointed the team at so you keep it in sync.
 | `-f, --filter <state>` | Show teammates in state: `running`, `completed`, `failed`, `stopped`, `all` (default: `all`) |
 | `-s, --since <iso>` | Cursor from a previous status call; only show updates after this timestamp |
 | `--agent-id <id>` | Show only this teammate (UUID or UUID prefix) |
+| `--parent-session <id>` | Show the teammates spawned by this session, across teams |
 | `-v, --verbose` | Emit full per-teammate detail (prompt, all paths, all messages); default is compact |
 | `--json` | Machine-readable JSON (compact by default; pair with `--verbose` for the full shape) |
 
@@ -204,7 +208,9 @@ pointed the team at so you keep it in sync.
 
 | Flag | Description |
 |---|---|
-| `-n, --tail <n>` | Last N lines only |
+| `-n, --tail <n>` | Last N lines of raw stdout instead of the summary |
+| `-m, --full` | Full raw stdout instead of the summary |
+| `--teammate <name>` | Teammate name (alias for the positional argument) |
 | `--team <team>` | Disambiguate when the same name appears in multiple teams |
 
 ## Resuming a teammate
@@ -233,7 +239,7 @@ The teammate re-launches through the same backend it first used (local process o
 remote host) in its original working directory / worktree, and flips back to
 `running` so `teams status` tracks it live again.
 
-**Every harness.** The resume delegates to `agents run --resume`, so it inherits that
+**Every harness.** The resume delegates to `agents run <agent> --resume <id>`, so it inherits that
 command's coverage: native resume for Claude (`--resume`) and Codex (`resume`), and a
 universal `/continue` replay for the rest (OpenCode, Grok, Kimi, …). The session id it
 resumes is the teammate's underlying agent session — captured from the agent's own
@@ -247,7 +253,7 @@ time you spawn teammates that touch the same codebase, you must declare what
 each one owns, what it must not touch, and which shared artifacts one teammate
 produces for others to consume.
 
-The format from AGENTS.md (the canonical memory file for this repo):
+The format:
 
 ```
 Owns       — explicit files (with line ranges where helpful)
@@ -413,8 +419,7 @@ If **no** pool device can run a pending teammate's agent, `teams start` **fails
 loud** — e.g. `No device in the team pool can run claude@2.1.112. Run 'agents
 devices ping' to see which devices have the agent installed + signed in.` —
 instead of stranding the teammate; it never silently falls back to a local run you
-did not ask for. Pass
-`--force` to downgrade that to a warning and start anyway. A probe that simply
+did not ask for. A probe that simply
 could not reach the pool (no positive evidence) does **not** trigger the failure —
 the real error then surfaces at the SSH dispatch. Set a per-device cap with
 `agents devices config <name> agents.max-concurrent N`.
@@ -526,14 +531,14 @@ agents teams status my-team --json
 # Full status as JSON (legacy shape — prompt, all paths, all messages)
 agents teams status my-team --json --verbose
 
-# All teams as JSON (used by agi-cli observability layer)
+# All teams as JSON
 agents teams list --json
 ```
 
 ## Budget Guardrails
 
-Teammates **inherit the project's budget caps** (see
-[docs/observability.md](./observability.md#budget-guardrails-agents-budget)).
+Teammates **inherit the project's budget caps** (the `budget:` block in
+`agents.yaml`, see below).
 Before each teammate launches, its estimated cost is projected onto current
 spend; under `on_exceed: block`, a teammate that would breach `per_run`,
 `per_day`, `per_agent`, or `per_project` is **refused** and the spawn fails with
@@ -542,11 +547,11 @@ vendors, a Claude teammate and a Codex teammate draw down the *same*
 `per_project` / `per_day` pool — one budget governs the whole team regardless of
 which CLIs it uses.
 
-Teammate budgeting is **pre-flight only** in v1: a teammate is estimated and
-blocked *before* it spawns, but there is **no live mid-run hard-cap kill** for
-teammates (they spawn through the teams runner, not the headless `agents run`
-kill path). The live mid-run kill applies to local headless `agents run` today;
-extending it to teams is a planned follow-up.
+Under `teams start --watch`, a live watcher also reads the usage events in each
+teammate's stdout every wave; on the first cap breach the supervisor stops every
+teammate in the team, prints `[budget] cap … exceeded … — stopping team <team>`,
+and exits (`src/lib/budget/live-team.ts`, `src/lib/teams/supervisor.ts`). A
+one-shot `teams start` (no `--watch`) gets only the pre-flight check.
 
 Set caps in the project's `agents.yaml`:
 
@@ -556,12 +561,7 @@ budget:
   on_exceed: block
 ```
 
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/teams.mp4"></video>
-
 ## See Also
 
 - [docs/concepts.md](./concepts.md) — DotAgents repos, resource resolution model
-- [docs/observability.md](./observability.md) — `agents teams list --json` as a fleet observability source
 - [docs/cloud.md](./cloud.md) — cloud dispatch (`--cloud rush|codex|factory` on `teams add`)

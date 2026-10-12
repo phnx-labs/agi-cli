@@ -19,7 +19,7 @@ host: { agent: codex }
 env:
   OPENAI_BASE_URL: https://api.deepinfra.com/v1/openai
   OPENAI_MODEL: deepseek-ai/DeepSeek-V3
-account: <stable account id>
+account: deepinfra             # the durable account name, not a per-device id
 provider: deepinfra
 ```
 

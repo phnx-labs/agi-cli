@@ -71,7 +71,7 @@ function printOnboardingNextStep(name: string): void {
 export function registerSetupBrowserCommand(setupCmd: Command): void {
   setupCmd
     .command('browser')
-    .description('Set up `agents browser` — install the Browser CLI, seed profiles, and pick this machine\'s default.')
+    .description('Set up the standalone `browser` CLI — install it, seed profiles, and pick this machine\'s default.')
     .option('--install-only', 'Install the standalone Browser CLI without changing profiles or starting a browser')
     .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
     .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {

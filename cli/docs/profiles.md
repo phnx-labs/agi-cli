@@ -40,7 +40,7 @@ The model is written to the host's model env var — `OPENCODE_MODEL` for openco
 
 `agents harness list` shows three groups: your custom harnesses, the addable built-in presets, and the native harness registry. `agents harness view <name>` and `agents harness remove <name>` round it out.
 
-A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. The difference from `agents harness add`: `harness add` takes the host+model one-shot (no preset needed) and owns its own `--host` flag, whereas `agents harness --host <device>` is reserved for running the profiles command on a remote device.
+A harness *is* a profile — same `~/.agents/profiles/<name>.yml`, same `agents run` resolution, same device sync via `agents repo push user`. `harness add` takes the host+model one-shot (`--host` names the host CLI, not a device) or applies a built-in preset by name or `--preset`.
 
 ### Forking a harness (`agents harness fork`)
 
@@ -148,8 +148,7 @@ Profile YAML `host.agent` selects which binary is spawned. Env vars override def
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `harness list` / `ls` | List configured profiles (name, host, provider, model) | `agents harness list` |
-| `harness list` | List custom harnesses and the built-in presets | `agents harness list` |
+| `harness list` / `ls` | List custom harnesses, the addable built-in presets, and native harnesses | `agents harness list` |
 | `harness view <name>` / `show` | Inspect a profile (env vars, auth status, preset link) | `agents harness view kimi` |
 | `harness add <name>` | Add a profile from a preset. Prompts for API key once per provider. | `agents harness add kimi` |
 | `harness add <name> --preset <preset>` | Add a profile using an explicit preset name | `agents harness add k2 --preset kimi` |
@@ -195,7 +194,7 @@ All OpenRouter presets share one key (`agents-cli.openrouter.token`). Adding a s
 
 Source: `src/lib/profiles-presets.ts`.
 
-**REASONING vs PRINT-SAFE:** Claude Code sends `thinking:{type:"enabled"}` in its Anthropic payload. When the model returns reasoning/redacted_thinking blocks, `--print` consolidation returns empty stdout. Reasoning presets (`kimi`, `minimax`, `glm`) work fine interactively; use print-safe variants (`kimi-chat`, `qwen`, `deepseek`) for `agents run --print` and scripted pipelines.
+**REASONING vs PRINT-SAFE:** Claude Code sends `thinking:{type:"enabled"}` in its Anthropic payload. When the model returns reasoning/redacted_thinking blocks, `--print` consolidation returns empty stdout. Reasoning presets (`kimi`, `minimax`, `glm`) work fine interactively; use print-safe variants (`kimi-chat`, `qwen`, `deepseek`) for headless `agents run <profile> "<prompt>"` and scripted pipelines.
 
 ## Configuration Schema
 
@@ -206,6 +205,9 @@ name: local-llama              # string, required — must match filename stem
                                # Pattern: [a-z0-9][a-z0-9-_]{0,48} (case-insensitive)
 
 description: Local Llama 3.3  # string, optional — shown in `harness list` and `view`
+
+account: ollama                # string, optional — durable account NAME (agents accounts);
+                               # resolved at spawn time, credential stays on the device
 
 host:
   agent: claude                # AgentId, required — which CLI binary to spawn
@@ -240,7 +242,7 @@ models:                        # Partial<Record<ModelTier, string>>, optional
                                # the single pinned model in `env`, unchanged.
 ```
 
-Fields sourced from `Profile` interface at `src/lib/profiles.ts:19-73`.
+Fields sourced from the `Profile` interface in `src/lib/profiles.ts` (which also carries `forkedFrom`, `fallback_model`, `label`, and `authOptional`).
 
 ## Recipes
 
@@ -256,7 +258,7 @@ agents run kimi "refactor the auth handler"
 
 # Add a print-safe preset for scripted use
 agents harness add deepseek
-agents run deepseek --print "summarize the diff"
+agents run deepseek "summarize the diff"   # a prompt runs headless
 ```
 
 ### 2. Write a custom YAML for a local Ollama endpoint
@@ -293,7 +295,7 @@ agents accounts set-key openrouter   # prompts for new key, overwrites the old o
 # All kimi, kimi-chat, minimax, glm, qwen, deepseek profiles pick it up immediately
 ```
 
-To rotate non-interactively (CI), import from an `agents secrets` entry:
+To rotate non-interactively (CI), import from a `secrets` bundle entry:
 
 ```bash
 agents accounts set-key openrouter --from-secrets openrouter.ai:OPENROUTER_API_KEY
@@ -304,7 +306,7 @@ agents accounts set-key openrouter --from-secrets openrouter.ai:OPENROUTER_API_K
 ```bash
 agents harness list              # table: NAME HOST PROVIDER MODEL
 agents harness view kimi         # env vars, auth status, signup URL
-agents harness presets           # full preset catalog with descriptions
+agents harness list --json       # custom harnesses plus the preset catalog, machine-readable
 ```
 
 ### 5. Pin a specific host version
@@ -359,12 +361,6 @@ leaseProfile: private-hot-box
 
 `--fresh` opts out of reuse entirely: it always provisions a brand-new box and
 tears it down after the run.
-
-## Demo
-
-<video autoplay loop muted playsinline width="100%" src="../assets/videos/profiles.mp4"></video>
-
-`agents harness add kimi` stores the OpenRouter key once; `agents run kimi` spawns Claude Code with Kimi K2.5 responding.
 
 ## See Also
 
