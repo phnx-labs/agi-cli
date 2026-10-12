@@ -375,6 +375,7 @@ describe('validation', () => {
   it('validates the Goals preferences: homeGoals levels and the goalCountdown switch (PHNX-4291)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     expect(getConfigValue('menubar.menu.homeGoals').spec.defaultValue).toEqual(['company']);
+    expect(getConfigValue('menubar.menu.ticketSort').spec.defaultValue).toBe('due');
     expect(getConfigValue('menubar.statusbar.goalCountdown').spec.defaultValue).toBe(false);
 
     setConfigValue('menubar.menu.homeGoals', ['company', 'myDay']);
