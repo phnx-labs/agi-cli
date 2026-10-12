@@ -30,11 +30,13 @@ describe('removed tool groups', () => {
     });
   }
 
-  it('points a moved sessions verb at its new home', () => {
-    const result = runAgents(['sessions', 'resume', 'abc123']);
-    expect(result.status).toBe(1);
-    expect(result.stderr.trim()).toBe(
-      "error: 'agents sessions resume' was removed; use 'agents run auto --resume <id>'.",
-    );
+  it('points a moved sessions verb at its new home, past a flag value', () => {
+    for (const args of [['sessions', 'resume', 'abc123'], ['sessions', '--device', 'box', 'resume', 'abc123']]) {
+      const result = runAgents(args);
+      expect(result.status).toBe(1);
+      expect(result.stderr.trim()).toBe(
+        "error: 'agents sessions resume' was removed; use 'agents run auto --resume <id>'.",
+      );
+    }
   });
 });
