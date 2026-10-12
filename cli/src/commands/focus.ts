@@ -755,17 +755,11 @@ async function stopHeadlessCopy(s: ActiveSession, id: string, remote: string | u
 
 export interface TakeoverDeps {
   open?: OpenSurfacesFn;
-  /** The tab backend; resolved from this terminal and the live roster when omitted. */
   choice?: LaunchBackendChoice | null;
   interactive?: boolean;
   meta?: SessionMeta;
 }
 
-/**
- * Bring a session with no attach rail into a terminal tab. A live headless run is
- * stopped first (here, or on its device), so the resumed tab never races it as a
- * second writer on the same conversation.
- */
 export async function resumeInTab(s: ActiveSession, remote: string | undefined, deps: TakeoverDeps = {}): Promise<void> {
   const id = s.sessionId ?? '';
   if (!id) {
@@ -788,11 +782,9 @@ export async function resumeInTab(s: ActiveSession, remote: string | undefined, 
   }
 
   const meta = deps.meta ?? (await richMetaById(id)) ?? metaFromActive(s);
-  // A peer-owned session reopens through the portable command, which routes to its owner.
   const command = [...buildSessionRecoveryCommand(meta, !!remote), '--quiet'];
   const recorded = meta.cwd ?? s.cwd;
   const localCwd = recorded ? localizeHome(recorded) : undefined;
-  // A peer's worktree may not exist here; its repo usually does.
   const cwd = localCwd && fs.existsSync(localCwd) ? localCwd : localProjectFolder(recorded) ?? process.cwd();
   const project = localProjectFolder(cwd) ?? cwd;
 
