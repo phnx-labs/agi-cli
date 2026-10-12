@@ -596,6 +596,14 @@ export interface ActiveSession {
    */
   terminalId?: string;
   /**
+   * The launch handle (`AGENTS_LAUNCH_ID`) stamped at spawn and joined to the
+   * agent's own SessionStart hook (`launch_id`). Like {@link terminalId} it
+   * survives an SSH hop and a session rotation, and is the primary join key the
+   * hook index resolves on before falling back to terminalId/pid. From the pid
+   * registry or the hook record; absent for any launch that carried no launch id.
+   */
+  launchId?: string;
+  /**
    * tmux pane id (`%N`) when this row was discovered via the tmux source AND its
    * session id could not be resolved (a born-unidentifiable non-Claude pane). It
    * is the dedupe key for such id-less rows, so two anonymous panes in the same
@@ -2014,7 +2022,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
       lastActivityMs: mtimeMs,
       pidCount: 1 + (foldedByRoot.get(pid) ?? 0),
       owner: resolveOwner(entry?.actor, resolvedId),
-      terminalId: entry?.terminalId,
+      terminalId: entry?.terminalId ?? hookRec?.terminal_id,
+      launchId: entry?.launchId ?? hookRec?.launch_id,
     }, state, sessionFile, true));
   }
   // Housekeeping: drop registry files for pids that have since died.

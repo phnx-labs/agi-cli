@@ -55,6 +55,21 @@ describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
     });
     expect(r.firstUserMessage).toBe('Implement the full request\nwith all acceptance criteria.');
   });
+
+  it('carries launchId + terminalId through to the emitted row (guard against a silent field drop)', () => {
+    const source: ActiveSession = {
+      context: 'terminal', kind: 'codex', sessionId: 'x', status: 'running',
+      machine: 'zion', cwd: '/repo',
+      launchId: 'launch-abc', terminalId: 'term-42',
+    };
+    const r = toSessionWatchRow('zion', source);
+    expect(r.launchId).toBe('launch-abc');
+    expect(r.terminalId).toBe('term-42');
+    // The identity fields the join keys ride alongside must survive too.
+    expect(r.sessionId).toBe('x');
+    expect(r.status).toBe('running');
+    expect(r.machine).toBe('zion');
+  });
 });
 
 describe('durable Previous rows on the canonical watch stream', () => {
