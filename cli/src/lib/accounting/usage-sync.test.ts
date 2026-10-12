@@ -3,7 +3,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { readFleetSharedDeviceStates, readOwnFleetSharedDeviceState } from '../fleet-shared-state.js';
+import { readFleetSharedDeviceStates, readOwnFleetSharedDeviceState, FLEET_SHARED_STATE_VERSION } from '../fleet-shared-state.js';
+import { setConfiguredDeviceRole } from '../device-config.js';
+import { readMeta } from '../state.js';
 import { readClaudeUsageCache, type CachedUsageSnapshot } from './usage.js';
 import {
   applyPeerFleetState,
@@ -146,5 +148,32 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(readOwnFleetSharedDeviceState('fresh', root)).toEqual({ version: 1, device: 'fresh' });
     await applyPeerFleetState({ version: 1, device: 'zion', auth: { status: 'ready' } }, { userAgentsDir: root, device: 'worker-a', receivedAt: 5 });
     expect(readOwnFleetSharedDeviceState('zion', root)).toEqual({ version: 1, device: 'zion', auth: { status: 'ready' } });
+  });
+});
+
+describe('applyPeerFleetState adopts account rows from a headed peer', () => {
+  const socials = {
+    id: 'acct-socials', name: 'socials', agent: 'grok' as const, identityKey: 'grok:user=s:org=s',
+    identityLabel: 'social@getrush.ai', scope: 'version' as const, provisioning: 'per-device' as const, createdOn: 'zion',
+  };
+  const envelope = (device: string, native: unknown[]) => ({
+    version: FLEET_SHARED_STATE_VERSION, device, accounts: { rows: [], native },
+  }) as never;
+
+  it('adds the row when the sender is headed and created it', async () => {
+    setConfiguredDeviceRole('zion', 'personal');
+    const applied = await applyPeerFleetState(envelope('zion', [socials]), { userAgentsDir: tempDir(), cachePath: path.join(tempDir(), 'c.json'), device: 'worker-a' });
+    expect(applied.adoptedAccounts).toEqual(['acct-socials']);
+    expect(readMeta().accounts?.native?.['acct-socials']?.name).toBe('socials');
+  });
+
+  it('ignores rows from a worker, and rows a headed peer only relays', async () => {
+    setConfiguredDeviceRole('worker-b', 'worker');
+    setConfiguredDeviceRole('desk', 'desktop');
+    const opts = () => ({ userAgentsDir: tempDir(), cachePath: path.join(tempDir(), 'c.json'), device: 'worker-a' });
+    expect((await applyPeerFleetState(envelope('worker-b', [{ ...socials, id: 'w', name: 'w', identityKey: 'k:w', createdOn: 'worker-b' }]), opts())).adoptedAccounts).toEqual([]);
+    expect((await applyPeerFleetState(envelope('desk', [{ ...socials, id: 'r', name: 'r', identityKey: 'k:r' }]), opts())).adoptedAccounts).toEqual([]);
+    expect(readMeta().accounts?.native?.w).toBeUndefined();
+    expect(readMeta().accounts?.native?.r).toBeUndefined();
   });
 });

@@ -282,6 +282,23 @@ export function addNativeAccount(
   return account;
 }
 
+export function adoptPeerNativeAccounts(records: readonly NativeAccountRecord[]): string[] {
+  const adopted: string[] = [];
+  updateMeta(current => {
+    const native = { ...current.accounts?.native };
+    for (const record of records) {
+      if (record.scope !== 'version' || native[record.id]) continue;
+      const known = listNativeAccounts({ accounts: { native }, deviceAccounts: current.deviceAccounts });
+      if (known.some(account => account.agent === record.agent
+        && (account.identityKey === record.identityKey || account.name === record.name))) continue;
+      native[record.id] = record;
+      adopted.push(record.id);
+    }
+    return adopted.length === 0 ? current : { ...current, accounts: { ...current.accounts, native } };
+  });
+  return adopted;
+}
+
 export function labelNativeAccount(
   agent: AgentId,
   identityKey: string,

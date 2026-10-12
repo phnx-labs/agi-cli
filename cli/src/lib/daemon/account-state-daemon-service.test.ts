@@ -201,6 +201,30 @@ describe('account auth transition notification', () => {
     expect(sent).toEqual(['claude:work:expired']);
   });
 
+  it('a headed device publishes its central account rows; a worker publishes none', async () => {
+    vi.useRealTimers();
+    const previousMachine = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'account-row-device';
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-account-rows-'));
+    try {
+      const { addNativeAccount } = await import('../account-registry.js');
+      const { setConfiguredDeviceRole } = await import('../device-config.js');
+      const created = addNativeAccount('socials-row', 'grok', 'grok:user=row:org=row', 'social@getrush.ai', 'version');
+      const file = path.join(root, 'devices', 'account-row-device', 'daemon-state.json');
+      setConfiguredDeviceRole('account-row-device', 'personal');
+      await publishAccountDaemonStateRows([], root);
+      const headed = JSON.parse(fs.readFileSync(file, 'utf-8'));
+      expect(headed.accounts.native.map((r: { id: string }) => r.id)).toContain(created.id);
+      setConfiguredDeviceRole('account-row-device', 'worker');
+      await publishAccountDaemonStateRows([], root);
+      expect(JSON.parse(fs.readFileSync(file, 'utf-8')).accounts.native).toBeUndefined();
+    } finally {
+      if (previousMachine === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+      else process.env.AGENTS_SYNC_MACHINE_ID = previousMachine;
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('publishes per-account verdicts into the real daemon-state envelope without dropping sibling fields', async () => {
     vi.useRealTimers();
     const previousMachine = process.env.AGENTS_SYNC_MACHINE_ID;
