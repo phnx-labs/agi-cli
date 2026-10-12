@@ -468,10 +468,10 @@ JSON and returning `undefined` (→ `skipped`) on any error.
 event (`agents send --to owner`, a `--blocked` or important `feed post`, an urgent
 feed block, a failed routine) is one `POST /me/notifications` to rush/api through
 [`src/lib/owner-notify.ts`](src/lib/owner-notify.ts) `postOwnerNotification`.
-rush/api owns the preferences (edited in the console Settings page), quiet hours,
+rush/api owns the preferences (edited in the console Settings page),
 dedup on `(event, dedupKey)` (`postOwnerNotification` prefixes every producer key with `owner:` so it can never collide with a cloud-run key), and delivery: email, Slack and iMessage all go out
 server-side, iMessage from Rush's SendBlue number. Event mapping: a block is
-`needs_you` (the only event that bypasses quiet hours), a failed routine is
+`needs_you`, a failed routine is
 `failed`, everything else is `message`; a green routine stays silent. The bearer is
 this box's Phoenix session, else the `notify`-scoped device token in this worker's
 reserved store `__notify-<device>__`. Neither is an `OwnerNotSignedInError`, never
