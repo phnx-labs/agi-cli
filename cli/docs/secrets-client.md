@@ -2,7 +2,7 @@
 
 `cli/src/lib/secrets-client.ts` is the **one** process client through which
 agents-cli talks to the standalone `secrets` CLI (PHNX-3989). Since secrets-cli
-0.3.0 its transport is the published `@phnx-labs/secrets-cli/client` entry
+0.3.3 its transport is the published `@phnx-labs/secrets-cli/client` entry
 (exact-pinned in `cli/package.json`), which this module re-exports
 (`secretsRequest*`, `readAndResolveBundleEnv*`, `SecretsClientError`,
 `resolveSecretsBin`, `buildServeEnv`, the test hooks); what stays here is
@@ -44,14 +44,14 @@ parent                              child: `secrets __serve`
   `Map` arguments and results are carried through `encodeWire`/`decodeWire`
   (`{ $map: [[k, v], …] }`). The published client imports these from the same
   package as the server, so the two cannot drift.
-- **Version negotiation rides the response**, not a separate round trip: every
+- **Version negotiation.** Every
   reply carries `v`, and `parseResponse` rejects one that is not
-  `PROTOCOL_VERSION` (1) with `PROTOCOL_UNSUPPORTED`. There is deliberately no
-  `handshake` request before the first real op — each request is a cold
-  `secrets __serve` process, so that negotiation cost a full Node boot on the
-  first secrets read of every command (PHNX-4082). `op: "handshake"` remains a
-  callable op the standalone answers with `{protocol, operations}`; the client
-  just no longer spends a spawn on it.
+  `PROTOCOL_VERSION` (1) with `PROTOCOL_UNSUPPORTED`. Since 0.3.1 the client
+  also sends one `handshake` per selected executable per process, cached, before
+  its first data op: an engine whose reply lacks the compatibility contract fails
+  with `ENGINE_INCOMPATIBLE`. That brings back one extra `secrets __serve` boot
+  on the first secrets read of a command, which PHNX-4082 had removed; secrets-cli
+  accepted that cost for the compatibility check.
 - **Errors** are `SecretsClientError` carrying the server's `{ code, message }`
   (e.g. `ACCESS_DENIED`, `NOT_FOUND`), or a client-side transport code
   (`SECRETS_BIN_MISSING`, `TIMEOUT`, `PROTOCOL_UNSUPPORTED`, `SPAWN_FAILED`).
@@ -85,8 +85,8 @@ answer.
 
 | Variable | Who sets it | Meaning |
 |---|---|---|
-| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (the published client's lookup keeps this rule): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets` and sits first on PATH, so taking it would make `agents secrets` re-enter itself without bound (the self-heal shim pass also removes that legacy shim outright). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
-| `SECRETS_HOME` | operator/tests (optional) | The standalone's state root. An explicit value passes through; an unset one stays unset, so the standalone uses its own default (`~/.agents/.secrets` since 0.2.0, which adopts the earlier `~/.agents` and `~/.secrets` stores on first use). agents-cli no longer forces `~/.agents` here or in `buildExecEnv` (`lib/exec.ts`), so a bare `secrets` inside an agent reads the same store. The standalone floor is 0.3.0 (`secrets-cli.ts`): a 0.1.x engine defaulted to `~/.secrets` without adopting. |
+| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (the published client's lookup keeps this rule): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets`, which no longer exists, so taking it would fail instead of reaching the standalone (the shim pass also prunes that legacy shim). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
+| `SECRETS_HOME` | operator/tests (optional) | The standalone's state root. An explicit value passes through; an unset one stays unset, so the standalone uses its own default (`~/.agents/.secrets` since 0.2.0, which adopts the earlier `~/.agents` and `~/.secrets` stores on first use and follows `AGENTS_REAL_HOME` when a harness swaps `HOME`). agents-cli no longer forces `~/.agents` here or in `buildExecEnv` (`lib/exec.ts`), so a bare `secrets` inside an agent reads the same store. The standalone floor is 0.3.3 (`secrets-cli.ts`). The client handshakes the selected engine before its first data request and rejects one without the 0.3.1 compatibility contract with `ENGINE_INCOMPATIBLE` (not a transport error), rather than reading a different root and answering `NOT_FOUND`. |
 | `SECRETS_PASSPHRASE` | **this client** (bridged) | The file-store encryption key the standalone reads. The extraction renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so `buildServeEnv` forwards a caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name agents-cli's own engine reads) onto `SECRETS_PASSPHRASE` for the child — otherwise the standalone can't decrypt the very file store agents-cli wrote and would silently provision a fresh machine-local key (MIG-1: never silently choose another key after a decryption miss). An explicit `SECRETS_PASSPHRASE` already in the env wins; the bridge only fills the rename gap. |
 
 The child inherits the rest of the parent env, so `SECRETS_SCOPE`/`SECRETS_CONTEXT`

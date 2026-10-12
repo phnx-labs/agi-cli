@@ -8,6 +8,7 @@
         "@fontsource/inter": "^5.3.0",
         "@fontsource/jetbrains-mono": "^5.3.0",
         "@inquirer/prompts": "8.5.2",
+        "@phnx-labs/secrets-cli": "0.3.3",
         "@phnx-labs/sessions-cli": "0.8.4",
         "@resvg/resvg-wasm": "^2.6.2",
         "@types/proper-lockfile": "4.1.4",
@@ -276,7 +277,7 @@
 
     "@phnx-labs/cli-docs": ["@phnx-labs/cli-docs@0.1.1", "", { "peerDependencies": { "commander": ">=12" } }, "sha512-2gcsKyVYDia/Sh6Fu199e+OLY8Wf4uQWqISOm+KisnOuEl2m/2x8J++Izm1VRQfWnQkCZkUkuIrjLm962hKsHA=="],
 
-    "@phnx-labs/secrets-cli": ["@phnx-labs/secrets-cli@0.3.0", "", { "dependencies": { "@1password/sdk": "0.5.0", "@aws-sdk/client-secrets-manager": "3.1127.0", "@aws-sdk/credential-providers": "3.1127.0", "@inquirer/prompts": "8.5.2", "age-encryption": "0.3.0", "chalk": "5.6.2", "commander": "15.0.0", "proper-lockfile": "4.1.2", "yaml": "2.9.0" }, "bin": { "secrets": "dist/index.js" } }, "sha512-z32mSOSzEMWQG40ciQDKpKqbMvGCbaNnxP/W5+ifKuVbgBPwVEgZZQtwVjLAMqxez2853lTnefAHEgXeqEu8hg=="],
+    "@phnx-labs/secrets-cli": ["@phnx-labs/secrets-cli@0.3.3", "", { "dependencies": { "@1password/sdk": "0.5.0", "@aws-sdk/client-secrets-manager": "3.1127.0", "@aws-sdk/credential-providers": "3.1127.0", "@inquirer/prompts": "8.5.2", "age-encryption": "0.3.0", "chalk": "5.6.2", "commander": "15.0.0", "proper-lockfile": "4.1.2", "yaml": "2.9.0" }, "bin": { "secrets": "dist/index.js" } }, "sha512-+7hqH9YZKdzMgM0qUaUPwwrUfIH73aDWhiZVyXivWKWXlDkmC5wLKBYMmNXSAQQe65PgksFtrGe1TsHHt6DbzA=="],
 
     "@phnx-labs/sessions-cli": ["@phnx-labs/sessions-cli@0.8.4", "", { "dependencies": { "@inquirer/core": "11.2.1", "@phnx-labs/secrets-cli": "0.3.0", "acorn": "8.18.0", "aws4fetch": "1.0.20", "chalk": "5.6.2", "commander": "15.0.0", "diff": "9.0.0", "marked": "15.0.12", "marked-terminal": "7.3.0", "proper-lockfile": "4.1.2", "shlex": "3.0.0", "unbash": "4.0.5" }, "bin": { "sessions": "dist/index.js" } }, "sha512-ek4eri8gHgOaE2cYkE4oLQs1IbR0XQshta0QvyesngGhcVc+2e/6IGfj8Vb+p4sHV1r9tD4YkL1aIpaE5YI3LA=="],
 
@@ -777,6 +778,8 @@
     "@noble/post-quantum/@noble/curves": ["@noble/curves@2.0.1", "", { "dependencies": { "@noble/hashes": "2.0.1" } }, "sha512-vs1Az2OOTBiP4q0pwjW5aF0xp9n4MxVrmkFBxc6EKZc6ddYx5gaZiAsZoq0uRRXWbi3AT/sBqn05eRPtn1JCPw=="],
 
     "@noble/post-quantum/@noble/hashes": ["@noble/hashes@2.0.1", "", {}, "sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw=="],
+
+    "@phnx-labs/sessions-cli/@phnx-labs/secrets-cli": ["@phnx-labs/secrets-cli@0.3.0", "", { "dependencies": { "@1password/sdk": "0.5.0", "@aws-sdk/client-secrets-manager": "3.1127.0", "@aws-sdk/credential-providers": "3.1127.0", "@inquirer/prompts": "8.5.2", "age-encryption": "0.3.0", "chalk": "5.6.2", "commander": "15.0.0", "proper-lockfile": "4.1.2", "yaml": "2.9.0" }, "bin": { "secrets": "dist/index.js" } }, "sha512-z32mSOSzEMWQG40ciQDKpKqbMvGCbaNnxP/W5+ifKuVbgBPwVEgZZQtwVjLAMqxez2853lTnefAHEgXeqEu8hg=="],
 
     "@poppinss/dumper/@sindresorhus/is": ["@sindresorhus/is@7.2.0", "", {}, "sha512-P1Cz1dWaFfR4IR+U13mqqiGsLFf1KbayybWwdd2vfctdV6hDpUkgCY0nKOLLTMSoRd/jJNjtbqzf13K8DCCXQw=="],
 

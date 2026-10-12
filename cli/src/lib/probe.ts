@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 
 const GROUP_REAP = process.platform !== 'win32';
+const STDOUT_DRAIN_MS = 250;
 
 const LIVE_GROUPS = new Set<number>();
 let exitHookInstalled = false;
@@ -67,9 +68,19 @@ export function probeCapture(
     });
     child.on('error', (e) => settle(e));
     child.on('exit', (code) => {
-      setImmediate(() =>
-        settle(code !== null && (options.acceptedExitCodes ?? [0]).includes(code) ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`)),
-      );
+      const done = () =>
+        settle(code !== null && (options.acceptedExitCodes ?? [0]).includes(code) ? null : new Error(`probe exited ${code}: ${cmd} ${args.join(' ')}`));
+      const stdout = child.stdout;
+      if (!stdout || stdout.readableEnded) {
+        setImmediate(done);
+        return;
+      }
+      // Exit can be delivered before the child's last write is read; a grandchild holding the pipe must not stall the probe.
+      const drain = setTimeout(done, STDOUT_DRAIN_MS);
+      stdout.once('end', () => {
+        clearTimeout(drain);
+        done();
+      });
     });
   });
 }

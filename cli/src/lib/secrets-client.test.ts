@@ -80,13 +80,14 @@ describe('item naming (the seam\'s shared identifier scheme)', () => {
 });
 
 describe.skipIf(process.platform === 'win32')('agents-cli wrappers against the real standalone from @phnx-labs/secrets-cli', () => {
-  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'USERPROFILE', 'SECRETS_HOME', 'SECRETS_PASSPHRASE', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT', 'SECRETS_NO_USAGE_TRACK'];
+  const ENV_KEYS = ['SECRETS_BIN', 'HOME', 'USERPROFILE', 'AGENTS_REAL_HOME', 'SECRETS_HOME', 'SECRETS_PASSPHRASE', 'AGENTS_SECRETS_PASSPHRASE', 'SECRETS_NO_AGENT', 'SECRETS_NO_USAGE_TRACK'];
   const saved: Record<string, string | undefined> = {};
   let home: string;
 
   function useRoot(root: 'explicit' | 'default'): void {
     process.env.HOME = home;
     process.env.USERPROFILE = home;
+    process.env.AGENTS_REAL_HOME = home;
     process.env.SECRETS_BIN = REAL_BIN;
     process.env.SECRETS_NO_AGENT = '1';
     process.env.SECRETS_NO_USAGE_TRACK = '1';
@@ -157,6 +158,20 @@ describe.skipIf(process.platform === 'win32')('agents-cli wrappers against the r
     writeBundleWithItemsSync(bundle, items);
     expect(fs.existsSync(path.join(home, '.agents', '.secrets'))).toBe(true);
     expect((await readAndResolveBundleEnv(bundleName)).env.MY_KEY).toBe('default-root-value');
+  }, 90_000);
+
+  it('a harness HOME swap still reaches the default root under AGENTS_REAL_HOME', async () => {
+    useRoot('default');
+    const bundleName = name('real-home');
+    const { bundle, items } = fileBundle(bundleName, 'real-home-value');
+    writeBundleWithItemsSync(bundle, items);
+    const versionHome = path.join(home, 'version-home');
+    fs.mkdirSync(versionHome);
+    process.env.HOME = versionHome;
+    process.env.USERPROFILE = versionHome;
+    _resetSecretsClientForTest();
+    expect(readAndResolveBundleEnvSync(bundleName).env.MY_KEY).toBe('real-home-value');
+    expect(fs.existsSync(path.join(versionHome, '.agents'))).toBe(false);
   }, 90_000);
 
   it('keeps denial and missing-data failures typed, never transport errors', async () => {
