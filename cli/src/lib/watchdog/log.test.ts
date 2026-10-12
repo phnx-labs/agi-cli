@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { appendWatchdogEvents, boundTailLines, parseWatchdogEvents, trimToLast, formatEvent, WATCHDOG_TAIL_MAX_CHARS, type WatchdogEvent } from './log.js';
+import { appendWatchdogEvents, boundTailLines, parseWatchdogEvents, readWatchdogEvents, trimToLast, formatEvent, WATCHDOG_TAIL_MAX_CHARS, type WatchdogEvent } from './log.js';
 
 const KNOWN_KINDS = new Set(['tick', 'decision', 'nudge', 'undelivered', 'rotate', 'error']);
 
@@ -22,6 +22,18 @@ function readLines(): Record<string, unknown>[] {
 }
 
 describe('appendWatchdogEvents', () => {
+  it('writes to the logs dir AGENTS_LOGS_DIR names when no path is given', () => {
+    const before = process.env.AGENTS_LOGS_DIR;
+    process.env.AGENTS_LOGS_DIR = dir;
+    try {
+      appendWatchdogEvents([{ ts: 1, kind: 'error', message: 'probe failed' }]);
+      expect(readLines().map((l) => l.message)).toEqual(['probe failed']);
+      expect(readWatchdogEvents().map((e) => e.message)).toEqual(['probe failed']);
+    } finally {
+      process.env.AGENTS_LOGS_DIR = before;
+    }
+  });
+
   it('writes one Factory-shaped JSON object per line and appends across calls', () => {
     appendWatchdogEvents([
       { ts: 1, kind: 'decision', terminalId: 'CC-1', agentType: 'claude', message: 'parked on a question', reason: 'parked', stalledForMs: 360_000, nudgeText: 'Finish it.', tailLines: ['{"a":1}'] },

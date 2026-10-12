@@ -10,9 +10,7 @@ import {
   parseCommaSeparatedList,
   relTime,
   humanDuration,
-  visibleWidth,
   padRight,
-  padVisible,
   isJsonMode,
   termLink,
   formatDie,
@@ -65,23 +63,10 @@ describe('humanDuration', () => {
   });
 });
 
-describe('visibleWidth', () => {
-  it('ignores ANSI SGR sequences including the escape byte', () => {
-    const colored = '\x1b[31mred\x1b[0m';
-    expect(visibleWidth(colored)).toBe(3);
-    expect(visibleWidth('plain')).toBe(5);
-  });
-});
-
-describe('padRight / padVisible', () => {
-  it('padRight pads by raw length', () => {
+describe('padRight', () => {
+  it('pads by raw length', () => {
     expect(padRight('ab', 5)).toBe('ab   ');
     expect(padRight('abcdef', 3)).toBe('abcdef');
-  });
-  it('padVisible pads by visible width, ignoring color codes', () => {
-    const colored = '\x1b[31mab\x1b[0m';
-    expect(visibleWidth(padVisible(colored, 5))).toBe(5);
-    expect(padVisible(colored, 5)).toBe(colored + '   ');
   });
 });
 

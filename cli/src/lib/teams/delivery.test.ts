@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
+import chalk from 'chalk';
 import { AgentStatus } from './agents.js';
 import {
   resolveTeammateDelivery,
   deliveryDisplayLabel,
   deliveryColorKey,
+  statusColor,
 } from './delivery.js';
 
 describe('resolveTeammateDelivery (RUSH-2380)', () => {
@@ -129,5 +131,19 @@ describe('deliveryColorKey', () => {
 
   it('uses stranded key so the row is not green COMPLETED (PHNX-2951)', () => {
     expect(deliveryColorKey('stranded', 'completed')).toBe('stranded');
+  });
+});
+
+describe('statusColor', () => {
+  it('colors a PR-open teammate magenta, not the white of an unknown status', () => {
+    const level = chalk.level;
+    chalk.level = 1;
+    try {
+      const label = statusColor(deliveryColorKey('pr_open', 'completed'))('PR OPEN');
+      expect(label).toBe(chalk.magenta('PR OPEN'));
+      expect(label).not.toBe(chalk.white('PR OPEN'));
+    } finally {
+      chalk.level = level;
+    }
   });
 });

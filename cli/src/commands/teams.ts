@@ -45,6 +45,7 @@ import {
   resolveTeammateDelivery,
   deliveryDisplayLabel,
   deliveryColorKey,
+  statusColor,
   type TeammateDelivery,
 } from '../lib/teams/delivery.js';
 import {
@@ -140,19 +141,6 @@ export interface TeamListAgentSnapshot {
   cloud_session_id: string | null;
   cloud_provider: string | null;
   pr_url: string | null;
-}
-
-function statusColor(status: string): (s: string) => string {
-  switch (status) {
-    case 'pending': return chalk.blue;
-    case 'running': return chalk.yellow;
-    case 'completed': return chalk.green;
-    case 'pr_open': return chalk.magenta;
-    case 'stranded': return chalk.yellow;
-    case 'failed': return chalk.red;
-    case 'stopped': return chalk.gray;
-    default: return chalk.white;
-  }
 }
 
 function compactPrompt(s: string, n = 160): string {

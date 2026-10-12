@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { relTime, truncate, humanDuration } from '../lib/format.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentStatusDetail, TaskInfo } from '../lib/teams/api.js';
-import { deliveryDisplayLabel, deliveryColorKey, type TeammateDelivery } from '../lib/teams/delivery.js';
+import { deliveryDisplayLabel, deliveryColorKey, statusColor, type TeammateDelivery } from '../lib/teams/delivery.js';
 
 export interface TeamRow {
   team: TaskInfo;
@@ -23,18 +23,6 @@ const AGENT_LABEL: Record<string, string> = {
 };
 
 const DOT = chalk.gray(' · ');
-
-function statusColor(status: string): (s: string) => string {
-  switch (status) {
-    case 'pending': return chalk.blue;
-    case 'running': return chalk.yellow;
-    case 'completed': return chalk.green;
-    case 'stranded': return chalk.yellow;
-    case 'failed': return chalk.red;
-    case 'stopped': return chalk.gray;
-    default: return chalk.white;
-  }
-}
 
 function firstLine(s: string): string {
   for (const line of s.split(/\r?\n/)) {
