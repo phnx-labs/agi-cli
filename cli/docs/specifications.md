@@ -1441,13 +1441,15 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   (`resumeLocalFallbackSource`, which rewrote `machine` to self) was deleted with
   `commands/resume.ts`, and the `agents run --resume <id>` path in `commands/exec.ts`
   routes to the origin peer without an equivalent fallback.
-- **SES-40a (MUST, PHNX-4344).** `agents ps focus <id>` on a session that is
-  live and headless (`context: 'headless'`, process alive) MUST stop that process
+- **SES-40a (MUST, PHNX-4344).** `agents ps focus <id>`, and each session the
+  focus picker opens, on a session that is live and headless (`context: 'headless'`, process alive) MUST stop that process
   before it opens the resumed tab, so the tab is the conversation's only writer:
   locally with `stopInteractive` (SIGTERM, SIGKILL after 5 s), which also clears
   the detach record, and on another device with `agents ps stop <id> --local`
-  there. When the owning device cannot be reached, focus MUST NOT open a tab and
-  MUST exit 1. The tab backend MUST come from `resolveLaunchBackend` over the live
+  there. When the owning device cannot be reached or its `ps stop` exits non-zero
+  (`runOnPeer` reports a one-shot hop's non-zero exit as `failed`), focus MUST NOT
+  open a tab and MUST exit 1. When the run was stopped but the tab then fails to
+  open, the error MUST say the run was stopped and how to resume it. The tab backend MUST come from `resolveLaunchBackend` over the live
   roster's host samples, never from the first installed app. A caller with no
   TTY (AGI Menu) focusing a session owned by another device MUST open a local tab
   running the portable `agents run auto --resume <id> --interactive`, which routes

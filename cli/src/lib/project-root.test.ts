@@ -209,13 +209,14 @@ describe('inferProjectRoot', () => {
 });
 
 describe('localProjectFolder — the local window folder for a session cwd', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lpf-home-'));
+  const home = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lpf-home-')), 'muqsit');
   const repo = path.join(home, 'src', 'github.com', 'me', 'svatlas');
   fs.mkdirSync(repo, { recursive: true });
 
-  it('maps a peer home (/home/<u> or /Users/<u>) onto this home', () => {
+  it('maps the same user\'s home on a peer (/home/<u> or /Users/<u>) onto this home', () => {
     expect(localProjectFolder('/home/muqsit/src/github.com/me/svatlas', home)).toBe(repo);
-    expect(localProjectFolder('/Users/someone/src/github.com/me/svatlas', home)).toBe(repo);
+    expect(localProjectFolder('/Users/muqsit/src/github.com/me/svatlas', home)).toBe(repo);
+    expect(localProjectFolder('/Users/someone/src/github.com/me/svatlas', home)).toBeUndefined();
   });
   it('keeps a cwd that is already local, and folds a worktree to its repo', () => {
     expect(localProjectFolder(repo, home)).toBe(repo);
@@ -231,9 +232,16 @@ describe('localProjectFolder — the local window folder for a session cwd', () 
 describe('localizeHome — a path from another box\'s home, named on this one', () => {
   it('maps /home/<u> and /Users/<u> onto this home and keeps local and non-home paths', () => {
     expect(localizeHome('/home/muqsit/src/x', '/Users/muqsit')).toBe('/Users/muqsit/src/x');
-    expect(localizeHome('/Users/someone', '/home/muqsit')).toBe('/home/muqsit');
+    expect(localizeHome('/Users/muqsit', '/home/muqsit')).toBe('/home/muqsit');
     expect(localizeHome('/Users/muqsit/src/x', '/Users/muqsit')).toBe('/Users/muqsit/src/x');
     expect(localizeHome('/srv/data/x', '/Users/muqsit')).toBe('/srv/data/x');
     expect(localizeHome('/home', '/Users/muqsit')).toBe('/home');
+  });
+  it('leaves another user\'s home and non-user dirs alone (PHNX-4344 review)', () => {
+    expect(localizeHome('/Users/Shared/proj', '/Users/muqsit')).toBe('/Users/Shared/proj');
+    expect(localizeHome('/home/linuxbrew/x', '/Users/muqsit')).toBe('/home/linuxbrew/x');
+    expect(localizeHome('/Users/muqsit2/x', '/Users/muqsit')).toBe('/Users/muqsit2/x');
+    expect(localizeHome('/home/alice/x', '/home/bob')).toBe('/home/alice/x');
+    expect(localizeHome('/Users/Shared/proj', '/Users/Shared')).toBe('/Users/Shared/proj');
   });
 });

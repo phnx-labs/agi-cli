@@ -362,6 +362,14 @@ describe('peerHopOutcome — offline-device fallback discriminator (PHNX-3626)',
     expect(peerHopOutcome(130, never)).toBe('ok');
     expect(peerHopOutcome(254, never)).toBe('ok');
   });
+  it('a one-shot command reports failed when the remote command exits non-zero, so a caller can tell it did not happen (PHNX-4344)', () => {
+    const never = () => { throw new Error('probed'); };
+    expect(peerHopOutcome(0, never, true)).toBe('ok');
+    expect(peerHopOutcome(1, never, true)).toBe('failed');
+    expect(peerHopOutcome(254, never, true)).toBe('failed');
+    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE, answers, true)).toBe('failed');
+    expect(peerHopOutcome(SSH_CONN_FAILURE_CODE, silent, true)).toBe('unreachable');
+  });
   it.skipIf(process.platform === 'win32')('peerAnswers is false for a host that does not exist', () => {
     expect(peerAnswers('nobody@host.invalid')).toBe(false);
   });

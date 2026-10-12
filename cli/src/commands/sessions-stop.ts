@@ -56,10 +56,8 @@ async function stopSessionAction(id: string, opts: { local?: boolean } = {}): Pr
   if (target.kind === 'remote') {
     console.log(chalk.gray(`${short} lives on ${target.machine} — stopping it there over SSH…`));
     const rc = await runOnPeer(['ps', 'stop', target.sessionId, '--local'], target.machine);
-    if (rc === 'no-target') {
-      console.error(chalk.red(`Can't reach ${target.machine} to stop ${short}.`));
-      process.exitCode = 1;
-    }
+    if (rc === 'no-target') console.error(chalk.red(`Can't reach ${target.machine} to stop ${short}.`));
+    if (rc !== 'ok') process.exitCode = 1;
     return;
   }
 

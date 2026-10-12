@@ -302,16 +302,19 @@ describe('confirmedProjectForCwd across homes (PHNX-4344)', () => {
     writeProjectDef({ name: 'rush', root: '~/src/github.com/muqsitnawaz/agents' });
     writeProjectDef({ name: 'other', root: '~/src/other' });
     resetProjectDefsCache();
-    expect(confirmedProjectForCwd('/home/muqsit/src/github.com/muqsitnawaz/agents/x')).toBe('rush');
-    expect(confirmedProjectForCwd('/Users/someone/src/github.com/muqsitnawaz/agents')).toBe('rush');
+    const user = path.basename(HOME);
+    expect(confirmedProjectForCwd(`/home/${user}/src/github.com/muqsitnawaz/agents/x`)).toBe('rush');
+    expect(confirmedProjectForCwd(`/Users/${user}/src/github.com/muqsitnawaz/agents`)).toBe('rush');
     expect(confirmedProjectForCwd(path.join(HOME, 'src/github.com/muqsitnawaz/agents/cli'))).toBe('rush');
   });
 
-  it('leaves non-home absolute paths and unrelated foreign paths unmatched', () => {
+  it('leaves non-home paths, /Users/Shared, and another user\'s home unmatched', () => {
     writeProjectDef({ name: 'rush', root: '~/src/github.com/muqsitnawaz/agents' });
     resetProjectDefsCache();
     expect(confirmedProjectForCwd('/srv/src/github.com/muqsitnawaz/agents')).toBeUndefined();
-    expect(confirmedProjectForCwd('/home/muqsit/src/unrelated')).toBeUndefined();
+    expect(confirmedProjectForCwd(`/home/${path.basename(HOME)}/src/unrelated`)).toBeUndefined();
+    expect(confirmedProjectForCwd('/Users/Shared/src/github.com/muqsitnawaz/agents')).toBeUndefined();
+    expect(confirmedProjectForCwd(`/home/${path.basename(HOME)}-other/src/github.com/muqsitnawaz/agents`)).toBeUndefined();
   });
 });
 
