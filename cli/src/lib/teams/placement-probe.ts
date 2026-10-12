@@ -42,6 +42,8 @@ interface ReadinessInfo {
   installed: boolean | undefined;
   signedIn: boolean | undefined;
   pickerEligible: boolean | undefined;
+  reason?: string;
+  timedOut?: boolean;
 }
 
 function probeRemoteReadiness(
@@ -74,7 +76,8 @@ function probeRemoteReadiness(
       clearTimeout(killTimer);
       resolve(value);
     };
-    const timer = setTimeout(() => child.kill('SIGTERM'), READY_PROBE_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, READY_PROBE_TIMEOUT_MS);
     const killTimer = setTimeout(() => { if (!settled) child.kill('SIGKILL'); }, READY_PROBE_TIMEOUT_MS + 250);
     killTimer.unref?.();
     child.stdout.setEncoding('utf-8');
@@ -82,6 +85,7 @@ function probeRemoteReadiness(
     child.stderr.resume();
     child.on('error', () => finish(unknown));
     child.on('close', (code) => {
+      if (timedOut) return finish({ ...unknown, timedOut: true });
       if (code !== 0 || !stdout) return finish(unknown);
       const probe = parseReadyProbe(stdout);
       if (!probe.reachable) return finish(unknown);
@@ -104,13 +108,14 @@ export function mergePlacementSignal(
   const reachable = readiness?.answered === true ? true : stats?.reachable;
   return {
     reachable,
-    timedOut: reachable === true ? undefined : stats?.timedOut,
+    timedOut: reachable === true ? readiness?.timedOut : stats?.timedOut,
     headroom: stats ? headroom(stats) : undefined,
     loadPercent: stats?.loadPercent,
     memPercent: stats?.memPercent,
     installed: readiness?.installed,
     signedIn: readiness?.signedIn,
     pickerEligible: readiness?.pickerEligible,
+    reason: readiness?.reason,
   };
 }
 

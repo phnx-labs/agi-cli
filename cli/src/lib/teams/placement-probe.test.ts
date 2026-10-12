@@ -40,6 +40,14 @@ describe('mergePlacementSignal', () => {
     expect(signal.signedIn).toBe(true);
   });
 
+  it('carries a timed-out ready probe on a reachable host and the box reason', () => {
+    const reachableStats = { host: 'm5', reachable: true, fetchedAt: 0 };
+    const unanswered = { answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined, timedOut: true };
+    expect(mergePlacementSignal(reachableStats, unanswered)).toMatchObject({ reachable: true, timedOut: true, installed: undefined });
+    const refused = { answered: true, installed: true, signedIn: false, pickerEligible: false, reason: 'all signed_out' };
+    expect(mergePlacementSignal(reachableStats, refused).reason).toBe('all signed_out');
+  });
+
   it('keeps the stats timeout when the ready probe also got no answer', () => {
     const signal = mergePlacementSignal(timedOutStats, {
       answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined,
