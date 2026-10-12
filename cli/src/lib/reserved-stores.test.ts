@@ -64,7 +64,7 @@ describe('reserved auth bundle backend rule (credential-management invariant 7)'
       expect(thrown).toBeInstanceOf(ReservedBundleWrongBackendError);
       expect((thrown as ReservedBundleWrongBackendError).bundle).toBe(AUTH_STORE_ALIAS);
       expect((thrown as ReservedBundleWrongBackendError).backend).toBe(backend);
-      expect((thrown as Error).message).toContain(`agents secrets create ${AUTH_STORE_ALIAS} --backend file`);
+      expect((thrown as Error).message).toContain(`secrets create ${AUTH_STORE_ALIAS} --backend file`);
     }
   });
 

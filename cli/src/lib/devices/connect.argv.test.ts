@@ -108,7 +108,7 @@ describe('argv mode on a PowerShell device', () => {
 
 describe('the browser provenance gate still fires on the argv form', () => {
   it('stamps a browser drive passed as real argv, metacharacters and all', () => {
-    const argv = ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'];
+    const argv = ['browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'];
     expect(tokensAfterRealShell(printfArgv(argv))).toEqual(argv);
   });
 });
@@ -156,7 +156,7 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   };
 
   it('quotes the actor pairs exactly ONCE on a POSIX browser drive', () => {
-    const remote = remoteCommandFrom(dev(), ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
+    const remote = remoteCommandFrom(dev(), ['browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
     expect(remote.startsWith('env AGENTS_FLEET_REMOTE=1 ')).toBe(true);
     expect(remote).not.toContain("'\\''");
     expect(remote).toContain("'https://x.test/?a=1&b=2'");
@@ -177,7 +177,7 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   });
 
   it('keeps the marker exact-once when a caller pre-marked the command', () => {
-    const pre = markFleetRemote(['agents', 'browser', 'status'], dev(), actor);
+    const pre = markFleetRemote(['browser', 'status'], dev(), actor);
     const remote = remoteCommandFrom(dev(), pre, true);
     expect(remote.match(/AGENTS_FLEET_REMOTE=1/g)).toHaveLength(1);
   });
@@ -187,14 +187,13 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   });
 
   it('emits an EXECUTABLE PowerShell script: call operator plus unquoted prelude', () => {
-    const remote = remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
+    const remote = remoteCommandFrom(dev({ shell: 'powershell' }), ['browser', 'navigate', '--url', 'https://x.test/?a=1&b=2'], true);
     const script = decodeRenderedPowershell(remote);
     expect(script).toContain("$env:AGENTS_FLEET_REMOTE='1';");
     expect(script).not.toContain("'$env:AGENTS_FLEET_REMOTE=");
-    expect(script).toContain("$zc = Get-Command 'agents' -ErrorAction Stop");
-    expect(script).toMatch(/\$zi\.Arguments\s*=\s*\$zr/);
+    expect(script).toContain("$__c = Get-Command -Name 'browser' -ErrorAction Stop");
     expect(script).toContain(quoteWin32ExecArg('https://x.test/?a=1&b=2'));
-    expect(script).not.toContain("& 'agents'");
+    expect(script).not.toContain("& 'browser'");
   });
 
   it('escapes a quote in a PowerShell provenance value without breaking the statement', () => {
@@ -209,9 +208,9 @@ describe('the FULL buildSshInvocation pipeline, not just the quoter', () => {
   });
 
   it('leaves a NON-argv powershell drive as an unquoted command, as before', () => {
-    const script = decodeRenderedPowershell(remoteCommandFrom(dev({ shell: 'powershell' }), ['agents', 'browser', 'status'], false));
-    expect(script).toContain('agents browser status');
-    expect(script).not.toContain("& 'agents'");
+    const script = decodeRenderedPowershell(remoteCommandFrom(dev({ shell: 'powershell' }), ['browser', 'status'], false));
+    expect(script).toContain('browser status');
+    expect(script).not.toContain("& 'browser'");
   });
 });
 

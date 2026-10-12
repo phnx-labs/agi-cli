@@ -39,7 +39,7 @@ describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
   it('keeps a live/idle-unfinished session resumable', () => {
     const r = toSessionWatchRow('zion', { context: 'terminal', kind: 'codex', sessionId: 'x', status: 'idle', pidAlive: true, cwd: '/repo' });
     expect(r.resumable).toBe(true);
-    expect(r.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'x', '--device', 'zion'] });
+    expect(r.recovery).toMatchObject({ command: 'agents', args: ['ps', 'focus', 'x'] });
   });
 
   it('keeps a recently-closed session resumable (not yet stale)', () => {
@@ -98,7 +98,7 @@ describe('durable Previous rows on the canonical watch stream', () => {
       branch: 'agents/history',
       ticket: { id: 'PHNX-3621' },
       pr: { url: 'https://github.com/phnx-labs/agi-ext/pull/26', number: 26 },
-      recovery: { command: 'agents', args: ['sessions', 'resume', 'history-1', '--device', 'zion'], cwd: '/repo' },
+      recovery: { command: 'agents', args: ['ps', 'focus', 'history-1'], cwd: '/repo' },
     });
     expect(projected.lastActivityMs - projected.startedAtMs!).toBe(120_000);
   });

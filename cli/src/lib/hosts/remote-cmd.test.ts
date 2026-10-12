@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
-import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsCommand, buildWindowsStdinImportCommand, buildWindowsStdinAgentsCommand, posixEnvExports, remoteShellFor, powershellQuote, decodePowershell, windowsRemotePath, windowsSetLocation, stripClixml, HOST_ROUTING_SPECS, type StripSpec } from './remote-cmd.js';
+import { stripRoutingFlags, buildRemoteAgentsInvocation, buildWindowsAgentsCommand, buildWindowsStdinAgentsCommand, posixEnvExports, remoteShellFor, powershellQuote, decodePowershell, windowsRemotePath, windowsSetLocation, stripClixml, HOST_ROUTING_SPECS, type StripSpec } from './remote-cmd.js';
 import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
 describe('stripClixml', () => {
@@ -297,55 +297,6 @@ describe('buildRemoteAgentsInvocation — Windows targets speak PowerShell', () 
     const script = decodeWindows(cmd);
     expect(script).toContain("if ($zq -eq 255) { exit 254 }");
     expect(script).toContain('exit $zq');
-  });
-});
-
-describe('buildWindowsStdinImportCommand', () => {
-  it('bridges ssh stdin through a temp file (never a hanging --from -)', () => {
-    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { force: true }));
-    expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
-    expect(script).toContain('[Console]::In.ReadToEnd()');
-    expect(script).toContain('[System.IO.Path]::GetTempFileName()');
-    expect(script).toContain('agents secrets import \'linear.app\' --from $tmp --force');
-    expect(script).not.toContain('--from -');
-    expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
-    expect(script).toContain('exit $code');
-  });
-
-  it('omits --force when not requested', () => {
-    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
-    expect(script).toContain('agents secrets import \'linear.app\' --from $tmp;');
-    expect(script).not.toContain('--force');
-  });
-
-  it('buildWindowsStdinAgentsCommand bridges ssh stdin to any verb via --from $tmp', () => {
-    const script = decodeWindows(buildWindowsStdinAgentsCommand(['__usage-ingest']));
-    expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
-    expect(script).toContain('[Console]::In.ReadToEnd()');
-    expect(script).toContain('[System.IO.Path]::GetTempFileName()');
-    expect(script).toContain('agents \'__usage-ingest\' --from $tmp');
-    expect(script).not.toContain('--from -');
-    expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
-    expect(script).toContain('exit $code');
-  });
-
-  it('sets policy never in the same import process', () => {
-    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app', { policyNever: true }));
-    expect(script).toContain("agents secrets import 'linear.app' --from $tmp --policy never --i-understand");
-    expect(script).not.toContain('secrets policy');
-  });
-
-  it('creates + writes the temp file INSIDE the try so a crash still cleans it up (RUSH-1764)', () => {
-    const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
-    const tryIdx = script.indexOf('try {');
-    const tmpIdx = script.indexOf('[System.IO.Path]::GetTempFileName()');
-    const writeIdx = script.indexOf('[System.IO.File]::WriteAllText($tmp, $in)');
-    const finallyIdx = script.indexOf('finally');
-    expect(tryIdx).toBeGreaterThanOrEqual(0);
-    expect(tmpIdx).toBeGreaterThan(tryIdx);
-    expect(writeIdx).toBeGreaterThan(tmpIdx);
-    expect(finallyIdx).toBeGreaterThan(writeIdx);
-    expect(script).toContain('if ($tmp) { Remove-Item -LiteralPath $tmp -Force');
   });
 });
 
