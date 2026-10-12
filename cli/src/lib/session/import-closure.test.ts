@@ -44,12 +44,7 @@ describe.each(extracted)('runtime import closure of %s', (root) => {
     expect(edges).toEqual([]);
   });
 
-  it('closure including dynamic imports keeps exactly the four deferred library-to-command edges', () => {
-    expect(libToCommandEdges(root, true).edges).toEqual([
-      'lib/accounts/add.ts -> commands/utils.ts',
-      'lib/smart-launch.ts -> commands/ssh.ts',
-      'lib/snapshot.ts -> commands/ps-roster.ts',
-      'lib/snapshot.ts -> commands/view.ts',
-    ]);
+  it('closure including dynamic imports reaches no command module', () => {
+    expect(libToCommandEdges(root, true).edges).toEqual([]);
   });
 });
