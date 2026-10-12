@@ -99,7 +99,7 @@ export const REMOVED_TOOL_GROUPS: ReadonlySet<string> = new Set(STANDALONE_TOOL_
 
 export function removedToolGroupMessage(group: string, rest: readonly string[]): string | undefined {
   if (!REMOVED_TOOL_GROUPS.has(group)) return undefined;
-  const verb = group === 'sessions' ? rest.find((arg) => !arg.startsWith('-')) : undefined;
+  const verb = group === 'sessions' ? rest.find((arg) => Object.hasOwn(MOVED_SESSIONS_VERBS, arg)) : undefined;
   const moved = verb === undefined ? undefined : MOVED_SESSIONS_VERBS[verb];
   if (moved) return `error: 'agents sessions ${verb}' was removed; use '${moved}'.`;
   if (group === 'sessions' && rest.some((arg) => arg === '--active' || arg === '--roots')) {

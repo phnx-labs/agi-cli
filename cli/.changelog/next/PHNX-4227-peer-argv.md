@@ -3,8 +3,7 @@
   and detached with `agents ps detach <id> --local`, the fleet roster asks each peer
   for `agents ps --local --json`, and `backfill tools --fleet`/`--device` drives
   each peer with `agents daemon index backfill tools --json --local` plus the same
-  filters. Each peer must run a CLI that has these commands: 1.22.121 or newer
-  for the `ps` hops, and 1.22.123 or newer for the backfill hop.
+  filters. Each peer must run the release that carries this change.
   An older peer is not detected or worked around: its roster and backfill rows
   read as unreachable, and a stop or detach prints the peer's own unknown-command
   error. Source:
