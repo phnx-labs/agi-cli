@@ -862,6 +862,7 @@ describe('routing refuses to decide on usage it cannot verify', () => {
 
     expect(result.noVerifiedUsage).toBe(false);
     expect(result.usageUnverified).toBe(true);
+    expect(result.healthy).toContain(stale);
   });
 
   it('does NOT flag noVerifiedUsage when a verified account exists', () => {
