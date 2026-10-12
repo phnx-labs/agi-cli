@@ -158,12 +158,16 @@ describe('ownership globs and companions', () => {
 
   test('direct static imports do not fan out through the whole CLI graph', () => {
     const plan = selectImpact({
-      files: ['cli/src/lib/artifact-actions.ts'],
+      files: ['cli/src/lib/command-skills.ts'],
       repoRoot: REPO,
       related: true,
     });
-    expect(plan.tests.map((t) => t.file)).toEqual(['cli/tests/artifact-actions.test.ts']);
-    expect(plan.tests[0].reason).toBe('static-import');
+    expect(plan.tests.map((t) => t.file)).toEqual([
+      'cli/src/lib/__tests__/doctor-diff.test.ts',
+      'cli/tests/cli-command-sync-spec.test.ts',
+    ]);
+    expect(plan.tests.every((t) => t.reason === 'static-import')).toBe(true);
+    expect(plan.tests.some((t) => t.file.endsWith('versions.test.ts'))).toBe(false);
     expect(plan.tests.some((t) => t.file.endsWith('daemon.test.ts'))).toBe(false);
     expect(plan.tests.some((t) => t.file.endsWith('sessions.test.ts'))).toBe(false);
   });

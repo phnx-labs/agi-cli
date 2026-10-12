@@ -4,9 +4,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import type { AgentId } from '../types.js';
 import { getAccountInfo } from '../agents.js';
-import { getKeychainTokenSync } from '../secrets-client.js';
-import { getClaudeKeychainService } from '../accounting/usage.js';
-import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 
 interface RuntimeCred {
   id: AgentId;
@@ -92,21 +89,6 @@ export async function detectSignedInRuntimes(): Promise<DetectedRuntime[]> {
   return out;
 }
 
-export async function pickRuntimes(
-  detected: DetectedRuntime[],
-  prompt?: (choices: { name: string; value: AgentId; checked: boolean; disabled: boolean | string }[]) => Promise<AgentId[]>,
-): Promise<AgentId[]> {
-  const choices = detected.map((d) => ({
-    name: `${d.label}${d.email ? ` (${d.email})` : d.signedIn ? ' (signed in)' : ''}`,
-    value: d.id,
-    checked: d.signedIn && !!d.credPath,
-    disabled: d.credPath ? false : 'no local credential — sign in first',
-  }));
-  if (prompt) return prompt(choices);
-  const { checkbox } = await import('@inquirer/prompts');
-  return checkbox({ message: 'Provision which runtime(s) on the leased box?', choices });
-}
-
 export function inferLeaseRuntime(agentName: string, detected: DetectedRuntime[]): AgentId | null {
   const signedIn = detected.filter((d) => d.signedIn && d.credPath);
   if (LEASE_RUNTIMES.some((c) => c.id === agentName)) {
@@ -149,78 +131,6 @@ export function buildHomeFileWriteScript(remote: string, contents: string): stri
 }
 
 export const CLAUDE_TOKEN_REMOTE = '.claude/.credentials.json';
-
-function isClaudeCredentialsBlob(s: string): boolean {
-  try {
-    const p = JSON.parse(s) as { claudeAiOauth?: { accessToken?: unknown } };
-    return typeof p?.claudeAiOauth?.accessToken === 'string';
-  } catch {
-    return false;
-  }
-}
-
-export async function resolveClaudeCredentialsBlob(opts?: {
-  preferEmail?: string | null;
-  readItem?: (service: string) => string;
-  service?: (home?: string) => string;
-  listVersions?: () => string[];
-  versionHome?: (version: string) => string;
-  accountEmail?: (home: string) => Promise<string | null>;
-}): Promise<string | null> {
-  const readItem = opts?.readItem ?? getKeychainTokenSync;
-  const service = opts?.service ?? getClaudeKeychainService;
-  const listVersions = opts?.listVersions ?? (() => listInstalledVersions('claude'));
-  const versionHome = opts?.versionHome ?? ((v: string) => getVersionHomePath('claude', v));
-  const accountEmail = opts?.accountEmail ?? (async (home: string) => (await getAccountInfo('claude', home)).email);
-
-  const tryRead = (svc: string): string | null => {
-    try {
-      const raw = readItem(svc).trim();
-      return isClaudeCredentialsBlob(raw) ? raw : null;
-    } catch {
-      return null;
-    }
-  };
-
-  if (process.platform === 'darwin') {
-    const bare = tryRead(service(undefined));
-    if (bare) {
-      if (!opts?.preferEmail) return bare;
-      const realHome = process.env.AGENTS_REAL_HOME || os.homedir();
-      const bareEmail = await accountEmail(realHome).catch(() => null);
-      if (bareEmail === opts.preferEmail) return bare;
-    }
-
-    let homes: string[];
-    try {
-      homes = listVersions().map(versionHome);
-    } catch {
-      homes = [];
-    }
-    if (opts?.preferEmail) {
-      const scored = await Promise.all(
-        homes.map(async (home) => ({ home, match: (await accountEmail(home).catch(() => null)) === opts.preferEmail })),
-      );
-      homes = [...scored.filter((s) => s.match), ...scored.filter((s) => !s.match)].map((s) => s.home);
-    }
-    for (const home of homes) {
-      const hit = tryRead(service(home));
-      if (hit) return hit;
-    }
-    return null;
-  }
-
-  const home = process.env.AGENTS_REAL_HOME || os.homedir();
-  const credsPath = path.join(home, '.claude', '.credentials.json');
-  try {
-    if (fs.existsSync(credsPath)) {
-      const raw = fs.readFileSync(credsPath, 'utf-8').trim();
-      if (raw && isClaudeCredentialsBlob(raw)) return raw;
-    }
-  } catch {
-  }
-  return null;
-}
 
 export function refusedNativeOAuthRuntimes(
   picked: AgentId[],

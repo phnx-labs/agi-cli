@@ -1181,29 +1181,6 @@ export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole
   else setConfigValue('role', role, { device: name });
 }
 
-export function devicesPinningBrowserProfile(
-  profile: string,
-): Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> {
-  ensureDeviceConfigMigrated();
-  const hits: Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> = [];
-  const devicesRoot = path.join(getUserAgentsDir(), 'devices');
-  let names: string[] = [];
-  try {
-    names = fs
-      .readdirSync(devicesRoot, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name);
-  } catch {
-    return hits;
-  }
-  for (const name of names.sort()) {
-    const cfg = readDeviceDocConfig(name);
-    if (cfg.defaultBrowserProfile === profile) hits.push({ device: name, key: 'browser.profile' });
-    if (cfg.browserViewer === profile) hits.push({ device: name, key: 'browser.viewer' });
-  }
-  return hits;
-}
-
 export function listConfiguredDeviceRoles(roster?: string[]): Record<string, ConfiguredDeviceRole> {
   ensureDeviceConfigMigrated();
   const out: Record<string, ConfiguredDeviceRole> = {};
@@ -1312,11 +1289,6 @@ export function assertDaemonEnabled(): void {
     `The daemon is disabled on this device (daemon.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
       `Re-enable with: agents daemon enable`,
   );
-}
-
-export async function resolveBrowserTaskIdleMs(): Promise<number | null> {
-  const minutes = ((await getConfigValueAsync('browser.task-idle-minutes')).value as number | undefined) ?? 30;
-  return minutes === 0 ? null : minutes * 60_000;
 }
 
 export function readMaxConcurrentCaps(devices: string[]): Record<string, number> {

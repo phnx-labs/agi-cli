@@ -23,17 +23,24 @@ afterEach(() => {
 
 function runCommandsExpression(home: string, expression: string): unknown {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/commands.ts')).href;
+  const writersUrl = pathToFileURL(path.resolve('src/lib/staleness/registry.ts')).href;
+  const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/.bin/tsx');
   const child = spawnSync(tsxBin, ['-e', `
     import {
       diffVersionCommands,
-      installCommand,
-      installCommandToVersion,
       listCommandsInVersionHome,
       listPluginCommandNames,
       removeCommandFromVersion,
     } from ${JSON.stringify(moduleUrl)};
+    import { WRITERS } from ${JSON.stringify(writersUrl)};
+    import { getVersionHomePath } from ${JSON.stringify(versionsUrl)};
     const home = ${JSON.stringify(home)};
+    const syncCommand = (agent, version, name) => {
+      const writer = WRITERS.commands[agent];
+      if (!writer) return null;
+      return writer.write({ version, versionHome: getVersionHomePath(agent, version), selection: [name], cwd: home });
+    };
     const result = ${expression};
     console.log(JSON.stringify(result));
   `], {
@@ -101,11 +108,10 @@ Report versions.`);
 
     const result = runCommandsExpression(
       home,
-      "installCommandToVersion('codex', '0.116.0', 'version')"
-    ) as { success: boolean; skipped?: boolean };
+      "syncCommand('codex', '0.116.0', 'version')"
+    ) as { synced: string[] };
 
-    expect(result.success).toBe(true);
-    expect(result.skipped).toBe(true);
+    expect(result.synced).toEqual([]);
     const commandsDir = path.join(versionHomePath(home, 'codex', '0.116.0'), '.codex', 'prompts');
     expect(fs.existsSync(path.join(commandsDir, 'version.md'))).toBe(false);
   });
@@ -191,10 +197,10 @@ describe('version command management', () => {
     const home = makeTempHome();
     writeSystemCommand(home, 'recap', 'Summarize this session.');
 
-    const installed = runCommandsExpression(home, "installCommandToVersion('cursor', '2026.07.23-e383d2b', 'recap')") as { success: boolean };
+    const installed = runCommandsExpression(home, "syncCommand('cursor', '2026.07.23-e383d2b', 'recap')") as { synced: string[] };
     const cursorHome = path.join(versionHomePath(home, 'cursor', '2026.07.23-e383d2b'), '.cursor');
 
-    expect(installed.success).toBe(true);
+    expect(installed.synced).toEqual(['recap']);
     expect(fs.existsSync(path.join(cursorHome, 'commands', 'recap.md'))).toBe(true);
     expect(fs.existsSync(path.join(cursorHome, 'skills', 'recap', 'SKILL.md'))).toBe(true);
 
@@ -208,7 +214,7 @@ describe('version command management', () => {
     const home = makeTempHome();
     writeSystemCommand(home, 'recap', 'Summarize this session.');
 
-    const installed = runCommandsExpression(home, "installCommandToVersion('codex', '0.117.0', 'recap')") as { success: boolean };
+    const installed = runCommandsExpression(home, "syncCommand('codex', '0.117.0', 'recap')") as { synced: string[] };
     const listed = runCommandsExpression(home, "listCommandsInVersionHome('codex', '0.117.0')") as string[];
     const diff = runCommandsExpression(home, "diffVersionCommands('codex', '0.117.0')") as {
       matched: string[];
@@ -219,7 +225,7 @@ describe('version command management', () => {
     const removed = runCommandsExpression(home, "removeCommandFromVersion('codex', '0.117.0', 'recap')") as { success: boolean };
 
     const versionHome = path.join(versionHomePath(home, 'codex', '0.117.0'), '.codex');
-    expect(installed.success).toBe(true);
+    expect(installed.synced).toEqual(['recap']);
     expect(listed).toEqual(['recap']);
     expect(diff).toMatchObject({ matched: ['recap'], toAdd: [], toUpdate: [], toRemove: [], orphans: [] });
     expect(removed.success).toBe(true);
@@ -238,8 +244,8 @@ describe('Grok native command install', () => {
     writeSystemCommand(home, 'my-cmd', '---\ndescription: Test command\n---\nDo something.');
     scaffoldInstalledVersion(home, 'grok', '0.2.111');
 
-    const installed = runCommandsExpression(home, "installCommandToVersion('grok', '0.2.111', 'my-cmd', 'copy')") as { success: boolean };
-    expect(installed.success).toBe(true);
+    const installed = runCommandsExpression(home, "syncCommand('grok', '0.2.111', 'my-cmd')") as { synced: string[] };
+    expect(installed.synced).toEqual(['my-cmd']);
 
     const commandsDir = path.join(versionHomePath(home, 'grok', '0.2.111'), '.agents', 'commands');
     expect(fs.existsSync(path.join(commandsDir, 'my-cmd.md'))).toBe(true);
@@ -250,14 +256,14 @@ describe('Grok native command install', () => {
   });
 });
 
-describe('Goose recipe command install (end-to-end via installCommandToVersion)', () => {
+describe('Goose recipe command install (end-to-end via the commands writer)', () => {
   it('installs a command as a Goose recipe YAML + config.yaml slash_commands entry', () => {
     const home = makeTempHome();
     writeSystemCommand(home, 'deploy', '---\ndescription: Deploy the app\n---\nRun the deploy.');
     scaffoldInstalledVersion(home, 'goose', '1.34.0');
 
-    const installed = runCommandsExpression(home, "installCommandToVersion('goose', '1.34.0', 'deploy', 'copy')") as { success: boolean };
-    expect(installed.success).toBe(true);
+    const installed = runCommandsExpression(home, "syncCommand('goose', '1.34.0', 'deploy')") as { synced: string[] };
+    expect(installed.synced).toEqual(['deploy']);
 
     const versionHome = versionHomePath(home, 'goose', '1.34.0');
     const recipePath = path.join(versionHome, '.config', 'goose', 'commands', 'deploy.yaml');
@@ -286,7 +292,7 @@ describe('removeCommandFromVersion soft-delete', () => {
     writeSystemCommand(home, 'my-cmd', '---\ndescription: Test command\n---\nDo something.');
     scaffoldInstalledVersion(home, 'claude', '1.0.0');
 
-    runCommandsExpression(home, "installCommandToVersion('claude', '1.0.0', 'my-cmd', 'copy')");
+    runCommandsExpression(home, "syncCommand('claude', '1.0.0', 'my-cmd')");
 
     const commandsDir = path.join(versionHomePath(home, 'claude', '1.0.0'), '.claude', 'commands');
     expect(fs.existsSync(path.join(commandsDir, 'my-cmd.md'))).toBe(true);
@@ -310,14 +316,10 @@ describe('removeCommandFromVersion soft-delete', () => {
     writeSystemCommand(home, 'plan', '---\ndescription: Plan something\n---\nPlan the work.');
     scaffoldInstalledVersion(home, 'gemini', '1.0.0');
 
-    const install = runCommandsExpression(home, "installCommandToVersion('gemini', '1.0.0', 'plan', 'copy')") as { success: boolean; skipped?: boolean; skipReason?: string };
+    const install = runCommandsExpression(home, "syncCommand('gemini', '1.0.0', 'plan')");
 
     const commandsDir = path.join(versionHomePath(home, 'gemini', '1.0.0'), '.gemini', 'commands');
-    expect(install).toEqual({
-      success: true,
-      skipped: true,
-      skipReason: 'gemini@1.0.0: /plan not supported for this agent version',
-    });
+    expect(install).toBeNull();
     expect(fs.existsSync(path.join(commandsDir, 'plan.toml'))).toBe(false);
   });
 
@@ -339,7 +341,7 @@ describe('removeCommandFromVersion soft-delete', () => {
     writeSystemCommand(home, 'scope-test', '---\ndescription: Scope test\n---\nBody.');
     scaffoldInstalledVersion(home, 'claude', '2.0.0');
 
-    runCommandsExpression(home, "installCommandToVersion('claude', '2.0.0', 'scope-test', 'copy')");
+    runCommandsExpression(home, "syncCommand('claude', '2.0.0', 'scope-test')");
     runCommandsExpression(home, "removeCommandFromVersion('claude', '2.0.0', 'scope-test')");
 
     expect(fs.existsSync(trashCommandsDir(home))).toBe(true);
@@ -356,7 +358,7 @@ describe('diffVersionCommands orphan detection', () => {
     const home = makeTempHome();
     writeSystemCommand(home, 'kept', '---\ndescription: Kept command\n---\nKeep this.');
     scaffoldInstalledVersion(home, 'claude', '1.0.0');
-    runCommandsExpression(home, "installCommandToVersion('claude', '1.0.0', 'kept', 'copy')");
+    runCommandsExpression(home, "syncCommand('claude', '1.0.0', 'kept')");
 
     const commandsDir = path.join(versionHomePath(home, 'claude', '1.0.0'), '.claude', 'commands');
     fs.mkdirSync(commandsDir, { recursive: true });

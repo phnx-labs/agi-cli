@@ -316,16 +316,6 @@ export const DEFAULT_REGISTRIES: Record<RegistryType, Record<string, RegistryCon
   skill: {},
 };
 
-export const SEEDED_REGISTRIES: Record<RegistryType, Record<string, RegistryConfig>> = {
-  mcp: {},
-  skill: {
-    hermes: {
-      url: 'https://hermes-agent.nousresearch.com/docs/api/skills-index.json',
-      enabled: true,
-    },
-  },
-};
-
 export interface McpPackage {
   registry_name: string;
   name: string;
@@ -360,46 +350,6 @@ export interface McpRegistryResponse {
     count: number;
     next_cursor?: string;
   };
-}
-
-export interface SkillEntry {
-  name: string;
-  description?: string;
-  source: string;
-  identifier?: string;
-  repo?: string;
-  path?: string;
-  author?: string;
-  installs?: number;
-  tags?: string[];
-  trustLevel?: string;
-  sha256?: string;
-}
-
-export interface SkillRegistryResponse {
-  skills: SkillEntry[];
-  metadata?: {
-    count: number;
-    next_cursor?: string;
-  };
-}
-
-export interface RegistrySearchResult {
-  name: string;
-  description?: string;
-  type: 'mcp' | 'skill';
-  source: string;
-  registry: string;
-  version?: string;
-  installs?: number;
-}
-
-export interface ResolvedPackage {
-  type: 'mcp' | 'skill' | 'git' | 'plugin';
-  source: string;
-  mcpEntry?: McpServerEntry;
-  skillEntry?: SkillEntry;
-  pluginSpec?: string;
 }
 
 export type ResourceType = 'commands' | 'skills' | 'hooks' | 'memory' | 'mcp' | 'permissions' | 'subagents' | 'plugins' | 'workflows';

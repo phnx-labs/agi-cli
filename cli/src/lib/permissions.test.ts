@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import {
-  COMPUTER_APP_GATED_VERBS,
   applyPermissionsToVersion,
   buildPermissionsFromGroups,
   containsBroadGrants,
@@ -18,7 +17,6 @@ import {
   convertToHermesFormat,
   convertToOpenClawFormat,
   convertToGrokFormat,
-  formatComputerPermissionGrantHint,
   listInstalledPermissions,
   installPermissionSet,
   getDefaultPermissionSet,
@@ -407,19 +405,6 @@ describe('containsBroadGrants', () => {
     });
 
     expect(result).toBeNull();
-  });
-});
-
-describe('computer permission hints', () => {
-  it('tells users the app-targeted verbs gated by Computer(bundle-id)', () => {
-    const hint = formatComputerPermissionGrantHint('Microsoft.WindowsNotepad');
-
-    expect(hint).toContain('Computer(Microsoft.WindowsNotepad)');
-    expect(hint).toContain('`computer reload`');
-    expect(hint).toContain('type-text');
-    expect(hint).toContain('key');
-    expect(COMPUTER_APP_GATED_VERBS).toContain('type-text');
-    expect(COMPUTER_APP_GATED_VERBS).toContain('key');
   });
 });
 

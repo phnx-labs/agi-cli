@@ -16,7 +16,7 @@ import {
 import { reconcileAttention } from './attention.js';
 import { isOpenQuestionBlock, resolveAnswerRoute } from '../answer-router.js';
 import { groupBlocksByOutcome } from '../feed-outcome.js';
-import { drain, enqueue, mailboxDir, readBox } from '../mailbox.js';
+import { enqueue, mailboxDir, readBox } from '../mailbox.js';
 import { resetPullRequestStatusCache } from './pr-status.js';
 import {
   answerOwnerIsLocal, checkAnswerDelivery, claimAndRouteAttentionAnswer, classifyReceipt,
@@ -704,14 +704,13 @@ describe('a claim is not a resolution', () => {
     expect(readResolution(block.blockId, feedRoot)).toBeUndefined();
     expect(deriveBlockState(readBlock(block.blockId, feedRoot)!)).toBe('open');
 
-    const priorFeedDir = process.env.AGENTS_FEED_DIR;
-    process.env.AGENTS_FEED_DIR = feedRoot;
-    try {
-      expect(drain(mailboxDir('drains', mailboxRoot), 'drains')).toHaveLength(1);
-    } finally {
-      if (priorFeedDir === undefined) delete process.env.AGENTS_FEED_DIR;
-      else process.env.AGENTS_FEED_DIR = priorFeedDir;
-    }
+    const queued = readBox(mailboxDir('drains', mailboxRoot)).filter((m) => m.state === 'inbox');
+    expect(queued).toHaveLength(1);
+    const [msg] = queued;
+    recordMessageReceipt(block.blockId, {
+      msgId: msg.msgId, status: 'consumed', at: new Date().toISOString(), from: msg.from,
+      generation: msg.generation, attempt: msg.attempt,
+    }, feedRoot);
     expect(latestMessageReceipt(block.blockId, feedRoot)?.status).toBe('consumed');
     expect(readResolution(block.blockId, feedRoot)?.reason).toBe('answered');
   });

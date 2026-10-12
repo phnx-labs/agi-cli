@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { mailboxDir, enqueue, drain } from './mailbox.js';
+import { mailboxDir, enqueue } from './mailbox.js';
 import { gcMailbox } from './mailbox-gc.js';
 import { blockIdForSession, publishBlock, readBlock } from './feed/feed.js';
 
@@ -104,9 +104,9 @@ describe('mailbox GC', () => {
   it('prunes old consumed entries', () => {
     const root = tmpRoot();
     const box = mailboxDir(BOX, root);
-    enqueue(box, { to: BOX, text: 'old' });
-    drain(box);
-    const consumedFile = path.join(box, 'consumed', fs.readdirSync(path.join(box, 'consumed'))[0]);
+    const msgId = enqueue(box, { to: BOX, text: 'old' });
+    const consumedFile = path.join(box, 'consumed', `${msgId}.json`);
+    fs.renameSync(path.join(box, 'inbox', `${msgId}.json`), consumedFile);
     const oldTime = new Date('2020-01-01T00:00:00.000Z');
     fs.utimesSync(consumedFile, oldTime, oldTime);
 

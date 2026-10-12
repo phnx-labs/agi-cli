@@ -35,30 +35,6 @@ const HOME = os.homedir();
 
 type ParsedRules = PermissionSet;
 
-export const COMPUTER_APP_GATED_VERBS = [
-  'screenshot',
-  'describe',
-  'get-text',
-  'launch',
-  'raise',
-  'click',
-  'right-click',
-  'type',
-  'type-text',
-  'key',
-  'drag',
-  'scroll',
-  'ax-action',
-  'focus',
-  'wait',
-] as const;
-
-export function formatComputerPermissionGrantHint(bundleId?: string): string {
-  const target = bundleId && bundleId.length > 0 ? bundleId : '<bundle-id>';
-  return `add Computer(${target}) to a permissions group, then \`computer reload\`\n` +
-    `app-targeted computer verbs are gated by Computer(<bundle-id>): ${COMPUTER_APP_GATED_VERBS.join(', ')}`;
-}
-
 export function containsBroadGrants(rules: ParsedRules): { broad: string[]; reason: string } | null {
   const broad: string[] = [];
   const reasons = new Set<string>();
@@ -1074,51 +1050,6 @@ export function readAgentPermissions(
 }
 
 
-export function applyClaudePermissions(
-  set: PermissionSet,
-  scope: 'user' | 'project' = 'user',
-  cwd?: string,
-  merge: boolean = true
-): { success: boolean; error?: string } {
-  const configDir = scope === 'user'
-    ? path.join(HOME, '.claude')
-    : path.join(cwd || process.cwd(), '.claude');
-  const configPath = path.join(configDir, 'settings.json');
-
-  try {
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-
-    let config: Record<string, unknown> = {};
-    if (fs.existsSync(configPath)) {
-      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-
-    const newPermissions = convertToClaudeFormat(set);
-
-    if (merge && config.permissions) {
-      const existing = config.permissions as { allow?: string[]; deny?: string[]; ask?: string[] };
-      const mergedAllow = new Set([...(existing.allow || []).map(canonicalToClaudeRule), ...newPermissions.permissions.allow]);
-      const mergedDeny = new Set([...(existing.deny || []).map(canonicalToClaudeRule), ...newPermissions.permissions.deny]);
-      const mergedAsk = new Set([...(existing.ask || []).map(canonicalToClaudeRule), ...(newPermissions.permissions.ask || []).map(canonicalToClaudeRule)]);
-      const perms: ClaudePermissions['permissions'] = {
-        allow: [...mergedAllow],
-        deny: [...mergedDeny],
-      };
-      if (mergedAsk.size > 0) perms.ask = [...mergedAsk];
-      config.permissions = perms;
-    } else {
-      config.permissions = newPermissions.permissions;
-    }
-
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
 export function openCodeConfigPath(scope: 'user' | 'project', cwd?: string, home: string = HOME): string {
   if (scope === 'project') {
     const root = cwd || process.cwd();
@@ -1134,115 +1065,6 @@ export function openCodeConfigPath(scope: 'user' | 'project', cwd?: string, home
     if (fs.existsSync(candidate)) return candidate;
   }
   return path.join(globalDir, 'opencode.jsonc');
-}
-
-function applyOpenCodePermissions(
-  set: PermissionSet,
-  scope: 'user' | 'project' = 'user',
-  cwd?: string,
-  merge: boolean = true
-): { success: boolean; error?: string } {
-  const configPath = openCodeConfigPath(scope, cwd);
-  const configDir = path.dirname(configPath);
-
-  try {
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-
-    let config: Record<string, unknown> = {};
-    if (fs.existsSync(configPath)) {
-      const content = stripJsonComments(fs.readFileSync(configPath, 'utf-8'));
-      config = JSON.parse(content);
-    }
-
-    const newPermissions = convertToOpenCodeFormat(set);
-
-    if (merge && config.permission) {
-      const existing = config.permission as { bash?: Record<string, string> };
-      config.permission = {
-        ...existing,
-        bash: {
-          ...(existing.bash || {}),
-          ...newPermissions.permission.bash,
-        },
-      };
-    } else {
-      config.permission = newPermissions.permission;
-    }
-
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
-function applyCodexPermissions(
-  set: PermissionSet,
-  scope: 'user' | 'project' = 'user',
-  cwd?: string,
-  merge: boolean = true
-): { success: boolean; error?: string } {
-  const configDir = scope === 'user'
-    ? path.join(HOME, '.codex')
-    : path.join(cwd || process.cwd(), '.codex');
-  const configPath = path.join(configDir, 'config.toml');
-
-  try {
-    if (!fs.existsSync(configDir)) {
-      fs.mkdirSync(configDir, { recursive: true });
-    }
-
-    let config: Record<string, unknown> = {};
-    if (fs.existsSync(configPath)) {
-      const content = fs.readFileSync(configPath, 'utf-8');
-      config = TOML.parse(content) as Record<string, unknown>;
-    }
-
-    const newPermissions = convertToCodexFormat(set, cwd);
-
-    if (newPermissions.approval_policy) {
-      config.approval_policy = newPermissions.approval_policy;
-    }
-    if (newPermissions.sandbox_mode) {
-      config.sandbox_mode = newPermissions.sandbox_mode;
-    }
-    if (newPermissions.sandbox_workspace_write) {
-      const existing = config.sandbox_workspace_write as Record<string, unknown> | undefined;
-      config.sandbox_workspace_write = merge
-        ? mergeCodexSandboxWrite(existing, newPermissions.sandbox_workspace_write)
-        : newPermissions.sandbox_workspace_write;
-    }
-
-    fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
-
-    syncCodexDenyRules(configDir, set.deny);
-    syncCodexAskRules(configDir, set.ask);
-
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-}
-
-function applyPermissionsToAgent(
-  agentId: AgentId,
-  set: PermissionSet,
-  scope: 'user' | 'project' = 'user',
-  cwd?: string,
-  merge: boolean = true
-): { success: boolean; error?: string } {
-  switch (agentId) {
-    case 'claude':
-      return applyClaudePermissions(set, scope, cwd, merge);
-    case 'opencode':
-      return applyOpenCodePermissions(set, scope, cwd, merge);
-    case 'codex':
-      return applyCodexPermissions(set, scope, cwd, merge);
-    default:
-      return { success: false, error: `Agent '${agentId}' does not support permissions` };
-  }
 }
 
 export type ApplyPermissionsResult = { success: boolean; error?: string; skipped?: string[] };

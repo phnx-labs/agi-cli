@@ -9,12 +9,7 @@ import chalk from 'chalk';
 
 import { decodeJwtPayload, decryptDroidAuthPayload, type AccountInfo } from '../agents.js';
 import { walkForFiles } from '../fs-walk.js';
-import {
-  deleteKeychainToken,
-  deleteKeychainTokenSync,
-  getKeychainTokenSync,
-  setKeychainToken,
-} from '../secrets-client.js';
+import { getKeychainTokenSync } from '../secrets-client.js';
 import { resolveClaudeSetupToken } from '../claude-account-token.js';
 import {
   formatBackoffRemaining,
@@ -31,8 +26,6 @@ import { padToWidth } from '../session/width.js';
 const execFileAsync = promisify(execFile);
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
-const CLAUDE_TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
-const CLAUDE_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const CLAUDE_OAUTH_BETA_HEADER = 'oauth-2025-04-20';
 const CLAUDE_REFRESH_LEEWAY_MS = 5 * 60 * 1000;
 
@@ -167,13 +160,6 @@ export function claudeAccessTokenNeedsRefresh(
   if (expiresAt == null) return false;
   return nowMs + CLAUDE_REFRESH_LEEWAY_MS >= expiresAt;
 }
-const CLAUDE_SCOPES = [
-  'user:profile',
-  'user:inference',
-  'user:sessions:claude_code',
-  'user:mcp_servers',
-  'user:file_upload',
-];
 const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
 
 let claudeUsageCachePathOverride: string | null = null;
@@ -316,13 +302,6 @@ interface ClaudeOauthCredentials {
 interface ClaudeKeychainPayload {
   organizationUuid?: string | null;
   claudeAiOauth?: ClaudeOauthCredentials | null;
-}
-
-interface ClaudeTokenResponse {
-  access_token?: string;
-  refresh_token?: string;
-  expires_in?: number;
-  scope?: string;
 }
 
 interface CachedUsageWindow {
@@ -1486,20 +1465,6 @@ function parseClaudeOauthPayload(raw: string): ClaudeOauthCredentials | null {
   }
 }
 
-const CLAUDE_OAUTH_CACHE_PREFIX = 'agents-cli.claude-oauth-cache.';
-
-function claudeOauthCacheItem(service: string): string {
-  const hash = createHash('sha256').update(service).digest('hex').slice(0, 16);
-  return `${CLAUDE_OAUTH_CACHE_PREFIX}${hash}`;
-}
-
-function deleteCachedClaudeOauth(service: string): void {
-  try {
-    deleteKeychainTokenSync(claudeOauthCacheItem(service));
-  } catch {
-  }
-}
-
 export function claudeHomeHasNativeOauthFile(home?: string): boolean {
   return readClaudeNativeCredentialsFile(home) !== null;
 }
@@ -1550,50 +1515,6 @@ export async function loadClaudeOauth(
   } catch {
   }
   return null;
-}
-
-async function saveClaudeOauth(
-  home: string | undefined,
-  credentials: ClaudeOauthCredentials
-): Promise<boolean> {
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
-    return false;
-  }
-
-  try {
-    const service = getClaudeKeychainService(home);
-
-    let existingPayload: ClaudeKeychainPayload = {};
-    try {
-      const stdout = getKeychainTokenSync(service);
-      existingPayload = JSON.parse(stdout.trim()) as ClaudeKeychainPayload;
-    } catch {
-    }
-
-    const newPayload: ClaudeKeychainPayload = {
-      ...existingPayload,
-      claudeAiOauth: {
-        ...existingPayload.claudeAiOauth,
-        accessToken: credentials.accessToken,
-        refreshToken: credentials.refreshToken,
-        expiresAt: credentials.expiresAt,
-        scopes: credentials.scopes ?? existingPayload.claudeAiOauth?.scopes,
-      },
-    };
-
-    const payloadJson = JSON.stringify(newPayload);
-
-    try {
-      await deleteKeychainToken(service);
-    } catch {
-    }
-
-    await setKeychainToken(service, payloadJson);
-    deleteCachedClaudeOauth(service);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 export function getClaudeKeychainService(home?: string): string {
@@ -2100,69 +2021,6 @@ function isCachedUsageWindowFresh(
     }
   }
   return true;
-}
-
-async function getClaudeAccessToken(oauth: ClaudeOauthCredentials, home?: string): Promise<string | null> {
-  const accessToken = oauth.accessToken?.trim();
-  if (!accessToken) {
-    return null;
-  }
-
-  if (!claudeAccessTokenNeedsRefresh(oauth.expiresAt ?? null)) {
-    return accessToken;
-  }
-
-  if (!oauth.refreshToken) {
-    return null;
-  }
-
-  const refreshed = await refreshClaudeToken(oauth);
-  if (!refreshed?.accessToken) {
-    return null;
-  }
-
-  await saveClaudeOauth(home, refreshed);
-
-  return refreshed.accessToken.trim();
-}
-
-async function refreshClaudeToken(oauth: ClaudeOauthCredentials): Promise<ClaudeOauthCredentials | null> {
-  const response = await fetch(CLAUDE_TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      grant_type: 'refresh_token',
-      refresh_token: oauth.refreshToken,
-      client_id: CLAUDE_CLIENT_ID,
-      scope: (oauth.scopes?.length ? oauth.scopes : CLAUDE_SCOPES).join(' '),
-    }),
-    signal: AbortSignal.timeout(15000),
-  });
-
-  if (!response.ok) {
-    return null;
-  }
-
-  const data = await response.json() as ClaudeTokenResponse;
-  if (!data.access_token || !data.expires_in) {
-    return null;
-  }
-
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || oauth.refreshToken || null,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    scopes: data.scope ? data.scope.split(/\s+/).filter(Boolean) : (oauth.scopes || CLAUDE_SCOPES),
-  };
-}
-
-export async function isClaudeAuthValid(home?: string): Promise<boolean> {
-  const oauth = await loadClaudeOauth(home);
-  if (!oauth) return false;
-  const token = await getClaudeAccessToken(oauth, home);
-  return token !== null;
 }
 
 function getClaudeUserAgent(cliVersion?: string | null): string {

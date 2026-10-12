@@ -11,7 +11,7 @@ import {
   applyPolicyToBlock,
 } from './feed-policy.js';
 import { publishBlock, readBlock, listBlocks, recordAnswer, deriveBlockState, blockIdForSession, type OpenBlock } from './feed/feed.js';
-import { drain, mailboxDir } from './mailbox.js';
+import { mailboxDir, readBox } from './mailbox.js';
 
 function tmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agents-policy-test-'));
@@ -96,7 +96,7 @@ phoneNotifyThreshold: high
     const updated = readBlock(blockIdForSession('a'), dir)!;
     expect(updated.answer?.answeredFrom).toBe('policy');
     expect(updated.defaultedAt).toBeTruthy();
-    expect(drain(mailboxDir('a', mailboxRoot)).map((m) => m.text)).toEqual(['deny']);
+    expect(readBox(mailboxDir('a', mailboxRoot)).map((m) => m.text)).toEqual(['deny']);
     expect(fs.existsSync(path.join(dir, 'a'))).toBe(false);
   });
 
@@ -114,7 +114,7 @@ phoneNotifyThreshold: high
     const result = applyPolicyToBlock(readBlock(blockIdForSession('fast'), dir)!, DEFAULT_POLICY, now, dir, mailboxRoot);
 
     expect(result.action).toBe('defaulted');
-    expect(drain(mailboxDir('fast', mailboxRoot)).map((m) => m.text)).toEqual(['No']);
+    expect(readBox(mailboxDir('fast', mailboxRoot)).map((m) => m.text)).toEqual(['No']);
   });
 
   it('hard-parks a decision block after timeout', () => {

@@ -9,20 +9,18 @@ import { capableAgents, isCapable, supports } from './capabilities.js';
 import { isDirectoryDoc } from './resources.js';
 import { normalizeAliases } from './resource-aliases.js';
 import { markdownToToml } from './convert.js';
-import { getCommandsDir, getUserCommandsDir, getEnabledExtraRepos, getProjectAgentsDir, getSkillsDir, getTrashCommandsDir } from './state.js';
+import { getCommandsDir, getUserCommandsDir, getProjectAgentsDir, getTrashCommandsDir } from './state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { discoverPlugins } from './plugins/plugins.js';
 import type { AgentId } from './types.js';
 import {
   commandSkillMatches,
-  installCommandSkillToVersion,
   listCommandSkillsInVersion,
   removeCommandSkillFromVersion,
   shouldAlsoInstallCommandAsSkill,
   shouldInstallCommandAsSkill,
 } from './command-skills.js';
 import {
-  installGooseCommandToVersion,
   listGooseCommandsInVersion,
   gooseCommandMatches,
   removeGooseCommandFromVersion,
@@ -84,28 +82,6 @@ export function commandAppliesTo(
   }
 
   return { ok: true };
-}
-
-function explainCommandSkip(
-  agent: AgentId,
-  version: string,
-  commandName: string,
-  result: CommandApplyResult
-): string {
-  if (result.ok) return '';
-  const tag = `${agent}@${version}`;
-  switch (result.reason) {
-    case 'unsupported':
-      return `${tag}: /${commandName} not supported for this agent version`;
-    case 'agent_excluded':
-      return `${tag}: /${commandName} excluded by command frontmatter agents list`;
-    case 'too_old':
-      return `${tag}: /${commandName} requires ${result.need}`;
-    case 'too_new':
-      return `${tag}: /${commandName} requires ${result.need}`;
-    default:
-      return `${tag}: /${commandName} skipped`;
-  }
 }
 
 export interface ValidationResult {
@@ -367,77 +343,6 @@ export function diffVersionCommands(agent: AgentId, version: string): VersionCom
   };
 }
 
-export function installCommandToVersion(
-  agent: AgentId,
-  version: string,
-  commandName: string,
-  method: 'symlink' | 'copy' = 'copy'
-): { success: boolean; error?: string; skipped?: boolean; skipReason?: string } {
-  const sourcePath = path.join(getCommandsDir(), `${commandName}.md`);
-  if (!fs.existsSync(sourcePath)) {
-    return { success: false, error: `Command '${commandName}' not found in central` };
-  }
-
-  const metadata = parseCommandMetadata(sourcePath);
-  const gate = commandAppliesTo(agent, version, metadata);
-  if (!gate.ok) {
-    return { success: true, skipped: true, skipReason: explainCommandSkip(agent, version, commandName, gate) };
-  }
-
-  const versionHome = getVersionHomePath(agent, version);
-  const agentDir = path.join(versionHome, agentConfigDirName(agent));
-  if (shouldInstallCommandAsSkill(agent, version)) {
-    return installCommandSkillToVersion(
-      agentDir,
-      commandName,
-      sourcePath,
-      [
-        getSkillsDir(),
-        ...getEnabledExtraRepos().map((repo) => path.join(repo.dir, 'skills')),
-      ]
-    );
-  }
-
-  if (shouldAlsoInstallCommandAsSkill(agent, version)) {
-    const installed = installCommandSkillToVersion(
-      agentDir,
-      commandName,
-      sourcePath,
-      [getSkillsDir(), ...getEnabledExtraRepos().map((repo) => path.join(repo.dir, 'skills'))],
-    );
-    if (!installed.success) return installed;
-  }
-
-  if (agent === 'goose') {
-    return installGooseCommandToVersion(versionHome, commandName, sourcePath);
-  }
-
-  const agentConfig = AGENTS[agent];
-  const commandsDir = getVersionCommandsDir(agent, version);
-  fs.mkdirSync(commandsDir, { recursive: true });
-
-  const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
-  const targetPath = path.join(commandsDir, `${commandName}${ext}`);
-
-  try {
-    if (fs.existsSync(targetPath) || fs.lstatSync(targetPath, { throwIfNoEntry: false })) {
-      fs.unlinkSync(targetPath);
-    }
-
-    if (agentConfig.format === 'toml') {
-      const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-      fs.writeFileSync(targetPath, markdownToToml(commandName, sourceContent), 'utf-8');
-    } else if (method === 'symlink') {
-      fs.symlinkSync(sourcePath, targetPath);
-    } else {
-      fs.copyFileSync(sourcePath, targetPath);
-    }
-  } catch (err) {
-    return { success: false, error: (err as Error).message };
-  }
-  return { success: true };
-}
-
 export function removeCommandFromVersion(
   agent: AgentId,
   version: string,
@@ -501,65 +406,8 @@ export function uninstallCommand(agentId: AgentId, commandName: string): boolean
   return false;
 }
 
-function listInstalledCommands(agentId: AgentId): string[] {
-  const agent = AGENTS[agentId];
-  const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
-  if (!fs.existsSync(commandsDir)) {
-    return [];
-  }
-
-  const ext = agent.format === 'toml' ? '.toml' : '.md';
-  return fs
-    .readdirSync(commandsDir)
-    .filter((f) => f.endsWith(ext))
-    .map((f) => f.replace(ext, ''));
-}
-
-function commandExists(agentId: AgentId, commandName: string): boolean {
-  const agent = AGENTS[agentId];
-  const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
-  const ext = agent.format === 'toml' ? '.toml' : '.md';
-  const targetPath = path.join(commandsDir, `${commandName}${ext}`);
-  return fs.existsSync(targetPath);
-}
-
 function normalizeContent(content: string): string {
   return content.replace(/\r\n/g, '\n').trim();
-}
-
-function commandContentMatches(
-  agentId: AgentId,
-  commandName: string,
-  sourcePath: string
-): boolean {
-  const agent = AGENTS[agentId];
-  const home = getEffectiveHome(agentId);
-  const commandsDir = path.join(home, agentConfigDirName(agentId), agent.commandsSubdir);
-  const ext = agent.format === 'toml' ? '.toml' : '.md';
-  const installedPath = path.join(commandsDir, `${commandName}${ext}`);
-
-  if (!fs.existsSync(installedPath) || !fs.existsSync(sourcePath)) {
-    return false;
-  }
-
-  try {
-    const installedContent = fs.readFileSync(installedPath, 'utf-8');
-    const sourceContent = fs.readFileSync(sourcePath, 'utf-8');
-
-    const sourceIsMarkdown = sourcePath.endsWith('.md');
-    const needsConversion = agent.format === 'toml' && sourceIsMarkdown;
-
-    if (needsConversion) {
-      const convertedSource = markdownToToml(commandName, sourceContent);
-      return normalizeContent(installedContent) === normalizeContent(convertedSource);
-    }
-
-    return normalizeContent(installedContent) === normalizeContent(sourceContent);
-  } catch {
-    return false;
-  }
 }
 
 function getProjectCommandsDirs(agentId: AgentId, cwd: string = process.cwd()): string[] {

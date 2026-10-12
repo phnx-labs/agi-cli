@@ -76,8 +76,7 @@ record of `null` for it.
   consumers cost one ssh per peer instead of N — PHNX-3999; the socket binds on
   start but the fan-out itself is demand-gated on a connected reader), and
   `daemon-heartbeat`
-  (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
-  `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`
+  (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and `auth-sync`
   (`auth-sync-service.ts`: also mints and pushes owner-notify device tokens to
   workers, PHNX-4267), `usage-sync` (`usage-sync-service.ts`), and — since
   PHNX-3695 — `self-update` (`self-update-service.ts`: checks npm for a newer
@@ -211,8 +210,7 @@ record of `null` for it.
   `updateFleetSharedDeviceStateAsync` (was a `withFileLock` every tick,
   `fleet-shared-state.ts`); **keychain-reap**'s whole-process-table `ps` is now
   `execFileBounded` (`secrets/reaper.ts`); **watchdog** reads `watchdog.enabled`
-  via `getConfigValueAsync` and **browser-task-reap** its idle config via the
-  async `resolveBrowserTaskIdleMs` (`device-config.ts`); **tmux-reap**'s per-process
+  via `getConfigValueAsync`; **tmux-reap**'s per-process
   `/proc/<pid>/environ` scan uses `fs/promises` (`tmux/orphan-reap.ts`).
 
   The structural guard `guard-no-sync-io.test.ts` (1) scans every `*-service.ts`
@@ -232,9 +230,7 @@ record of `null` for it.
   report extraction / transcript archival inside `reconcileRunningRecord`
   (`inferFinalStatusFromLog`, `extractAndSaveReport`, `archiveRoutineTranscripts`)
   which fire ONLY when a run ends; `captureProcessStartTime`'s memoized per-helper
-  `ps` fingerprints (keychain-reap, a small pid subset); the browser pid-registry
-  `readdirSync`/`readFileSync` (browser-task-reap, bounded by live-session count);
-  the opt-in watchdog per-session `statSync`/`readFileSync`; catchup's
+  `ps` fingerprints (keychain-reap, a small pid subset); the opt-in watchdog per-session `statSync`/`readFileSync`; catchup's
   overdue-dispatch (conditional); and
   `session-index`'s synchronous better-sqlite3 (a different class, not a fs/exec
   primitive). Converting these is a separate change and does not block the

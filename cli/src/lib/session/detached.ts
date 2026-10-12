@@ -42,22 +42,6 @@ export function clearDetachRecord(sessionId: string): void {
   }
 }
 
-export function listDetachRecords(): DetachRecord[] {
-  let names: string[];
-  try {
-    names = fs.readdirSync(detachedDir());
-  } catch {
-    return [];
-  }
-  const out: DetachRecord[] = [];
-  for (const name of names) {
-    if (!name.endsWith('.json')) continue;
-    const rec = readDetachRecord(name.slice(0, -'.json'.length));
-    if (rec) out.push(rec);
-  }
-  return out;
-}
-
 export function isHeadlessAlive(rec: DetachRecord): boolean {
 
   if (!rec.headlessPid || rec.headlessPid <= 0) return false;

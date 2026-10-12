@@ -12,11 +12,11 @@ const {
   writeDetachRecord,
   readDetachRecord,
   clearDetachRecord,
-  listDetachRecords,
   isHeadlessAlive,
   presenceFromStore,
 } = await import('./detached.js');
 const { captureProcessStartTime } = await import('../platform/process.js');
+const { getSystemAgentsDir } = await import('../state.js');
 
 const children: ChildProcess[] = [];
 function longRunningChild(): ChildProcess {
@@ -26,7 +26,7 @@ function longRunningChild(): ChildProcess {
 }
 
 afterEach(() => {
-  for (const rec of listDetachRecords()) clearDetachRecord(rec.sessionId);
+  fs.rmSync(path.join(getSystemAgentsDir(), 'detached'), { recursive: true, force: true });
 });
 afterAll(() => {
   for (const c of children) {
@@ -58,12 +58,6 @@ describe('detach store', () => {
     writeDetachRecord({ sessionId: 'sess-bbb', agent: 'codex', headlessPid: 1, headlessStartTime: null, detachedAtMs: 0 });
     clearDetachRecord('sess-bbb');
     expect(readDetachRecord('sess-bbb')).toBeUndefined();
-  });
-
-  it('list returns every written record', () => {
-    writeDetachRecord({ sessionId: 's1', agent: 'claude', headlessPid: 1, headlessStartTime: null, detachedAtMs: 0 });
-    writeDetachRecord({ sessionId: 's2', agent: 'claude', headlessPid: 2, headlessStartTime: null, detachedAtMs: 0 });
-    expect(listDetachRecords().map((r) => r.sessionId).sort()).toEqual(['s1', 's2']);
   });
 
   it('read on an unknown id is undefined, not a throw', () => {

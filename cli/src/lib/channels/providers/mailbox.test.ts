@@ -1,7 +1,7 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import * as fs from 'fs';
 import { mailboxProvider } from './mailbox.js';
-import { mailboxDir, peek } from '../../mailbox.js';
+import { mailboxDir, readBox } from '../../mailbox.js';
 
 const BOX = `agents-send-test-${process.pid}`;
 
@@ -19,7 +19,7 @@ describe('mailbox provider', () => {
     expect(res.channel).toBe('mailbox');
     expect(res.msgId).toBeTruthy();
 
-    const pending = peek(mailboxDir(BOX), BOX);
+    const pending = readBox(mailboxDir(BOX));
     expect(pending.map((m) => m.text)).toContain('hello mailbox');
     expect(pending.find((m) => m.text === 'hello mailbox')?.from).toBe('send-test');
   });
@@ -34,6 +34,6 @@ describe('mailbox provider', () => {
     const res = await mailboxProvider.send('nope', { target: BOX, dryRun: true });
     expect(res.ok).toBe(true);
     expect(res.msgId).toBeUndefined();
-    expect(peek(mailboxDir(BOX), BOX)).toHaveLength(0);
+    expect(readBox(mailboxDir(BOX))).toHaveLength(0);
   });
 });
