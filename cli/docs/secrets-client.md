@@ -57,7 +57,10 @@ parent                              child: `secrets __serve`
 - **Engine stderr** goes to `<logs>/secrets-serve.log` (`AGENTS_LOGS_DIR`,
   default `~/.agents/.cache/logs`), not the caller's terminal: the module calls
   the published `configureSecretsClient({ stderr })` once at load, which covers
-  the async and sync paths. The file is appended to and created `0600`.
+  the async and sync paths. The file is appended to and created `0600`; a relative
+  `AGENTS_LOGS_DIR` resolves against the working directory and an empty one means the
+  default. If the log cannot be created or opened at load, engine stderr is dropped
+  (`'ignore'`, never the terminal) so secrets requests keep working.
 - **Errors** are `SecretsClientError` carrying the server's `{ code, message }`
   (e.g. `ACCESS_DENIED`, `NOT_FOUND`), or a client-side transport code
   (`SECRETS_BIN_MISSING`, `TIMEOUT`, `PROTOCOL_UNSUPPORTED`, `SPAWN_FAILED`).

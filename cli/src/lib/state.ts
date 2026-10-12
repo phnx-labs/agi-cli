@@ -388,7 +388,7 @@ export function getCloudDir(): string { return CLOUD_DIR; }
 export function getTerminalsDir(): string { return TERMINALS_DIR; }
 
 export function getLogsDir(): string {
-  return process.env.AGENTS_LOGS_DIR ?? LOGS_DIR;
+  return process.env.AGENTS_LOGS_DIR || LOGS_DIR;
 }
 
 export function getPerfDir(): string {

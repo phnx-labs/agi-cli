@@ -1,3 +1,4 @@
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   configureSecretsClient,
@@ -43,7 +44,15 @@ export {
 } from '@phnx-labs/secrets-cli/client';
 
 function routeEngineStderr(): void {
-  configureSecretsClient({ stderr: path.join(getLogsDir(), 'secrets-serve.log') });
+  const log = path.resolve(getLogsDir(), 'secrets-serve.log');
+  try {
+    fs.mkdirSync(path.dirname(log), { recursive: true, mode: 0o700 });
+    fs.closeSync(fs.openSync(log, 'a', 0o600));
+  } catch {
+    configureSecretsClient({ stderr: 'ignore' });
+    return;
+  }
+  configureSecretsClient({ stderr: log });
 }
 routeEngineStderr();
 

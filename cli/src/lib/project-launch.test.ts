@@ -22,7 +22,7 @@ vi.mock('./state.js', () => ({
     const p = path.join(cwd, '.agents');
     return fs.existsSync(p) ? p : null;
   }; },
-  get getLogsDir() { return () => process.env.AGENTS_LOGS_DIR!; },
+  get getLogsDir() { return () => process.env.AGENTS_LOGS_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'launch-sync-logs-')); },
   get getEnabledExtraRepos() { return () => []; },
   get getVersionsDir() { return () => path.join(USER_DIR, '.history', 'versions'); },
   get getCliVersionCachePath() { return () => path.join(os.tmpdir(), 'agents-cli-version.json'); },

@@ -222,53 +222,94 @@ describe.skipIf(process.platform === 'win32')('agents-cli wrappers against the r
 });
 
 describe.skipIf(process.platform === 'win32')('one agents-cli process talking to the real engine', () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-engine-')); });
+  afterEach(() => {
+    fs.chmodSync(dir, 0o700);
+    for (const entry of fs.readdirSync(dir)) fs.chmodSync(path.join(dir, entry), 0o700);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function runConsumer(logsDir: string, cwd = dir): { stdout: string; stderr: string; status: number | null; spawns: number; home: string } {
+    const tally = path.join(dir, 'engine-spawns');
+    const engine = invocation(REAL_BIN);
+    const wrapper = path.join(dir, 'secrets');
+    fs.writeFileSync(
+      wrapper,
+      `#!/bin/sh\necho "engine-stderr-probe $$" >&2\necho $$ >> '${tally}'\nexec ${[engine.command, ...engine.prefix].map((a) => `'${a}'`).join(' ')} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const client = fileURLToPath(new URL('./secrets-client.ts', import.meta.url));
+    const script = path.join(dir, 'consumer.ts');
+    fs.writeFileSync(script, [
+      `import { writeBundleWithItemsSync, readAndResolveBundleEnvSync, readAndResolveBundleEnv, secretsKeychainItem } from ${JSON.stringify(client)};`,
+      `writeBundleWithItemsSync({ name: 'probe', backend: 'file', vars: { TOKEN: 'keychain:TOKEN' } }, new Map([[secretsKeychainItem('probe', 'TOKEN'), 'engine-value']]));`,
+      `const sync = readAndResolveBundleEnvSync('probe').env.TOKEN;`,
+      `const async_ = (await readAndResolveBundleEnv('probe')).env.TOKEN;`,
+      `console.log(JSON.stringify({ sync, async: async_ }));`,
+    ].join('\n'));
+    const home = path.join(dir, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const run = spawnSync('bun', [script], {
+      cwd,
+      encoding: 'utf8',
+      timeout: 90_000,
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        AGENTS_REAL_HOME: home,
+        AGENTS_LOGS_DIR: logsDir,
+        SECRETS_BIN: wrapper,
+        SECRETS_HOME: path.join(home, 'store'),
+        SECRETS_PASSPHRASE: 'agents-engine-stderr-test',
+        SECRETS_NO_AGENT: '1',
+        SECRETS_NO_USAGE_TRACK: '1',
+      },
+    });
+    const spawns = fs.existsSync(tally) ? fs.readFileSync(tally, 'utf8').trim().split('\n').length : 0;
+    return { stdout: run.stdout, stderr: run.stderr, status: run.status, spawns, home };
+  }
+
+  function expectQuietSuccess(run: ReturnType<typeof runConsumer>): void {
+    expect(run.status, run.stderr).toBe(0);
+    expect(JSON.parse(run.stdout.trim())).toEqual({ sync: 'engine-value', async: 'engine-value' });
+    expect(run.stderr).not.toContain('engine-stderr-probe');
+    expect(run.spawns).toBe(3);
+  }
+
+  function probeLines(log: string): number {
+    return fs.readFileSync(log, 'utf8').match(/engine-stderr-probe/g)?.length ?? 0;
+  }
+
   it('spawns one engine per request and sends its stderr to secrets-serve.log, never the terminal', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-engine-'));
-    try {
-      const tally = path.join(dir, 'engine-spawns');
-      const logs = path.join(dir, 'logs');
-      const engine = invocation(REAL_BIN);
-      const wrapper = path.join(dir, 'secrets');
-      fs.writeFileSync(
-        wrapper,
-        `#!/bin/sh\necho "engine-stderr-probe $$" >&2\necho $$ >> '${tally}'\nexec ${[engine.command, ...engine.prefix].map((a) => `'${a}'`).join(' ')} "$@"\n`,
-        { mode: 0o755 },
-      );
-      const client = fileURLToPath(new URL('./secrets-client.ts', import.meta.url));
-      const script = path.join(dir, 'consumer.ts');
-      fs.writeFileSync(script, [
-        `import { writeBundleWithItemsSync, readAndResolveBundleEnvSync, readAndResolveBundleEnv, secretsKeychainItem } from ${JSON.stringify(client)};`,
-        `writeBundleWithItemsSync({ name: 'probe', backend: 'file', vars: { TOKEN: 'keychain:TOKEN' } }, new Map([[secretsKeychainItem('probe', 'TOKEN'), 'engine-value']]));`,
-        `const sync = readAndResolveBundleEnvSync('probe').env.TOKEN;`,
-        `const async_ = (await readAndResolveBundleEnv('probe')).env.TOKEN;`,
-        `console.log(JSON.stringify({ sync, async: async_ }));`,
-      ].join('\n'));
-      const home = path.join(dir, 'home');
-      fs.mkdirSync(home);
-      const run = spawnSync('bun', [script], {
-        encoding: 'utf8',
-        timeout: 90_000,
-        env: {
-          PATH: process.env.PATH,
-          HOME: home,
-          AGENTS_REAL_HOME: home,
-          AGENTS_LOGS_DIR: logs,
-          SECRETS_BIN: wrapper,
-          SECRETS_HOME: path.join(home, 'store'),
-          SECRETS_PASSPHRASE: 'agents-engine-stderr-test',
-          SECRETS_NO_AGENT: '1',
-          SECRETS_NO_USAGE_TRACK: '1',
-        },
-      });
-      expect(run.status, run.stderr).toBe(0);
-      expect(JSON.parse(run.stdout.trim())).toEqual({ sync: 'engine-value', async: 'engine-value' });
-      expect(run.stderr).not.toContain('engine-stderr-probe');
-      expect(fs.readFileSync(tally, 'utf8').trim().split('\n')).toHaveLength(3);
-      const log = path.join(logs, 'secrets-serve.log');
-      expect(fs.readFileSync(log, 'utf8').match(/engine-stderr-probe/g)).toHaveLength(3);
-      expect(fs.statSync(log).mode & 0o777).toBe(0o600);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+    const logs = path.join(dir, 'logs');
+    const run = runConsumer(logs);
+    expectQuietSuccess(run);
+    const log = path.join(logs, 'secrets-serve.log');
+    expect(probeLines(log)).toBe(3);
+    expect(fs.statSync(log).mode & 0o777).toBe(0o600);
+  }, 120_000);
+
+  it('an empty AGENTS_LOGS_DIR falls back to the default logs dir', () => {
+    const run = runConsumer('');
+    expectQuietSuccess(run);
+    expect(probeLines(path.join(run.home, '.agents', '.cache', 'logs', 'secrets-serve.log'))).toBe(3);
+  }, 120_000);
+
+  it('a relative AGENTS_LOGS_DIR resolves against the working directory', () => {
+    const cwd = path.join(dir, 'work');
+    fs.mkdirSync(cwd);
+    const run = runConsumer('rel-logs', cwd);
+    expectQuietSuccess(run);
+    expect(probeLines(path.join(cwd, 'rel-logs', 'secrets-serve.log'))).toBe(3);
+  }, 120_000);
+
+  it.skipIf(process.getuid?.() === 0)('an unwritable logs dir drops engine stderr instead of failing requests', () => {
+    const locked = path.join(dir, 'locked');
+    fs.mkdirSync(locked);
+    fs.chmodSync(locked, 0o500);
+    const run = runConsumer(path.join(locked, 'logs'));
+    expectQuietSuccess(run);
+    expect(fs.existsSync(path.join(locked, 'logs'))).toBe(false);
   }, 120_000);
 });
