@@ -678,3 +678,64 @@ describe('openFocusTabs — a selected live headless session is stopped before i
     }
   });
 });
+
+describe('focusResolvedSession — an ended session from a caller with no TTY (AGI Menu)', () => {
+  const vscodium = { backend: 'vscodium-agent', source: 'active-session', host: 'codium' } as const;
+  function recorder(result: Partial<LaunchResult> = { ok: true }) {
+    const opened: Array<{ items: SurfaceItem[]; backend: string }> = [];
+    const open = async (items: SurfaceItem[], opts: { backend: string }): Promise<LaunchResult[]> => {
+      opened.push({ items, backend: opts.backend });
+      return items.map((it) => ({ request: { backend: opts.backend, layout: 'tab', cwd: it.cwd, command: it.command }, ...result })) as LaunchResult[];
+    };
+    return { opened, open: open as never };
+  }
+  const ended = (id: string, machine?: string): SessionMeta =>
+    ({ id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath: '', cwd: os.tmpdir(), machine });
+
+  it('opens a tab running the recovery command instead of resuming in place', async () => {
+    const id = 'f0c05e11-4344-4000-8000-00000000434d';
+    const { opened, open } = recorder();
+    try {
+      await focusResolvedSession(ended(id), new Map(), machineId(), refuseFallback, false, false, { open, choice: vscodium, interactive: false });
+      expect(opened).toHaveLength(1);
+      expect(opened[0].backend).toBe('vscodium-agent');
+      expect(opened[0].items[0].command.join(' ')).toContain(`run auto --resume ${id} --interactive --quiet`);
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      process.exitCode = undefined;
+    }
+  });
+
+  it('a peer-owned ended session opens a local tab with the portable command, not an SSH TTY hop', async () => {
+    const id = 'f0c05e11-4344-4000-8000-00000000434e';
+    const { opened, open } = recorder();
+    try {
+      await focusResolvedSession(ended(id, 'peer-box'), new Map(), machineId(), refuseFallback, false, false, { open, choice: vscodium, interactive: false });
+      expect(opened[0].items[0].command).toEqual(['agents', 'run', 'auto', '--resume', id, '--interactive', '--quiet']);
+    } finally {
+      process.exitCode = undefined;
+    }
+  });
+
+  it('fails loud with no terminal backend, and when the tab is not confirmed', async () => {
+    const id = 'f0c05e11-4344-4000-8000-00000000434f';
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.join(' ')); });
+    try {
+      const none = recorder();
+      await focusResolvedSession(ended(id), new Map(), machineId(), refuseFallback, false, false, { open: none.open, choice: null, interactive: false });
+      expect(none.opened).toHaveLength(0);
+      expect(process.exitCode).toBe(1);
+      expect(errors.join('\n')).toMatch(/No terminal this machine can drive/);
+      process.exitCode = undefined;
+      const reason = ackFailure(undefined, { backend: 'vscodium-agent', layout: 'tab', cwd: '/d', command: [], project: '/d' }, 15_000)!;
+      const unconfirmed = recorder({ ok: false, error: reason });
+      await focusResolvedSession(ended(id), new Map(), machineId(), refuseFallback, false, false, { open: unconfirmed.open, choice: vscodium, interactive: false });
+      expect(process.exitCode).toBe(1);
+      expect(errors.join('\n')).toContain(reason);
+    } finally {
+      spy.mockRestore();
+      process.exitCode = undefined;
+    }
+  });
+});
