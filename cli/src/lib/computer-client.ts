@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
+import { childExitCode } from './platform/process.js';
 import { buildComputerContext } from './computer/context.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/computer-cli';
@@ -103,19 +104,9 @@ async function forwardToComputer(opts: { argv: string[]; capture?: boolean }): P
     child.on('error', (err) => {
       reject(new ComputerClientError('COMPUTER_SPAWN_FAILED', `Could not run \`${bin}\`: ${err.message}`));
     });
-    child.on('close', (code, signal) => {
-      if (code == null) return resolve(signal ? 128 + (osSignalNumber(signal) ?? 0) : 1);
-      resolve(code);
-    });
+    child.on('close', (code, signal) => resolve(childExitCode(code, signal)));
   });
   return { exitCode, stdout };
-}
-
-function osSignalNumber(signal: NodeJS.Signals): number | undefined {
-  const table: Partial<Record<NodeJS.Signals, number>> = {
-    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGPIPE: 13, SIGTERM: 15,
-  };
-  return table[signal];
 }
 
 export async function installComputerHelperMacLocal(): Promise<void> {

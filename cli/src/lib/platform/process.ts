@@ -31,6 +31,11 @@ export function backgroundSpawnOptions(
   return { cwd, detached: true, windowsHide: false };
 }
 
+export function childExitCode(status: number | null, signal: NodeJS.Signals | null): number {
+  if (status != null) return status;
+  return signal ? 128 + (os.constants.signals[signal] ?? 0) : 1;
+}
+
 const EXIT_POLL_MS = 50;
 
 export function hasExited(pid: number): boolean {

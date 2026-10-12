@@ -58,7 +58,7 @@ import {
   setCompactRootHelp,
 } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
-import { IS_WINDOWS } from './lib/platform/index.js';
+import { IS_WINDOWS, childExitCode } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
 import { emit, emitFriction, redactArgs } from './lib/feed/events.js';
 import { stampProvenance } from './lib/event-provenance.js';
@@ -387,7 +387,7 @@ async function promptUpgrade(latestVersion: string, mayPrompt: boolean): Promise
         stdio: 'inherit',
         shell: false,
       });
-      process.exit(result.status ?? 0);
+      process.exit(childExitCode(result.status, result.signal));
     } catch (err) {
       if (isPromptCancelled(err)) return;
       spinner.fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
