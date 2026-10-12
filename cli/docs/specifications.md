@@ -3041,7 +3041,7 @@ snapshot older than its freshness bar and none is verified
 (the yosemite-s1 failing-refresh incident); When `resolveRunVersion` resolves a
 version; Then it MUST NOT auto-pick on the stale number — it returns
 `version: null` with `noVerifiedUsage: true` (`lib/accounting/rotate.ts`,
-`preferVerified` computing `verified.length === 0 && pool.some(hasStaleUsage)`).
+`preferVerified` computing `verified.length === 0 && pool.every(hasStaleUsage)`).
 The freshness bar is `USAGE_DECISION_MAX_AGE_MS` (5 min) for a locally
 captured row (`poll` / `statusline`) and `USAGE_SYNC_TRUST_MS` (the 15-minute
 usage-sync cadence) for a row whose `freshness.source` is `sync` — a worker
@@ -3055,6 +3055,8 @@ candidates MUST remain in `rotation.healthy` so bounded post-rejection failover
 account and refusing to FAIL OVER to it after a real 429 are different calls.
 A pool that is merely BLIND (no snapshot at all — GWT-E5c) is NOT stale and
 still draws a pick; `hasStaleUsage` requires a present, dated, windowed snapshot.
+A MIXED pool (some stale, the rest blind) also draws a pick: a blind account
+carries no number to be misled by, so one stale row cannot veto the pool.
 A row whose `freshness.source` is `sync` is ALSO never stale, however old
 (D1, PHNX-4116): the box that holds it cannot refresh it — the account's poller
 lives on the headed device that published it — so its age is shown, never used

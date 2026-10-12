@@ -319,7 +319,7 @@ function preferVerified(
     verified.length > 0 &&
     (narrowing === 'any-verified' || verified.length >= Math.ceil(pool.length / 2));
   const picked = choose(narrow ? verified : pool);
-  const noVerifiedUsage = verified.length === 0 && pool.some((c) => hasStaleUsage(c, nowMs));
+  const noVerifiedUsage = verified.length === 0 && pool.every((c) => hasStaleUsage(c, nowMs));
   return {
     picked,
     usageUnverified: !isUsageVerified(picked, nowMs),
