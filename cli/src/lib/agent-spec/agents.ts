@@ -17,6 +17,7 @@ import { registeredNativeAccountForEmail, parseNativeIdentityKey } from '../nati
 import { resolveVersion, getVersionHomePath, getBinaryPath } from '../installations/versions.js';
 import { supports } from '../capabilities.js';
 import { MCP_TARGETS } from '../mcp-registry.js';
+import { HARNESS_AUTH } from '../harness-auth-capabilities.js';
 import { VERSION_RE } from './primitives.js';
 
 export interface CliState {
@@ -1044,10 +1045,10 @@ export function isAccountSlotDir(dir: string): boolean {
   return resolved === root || resolved.startsWith(root + path.sep);
 }
 
-function resolveAccountCredentialPath(base: string, ...segments: string[]): string | null {
+function resolveAccountCredentialPath(agent: AgentId, base: string, ...segments: string[]): string | null {
   const perVersion = path.join(base, ...segments);
   try { if (fs.existsSync(perVersion)) return perVersion; } catch {  }
-  if (isAccountSlotDir(base)) return null;
+  if (isAccountSlotDir(base) || HARNESS_AUTH[agent].slotEnv) return null;
   const active = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...segments);
   if (active !== perVersion) {
     try { if (fs.existsSync(active)) return active; } catch {  }
@@ -1100,8 +1101,8 @@ interface DroidAuthPayload {
 }
 
 export function decryptDroidAuthPayload(base: string): DroidAuthPayload | null {
-  const filePath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
-  const keyPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.key');
+  const filePath = resolveAccountCredentialPath('droid', base, '.factory', 'auth.v2.file');
+  const keyPath = resolveAccountCredentialPath('droid', base, '.factory', 'auth.v2.key');
   if (!filePath || !keyPath) return null;
   return decryptDroidAuthFile(filePath, keyPath);
 }
@@ -1578,7 +1579,7 @@ export async function getAccountInfo(
         };
       }
       case 'cursor': {
-        const cfgPath = resolveAccountCredentialPath(base, '.cursor', 'cli-config.json');
+        const cfgPath = resolveAccountCredentialPath('cursor', base, '.cursor', 'cli-config.json');
         if (!cfgPath) return { ...empty, lastActive };
         try {
           const cfg = JSON.parse(await fs.promises.readFile(cfgPath, 'utf-8'));
@@ -1586,7 +1587,7 @@ export async function getAccountInfo(
           const email = typeof authInfo?.email === 'string' ? authInfo.email : null;
           const accountId = normalizeIdentityPart(authInfo?.authId ?? authInfo?.userId);
           if (!email && !accountId) return { ...empty, lastActive };
-          const authPath = resolveAccountCredentialPath(base, '.cursor', 'auth.json');
+          const authPath = resolveAccountCredentialPath('cursor', base, '.cursor', 'auth.json');
           let hasToken = false;
           if (authPath) {
             try {
@@ -1601,7 +1602,7 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'grok': {
-        const authPath = resolveAccountCredentialPath(base, '.grok', 'auth.json');
+        const authPath = resolveAccountCredentialPath('grok', base, '.grok', 'auth.json');
         if (!authPath) return { ...empty, lastActive };
         try {
           const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
@@ -1621,7 +1622,7 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'antigravity': {
-        const tokenPath = resolveAccountCredentialPath(base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
+        const tokenPath = resolveAccountCredentialPath('antigravity', base, '.gemini', 'antigravity-cli', 'antigravity-oauth-token');
         if (tokenPath) {
           const data = JSON.parse(await fs.promises.readFile(tokenPath, 'utf-8'));
           if (typeof data?.token?.refresh_token === 'string' && data.token.refresh_token) {
@@ -1636,7 +1637,7 @@ export async function getAccountInfo(
         return { ...empty, lastActive };
       }
       case 'kimi': {
-        const credPath = resolveAccountCredentialPath(base, '.kimi-code', 'credentials', 'kimi-code.json');
+        const credPath = resolveAccountCredentialPath('kimi', base, '.kimi-code', 'credentials', 'kimi-code.json');
         if (!credPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(credPath, 'utf-8'));
         const accessToken = data?.access_token;
@@ -1662,7 +1663,7 @@ export async function getAccountInfo(
           };
         }
         // An unreadable encrypted payload still counts conservatively when its auth file exists.
-        const authPath = resolveAccountCredentialPath(base, '.factory', 'auth.v2.file');
+        const authPath = resolveAccountCredentialPath('droid', base, '.factory', 'auth.v2.file');
         if (!authPath) return { ...empty, lastActive };
         return { ...empty, signedIn: true, lastActive };
       }
@@ -1685,7 +1686,7 @@ export async function getAccountInfo(
           const accountKey = buildIdentityKey(agentId, [['auth', 'env']]);
           return { ...empty, signedIn: true, accountId: 'env', accountKey, lastActive };
         }
-        const authPath = resolveAccountCredentialPath(base, '.config', 'muse', 'auth.json');
+        const authPath = resolveAccountCredentialPath('muse', base, '.config', 'muse', 'auth.json');
         if (!authPath) return { ...empty, lastActive };
         const data = JSON.parse(await fs.promises.readFile(authPath, 'utf-8'));
         if (!data || typeof data !== 'object') return { ...empty, lastActive };

@@ -1686,6 +1686,57 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(week?.usedPercent).toBe(37);
   });
 
+  function writeBalanceExhausted(tsMs: number): void {
+    const logDir = path.join(home, '.grok', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'unified.jsonl'), JSON.stringify({
+      ts: new Date(tsMs).toISOString(),
+      lvl: 'error',
+      msg: 'shell.turn.inference_failed',
+      ctx: {
+        kind: 'api',
+        status_code: 402,
+        is_retryable: false,
+        message: 'API error (status 402 Payment Required): Grok Build usage balance exhausted',
+      },
+    }) + '\n');
+  }
+
+  it('reads a recent 402 balance-exhausted turn as out of credits', async () => {
+    const now = Date.now();
+    writeBillingLine({ tsMs: now - 5 * DAY, percent: 69, periodStartMs: now - 6 * DAY, periodEndMs: now + DAY });
+    writeBalanceExhausted(now - 10 * 60 * 1000);
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.unavailable?.reason).toBe('out_of_credits');
+    expect(deriveUsageStatusFromSnapshot(info.snapshot)).not.toBe('available');
+  });
+
+  it('reports out of credits even when no billing line was ever logged', async () => {
+    writeBalanceExhausted(Date.now() - 60 * 1000);
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.unavailable?.reason).toBe('out_of_credits');
+  });
+
+  it('re-probes an account whose 402 is older than the out-of-credits window', async () => {
+    const now = Date.now();
+    writeBalanceExhausted(now - 2 * HOUR);
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.unavailable).toBeUndefined();
+  });
+
+  it('clears the 402 once a later credits fetch is logged', async () => {
+    const now = Date.now();
+    writeBalanceExhausted(now - 20 * 60 * 1000);
+    writeBillingLine({ tsMs: now - 60 * 1000, percent: 12, periodStartMs: now - DAY, periodEndMs: now + 6 * DAY });
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.unavailable).toBeUndefined();
+    expect(info.snapshot?.windows.find((w) => w.key === 'week')?.usedPercent).toBe(12);
+  });
+
   it('does not invent a 0% bar when creditUsagePercent is missing', async () => {
     const now = Date.now();
     writeBillingLine({

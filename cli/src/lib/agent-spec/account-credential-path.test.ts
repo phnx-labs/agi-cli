@@ -27,4 +27,25 @@ describe('resolveAccountCredentialPath — slot first (PHNX-3940 T5)', () => {
     expect(info.email).not.toBe('leaked@example.com');
     expect(info.signedIn).toBe(false);
   });
+
+  it('does not borrow the shared ~/.grok login for a version home the launcher pins with GROK_HOME', async () => {
+    process.env.AGENTS_REAL_HOME = tmp;
+    fs.mkdirSync(path.join(tmp, '.grok'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.grok', 'auth.json'), JSON.stringify({ email: 'shared@example.com', refresh_token: 'rt' }));
+    const versionHome = fs.mkdtempSync(path.join(tmp, 'grok-version-home-'));
+    fs.mkdirSync(path.join(versionHome, '.grok'), { recursive: true });
+    const info = await getAccountInfo('grok', versionHome);
+    expect(info.email).toBeNull();
+    expect(info.signedIn).toBe(false);
+  });
+
+  it('still falls back to the shared home for a harness the launcher does not pin', async () => {
+    process.env.AGENTS_REAL_HOME = tmp;
+    fs.mkdirSync(path.join(tmp, '.cursor'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, '.cursor', 'cli-config.json'), JSON.stringify({ authInfo: { email: 'shared@example.com' } }));
+    fs.writeFileSync(path.join(tmp, '.cursor', 'auth.json'), JSON.stringify({ accessToken: 'tok' }));
+    const versionHome = fs.mkdtempSync(path.join(tmp, 'cursor-version-home-'));
+    const info = await getAccountInfo('cursor', versionHome);
+    expect(info.email).toBe('shared@example.com');
+  });
 });
