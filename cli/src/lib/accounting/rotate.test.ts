@@ -853,6 +853,17 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(result.picked.version).toBeDefined();
   });
 
+  it('does NOT flag noVerifiedUsage when one account is stale and the rest are blind', () => {
+    const stale = candidate({ version: '2.1.260', usageSnapshot: dayOld(48) });
+    const blindA = candidate({ version: '2.1.252' });
+    const blindB = candidate({ version: '2.1.258' });
+
+    const result = pickBalancedCandidate([stale, blindA, blindB], NOW)!;
+
+    expect(result.noVerifiedUsage).toBe(false);
+    expect(result.usageUnverified).toBe(true);
+  });
+
   it('does NOT flag noVerifiedUsage when a verified account exists', () => {
     const stale = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });
     const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(90) });
