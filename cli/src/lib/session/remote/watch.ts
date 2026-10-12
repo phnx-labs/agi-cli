@@ -111,6 +111,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
       }
     : readSessionSummaryAny(session.id);
   const folded = readSessionTimelineAny(session.id);
+  const model = folded?.model ?? session.model;
   const title = previousRowTitle(session, folded?.request?.headline);
   return {
     context: 'recent',
@@ -144,7 +145,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(folded?.request ? { request: folded.request } : {}),
     ...(folded?.timeline ? { timeline: folded.timeline } : {}),
     ...(folded?.files ? { files: folded.files } : {}),
-    ...(folded?.model ?? session.model ? { model: folded?.model ?? session.model } : {}),
+    ...(model ? { model } : {}),
     ...(folded?.failures ? { failures: folded.failures } : {}),
     ...(folded?.activityHistogram ? { activityHistogram: folded.activityHistogram } : {}),
     ...(folded?.userTurns ? { userTurns: folded.userTurns } : {}),
