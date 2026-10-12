@@ -185,9 +185,9 @@ for the `formatMetaOnlyBody` reason above.
 `agents ps` splits on TTY (`runLiveRoster`, `commands/ps-roster.ts:760-772`): an interactive terminal
 gets the browser (`sessions-browser.ts`), everything else gets the static
 `renderActiveSessions` dump. Both funnel through one fleet sweep, `gatherActiveSessions`
-(`commands/ps-roster.ts:416`) = local `getActiveSessions()` + remote SSH fan-out
+(`active.ts:1916`) = local `getActiveSessions()` + remote SSH fan-out
 `gatherRemoteActive` (`remote-active.ts`), deduped by `${machine}:${sessionId}`
-(`dedupeByMachineSession`, `commands/ps-roster.ts`). The executing machine owns an
+(`dedupeByMachineSession`, `active.ts`). The executing machine owns an
 offloaded session: its row replaces the dispatcher's `offloadedFrom` shim, and a
 shim whose owner answered the sweep (a parseable JSON array) without that session
 is dropped (the tab is bound to a run that is no longer live there); remote

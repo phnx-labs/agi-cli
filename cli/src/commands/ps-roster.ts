@@ -2,7 +2,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import { sessionDisplayAgent, linkUrl } from '@phnx-labs/sessions-cli/reader';
 import {
-  getActiveSessions,
+  gatherActiveSessions,
   describeActiveDiscoveryHealth,
   sessionProcessIsLocal,
   backfillActiveRowsFromIndex,
@@ -14,9 +14,6 @@ import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '..
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
 import { resolveViewingIn, viewingInLabel } from '../lib/session/viewing-in.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { gatherRemoteActive, NO_FANOUT_ENV } from '../lib/session/remote-active.js';
-import { hostToken, remoteHostsToDial, shouldIncludeLocal } from '../lib/session/remote-list.js';
-import { loadFleetActiveSessions, loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import { formatCompactAge } from '../lib/session/relative-time.js';
 import { colorAgent } from '../lib/agents.js';
@@ -284,34 +281,6 @@ export function groupSessionsByMachine(sessions: ActiveSession[], localMachine: 
   return { machines };
 }
 
-export function dedupeByMachineSession(sessions: ActiveSession[], answered: readonly string[]): ActiveSession[] {
-  const heard = new Set(answered.map(normalizeHost));
-  const seen = new Map<string, number>();
-  const out: ActiveSession[] = [];
-  for (const s of sessions) {
-    if (!s.sessionId) { out.push(s); continue; }
-    const key = `${s.machine ?? ''}:${s.sessionId}`;
-    const at = seen.get(key);
-    if (at === undefined) {
-      seen.set(key, out.length);
-      out.push(s);
-      continue;
-    }
-    if (out[at].offloadedFrom && !s.offloadedFrom) out[at] = s;
-  }
-  return out.filter(s => !(s.sessionId && s.offloadedFrom && s.context !== 'teams' && s.machine && heard.has(normalizeHost(s.machine))));
-}
-
-export function filterActiveSessionsByHostScope(
-  sessions: ActiveSession[],
-  hosts: string[] | undefined,
-  self: string,
-): ActiveSession[] {
-  if (!hosts || hosts.length === 0) return sessions;
-  const wanted = new Set(hosts.map(hostToken));
-  return sessions.filter((s) => wanted.has(s.machine ?? self));
-}
-
 function groupTally(sessions: ActiveSession[]): string {
   const running = sessions.filter(s => s.status === 'running').length;
   const idle = sessions.filter(s => s.status === 'idle').length;
@@ -411,79 +380,6 @@ async function enrichTmuxLocators(local: ActiveSession[], surfaces: GhosttySurfa
       }
     }
   } catch {  }
-}
-
-export async function gatherActiveSessions(
-  opts: { local?: boolean; hosts?: string[]; forceRefresh?: boolean } = {},
-): Promise<{
-  sessions: ActiveSession[];
-  remoteDeviceCount: number;
-  remoteSkipped?: string[];
-  remoteDiscoveryFailed?: boolean;
-}> {
-  const forceRefresh = opts.forceRefresh === true
-    || process.env.AGENTS_SESSIONS_FORCE_REFRESH === '1'
-    || process.env[NO_FANOUT_ENV] === '1';
-  const scoped = (opts.hosts?.length ?? 0) > 0;
-
-  if (opts.local && !scoped) {
-    const loaded = await loadLocalActiveSessions({ forceRefresh });
-
-    const self = machineId();
-    for (const s of loaded.sessions) if (!s.machine) s.machine = self;
-    return { sessions: loaded.sessions, remoteDeviceCount: 0 };
-  }
-
-  if (!opts.local && !scoped) {
-    const loaded = await loadFleetActiveSessions({
-      forceRefresh,
-      gather: () => gatherActiveSessionsLive({ local: false }),
-    });
-    return {
-      sessions: loaded.sessions,
-      remoteDeviceCount: loaded.remoteDeviceCount,
-      remoteSkipped: loaded.remoteSkipped,
-      remoteDiscoveryFailed: loaded.remoteDiscoveryFailed,
-    };
-  }
-
-  return gatherActiveSessionsLive(opts);
-}
-
-async function gatherActiveSessionsLive(
-  opts: { local?: boolean; hosts?: string[] } = {},
-): Promise<{
-  sessions: ActiveSession[];
-  remoteDeviceCount: number;
-  remoteSkipped: string[];
-  remoteDiscoveryFailed: boolean;
-}> {
-  const self = machineId();
-  const local = shouldIncludeLocal(opts.hosts, self)
-    ? await getActiveSessions({ localOnly: opts.local })
-    : [];
-  for (const s of local) if (!s.machine) s.machine = self;
-
-  let remoteDeviceCount = 0;
-  let remoteSkipped: string[] = [];
-  let remoteDiscoveryFailed = false;
-  let merged = local;
-  if (!opts.local) {
-    const remoteHosts = remoteHostsToDial(opts.hosts, self);
-    if (!opts.hosts?.length || (remoteHosts && remoteHosts.length > 0)) {
-      const remote = await gatherRemoteActive(remoteHosts);
-      remoteDeviceCount = remote.deviceCount;
-      remoteSkipped = remote.skipped;
-      remoteDiscoveryFailed = remote.discoveryFailed;
-      merged = dedupeByMachineSession([...local, ...remote.sessions], remote.answered);
-    }
-  }
-  return {
-    sessions: filterActiveSessionsByHostScope(merged, opts.hosts, self),
-    remoteDeviceCount,
-    remoteSkipped,
-    remoteDiscoveryFailed,
-  };
 }
 
 async function describeEmptyActiveDiscovery(

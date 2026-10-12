@@ -61,8 +61,9 @@ sibling is `agents fork <session>`.
 | `--no-interactive` | Print instead of opening the picker on a TTY |
 
 On a TTY with no `--status`, `ps` opens the session picker seeded running-only; `r`
-toggles that filter. The roster code lives in `src/commands/ps-roster.ts`
-(`gatherActiveSessions`, `renderActiveSessions`, `runLiveRoster`).
+toggles that filter. The roster renderer lives in `src/commands/ps-roster.ts`
+(`renderActiveSessions`, `runLiveRoster`); the fleet sweep behind it is
+`gatherActiveSessions` in `src/lib/session/active.ts`.
 
 The local snapshot the daemon publishes (`publishLocalActiveSessions`) stamps every
 row with this machine's id. A row without `machine` fails `isRunningLiveSession`, so

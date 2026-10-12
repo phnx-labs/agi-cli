@@ -697,8 +697,8 @@ SSH access (§7); rendering sessions that no harness produced.
   `agents ps --device`) names **where the
   session runs**, not which box reported it. Every returned row MUST satisfy
   `machine ∈ scope` (`filterActiveSessionsByHostScope`,
-  `commands/ps-roster.ts:396`), applied inside the single gather (`gatherActiveSessions`,
-  `commands/ps-roster.ts:586`) so the interactive browser and `agents ps --json` cannot disagree.
+  `lib/session/active.ts:1906`), applied inside the single gather (`gatherActiveSessions`,
+  `lib/session/active.ts:1916`) so the interactive browser and `agents ps --json` cannot disagree.
   - **The executing machine owns the row.** A host-dispatched run
     (`agents run --device <peer>`) leaves a live shim process on the DISPATCHING
     box carrying the remote run's session id, so choosing whom to ASK is not the
@@ -791,9 +791,10 @@ SSH access (§7); rendering sessions that no harness produced.
 **Moved to the standalone `sessions` CLI (PHNX-4227):** SES-24 through SES-27a and
 SES-50/SES-51 govern `sessions export` / `sessions import`, which agents-cli no longer
 implements. Their code is sessions-cli's `src/commands/sessions-bundle.ts`
-(`runExport`, `runImport`) and `src/lib/session/sync/`. agents-cli keeps the managed
-Worker template (`lib/session/sync/worker-template.ts`, the storage-boundary half of
-SES-51 and all of SES-52), the `r2.backups` bundle convention
+(`runExport`, `runImport`) and `src/lib/session/sync/`. agents-cli deploys the managed
+Worker that sessions-cli renders (`renderSessionsWorkerScript` from
+`@phnx-labs/sessions-cli/backup`, its `src/lib/session/sync/worker-template.ts`: the
+storage-boundary half of SES-51 and all of SES-52), the `r2.backups` bundle convention
 (`lib/session/sync/config.ts`), and the operator provisioning
 `agents setup session-backup` (`commands/setup-session-backup.ts`).
 
@@ -867,7 +868,7 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   record body is an AES-256-GCM transcript envelope) MUST be rejected with 422, so
   an older/buggy client cannot land readable plaintext; and a MANAGED restore MUST
   fail loud on any non-encrypted object rather than importing it
-  (`lib/session/sync/worker-template.ts:isEncryptedManagedBundle`; the restore half is
+  (sessions-cli `src/lib/session/sync/worker-template.ts:isEncryptedManagedBundle`; the restore half is
   sessions-cli `src/commands/sessions-bundle.ts:runImport`).
 - **SES-52 (MUST).** The managed sessions Worker MUST authenticate EVERY route
   (PUT/GET/LIST/DELETE) with a Phoenix bearer, verified at
@@ -898,7 +899,7 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   tombstones, and settled-ledger entries under create/delete churn. Contention
   MUST fail loud; same-key PUT/DELETE races MUST NOT delete a replacement,
   double-refund, strand a path, or leave phantom quota
-  (`lib/session/sync/worker-template.ts`;
+  (sessions-cli `src/lib/session/sync/worker-template.ts`, exercised here under workerd by
   `lib/session/sync/worker-template.integration.test.ts`).
 
 #### 3.6 Incremental consumer stream
@@ -1783,7 +1784,7 @@ normative — a change that widens/narrows a cell is a spec change.
   - **Narrowed (RUSH-2479).** The one case that is now provably collapsed is the
     offloaded run, whose dispatcher shim and executing machine's own row share a
     `machine:sessionId` key once SES-23a attributes both to the execution host.
-    `dedupeByMachineSession` (`commands/ps-roster.ts:379,582`) MUST keep the row that is not an offload shim
+    `dedupeByMachineSession` (`lib/session/active.ts:1888,1980`) MUST keep the row that is not an offload shim
     (`offloadedFrom` unset), so the merged fleet view never trades a real
     transcript for a `[host/<peer>]` placeholder. A shim whose owner ANSWERED
     the sweep (`answered` in `lib/remote-agents-json.ts`: a parseable JSON array;
@@ -1791,7 +1792,7 @@ normative — a change that widens/narrows a cell is a spec change.
     not an answer) without that session MUST be dropped. The answer MUST come
     from a fresh scan: a peer answering a sweep (`AGENTS_SESSIONS_LOCAL=1`)
     bypasses its active-sessions snapshot (`gatherActiveSessions`,
-    `commands/ps-roster.ts`), so an absence is evidence, not a stale cache: the owner is the authority for what runs there, and the
+    `lib/session/active.ts`), so an absence is evidence, not a stale cache: the owner is the authority for what runs there, and the
     shim is a desktop tab bound to a run that is no longer live (37 such
     `unknown` rows on one desktop, 2026-10-11). Only a shim whose owner went
     unheard survives, as `unknown` (SES-18), never as running. A remote
@@ -2381,7 +2382,7 @@ schema (`--json` passes through each agent's native stream format).
     headed device** (`personal` or `desktop`): `allowInteractiveUsageLogin(role, isTTY)`
     (`commands/view.ts`) returns true iff `isHeadedDeviceRole(selfConfiguredDeviceRole())`
     AND `process.stdout.isTTY`. A `--json`/piped reader (returns early via
-    `collectAgentsJson`, or non-TTY) and any `worker`/unmarked device MUST leave it
+    `collectAgentsJson` in `lib/installations/inventory-json.ts`, or non-TTY) and any `worker`/unmarked device MUST leave it
     unset. Role alone is insufficient — a scripted refresh MUST NOT silently acquire
     the interactive credential.
   - With the flag set and no setup-token, `loadClaudeOauth` MUST fall through to the

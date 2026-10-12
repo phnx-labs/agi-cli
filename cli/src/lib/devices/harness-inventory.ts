@@ -24,6 +24,18 @@ import { authCacheKey, readAuthHealthCache } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
 import { fixFor, type AccountVerdict } from '../signin-badge.js';
 import { harnessWorkerIsPerDevice } from '../harness-auth-capabilities.js';
+import { loadDevices } from './registry.js';
+import { resolveDeviceProfile } from './resolve-profile.js';
+import { deviceIdentityArgs, fleetDialTarget } from './connect.js';
+import {
+  fanOutDevices,
+  planFleetTargets,
+  raceFleetPingDeadline,
+  remoteFleetTargets,
+  type FleetStatusTarget,
+} from './fleet.js';
+import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
+import { sshExecAsync } from '../ssh-exec.js';
 
 export interface QuotaSummary {
   status: 'available' | 'rate_limited' | 'out_of_credits' | null;
@@ -238,6 +250,82 @@ export async function collectLocalHarnessInventory(opts?: {
       usageError: usage?.error ?? null,
     };
   });
+}
+
+export interface FleetHarnessQuery {
+  agents?: AgentId[];
+  devices?: string[];
+  refresh?: boolean;
+  spinner?: (text: string) => { stop(): void };
+}
+
+async function probeRemoteHarnesses(
+  target: FleetStatusTarget,
+  refresh: boolean,
+): Promise<HarnessRow[]> {
+  const isWin = /^win/i.test((target.platform ?? '').trim());
+  const env = isWin ? undefined : { PATH: '$HOME/.agents/.cache/shims:$HOME/.local/bin:$PATH' };
+  const args = ['devices', 'harnesses', '--local', '--json'];
+  if (refresh) args.push('--refresh');
+  const cmd = buildRemoteAgentsInvocation(args, undefined, isWin ? 'windows' : undefined, env);
+  const res = await sshExecAsync(target.dialTarget, cmd, { timeoutMs: 15000, multiplex: true, extraSshArgs: target.extraSshArgs });
+  if (res.code !== 0) {
+    throw new Error(res.timedOut ? 'timed out' : (res.stderr.trim() || `exit ${res.code ?? 'unknown'}`));
+  }
+  const parsed = JSON.parse(res.stdout) as { host: string; rows: HarnessRow[] };
+  return parsed.rows ?? [];
+}
+
+export async function collectFleetHarnesses(opts: FleetHarnessQuery): Promise<HostHarnessResult[]> {
+  const self = machineId();
+  const want = opts.devices?.length ? new Set(opts.devices) : null;
+  const results: HostHarnessResult[] = [];
+
+  if (!want || want.has(self)) {
+    const localRows = await collectLocalHarnessInventory({ agents: opts.agents, refresh: opts.refresh });
+    results.push({ host: self, rows: localRows });
+  }
+
+  const reg = await loadDevices();
+  const planned = planFleetTargets(reg);
+  let remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
+    name: t.device.name,
+    platform: resolveDeviceProfile(t.device).platform,
+    skip: t.skip,
+    dialTarget: fleetDialTarget(t.device),
+    extraSshArgs: deviceIdentityArgs(t.device),
+  }));
+  if (want) remoteTargets = remoteTargets.filter((t) => want.has(t.name));
+
+  if (remoteTargets.length > 0) {
+    const probeable = remoteTargets.filter((t) => !t.skip).length;
+    const spinner = opts.spinner?.(`Probing ${probeable} device${probeable === 1 ? '' : 's'}…`);
+    let remote: Awaited<ReturnType<typeof fanOutDevices<HarnessRow[], FleetStatusTarget>>>;
+    try {
+      const fanOut = fanOutDevices(
+        remoteTargets,
+        (t) => probeRemoteHarnesses(t, !!opts.refresh),
+        { perDeviceTimeoutMs: 15_000 },
+      );
+      remote = await raceFleetPingDeadline(fanOut, remoteTargets, 30_000);
+    } finally {
+      spinner?.stop();
+    }
+    for (const r of remote) {
+      if (r.status === 'ok' && r.value) {
+        results.push({ host: r.name, rows: r.value });
+      } else {
+        results.push({
+          host: r.name,
+          rows: [],
+          error: r.error,
+          skipped: r.reason ? String(r.reason) : undefined,
+        });
+      }
+    }
+  }
+
+  return results;
 }
 
 export function groupByAccount(rows: HarnessRow[]): AccountGroup[] {

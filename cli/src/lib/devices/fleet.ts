@@ -184,6 +184,12 @@ export function runFleet(
   return results;
 }
 
+export interface FleetStatusTarget extends FanOutDeviceTarget {
+  platform?: string;
+  dialTarget: string;
+  extraSshArgs?: string[];
+}
+
 interface FanOutDeviceOptions {
   perDeviceTimeoutMs?: number;
 }
@@ -225,4 +231,25 @@ export async function fanOutDevices<T, Target extends FanOutDeviceTarget = FanOu
       };
     }
   }));
+}
+
+export async function raceFleetPingDeadline<T, Target extends FanOutDeviceTarget>(
+  fanOut: Promise<FanOutDeviceResult<T>[]>,
+  remoteTargets: Target[],
+  overallTimeoutMs: number,
+): Promise<FanOutDeviceResult<T>[]> {
+  const overallDeadline = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('fleet ping overall deadline exceeded')), overallTimeoutMs),
+  );
+  try {
+    return await Promise.race([fanOut, overallDeadline]);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return remoteTargets.map((t) => ({
+      name: t.name,
+      status: t.skip ? ('skipped' as const) : ('failed' as const),
+      reason: t.skip,
+      error: t.skip ? undefined : errMsg,
+    }));
+  }
 }

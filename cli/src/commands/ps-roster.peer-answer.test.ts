@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { gatherActiveSessions } from './ps-roster.js';
+import { gatherActiveSessions } from '../lib/session/active.js';
 import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import {
   clearActiveSnapshotMemoryForTest,

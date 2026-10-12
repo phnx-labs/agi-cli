@@ -14,10 +14,10 @@ import { enrichTeamOrigins, safeTeamText, shouldShowTeamSessions } from '@phnx-l
 import { listBookmarks, toggleBookmark } from '../lib/session/bookmarks.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { buildPreview, setRemotePreviewRepaint, LIVE_ROW_PREFIX, handlePickedSession } from './sessions-picker.js';
-import { isRunningLiveSession } from '../lib/session/active.js';
+import { gatherActiveSessions, isRunningLiveSession } from '../lib/session/active.js';
 import { cleanPreview, formatPickerLabel, pickerColumnsFor, type SshOriginTag, liveHostLabel, formatLiveStatusHeadline, type PickerColumns } from '../lib/session/presentation.js';
 import { matchesTeam, mergeLocalFirst, parseAgentFilter, sessionMatchesQuery } from '../lib/session/selection.js';
-import { gatherActiveSessions, matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
+import { matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
 
 export interface BrowserFilter {
   running: boolean;

@@ -619,7 +619,7 @@ async function defaultAddRunners(): Promise<AddRunners> {
       try {
         return await password({ message: `Enter the ${env} API key (stored as this account's worker credential):` });
       } catch (err) {
-        const { isPromptCancelled } = await import('../../commands/utils.js');
+        const { isPromptCancelled } = await import('../format.js');
         if (isPromptCancelled(err)) return null;
         throw err;
       }

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { parseRemoteActive } from '../remote-active.js';
 import { gatherRemoteAgentsJson, type SshCaptureFn } from '../../remote-agents-json.js';
-import { dedupeByMachineSession } from '../../../commands/ps-roster.js';
+import { dedupeByMachineSession } from '../active.js';
 
 describe('parseRemoteActive', () => {
   it('tags every parsed session with the source machine', () => {

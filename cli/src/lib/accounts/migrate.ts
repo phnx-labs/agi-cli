@@ -242,7 +242,7 @@ function chooseCanonical(
 async function duplicateTrashLabels(items: InstallationInventory[]): Promise<Set<string>> {
   const slotish = items.filter((i) => i.hasCredential && i.identityKey && !i.isolated);
   if (slotish.length < 2) return new Set();
-  const { planDuplicatePrune } = await import('../../commands/view.js');
+  const { planDuplicatePrune } = await import('../installations/duplicate-prune.js');
   const dups = planDuplicatePrune(slotish.map((i) => ({
     version: i.label,
     release: i.release,

@@ -12,8 +12,8 @@ import {
   DEFAULT_SESSIONS_BUCKET_NAME,
   DEFAULT_SESSIONS_DOMAIN,
   DEFAULT_SESSIONS_WORKER_NAME,
-} from './managed-config.js';
-import { renderSessionsWorkerScript } from './worker-template.js';
+  renderSessionsWorkerScript,
+} from '@phnx-labs/sessions-cli/backup';
 
 interface ProvisionOptions {
   request?: CloudflareRequester;

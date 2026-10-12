@@ -339,7 +339,7 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
 async function promptUpgrade(latestVersion: string, mayPrompt: boolean): Promise<void> {
   const { default: ora } = await import('ora');
   const { confirm, select } = await import('@inquirer/prompts');
-  const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
+  const { isInteractiveTerminal, isPromptCancelled } = await import('./lib/format.js');
   if (!mayPrompt || !isInteractiveTerminal()) {
     console.error(chalk.yellow(`Update available: ${VERSION} -> ${latestVersion}. Run: agents upgrade --yes`));
     return;
@@ -426,7 +426,7 @@ async function checkForUpdates(mayPrompt: boolean): Promise<void> {
     try {
       await promptUpgrade(cache!.latestVersion, mayPrompt);
     } catch (err) {
-      const { isPromptCancelled } = await import('./commands/utils.js');
+      const { isPromptCancelled } = await import('./lib/format.js');
       if (isPromptCancelled(err)) return;
     }
   }
@@ -566,7 +566,7 @@ function registerInternalCommand(p: Command): void {
 async function runUpgrade(version: string | undefined, options: UpgradeOptions): Promise<void> {
       const { default: ora } = await import('ora');
       const { confirm } = await import('@inquirer/prompts');
-      const { isInteractiveTerminal, isPromptCancelled } = await import('./commands/utils.js');
+      const { isInteractiveTerminal, isPromptCancelled } = await import('./lib/format.js');
       const target = version ?? 'latest';
       let spinner = ora(version ? `Resolving ${NPM_PACKAGE_NAME}@${target}...` : 'Checking for updates...').start();
       try {

@@ -4,9 +4,11 @@ import {
   remoteFleetTargets,
   fanOutDevices,
   fleetHealthSkip,
+  raceFleetPingDeadline,
   runFleet,
   skipLabel,
   upgradeCommand,
+  type FanOutDeviceTarget,
   type FleetTarget,
 } from './fleet.js';
 import type { DeviceProfile, DeviceRegistry } from './registry.js';
@@ -267,4 +269,38 @@ describe('skipLabel', () => {
     expect(skipLabel('offline')).toBe('offline');
     expect(skipLabel('no-address')).toBe('no address');
   });
+});
+
+describe('runFleetPing overall-deadline (RUSH-2041)', () => {
+  it('exits promptly and marks all remotes failed/skipped when the overall deadline fires before probes settle', async () => {
+    const OVERALL_TIMEOUT_MS = 50;
+
+    const remoteTargets: FanOutDeviceTarget[] = [
+      { name: 'worker-a' },
+      { name: 'worker-b' },
+      { name: 'offline-c', skip: 'offline' as const },
+    ];
+
+    const hangingFanOut = new Promise<Awaited<ReturnType<typeof fanOutDevices<string[], FanOutDeviceTarget>>>>(() => {
+    });
+
+    const start = Date.now();
+    const remote = await raceFleetPingDeadline(hangingFanOut, remoteTargets, OVERALL_TIMEOUT_MS);
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(OVERALL_TIMEOUT_MS * 20);
+
+    expect(remote).toHaveLength(3);
+    const byName = Object.fromEntries(remote.map((r) => [r.name, r]));
+
+    expect(byName['worker-a'].status).toBe('failed');
+    expect(byName['worker-a'].error).toBe('fleet ping overall deadline exceeded');
+
+    expect(byName['worker-b'].status).toBe('failed');
+    expect(byName['worker-b'].error).toBe('fleet ping overall deadline exceeded');
+
+    expect(byName['offline-c'].status).toBe('skipped');
+    expect(byName['offline-c'].reason).toBe('offline');
+    expect(byName['offline-c'].error).toBeUndefined();
+  }, 2000);
 });
