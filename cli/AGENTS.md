@@ -15,6 +15,12 @@ module map, build, and release mechanics the README does not.
 > Phoenix Labs · FSL-1.1-Apache-2.0. Repo-wide policy (conventions, code review, security)
 > lives in the root [AGENTS.md](../AGENTS.md).
 
+`agents --help` is a 10-group front door (`FRONT_DOOR` in [`src/lib/help.ts`](src/lib/help.ts):
+setup/run/sessions/view, then teams/browser/secrets/devices/accounts/add). Every other
+group — including `ssh`, the fifth most-used — is listed by `agents --help --all`, which
+loads the real command tree so the index cannot drift. No command is hidden from that
+listing unless Commander already marks it hidden.
+
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
 core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.

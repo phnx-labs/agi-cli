@@ -1,7 +1,8 @@
 # Architecture and decisions
 
 This directory explains how agents-cli works and which decisions must survive a
-refactor. It is not a command manual. Use `agents <group> --help` or the generated
+refactor. It is not a command manual. Use `agents --help` (start-here groups),
+`agents --help --all` (every group), `agents <group> --help`, or the generated
 [command index](command-index.md) for syntax, and the product README for onboarding.
 
 Read in this order:

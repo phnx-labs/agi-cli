@@ -8,9 +8,10 @@
  *
  * This module maps each user-typed top-level command name to a thunk that
  * dynamically imports ONLY the module(s) that command needs. Fast commands
- * (`--version`, `view`, ...) now pay for just the one module they use; the full
- * tree is loaded only on the rare slow paths (unknown-command spellcheck, bare
- * help) via `registerAllEagerCommands` in src/index.ts.
+ * (`--version`, `view`, compact `--help`) now pay for just the one module they
+ * use; the full tree is loaded only on rare slow paths (`agents --help --all`,
+ * the command-index generator). Unknown-command spellcheck uses the plain
+ * `KNOWN_TOP_LEVEL_COMMANDS` string set and does not load every module.
  *
  * Parity is non-negotiable: the name -> loader map below mirrors exactly which
  * module registers which top-level command on `main`. Multi-command modules
@@ -21,6 +22,7 @@
 import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { FRONT_DOOR, type RootHelpGroup } from '../lib/help.js';
 import { configureRootCommand } from '../lib/startup/root-command.js';
 import { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
 export { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
@@ -226,17 +228,43 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
 };
 
 /**
+ * Fail loud if compact root help names a group the loader table does not
+ * register. Called from {@link buildFullCommandTree} so the index generator
+ * and `--help --all` cannot silently ship a dead front-door entry.
+ */
+export function assertFrontDoorLoaders(): void {
+  const missing = Object.keys(FRONT_DOOR).filter((name) => COMMAND_LOADERS[name] === undefined);
+  if (missing.length > 0) {
+    throw new Error(`FRONT_DOOR names command(s) not in COMMAND_LOADERS: ${missing.join(', ')}`);
+  }
+}
+
+/**
+ * Visible (non-hidden) top-level groups from a registered program, canonical
+ * names only, UTF-16 codepoint order — the listing `agents --help --all` prints.
+ */
+export function visibleTopLevelGroups(program: Command): RootHelpGroup[] {
+  return program
+    .createHelp()
+    .visibleCommands(program)
+    .map((cmd) => ({ name: cmd.name(), description: cmd.description() }))
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/**
  * Register every module in {@link COMMAND_LOADERS} onto one fresh program and
  * return it — the full public command tree, deduped by loader identity so a
  * loader mapped to several names (e.g. `add`/`use`/`list` -> versions) runs once.
  *
- * Off the hot path only: the command-index generator (`scripts/gen-command-index.ts`)
- * and the tests build the tree from this. Startup never calls it — src/index.ts
- * registers just the one requested command via `registerEagerForRequest`. The
- * inline aliases/tombstones ({@link INLINE_COMMAND_NAMES}) are NOT included: they
- * are closures over entry-point state that src/index.ts registers directly.
+ * Off the hot path only: the command-index generator (`scripts/gen-command-index.ts`),
+ * `agents --help --all`, and the tests build the tree from this. Compact `--help`
+ * stays a static string — src/index.ts registers just the one requested command
+ * via `registerEagerForRequest`. The inline aliases/tombstones
+ * ({@link INLINE_COMMAND_NAMES}) are NOT included: they are closures over
+ * entry-point state that src/index.ts registers directly.
  */
 export async function buildFullCommandTree(): Promise<Command> {
+  assertFrontDoorLoaders();
   const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string };
   const program = configureRootCommand(new Command(), 'agents', packageJson.version);
   const done = new Set<ModuleLoader>();

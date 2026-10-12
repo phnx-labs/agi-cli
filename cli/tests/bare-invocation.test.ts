@@ -31,7 +31,8 @@ describe('bare `agents` invocation', () => {
     });
 
     expect(result.stdout).toContain('Usage: agents [command] [options]');
-    expect(result.stdout).toContain('Quick start:');
+    expect(result.stdout).toContain('Start here:');
+    expect(result.stdout).toContain('agents --help --all');
     expect(result.status).toBe(0);
   });
 });

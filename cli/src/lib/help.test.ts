@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 
-import { applyGlobalHelpConventions, registerCommandGroups, setHelpSections } from './help.js';
+import { applyGlobalHelpConventions, registerCommandGroups, renderRootHelp, setHelpSections } from './help.js';
 
 function buildTestCommand(opts: { examples?: string; notes?: string } = {}): Command {
   const root = new Command('agents');
@@ -140,5 +140,60 @@ describe('registerCommandGroups', () => {
     expect(help).not.toContain('Ghost group:');
     expect(help).toContain('Inspect:');
     expect(help).not.toContain('Commands:');
+  });
+});
+
+describe('renderRootHelp', () => {
+  it('lists FRONT_DOOR groups and a pointer to --help --all, not ssh', () => {
+    const help = renderRootHelp();
+
+    expect(help).toContain('Start here:');
+    expect(help).toContain('Every day:');
+    expect(help).toContain('agents --help --all');
+    expect(help).toMatch(/^\s{2}setup\s/m);
+    expect(help).toMatch(/^\s{2}run /m);
+    expect(help).toMatch(/^\s{2}sessions\s/m);
+    expect(help).toMatch(/^\s{2}view\s/m);
+    expect(help).not.toMatch(/^\s{2}ssh\s/m);
+    expect(help).not.toMatch(/^\s{2}repos\s/m);
+    expect(help).not.toMatch(/^\s{2}computer\s/m);
+    expect(help).not.toMatch(/^\s{2}notify\s/m);
+
+    const twoColumn = help.split('\n').filter((line) => /^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}/.test(line));
+    expect(twoColumn.length).toBeLessThanOrEqual(12);
+    expect(twoColumn.length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('lists every passed group on the --all path, including ssh', () => {
+    const help = renderRootHelp({
+      groups: [
+        { name: 'sessions', description: 'Find, browse, and read transcripts.' },
+        { name: 'ssh', description: 'Connect to a registered device.' },
+        { name: 'repos', description: 'Manage extra DotAgent repos.' },
+      ],
+    });
+
+    expect(help).toContain('All command groups:');
+    expect(help).toMatch(/^\s{2}ssh\s{2,}Connect to a registered device\./m);
+    expect(help).toMatch(/^\s{2}repos\s{2,}/m);
+    expect(help).toContain("See 'agents <group> --help'");
+    expect(help).not.toContain('Start here:');
+  });
+
+  it('drops disabled FRONT_DOOR groups and rewrites the brand name', () => {
+    const help = renderRootHelp({ cliName: 'jack', disabled: new Set(['browser', 'devices']) });
+
+    expect(help).toContain('Usage: jack [command] [options]');
+    expect(help).toContain('jack --help --all');
+    expect(help).not.toMatch(/^\s{2}browser\s{2,}/m);
+    expect(help).not.toMatch(/^\s{2}devices\s{2,}/m);
+    expect(help).toMatch(/^\s{2}secrets\s{2,}/m);
+  });
+
+  it('fails loud when --all is asked to render an empty group list', () => {
+    expect(() => renderRootHelp({ groups: [] })).toThrow(/no visible groups/);
+    expect(() => renderRootHelp({ groups: [{ name: 'ssh', description: 'x' }], disabled: new Set(['ssh']) })).toThrow(
+      /no visible groups/,
+    );
   });
 });

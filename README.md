@@ -57,6 +57,7 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` exists only for [team spaces](#sign-in). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 The command surface teaches setup through `agents setup` and group-level `--help`.
+`agents --help` lists the start-here groups; `agents --help --all` lists every group.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
 
 **Learn (concepts):** [Loop + graph engineering](https://agi-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agi-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agi-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agi-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agi-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).

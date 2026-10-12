@@ -198,7 +198,7 @@ what \`agents\` actually registers.
 - Full option lists live in the machine-readable [\`command-index.json\`](command-index.json).
 - \`agents <group> --help\` shows the workflow-first help (examples + notes) for a group.
 
-Excluded (same as \`agents --help\`): commands Commander marks hidden (e.g. \`remove\`/\`rm\`/\`purge\`
+Excluded (same as \`agents --help --all\`): commands Commander marks hidden (e.g. \`remove\`/\`rm\`/\`purge\`
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (\`perms\`, \`exec\`, \`jobs\`, \`cron\`, \`check\`, \`resources\`, \`hq\`, \`_internal\`).
 `;

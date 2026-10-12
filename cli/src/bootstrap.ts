@@ -82,10 +82,12 @@ import {
   LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
   RETIRED_TOP_LEVEL_COMMANDS,
+  buildFullCommandTree,
+  visibleTopLevelGroups,
   type ModuleLoader,
 } from './cli/command-registry.js';
 import { closestTopLevelCommand } from './lib/startup/spellcheck.js';
-import { applyGlobalHelpConventions } from './lib/help.js';
+import { applyGlobalHelpConventions, renderRootHelp } from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
@@ -204,126 +206,16 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
   }
 });
 
-/**
- * Skin the static root help for a brand: rewrite the visible `agents` command
- * examples to the brand name and drop lines for commands this brand disabled.
- * A no-op for the unbranded `agents` CLI with nothing disabled.
- */
-function brandRootHelp(raw: string): string {
-  let text = raw;
-  if (BRAND !== 'agents') {
-    text = text
-      .replace(/Usage: agents /g, `Usage: ${BRAND} `)
-      .replace(/^ {2}agents /gm, `  ${BRAND} `)
-      .replace(/Run 'agents /g, `Run '${BRAND} `);
-  }
-  const disabled = disabledCommandsForActiveBrand();
-  if (disabled.size > 0) {
-    text = text
-      .split('\n')
-      .filter((line) => {
-        const m = line.match(/^ {2}([a-z][\w-]*)/);
-        return !(m && disabled.has(m[1]));
-      })
-      .join('\n');
-  }
-  return text;
-}
-
-// Custom help for the main program only
+// Custom help for the main program only. Compact `--help` is a static front
+// door (FRONT_DOOR in lib/help.ts) so this path still loads zero command
+// modules. `agents --help --all` is intercepted later and lists the real tree.
 const originalHelpInformation = program.helpInformation.bind(program);
 program.helpInformation = function () {
   if (this.name() === BRAND && !this.parent) {
-    return brandRootHelp(`Usage: agents [command] [options]
-
-Install, configure, run, and dispatch AI coding agents from one place.
-Works with Claude, Codex, Antigravity, Cursor, OpenCode, OpenClaw, and Droid.
-
-Quick start:
-  agents setup                    First-time setup (interactive); setup beta enables preview features
-  agents view                     See what's installed
-  agents run <agent> ["prompt"]   Run an agent (interactive without prompt, headless with)
-  agents sessions                 Browse past sessions across all agents
-
-Agent versions:
-  add <agent>[@version]           Install an agent CLI (e.g. agents add grok or agents add codex)
-  import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
-  update <agent>[@version]        Move an installed agent to a new release, keeping its name (agents-cli itself is 'agents upgrade')
-  prune <agent>[@version]         Uninstall a version
-  remove <agent>[@version]        Alias for prune
-  use <agent>@<version>           Set the default version
-  prune cleanup [target]          Remove orphan resources and older duplicate version installs
-  trash                           Inspect and restore soft-deleted version directories
-  view [agent[@version]]          List versions, inspect one in detail, or --merged for the cross-layer resource surface
-  inspect <target>                Deep details for one agent+version, or a DotAgents repo (user|system|project|alias|path)
-
-Agent configuration (synced across versions):
-  rules                           Instructions given to agents (CLAUDE.md, etc.)
-  commands                        Slash commands (/commit, /test, etc.)
-  skills                          Knowledge packs (SKILL.md + supporting files)
-  mcp                             MCP servers (stdio or HTTP)
-  permissions                     Allow/deny rules for tool calls
-  hooks                           Shell scripts that run on agent events (hooks.yaml in agents.yaml)
-  subagents                       Named sub-agent definitions
-  plugins                         Bundles of skills, hooks, and scripts
-
-Packages:
-  search <query>                  Find MCP servers and skills in registries
-  install <pkg>                   Install from registry (mcp:name, skill:user/repo)
-
-Run and dispatch:
-  run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
-  config                          Configure run defaults, project root, device options, and spend caps (config budget)
-  teams                           Coordinate multiple agents on shared work
-  routines                        Run agents on a cron schedule (scheduler auto-starts)
-  daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
-  webhook                         Receive signed GitHub/Linear webhooks for trigger routines
-  funnel                          Expose a webhook receiver through Tailscale Funnel
-  sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
-  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
-  browser                         Automate a browser — navigate, click, screenshot, console, network
-  pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
-  artifacts                       Publish what an agent made (plans, reports, visuals) to a shareable link
-
-Observe (read the fleet — no store merge):
-  feed                            Needs-you inbox (open blocks waiting on you); agent posts = feed --filter updates
-  sessions --active               Live agents (who is running right now)
-  events                          Unified ops + activity event trail
-  events audit                    Dispatched-run outcomes (alias of events --include runs)
-  sync status                     Sync/drift only (not the live fleet snapshot)
-  devices snapshot                One-process inventory + active sessions poll
-
-Credentials (harness keys):
-  harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
-  secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
-  accounts                        Provider credentials, setup-token mint, native OAuth logout
-
-Diagnostics:
-  doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
-  usage [agent]                   Show rate-limit and quota usage per agent
-  insights                        How work looks — behaviour (default), mix, cost, and output
-  perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
-
-Config sync:
-  repo pull [alias]               Git pull a repo (system | user | <extra>)
-  sync [agent]                    Re-materialize installed version homes; --local to skip fetching
-  repo init --path <dir>          Scaffold your own editable repo from a template
-  repo add <path|gh:user/repo>    Merge an extra repo after the system repo
-
-Automation tips:
-  Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
-  Use --yes for defaults          Auto-accept sync/default prompts on add/use/pull
-  Use --names for central items   e.g. agents commands add --names review-pr,debug
-  Use agent@version targets       e.g. --agents grok@0.1.218,claude@2.1.79,codex@default
-  Non-TTY shells apply defaults   Omitted required selections fail with a plain hint
-
-Options:
-  -V, --version                   Show version number
-  -h, --help                      Show help
-  --verbose                       Show startup self-heal details on stderr
-
-System config lives in ~/.agents/.system/. Run 'agents <command> --help' for details.
-`);
+    return renderRootHelp({
+      cliName: BRAND,
+      disabled: disabledCommandsForActiveBrand(),
+    });
   }
   return originalHelpInformation();
 };
@@ -1053,9 +945,12 @@ if (passedArgs[0] === 'sessions') {
 }
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
 const verboseStartup = passedArgs.includes('--verbose');
+// Root `--all` is the full-group listing (`agents --help --all`). It is a
+// documentation path, not a command: no command name, and `--all` is present.
+const rootAllRequested = requestedCommand === undefined && passedArgs.includes('--all');
 // Help and version output are pure documentation — they must never gate on
 // setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
-const helpOrVersionRequested = passedArgs.some(
+const helpOrVersionRequested = rootAllRequested || passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
 
@@ -1106,9 +1001,10 @@ if (requestedIsDisabled) {
     requestedIsUnknown = true;
   }
 }
-// When requestedCommand is undefined (bare invocation, --version, --help, -h) no
-// command modules are needed: --version is built in and the root help text is a
-// static string.
+// When requestedCommand is undefined (bare invocation, --version, --help, -h)
+// no command modules are needed on the compact path: --version is built in and
+// compact root help is a static string. `--help --all` loads the full tree
+// below, after help conventions, so it still skips update/migration.
 
 // Mirror main: help conventions are applied after the eager command tree and
 // before the lazy commands, so the latter inherit the root's custom help
@@ -1302,13 +1198,28 @@ if (
   } catch { /* never block CLI startup on the menu bar */ }
 }
 
-// Bare invocation prints the root help. Commander only auto-displays help on
-// an empty parse when subcommands are registered, and the lazy-startup path
-// registers none for a bare call — without this branch, `agents` exits
+// Bare invocation prints the compact root help. Commander only auto-displays
+// help on an empty parse when subcommands are registered, and the lazy-startup
+// path registers none for a bare call — without this branch, `agents` exits
 // silently. Runs after first-run setup and migrations so those still fire;
 // exits 0 to match `agents --help` (and the pre-fix exit code).
 if (passedArgs.length === 0) {
   program.outputHelp();
+  process.exit(0);
+}
+
+// Full group listing. Loads the real command tree so the index cannot drift
+// from what the CLI actually registers (hidden commands stay hidden). Compact
+// `--help` above never takes this path.
+if (rootAllRequested) {
+  const tree = await buildFullCommandTree();
+  process.stdout.write(
+    renderRootHelp({
+      cliName: BRAND,
+      disabled: brandDisabled,
+      groups: visibleTopLevelGroups(tree),
+    }),
+  );
   process.exit(0);
 }
 

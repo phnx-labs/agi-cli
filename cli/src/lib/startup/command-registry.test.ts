@@ -12,8 +12,24 @@ import {
 } from './command-registry.js';
 import {
   LAZY_COMMAND_NAMES,
+  assertFrontDoorLoaders,
   buildFullCommandTree,
+  visibleTopLevelGroups,
 } from '../../cli/command-registry.js';
+import { FRONT_DOOR } from '../help.js';
+
+describe('FRONT_DOOR', () => {
+  it('names only commands COMMAND_LOADERS actually registers', () => {
+    expect(() => assertFrontDoorLoaders()).not.toThrow();
+  });
+
+  it('names only visible (non-hidden) groups in the real command tree', async () => {
+    const program = await buildFullCommandTree();
+    const visible = new Set(visibleTopLevelGroups(program).map((group) => group.name));
+    const hidden = Object.keys(FRONT_DOOR).filter((name) => !visible.has(name));
+    expect(hidden).toEqual([]);
+  });
+});
 
 describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('covers every top-level name and alias the real command modules register', async () => {

@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import path from 'node:path';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
@@ -7,25 +9,34 @@ const tsxCli = path.join(repoRoot, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const entrypoint = path.join(repoRoot, 'src', 'index.ts');
 
 function runCli(args: string[]): string {
-  return execFileSync('node', [tsxCli, entrypoint, ...args], {
-    cwd: repoRoot,
-    encoding: 'utf-8',
-    env: {
-      ...process.env,
-      NO_COLOR: '1',
-    },
-  });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-prune-help-'));
+  fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
+  try {
+    return execFileSync('node', [tsxCli, entrypoint, ...args], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        AGENTS_SKIP_MIGRATION: '1',
+        AGENTS_NO_AUTOPULL: '1',
+        AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
+        NO_COLOR: '1',
+      },
+    });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 }
 
 describe('prune command', () => {
-  it('surfaces prune in top-level help', () => {
-    const helpText = runCli(['--help']);
+  it('surfaces prune in the full group listing (agents --help --all)', () => {
+    const helpText = runCli(['--help', '--all']);
 
-    expect(helpText).toContain('prune <agent>[@version]');
-    expect(helpText).toContain('Uninstall a version');
-    expect(helpText).toContain('remove <agent>[@version]');
-    expect(helpText).toContain('Alias for prune');
-    expect(helpText).toContain('prune cleanup [target]');
+    expect(helpText).toMatch(/^\s{2}prune\s{2,}/m);
+    expect(helpText).toMatch(/Uninstall/i);
   });
 
   it('shows dedicated help for version prune', () => {
