@@ -41,10 +41,16 @@ export function homeRemainder(p: string): string | null {
 const FOREIGN_HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/;
 const WORKTREE_RE = /\/\.agents\/worktrees\/[^/]+(?:\/.*)?$/;
 
+// A path recorded on another box (`/home/<u>/...` on a Linux worker, `/Users/<u>/...` on
+// a Mac) names the same home-relative location here. Non-home absolute paths are left alone.
+export function localizeHome(p: string, home: string = HOME): string {
+  if (p === home || p.startsWith(home + '/')) return p;
+  return p.replace(FOREIGN_HOME_RE, home);
+}
+
 export function localProjectFolder(cwd: string | undefined, home: string = HOME): string | undefined {
   if (!cwd) return undefined;
-  const local = cwd.startsWith(home + '/') || cwd === home ? cwd : cwd.replace(FOREIGN_HOME_RE, home);
-  const folder = local.replace(WORKTREE_RE, '');
+  const folder = localizeHome(cwd, home).replace(WORKTREE_RE, '');
   return folder !== home && fs.existsSync(folder) ? folder : undefined;
 }
 

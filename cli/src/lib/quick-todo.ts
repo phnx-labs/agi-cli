@@ -226,7 +226,24 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   }
 }
 
-export async function listQuickTodos(now: Date, linear: LinearExec = linearExec): Promise<{ todos: QuickTodo[]; total: number }> {
+export interface ListOptions {
+  /** An agents project or Linear project name: list that project's open issues instead of your quick to-dos. */
+  project?: string;
+  defs?: readonly ProjectDef[];
+}
+
+export async function listQuickTodos(now: Date, opts: ListOptions = {}, linear: LinearExec = linearExec): Promise<{ todos: QuickTodo[]; total: number }> {
+  if (opts.project) {
+    const project = linearProjectFor(opts.project, opts.defs ?? []);
+    const parsed = JSON.parse((await linear(['tasks', '--project', project, '--status', 'open', '--all', '--json'])).stdout) as { issues?: RawIssue[] };
+    const all = (parsed.issues ?? []).map(toQuickTodo);
+    all.sort((a, b) => {
+      if ((a.due === null) !== (b.due === null)) return a.due !== null ? -1 : 1;
+      if (a.due !== null && a.due !== b.due) return a.due < b.due! ? -1 : 1;
+      return b.createdAt.localeCompare(a.createdAt);
+    });
+    return { todos: all.slice(0, TODO_LIST_LIMIT), total: all.length };
+  }
   const parsed = JSON.parse((await linear(['tasks', '--assignee', 'me', '--status', 'open', '--cycle', 'all', '--all', '--json'])).stdout) as { issues?: RawIssue[] };
   const today = localDay(now);
   const due = (t: QuickTodo) => t.due !== null && t.due <= today;

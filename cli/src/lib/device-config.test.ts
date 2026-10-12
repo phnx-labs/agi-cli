@@ -375,7 +375,7 @@ describe('validation', () => {
   it('stores what the GitHub tab hides as org logins or owner/repo slugs and refuses anything else (PHNX-4269)', async () => {
     const { setConfigValue, getConfigValue } = await freshModules();
     expect(getConfigValue('menubar.menu.githubHidden').spec.defaultValue).toEqual([]);
-    expect(getConfigValue('menubar.menu.githubDrafts').spec.defaultValue).toBe(false);
+    expect(getConfigValue('menubar.menu.githubDrafts').spec.defaultValue).toBe(true);
     expect(getConfigValue('menubar.menu.githubBots').spec.defaultValue).toBe(false);
     setConfigValue('menubar.menu.githubHidden', ['RE-LABS', 'acme/web']);
     expect(getConfigValue('menubar.menu.githubHidden').value).toEqual(['RE-LABS', 'acme/web']);
@@ -517,6 +517,7 @@ describe('listConfig', () => {
       'menubar.menu.thenBy',
       'menubar.menu.ticketGroup',
       'menubar.menu.ticketSort',
+      'menubar.menu.todoProject',
       'menubar.menu.workingRowsShown',
       'menubar.statusbar.goalCountdown',
       'notes',

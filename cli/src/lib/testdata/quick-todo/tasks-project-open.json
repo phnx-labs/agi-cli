@@ -1,0 +1,220 @@
+{
+  "scope": "all",
+  "cycle": null,
+  "project": {
+    "id": "00000000-0000-4000-8000-000000000003",
+    "name": "Rush",
+    "auto": false
+  },
+  "count": 8,
+  "issues": [
+    {
+      "id": "00000000-0000-4000-8000-000000009100",
+      "updatedAt": "2026-10-04T12:00:00.000Z",
+      "identifier": "PHNX-9101",
+      "title": "Rush: newest, no due date",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": null,
+      "createdAt": "2026-10-04T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9101"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009101",
+      "updatedAt": "2026-09-20T12:00:00.000Z",
+      "identifier": "PHNX-9102",
+      "title": "Rush: due next week",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": "2026-10-11",
+      "createdAt": "2026-09-20T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9102"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009102",
+      "updatedAt": "2026-09-01T12:00:00.000Z",
+      "identifier": "PHNX-9103",
+      "title": "Rush: overdue",
+      "description": "Created from AGI Menu",
+      "state": {
+        "name": "Doing",
+        "type": "started"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": "2026-10-02",
+      "createdAt": "2026-09-01T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9103"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009103",
+      "updatedAt": "2026-09-15T12:00:00.000Z",
+      "identifier": "PHNX-9104",
+      "title": "Rush: older, no due date",
+      "description": "Notes",
+      "state": {
+        "name": "Backlog",
+        "type": "backlog"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": null,
+      "createdAt": "2026-09-15T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9104"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009104",
+      "updatedAt": "2026-09-10T12:00:00.000Z",
+      "identifier": "PHNX-9105",
+      "title": "Rush: due today",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": "2026-10-04",
+      "createdAt": "2026-09-10T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9105"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009105",
+      "updatedAt": "2026-10-01T12:00:00.000Z",
+      "identifier": "PHNX-9106",
+      "title": "Rush: middle, no due date",
+      "description": "Notes",
+      "state": {
+        "name": "In Review",
+        "type": "started"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": null,
+      "createdAt": "2026-10-01T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9106"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009106",
+      "updatedAt": "2026-08-01T12:00:00.000Z",
+      "identifier": "PHNX-9107",
+      "title": "Rush: oldest, no due date",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": null,
+      "createdAt": "2026-08-01T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9107"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000009107",
+      "updatedAt": "2026-10-03T12:00:00.000Z",
+      "identifier": "PHNX-9108",
+      "title": "Rush: second newest, no due date",
+      "description": "Notes",
+      "state": {
+        "name": "Todo",
+        "type": "unstarted"
+      },
+      "priority": 0,
+      "labels": {
+        "nodes": []
+      },
+      "assignee": null,
+      "delegate": null,
+      "project": {
+        "name": "Rush",
+        "id": "00000000-0000-4000-8000-000000000003"
+      },
+      "projectMilestone": null,
+      "cycle": null,
+      "dueDate": null,
+      "createdAt": "2026-10-03T12:00:00.000Z",
+      "url": "https://linear.app/example-team/issue/PHNX-9108"
+    }
+  ]
+}

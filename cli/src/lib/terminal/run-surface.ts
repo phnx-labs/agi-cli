@@ -83,6 +83,15 @@ export async function toHostSamples(sessions: ActiveSession[]): Promise<SessionH
   return samples;
 }
 
+export async function liveHostSamples(): Promise<SessionHostSample[]> {
+  try {
+    const { getActiveSessions } = await import('../session/active.js');
+    return await toHostSamples(await getActiveSessions());
+  } catch {
+    return [];
+  }
+}
+
 export interface OpenRunSurfaceParams {
   argv: string[];
   forced?: Backend;

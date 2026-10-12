@@ -26,10 +26,14 @@ import {
   openSurfaces,
   describeLaunch,
   currentContext,
-  availableBackends,
-  detectCurrentBackend,
+  resolveLaunchBackend,
+  describeBackendChoice,
+  liveHostSamples,
   type Backend,
+  type LaunchBackendChoice,
 } from '../lib/terminal/index.js';
+import { stopInteractive } from './detach.js';
+import { localizeHome, localProjectFolder } from '../lib/project-root.js';
 import { addressabilityRecoveryHint } from '../lib/terminal/resolve.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { setHelpSections } from '../lib/help.js';
@@ -731,41 +735,95 @@ async function richMetaById(id: string): Promise<SessionMeta | undefined> {
   }
 }
 
-const resumeInNewTab: UnreachableFallback = async (s, remote) => {
+export function isLiveHeadless(s: ActiveSession): boolean {
+  return s.context === 'headless' && isRunningLiveSession(s);
+}
+
+async function stopHeadlessCopy(s: ActiveSession, id: string, remote: string | undefined): Promise<boolean> {
+  if (!remote) {
+    console.log(chalk.gray(`${shortId(s)} is running headless (pid ${s.pid}); stopping it so the tab is its only writer.`));
+    await stopInteractive(s);
+    return true;
+  }
+  console.log(chalk.gray(`${shortId(s)} is running headless on ${remote}; stopping it there so the tab is its only writer.`));
+  const rc = await runOnPeer(['ps', 'stop', id, '--local'], remote);
+  if (rc === 'ok') return true;
+  console.error(chalk.red(`Can't reach ${remote} to stop the headless ${shortId(s)}, so no second copy was opened.`));
+  process.exitCode = 1;
+  return false;
+}
+
+export interface TakeoverDeps {
+  open?: OpenSurfacesFn;
+  /** The tab backend; resolved from this terminal and the live roster when omitted. */
+  choice?: LaunchBackendChoice | null;
+  interactive?: boolean;
+  meta?: SessionMeta;
+}
+
+/**
+ * Bring a session with no attach rail into a terminal tab. A live headless run is
+ * stopped first (here, or on its device), so the resumed tab never races it as a
+ * second writer on the same conversation.
+ */
+export async function resumeInTab(s: ActiveSession, remote: string | undefined, deps: TakeoverDeps = {}): Promise<void> {
   const id = s.sessionId ?? '';
   if (!id) {
     console.log(chalk.yellow('This session has no id to resume.'));
     return;
   }
+  const headless = isLiveHeadless(s);
+  const interactive = deps.interactive ?? isInteractiveTerminal();
 
-  if (remote) {
-    console.log(chalk.gray(`${shortId(s)} has no live terminal on ${remote} — resuming it there over SSH…`));
+  if (remote && interactive) {
+    if (headless && !(await stopHeadlessCopy(s, id, remote))) return;
+    console.log(chalk.gray(`${shortId(s)} has no live terminal on ${remote}; resuming it there over SSH…`));
     const rc = await runOnPeer(sessionRecoveryRunArgs({ id }), remote, { tty: true, sessionId: id });
     if (rc === 'no-target') {
       console.log(chalk.red(`${remote} isn't reachable as a device. Try: agents devices sync`));
       console.log(chalk.gray(`  recovery must run on ${remote}, where the indexed session originated`));
+      process.exitCode = 1;
     }
     return;
   }
 
-  const meta = (await richMetaById(id)) ?? metaFromActive(s);
-  const command = [...buildSessionRecoveryCommand(meta), '--quiet'];
-  const cwd = meta.cwd && fs.existsSync(meta.cwd) ? meta.cwd : process.cwd();
+  const meta = deps.meta ?? (await richMetaById(id)) ?? metaFromActive(s);
+  // A peer-owned session reopens through the portable command, which routes to its owner.
+  const command = [...buildSessionRecoveryCommand(meta, !!remote), '--quiet'];
+  const recorded = meta.cwd ?? s.cwd;
+  const localCwd = recorded ? localizeHome(recorded) : undefined;
+  // A peer's worktree may not exist here; its repo usually does.
+  const cwd = localCwd && fs.existsSync(localCwd) ? localCwd : localProjectFolder(recorded) ?? process.cwd();
+  const project = localProjectFolder(cwd) ?? cwd;
 
-  const ctx = currentContext();
-  const backend: Backend | undefined = detectCurrentBackend(ctx) ?? availableBackends(ctx)[0]?.id;
-  if (!backend) {
+  const choice = deps.choice !== undefined ? deps.choice : resolveLaunchBackend(currentContext(), await liveHostSamples());
+  if (!choice) {
+    if (!interactive || remote) {
+      console.error(chalk.red(`No terminal this machine can drive to reopen ${shortId(s)}. Run: agents run auto --resume ${id}`));
+      process.exitCode = 1;
+      return;
+    }
+    if (headless && !(await stopHeadlessCopy(s, id, undefined))) return;
     await resumeSessionInPlace(meta);
     return;
   }
 
-  console.log(chalk.gray(`${shortId(s)} has no live terminal to attach — opening a new ${backend} tab and resuming a copy.`));
-  const results = await openSurfaces([{ cwd, project: cwd, command }], { backend, packing: 'tabs' });
+  if (headless && !(await stopHeadlessCopy(s, id, remote))) return;
+  const what = headless ? 'resuming it' : 'resuming a copy';
+  const where = remote ? ` (it runs on ${remote})` : '';
+  console.log(chalk.gray(`${shortId(s)} has no live terminal to attach${where}; opening a new tab in ${describeBackendChoice(choice)} and ${what}.`));
+  const open = deps.open ?? openSurfaces;
+  const results = await open(
+    [{ cwd, project, command, agent: s.kind || undefined, sessionId: id }],
+    { backend: choice.backend, packing: 'tabs' },
+  );
   const line = describeLaunch(results[0], { verb: 'Resumed', label: shortId(s) });
   if (results[0].ok) console.log(line);
   else {
     console.error(chalk.red(line));
-    console.error(chalk.gray(`  Resume it in this terminal instead: agents run auto --resume ${meta.id}`));
+    console.error(chalk.gray(`  Resume it in a terminal instead: agents run auto --resume ${meta.id}`));
     process.exitCode = 1;
   }
-};
+}
+
+const resumeInNewTab: UnreachableFallback = (s, remote) => resumeInTab(s, remote);

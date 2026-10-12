@@ -58,5 +58,5 @@ export {
 } from './resolve.js';
 export { iLoginShell } from './shell.js';
 export { shellQuote } from './quote.js';
-export { parseTerminalFlag, stripTerminalFlag, buildRunCommand, openRunInTerminal, toHostSamples, TERMINAL_FLAG_BACKENDS } from './run-surface.js';
+export { parseTerminalFlag, stripTerminalFlag, buildRunCommand, openRunInTerminal, toHostSamples, liveHostSamples, TERMINAL_FLAG_BACKENDS } from './run-surface.js';
 export type { OpenRunSurfaceParams, OpenRunSurfaceResult } from './run-surface.js';

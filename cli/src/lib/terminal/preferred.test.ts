@@ -104,6 +104,15 @@ describe('resolveLaunchBackend', () => {
       .toEqual({ backend: 'iterm', source: 'active-session', host: 'iterm' });
   });
 
+  it('a GUI caller (no TTY, no TERM_PROGRAM) lands in VSCodium when the live roster runs there (PHNX-4344)', () => {
+    const sessions: SessionHostSample[] = [
+      ...Array.from({ length: 17 }, (_, i) => ({ host: 'codium', lastActivityMs: 10_000 + i })),
+      { host: 'iterm', lastActivityMs: 1_000 },
+    ];
+    expect(resolveLaunchBackend(guiCtx, sessions, macDefaults))
+      .toEqual({ backend: 'vscodium-agent', source: 'active-session', host: 'codium' });
+  });
+
   it('falls back to an available backend when nothing names a terminal', () => {
     expect(resolveLaunchBackend(guiCtx, [], macDefaults))
       .toEqual({ backend: 'iterm', source: 'available' });

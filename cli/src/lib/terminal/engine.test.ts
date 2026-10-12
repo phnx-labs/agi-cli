@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planLayouts } from './policy.js';
-import { specsForRequest, buildRequests, openSurface } from './engine.js';
+import { specsForRequest, buildRequests, openSurface, ackFailure } from './engine.js';
 import { remoteCommand } from './transport.js';
 import type { LaunchRequest } from './types.js';
 
@@ -79,5 +79,14 @@ describe('remoteCommand (serialize argv for ssh)', () => {
   });
   it('escapes embedded single quotes safely', () => {
     expect(remoteCommand({ argv: ["a'b"] })).toBe("'a'\\''b'");
+  });
+});
+
+describe('ackFailure — a VSCodium tab request that is never confirmed', () => {
+  it('names the one-time extension URI prompt as the likely cause (PHNX-4344)', () => {
+    const req: LaunchRequest = { backend: 'vscodium-agent', layout: 'tab', cwd: '/d', command: CMD, project: '/d' };
+    expect(ackFailure(undefined, req, 15_000)).toBe(
+      "VSCodium did not confirm the tab within 15s; if VSCodium is asking \"Allow 'Agents' extension to open this URI?\", approve it and try again",
+    );
   });
 });

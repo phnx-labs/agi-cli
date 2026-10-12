@@ -37,8 +37,11 @@ function ackReader(nonce: string): () => string | undefined {
   };
 }
 
-function ackFailure(ack: SpawnAck | undefined, req: LaunchRequest, timeoutMs: number): string | undefined {
-  if (!ack) return `VSCodium didn't confirm a tab within ${Math.round(timeoutMs / 1000)}s`;
+export function ackFailure(ack: SpawnAck | undefined, req: LaunchRequest, timeoutMs: number): string | undefined {
+  if (!ack) {
+    return `VSCodium did not confirm the tab within ${Math.round(timeoutMs / 1000)}s; ` +
+      `if VSCodium is asking "Allow 'Agents' extension to open this URI?", approve it and try again`;
+  }
   if (!ackLandedIn(ack, req.project)) {
     const where = ack.workspaceName ?? (ack.windowFolders.join(', ') || 'an unknown window');
     const why = ack.reason ? ` (${ack.reason})` : '';

@@ -9,7 +9,7 @@ import { killSession } from '../lib/tmux/index.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { getAgentsInvocation } from '../lib/daemon/daemon.js';
 import { captureProcessStartTime } from '../lib/platform/process.js';
-import { writeDetachRecord } from '../lib/session/detached.js';
+import { clearDetachRecord, writeDetachRecord } from '../lib/session/detached.js';
 import { getLogsDir } from '../lib/state.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { buildBackgroundArgv, resolveDetachTarget, resolveOne } from './detach-core.js';
@@ -43,10 +43,12 @@ export async function stopInteractive(s: ActiveSession, socket: string = getDefa
     try {
       process.kill(s.pid, 'SIGTERM');
     } catch {
+      if (s.sessionId) clearDetachRecord(s.sessionId);
       return;
     }
   }
   if (s.pid && s.pid > 0) await waitForExit(s.pid);
+  if (s.sessionId) clearDetachRecord(s.sessionId);
 }
 
 async function waitForExit(pid: number, timeoutMs = 5000): Promise<void> {
