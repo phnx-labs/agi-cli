@@ -419,7 +419,8 @@ right home if one is staged.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
 - **Query GitHub over the REST API, not GraphQL — the GraphQL limit is fleet-shared
-  and cheap to exhaust.** `gh pr view/list --json <field>` and `gh pr checks` resolve
+  and cheap to exhaust.** (One measured exception, the bounded open-PR reads behind
+  `agents projects prs`, is documented in [`cli/AGENTS.md`](cli/AGENTS.md).) `gh pr view/list --json <field>` and `gh pr checks` resolve
   through GitHub's GraphQL API (a 5,000-**point**/hr budget shared across every agent
   and machine on the account); a status poll loop drains it in minutes and then
   *every* agent's `gh` calls 401 with `API rate limit already exceeded`, plus a
