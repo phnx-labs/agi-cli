@@ -70,8 +70,20 @@ export function outputHomeHasDotDot(raw: string): boolean {
   return raw.split(/[\\/]/).includes('..');
 }
 
-function liveHarnessHomes(home: string): string[] {
-  return PORTABLE_HARNESSES.map((name) => path.join(home, `.${name}`));
+/**
+ * The live harness homes, each CANONICALIZED and tagged with its dir name.
+ * Realpathing the config dir itself (not just its parent) is load-bearing: if
+ * `~/.claude` is a symlink to some other directory, `--output-home ~/.claude`
+ * canonicalizes to that link target, so comparing against a non-canonical
+ * `<home>/.claude` would miss it and the literal live home would be accepted.
+ * Both sides must be canonical. The `dir` (`.claude`) is retained for the error
+ * message, since `basename(canonical)` would be the link-target name, not `.claude`.
+ */
+function liveHarnessHomes(realHome: string): { dir: string; canonical: string }[] {
+  return PORTABLE_HARNESSES.map((name) => ({
+    dir: `.${name}`,
+    canonical: realpathExistingPrefix(path.join(realHome, `.${name}`)),
+  }));
 }
 
 /**
@@ -111,9 +123,9 @@ export function resolveOutputHome(raw: string, cwd = process.cwd(), home = os.ho
     throw new MaterializeGuardError('Path escape: output home must not be the live home directory');
   }
   for (const live of liveHarnessHomes(realHome)) {
-    if (canonical === live || canonical.startsWith(live + path.sep)) {
+    if (canonical === live.canonical || canonical.startsWith(live.canonical + path.sep)) {
       throw new MaterializeGuardError(
-        `Path escape: output home must not target the live ${path.basename(live)} directory`,
+        `Path escape: output home must not target the live ${live.dir} directory`,
       );
     }
   }

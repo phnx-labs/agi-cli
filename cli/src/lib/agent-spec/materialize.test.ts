@@ -232,6 +232,82 @@ describe('materializeAgentPackage — stale-prune never deletes outside the outp
   });
 });
 
+describe('materializeAgentPackage — refuses preplanted symlinks at leaf destinations', () => {
+  /** Write a victim file OUTSIDE any output home; returns its path + original content. */
+  function plantVictim(name: string): { path: string; content: string } {
+    const dir = tempHome();
+    const p = path.join(dir, name);
+    const content = `ORIGINAL-${name}`;
+    fs.writeFileSync(p, content);
+    return { path: p, content };
+  }
+
+  it('refuses a preplanted symlink at the subagent leaf file', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    const victim = plantVictim('stolen-subagent.md');
+    const agentsDir = path.join(outputHome, '.claude', 'agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    // The fixture's subagent is 'source-finder'; claude writes it as <name>.md.
+    fs.symlinkSync(victim.path, path.join(agentsDir, 'source-finder.md'));
+
+    expect(() =>
+      materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
+    ).toThrow(/outside the output home/);
+    expect(fs.readFileSync(victim.path, 'utf-8')).toBe(victim.content);
+  });
+
+  it('refuses a preplanted symlink at the hook script leaf', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    const victim = plantVictim('cron-evil.sh');
+    const hooksDir = path.join(outputHome, '.claude', 'hooks');
+    fs.mkdirSync(hooksDir, { recursive: true });
+    // The fixture's hook is 'capture' with a .sh script.
+    fs.symlinkSync(victim.path, path.join(hooksDir, 'capture.sh'));
+
+    expect(() =>
+      materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
+    ).toThrow(/outside the output home/);
+    expect(fs.readFileSync(victim.path, 'utf-8')).toBe(victim.content);
+  });
+
+  it('refuses a preplanted symlink at the materialization-receipt.json leaf', () => {
+    const resolved = resolveAgentPackage(FIXTURE);
+    const outputHome = tempHome();
+    const victim = plantVictim('receipt-victim.json');
+    fs.symlinkSync(victim.path, path.join(outputHome, 'materialization-receipt.json'));
+
+    expect(() =>
+      materializeAgentPackage(resolved, { harness: 'claude', harnessVersion: '2.1.0', outputHome }),
+    ).toThrow(/outside the output home/);
+    expect(fs.readFileSync(victim.path, 'utf-8')).toBe(victim.content);
+  });
+
+  // The registration file registerHooksToSettings writes differs per harness;
+  // pin that every portable harness's registration leaf is guarded.
+  const REGISTRATION_LEAF: Record<string, string[]> = {
+    claude: ['.claude', 'settings.json'],
+    codex: ['.codex', 'hooks.json'],
+    opencode: ['.config', 'opencode', 'plugins', 'agents-cli-hooks.ts'],
+  };
+  for (const harness of ['claude', 'codex', 'opencode'] as AgentId[]) {
+    it(`refuses a preplanted symlink at the ${harness} hook-registration leaf`, () => {
+      const resolved = resolveAgentPackage(FIXTURE);
+      const outputHome = tempHome();
+      const victim = plantVictim(`reg-victim-${harness}`);
+      const leaf = path.join(outputHome, ...REGISTRATION_LEAF[harness]);
+      fs.mkdirSync(path.dirname(leaf), { recursive: true });
+      fs.symlinkSync(victim.path, leaf);
+
+      expect(() =>
+        materializeAgentPackage(resolved, { harness, harnessVersion: HARNESS_VERSIONS[harness], outputHome }),
+      ).toThrow(/outside the output home/);
+      expect(fs.readFileSync(victim.path, 'utf-8')).toBe(victim.content);
+    });
+  }
+});
+
 describe('materializeAgentPackage — fails closed', () => {
   it('refuses a harness the package does not declare supported', () => {
     const resolved = resolveAgentPackage(FIXTURE);

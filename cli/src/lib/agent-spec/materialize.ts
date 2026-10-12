@@ -166,6 +166,12 @@ function materializeSubagent(resource: ResolvedResource, harness: AgentId, outpu
   }
   const dir = target.dir(outputHome);
   assertTargetContained(realOutputHome, dir, `${harness} subagent '${resource.name}'`);
+  // Guard the concrete leaf file(s) `target.write` will touch, immediately before
+  // it writes — a preplanted symlink AT the leaf (dir real, leaf a symlink to
+  // outside) would otherwise be followed by the writer.
+  for (const occ of target.occupied(dir, resource.name)) {
+    assertTargetContained(realOutputHome, occ.path, `${harness} subagent '${resource.name}'`);
+  }
   target.write(dir, { name: resource.name, path: resource.sourcePath });
   const occupied = target.occupied(dir, resource.name)[0];
   return path.relative(outputHome, occupied.path);
@@ -207,6 +213,29 @@ function materializeMcp(resources: ResolvedResource[], harness: AgentId, outputH
   return resources.map(() => rel);
 }
 
+/**
+ * The registration file(s) `registerHooksToSettings` writes for a harness, which
+ * sit BESIDE the hooks dir (not under it), so the hooks-dir guard doesn't cover
+ * them. These MUST mirror the LITERAL paths the per-harness registrars in
+ * `hooks/install.ts` use, not `agentConfigDirName` — those diverge (opencode
+ * registers under the literal `.config/opencode`, while `agentConfigDirName`
+ * ('opencode') is `.opencode`). Kept in lockstep with `registerHooksForCodex`
+ * (`.codex/hooks.json` + `.codex/config.toml`) and `registerHooksForOpenCode`
+ * (`.config/opencode/plugins/agents-cli-hooks.ts`); the default
+ * (`<config>/settings.json`) matches the Claude-family registrar
+ * (`registerHooksForClaude`, whose `configDirName` defaults to
+ * `agentConfigDirName`). Pinned by a completeness test.
+ */
+function hookRegistrationLeaves(harness: AgentId, outputHome: string): string[] {
+  if (harness === 'codex') {
+    return [path.join(outputHome, '.codex', 'hooks.json'), path.join(outputHome, '.codex', 'config.toml')];
+  }
+  if (harness === 'opencode') {
+    return [path.join(outputHome, '.config', 'opencode', 'plugins', 'agents-cli-hooks.ts')];
+  }
+  return [path.join(outputHome, agentConfigDirName(harness), 'settings.json')];
+}
+
 function materializeHooks(resources: ResolvedResource[], harness: AgentId, outputHome: string, realOutputHome: string): Map<string, string> {
   const targets = new Map<string, string>();
   if (resources.length === 0) return targets;
@@ -232,10 +261,20 @@ function materializeHooks(resources: ResolvedResource[], harness: AgentId, outpu
     if (!destScript.startsWith(hooksDirResolved + path.sep)) {
       throw new AgentPackageError(`${harness}: hook '${r.name}' resolves outside the hooks directory`, 'invalid-resource');
     }
+    // Realpath-guard the script LEAF immediately before the copy + chmod: a
+    // preplanted symlink at destScript (hooksDir real, leaf a symlink to outside)
+    // would otherwise have `copyFileSync`/`chmodSync` follow it.
+    assertTargetContained(realOutputHome, destScript, `${harness} hook '${r.name}' script`);
     fs.copyFileSync(scriptPath, destScript);
     fs.chmodSync(destScript, 0o755);
     manifest[r.name] = { script: destScript, events: def.events, matcher: def.matcher, timeout: def.timeout };
     targets.set(r.name, path.relative(outputHome, destScript));
+  }
+  // Guard the file(s) registerHooksToSettings writes (settings.json / hooks.json /
+  // config.toml / the opencode plugin) BEFORE it runs, so a preplanted symlink at
+  // a registration leaf inside an otherwise-real config dir can't redirect it.
+  for (const leaf of hookRegistrationLeaves(harness, outputHome)) {
+    assertTargetContained(realOutputHome, leaf, `${harness} hook registration`);
   }
   const result = registerHooksToSettings(harness, outputHome, manifest);
   if (result.errors.length > 0) {
@@ -361,7 +400,11 @@ export function materializeAgentPackage(resolved: ResolvedAgentPackage, options:
     resources: entries,
     warnings: [],
   };
-  fs.writeFileSync(path.join(outputHome, RECEIPT_FILE), JSON.stringify(receipt, null, 2) + '\n');
+  const receiptPath = path.join(outputHome, RECEIPT_FILE);
+  // Guard the receipt leaf too: a preplanted symlink at materialization-receipt.json
+  // would otherwise have this final write follow it outside the output home.
+  assertTargetContained(realOutputHome, receiptPath, 'materialization receipt');
+  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n');
   return receipt;
 }
 

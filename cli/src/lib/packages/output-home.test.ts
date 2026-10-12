@@ -103,4 +103,17 @@ describe('resolveOutputHome', () => {
     const out = path.join(link, 'ephemeral');
     expect(resolveOutputHome(out, process.cwd(), home)).toBe(path.resolve(out));
   });
+
+  it('refuses the live ~/.claude even when ~/.claude is ITSELF a symlink', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symclaude-'));
+    tempDirs.push(home);
+    // The real store the live ~/.claude points at.
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'mat-guard-symclaude-store-'));
+    tempDirs.push(store);
+    fs.symlinkSync(store, path.join(home, '.claude'));
+    // Both the literal live home and a path nested in it must be refused, even
+    // though the requested path canonicalizes to `store` (the link target).
+    expect(() => resolveOutputHome(path.join(home, '.claude'), process.cwd(), home)).toThrow(/live \.claude directory/);
+    expect(() => resolveOutputHome(path.join(home, '.claude', 'nested'), process.cwd(), home)).toThrow(/live \.claude directory/);
+  });
 });
