@@ -10,7 +10,7 @@ loud with install guidance rather than falling back to anything in-repo:
 
 ```
 agents setup tools --tool secrets
-# or: npm i -g @phnx-labs/secrets-cli@0.3.0
+# or: npm i -g @phnx-labs/secrets-cli@0.3.3
 # or: agents setup secrets
 ```
 

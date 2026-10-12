@@ -18,7 +18,7 @@ const SSH = '/usr/bin/ssh';
 const TARGET = '127.0.0.1';
 const RUN = `agents-push-${process.pid}-${Date.now().toString(36)}`;
 const BIN = ensureStandaloneSecretsBin();
-const ENV_KEYS = ['HOME', 'USERPROFILE', 'SECRETS_HOME', 'SECRETS_PASSPHRASE', 'SECRETS_BIN', 'PATH'];
+const ENV_KEYS = ['HOME', 'USERPROFILE', 'AGENTS_REAL_HOME', 'SECRETS_HOME', 'SECRETS_PASSPHRASE', 'SECRETS_BIN', 'PATH'];
 
 let tmp = '';
 let sshd: ChildProcess | undefined;
@@ -47,6 +47,7 @@ function writeExec(file: string, body: string): void {
 function asSide(home: string, root?: string): void {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  process.env.AGENTS_REAL_HOME = home;
   process.env.SECRETS_BIN = BIN;
   process.env.PATH = `${clientBin}${path.delimiter}${saved.PATH ?? ''}`;
   delete process.env.SECRETS_PASSPHRASE;
