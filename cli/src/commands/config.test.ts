@@ -193,6 +193,7 @@ describe('config command', () => {
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeSections', 'company,inbox'])).toThrow(/"inbox" is not one of/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeSections', 'today,-today'])).toThrow(/twice/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.sessionFilter', 'show=working;mood=calm'])).toThrow(/"mood" is not one of/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.sessionFilter', 'show=working;sort=bogus'])).toThrow(/sort="bogus" is not one of/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.artifactApps', 'video=com.apple.QuickTimePlayerX'])).toThrow(/<kind>=<bundle id>/);
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.ticketSort', 'random'])).toThrow();
   });

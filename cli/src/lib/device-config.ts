@@ -814,9 +814,18 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'AGI Menu: the one filter Home\'s Open sessions and the Sessions tab share — ' +
       '`show=<statuses>;which=<kinds>;sort=<updated|newest|idle|idletime|longest>;group=<status|app|project|device|none>`.',
     validate: (v) => {
-      const parts = String(v).split(';').map((p) => p.split('=')[0].trim()).filter(Boolean);
-      const bad = parts.find((p) => !['show', 'which', 'sort', 'group'].includes(p));
-      return bad === undefined ? null : `menubar.menu.sessionFilter: "${bad}" is not one of show, which, sort, group.`;
+      const allowed: Record<string, string[] | null> = {
+        show: null, which: null,
+        sort: ['updated', 'newest', 'idle', 'idletime', 'longest'],
+        group: ['status', 'app', 'project', 'device', 'none'],
+      };
+      for (const part of String(v).split(';').filter((p) => p.trim())) {
+        const [name, value = ''] = part.split('=').map((s) => s.trim());
+        if (!(name in allowed)) return `menubar.menu.sessionFilter: "${name}" is not one of show, which, sort, group.`;
+        const values = allowed[name];
+        if (values && !values.includes(value)) return `menubar.menu.sessionFilter: ${name}="${value}" is not one of ${values.join(', ')}.`;
+      }
+      return null;
     },
   },
   {
