@@ -350,7 +350,7 @@ agents ps detach <id>           Send a live agent to the background — stop its
 agents ps focus [selector]      Focus sessions by id, harness/version, topic, device, or live state; attach living panes and recover ended ones
 agents ps migrate [session-id]  Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
 agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
-agents ps preview <id>          Show one rich session card without rendering the full transcript
+agents ps preview <id...>       Show rich session cards without rendering the full transcripts
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
 agents ps watch                 Stream canonical live and recoverable session row changes as NDJSON
 ```

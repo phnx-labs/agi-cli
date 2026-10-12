@@ -156,7 +156,7 @@ SSH access (§7); rendering sessions that no harness produced.
 - **`ActiveSession`** — the live, in-process view of a currently-running agent
   (`lib/session/active.ts:271-365`).
 - **Preview** — the one-line "what this session is/was doing" string shown in a
-  list row; distinct from the multi-line **picker preview** (`sessions preview <id>`, the
+  list row; distinct from the multi-line **picker preview** (`ps preview <id>`, the
   interactive picker's preview pane).
 - **Provenance** — where a live agent *process* physically runs (host / SSH /
   tmux pane), for reply-routing (`lib/session/provenance.ts`).
@@ -1120,7 +1120,7 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   or a timer (`lib/session/timeline-pass.ts`, `lib/session/glance-files.ts`;
   `lib/session/glance-files.test.ts`, `lib/session/timeline-pass.test.ts`,
   `lib/session/db.timelines.test.ts`).
-- **SES-58 (MUST, PHNX-4326).** The `sessions preview --json` digest MUST carry
+- **SES-58 (MUST, PHNX-4326).** The `ps preview --json` digest MUST carry
   `todos` from `extractTodoProgressFromEvents`, the fold the watch rows use, and
   MAY carry `subAgents` and `images`, each absent when empty. For a Claude session
   with `subagents/agent-*.jsonl` children, `subAgents` MUST be those children and
@@ -1144,7 +1144,7 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   transcript's mtime or size changes
   (`lib/session/remote/watch.ts` `previousRowCard`, `fillPreviousCards`;
   `lib/session/remote/watch.test.ts`).
-- **SES-60 (MUST, PHNX-4326).** `sessions preview <id...> --json` with one id
+- **SES-60 (MUST, PHNX-4326).** `ps preview <id...> --json` with one id
   MUST print the single envelope object unchanged. With several ids it MUST print
   one JSON array in argument order whose elements are that envelope plus `query`
   (the id as given). An id that does not resolve MUST be an element with
