@@ -27,6 +27,7 @@ import { refuseFallback } from './go.js';
 import { ackFailure } from '../lib/terminal/engine.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { readDetachRecord, writeDetachRecord } from '../lib/session/detached.js';
+import { upsertDevice } from '../lib/devices/registry.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
@@ -535,7 +536,7 @@ describe('resumeInTab — a live headless run is stopped before its tab opens (P
       await resumeInTab(
         { context: 'terminal', kind: 'claude', sessionId: id, status: 'idle', machine: 'peer-box' },
         'peer-box',
-        { open, choice: vscodium, interactive: false, meta: metaFor(id, '/home/muqsit/src/github.com/me/agents/.agents/worktrees/fix') },
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, `/home/${path.basename(home)}/src/github.com/me/agents/.agents/worktrees/fix`) },
       );
       expect(opened).toHaveLength(1);
       expect(opened[0].items[0].command).toEqual(['agents', 'run', 'auto', '--resume', id, '--interactive', '--quiet']);
@@ -566,6 +567,69 @@ describe('resumeInTab — a live headless run is stopped before its tab opens (P
     }
   });
 
+  function fakeSsh(exitCode: number): { argsFile: string; restore: () => void } {
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-ssh-'));
+    const argsFile = path.join(bin, 'args');
+    fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh\nprintf '%s\\n' "$@" >> '${argsFile}'\nexit ${exitCode}\n`, { mode: 0o755 });
+    const prev = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${prev}`;
+    return { argsFile, restore: () => { process.env.PATH = prev; fs.rmSync(bin, { recursive: true, force: true }); } };
+  }
+
+  it.skipIf(process.platform === 'win32')('opens nothing when the peer\'s `ps stop` exits 1, and opens the tab once it exits 0', async () => {
+    await upsertDevice('stop-peer', { platform: 'linux', user: 'test', address: { via: 'manual', dnsName: 'stop-peer.example.ts.net' } });
+    const id = 'f0c05e11-4344-4000-8000-000000004349';
+    const row: ActiveSession = { context: 'headless', kind: 'claude', sessionId: id, pid: 4242, pidAlive: true, status: 'running', machine: 'stop-peer' };
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.join(' ')); });
+    const failing = fakeSsh(1);
+    try {
+      const { opened, open } = opener();
+      await resumeInTab(row, 'stop-peer', { open, choice: vscodium, interactive: false, meta: metaFor(id, '/tmp') });
+      expect(fs.readFileSync(failing.argsFile, 'utf8')).toMatch(/ps.*stop.*f0c05e11-4344-4000-8000-000000004349.*--local/s);
+      expect(opened).toHaveLength(0);
+      expect(process.exitCode).toBe(1);
+      expect(errors.join('\n')).toMatch(/ps stop f0c05e11 --local failed on stop-peer/);
+    } finally {
+      failing.restore();
+      process.exitCode = undefined;
+    }
+    const passing = fakeSsh(0);
+    try {
+      const { opened, open } = opener();
+      await resumeInTab(row, 'stop-peer', { open, choice: vscodium, interactive: false, meta: metaFor(id, '/tmp') });
+      expect(opened).toHaveLength(1);
+      expect(opened[0].items[0].command).toEqual(['agents', 'run', 'auto', '--resume', id, '--interactive', '--quiet']);
+    } finally {
+      passing.restore();
+      spy.mockRestore();
+      process.exitCode = undefined;
+    }
+  });
+
+  it('says the headless run was stopped when its tab is then not confirmed', async () => {
+    const id = 'f0c05e11-4344-4000-8000-00000000434a';
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const reason = ackFailure(undefined, { backend: 'vscodium-agent', layout: 'tab', cwd: '/d', command: [], project: '/d' }, 15_000)!;
+    const { open } = opener(undefined, { ok: false, error: reason });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.join(' ')); });
+    try {
+      await resumeInTab(
+        { context: 'headless', kind: 'claude', sessionId: id, pid: child.pid, pidAlive: true, status: 'running', machine: machineId(), cwd: os.tmpdir() },
+        undefined,
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, os.tmpdir()) },
+      );
+      expect(process.exitCode).toBe(1);
+      expect(errors[0]).toContain(reason);
+      expect(errors[0]).toContain(`The headless run was stopped; resume it with agents run auto --resume ${id}`);
+    } finally {
+      child.kill('SIGKILL');
+      spy.mockRestore();
+      process.exitCode = undefined;
+    }
+  });
+
   it('fails loud with the tab backend\'s reason when the tab is not confirmed', async () => {
     const id = 'f0c05e11-4344-4000-8000-000000004348';
     const reason = ackFailure(undefined, { backend: 'vscodium-agent', layout: 'tab', cwd: '/d', command: [], project: '/d' }, 15_000)!;
@@ -582,6 +646,34 @@ describe('resumeInTab — a live headless run is stopped before its tab opens (P
       expect(errors[0]).toContain(reason);
     } finally {
       spy.mockRestore();
+      process.exitCode = undefined;
+    }
+  });
+});
+
+describe('openFocusTabs — a selected live headless session is stopped before its tab opens (SES-40a)', () => {
+  it('stops the headless pid before opening, and leaves an interactive one running', async () => {
+    const self = machineId();
+    const headless = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const interactive = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    const seen: Array<{ headless: boolean; interactive: boolean }> = [];
+    const open = vi.fn(async (items: SurfaceItem[]): Promise<LaunchResult[]> => {
+      seen.push({ headless: alive(headless.pid!), interactive: alive(interactive.pid!) });
+      return items.map((it) => ({ ok: true, request: { backend: 'tmux', layout: 'tab', cwd: it.cwd, command: it.command } })) as LaunchResult[];
+    });
+    const targets: ActiveSession[] = [
+      { context: 'headless', kind: 'claude', sessionId: 'f0c05e11-4344-4000-8000-00000000434b', pid: headless.pid, pidAlive: true, status: 'running', machine: self, cwd: os.tmpdir() },
+      { context: 'terminal', kind: 'claude', sessionId: 'f0c05e11-4344-4000-8000-00000000434c', pid: interactive.pid, pidAlive: true, status: 'running', machine: self, cwd: os.tmpdir() },
+    ];
+    try {
+      await openFocusTabs(targets, self, { open: open as never, backend: 'tmux', metas: targets.map(metaFromActive), probe: async () => ({ state: 'missing' }) });
+      expect(open).toHaveBeenCalledTimes(1);
+      expect((open.mock.calls[0][0] as SurfaceItem[])).toHaveLength(2);
+      expect(seen[0]).toEqual({ headless: false, interactive: true });
+    } finally {
+      headless.kill('SIGKILL');
+      interactive.kill('SIGKILL');
       process.exitCode = undefined;
     }
   });

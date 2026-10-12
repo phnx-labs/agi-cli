@@ -232,10 +232,14 @@ export function parsePeerPreviewDigest(parsed: unknown): unknown | undefined {
 
 const PEER_PROBE_TIMEOUT_MS = 15_000;
 
-export function peerHopOutcome(code: number | null, hostAnswers: () => boolean): 'ok' | 'unreachable' {
+export type PeerHopOutcome = 'ok' | 'unreachable' | 'failed';
+
+export function peerHopOutcome(code: number | null, hostAnswers: () => boolean, oneShot = false): PeerHopOutcome {
   if (code === null) return 'unreachable';
-  if (code !== SSH_CONN_FAILURE_CODE) return 'ok';
-  return hostAnswers() ? 'ok' : 'unreachable';
+  if (code === 0) return 'ok';
+  if (code !== SSH_CONN_FAILURE_CODE) return oneShot ? 'failed' : 'ok';
+  if (!hostAnswers()) return 'unreachable';
+  return oneShot ? 'failed' : 'ok';
 }
 
 export function peerAnswers(target: string): boolean {
@@ -280,7 +284,7 @@ export async function runOnPeer(
   args: string[],
   machine: string,
   opts: { tty?: boolean; env?: Record<string, string>; sessionId?: string } = {},
-): Promise<'ok' | 'no-target' | 'unreachable'> {
+): Promise<PeerHopOutcome | 'no-target'> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return 'no-target';
   assertValidSshTarget(peer.target);
@@ -324,7 +328,7 @@ export async function runOnPeer(
   }
   const notice = peerHopCloseNotice(opts, machine, code);
   if (notice) process.stderr.write(notice);
-  return peerHopOutcome(code, () => peerAnswers(peer.target));
+  return peerHopOutcome(code, () => peerAnswers(peer.target), !opts.tty);
 }
 
 export function hostToken(h: string): string {

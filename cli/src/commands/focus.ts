@@ -685,8 +685,19 @@ export async function openFocusTabs(
     return;
   }
 
+  const ready: typeof openable = [];
+  const stopped = new Set<ActiveSession>();
+  for (const p of openable) {
+    if (p.plan.kind === 'resume' && p.s.sessionId && isLiveHeadless(p.s)) {
+      if (!(await stopHeadlessCopy(p.s, p.s.sessionId, sessionProcessHost(p.s, self)))) continue;
+      stopped.add(p.s);
+    }
+    ready.push(p);
+  }
+  if (ready.length === 0) return;
+
   const results = await open(
-    openable.map((p) => ({
+    ready.map((p) => ({
       cwd: cwdFor(p.s, byId),
       project: cwdFor(p.s, byId),
       command: p.plan.command,
@@ -696,11 +707,11 @@ export async function openFocusTabs(
     { backend, packing: 'tabs' },
   );
   results.forEach((r, i) => {
-    const p = openable[i];
+    const p = ready[i];
     const line = describeLaunch(r, { verb: 'Opened', label: `${shortId(p.s)} (${p.plan.note})` });
     if (r.ok) console.log(line);
     else {
-      console.error(chalk.red(line));
+      console.error(chalk.red(stopped.has(p.s) ? `${line} ${stoppedNotice(p.s.sessionId!)}` : line));
       process.exitCode = 1;
     }
   });
@@ -748,9 +759,15 @@ async function stopHeadlessCopy(s: ActiveSession, id: string, remote: string | u
   console.log(chalk.gray(`${shortId(s)} is running headless on ${remote}; stopping it there so the tab is its only writer.`));
   const rc = await runOnPeer(['ps', 'stop', id, '--local'], remote);
   if (rc === 'ok') return true;
-  console.error(chalk.red(`Can't reach ${remote} to stop the headless ${shortId(s)}, so no second copy was opened.`));
+  console.error(chalk.red(rc === 'failed'
+    ? `agents ps stop ${shortId(s)} --local failed on ${remote}, so its headless run may still be live; no second copy was opened.`
+    : `Can't reach ${remote} to stop the headless ${shortId(s)}, so no second copy was opened.`));
   process.exitCode = 1;
   return false;
+}
+
+function stoppedNotice(id: string): string {
+  return `The headless run was stopped; resume it with agents run auto --resume ${id}`;
 }
 
 export interface TakeoverDeps {
@@ -812,8 +829,8 @@ export async function resumeInTab(s: ActiveSession, remote: string | undefined, 
   const line = describeLaunch(results[0], { verb: 'Resumed', label: shortId(s) });
   if (results[0].ok) console.log(line);
   else {
-    console.error(chalk.red(line));
-    console.error(chalk.gray(`  Resume it in a terminal instead: agents run auto --resume ${meta.id}`));
+    console.error(chalk.red(headless ? `${line} ${stoppedNotice(id)}` : line));
+    if (!headless) console.error(chalk.gray(`  Resume it in a terminal instead: agents run auto --resume ${meta.id}`));
     process.exitCode = 1;
   }
 }

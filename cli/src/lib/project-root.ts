@@ -38,12 +38,15 @@ export function homeRemainder(p: string): string | null {
   return null;
 }
 
-const FOREIGN_HOME_RE = /^\/(?:home|Users)\/[^/]+(?=\/|$)/;
+const FOREIGN_HOME_RE = /^\/(?:home|Users)\/([^/]+)(?=\/|$)/;
 const WORKTREE_RE = /\/\.agents\/worktrees\/[^/]+(?:\/.*)?$/;
 
 export function localizeHome(p: string, home: string = HOME): string {
   if (p === home || p.startsWith(home + '/')) return p;
-  return p.replace(FOREIGN_HOME_RE, home);
+  const foreign = p.match(FOREIGN_HOME_RE);
+  const user = path.basename(home);
+  if (!foreign || foreign[1] !== user || user === 'Shared') return p;
+  return home + p.slice(foreign[0].length);
 }
 
 export function localProjectFolder(cwd: string | undefined, home: string = HOME): string | undefined {
