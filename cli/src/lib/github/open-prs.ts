@@ -1,23 +1,17 @@
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
 import {
   CiErrors,
-  KeyedCache,
+  PR_NODE_FIELDS,
   enrichPr,
   fetchOnePr,
   fetchViewer,
   ghFailure,
-  isCachedRollup,
-  mapBounded,
-  readCi,
+  prFromNode,
   readRepoMergeAbility,
-  rowToProjectPr,
-  type CachedRollup,
-  type CiReader,
   type ProjectPr,
   type RepoMergeAbility,
 } from './project-prs.js';
 import type { ProjectDef } from '../projects.js';
-import { getCacheDir } from '../state.js';
 
 export type NeedsMe = 'review' | 'failing' | 'conflicts';
 
@@ -55,33 +49,29 @@ export interface OpenPrsOptions {
   owners?: string[];
   repo?: string;
   number?: number;
-  cacheDir?: string;
-  nowMs?: number;
 }
 
 export const SEARCH_RESULT_CAP = 1000;
 
-const SEARCH_JQ =
-  '.items[] | {number, title, url: .html_url, isDraft: (.draft // false), ' +
-  'state: (.state // "" | ascii_upcase), createdAt: (.created_at // ""), updatedAt: (.updated_at // ""), ' +
-  'login: (.user.login // ""), avatarUrl: (.user.avatar_url // ""), ' +
-  'slug: (.repository_url // "" | sub("^.*/repos/"; ""))}';
+const SEARCH_QUERY = `query($q: String!, $endCursor: String) {
+  search(query: $q, type: ISSUE, first: 100, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on PullRequest { ${PR_NODE_FIELDS} } }
+  }
+}`;
 
 interface SearchRow {
   slug: string;
   pr: ProjectPr;
 }
 
-function parseNdjson(out: string): Array<Record<string, unknown>> {
-  return out.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
-}
-
 async function searchOpenPrs(qualifier: string, gh: GhExec): Promise<SearchRow[]> {
-  const q = encodeURIComponent(`is:pr is:open archived:false ${qualifier}`);
   const out = await gh([
-    'api', `search/issues?q=${q}&sort=updated&order=desc&per_page=100`, '--paginate', '--cache', '60s', '--jq', SEARCH_JQ,
+    'api', 'graphql', '--paginate',
+    '-f', `q=is:pr is:open archived:false sort:updated-desc ${qualifier}`, '-f', `query=${SEARCH_QUERY}`,
+    '--jq', '.data.search.nodes[] | select(.number)',
   ]);
-  return parseNdjson(out).map((row) => ({ slug: String(row.slug ?? ''), pr: rowToProjectPr(row) }));
+  return out.split('\n').filter((l) => l.trim()).map((l) => prFromNode(JSON.parse(l) as Record<string, unknown>));
 }
 
 export async function listViewerOwners(viewer: string | null, gh: GhExec = ghExec): Promise<string[]> {
@@ -192,38 +182,22 @@ export async function buildOpenPrs(
     bySlug.set(slug, prs);
   }
 
-  const cacheDir = opts.cacheDir ?? getCacheDir();
-  const rollups = new KeyedCache<CachedRollup>(cacheDir, 'project-pr-ci.json', '@', isCachedRollup);
-  const nowMs = opts.nowMs ?? Date.now();
   const projects = await projectMap;
-
-  const readers = new Map<string, CiReader>();
-  for (const slug of bySlug.keys()) readers.set(slug, { slug, gh, rollups, errors: new CiErrors(), nowMs, reads: new Map() });
+  const errors = new Map([...bySlug.keys()].map((slug) => [slug, new CiErrors()]));
   const merges = new Map([...bySlug.keys()].map((slug) => [slug, readRepoMergeAbility(slug, gh).catch((err: unknown) => {
-    readers.get(slug)!.errors.record(err);
+    errors.get(slug)!.record(err);
     return null;
   })]));
-  const listed = [...bySlug].flatMap(([slug, prs]) => [...prs.values()].map((pr) => ({ slug, pr })));
-  const read = await mapBounded(listed, 8, async ({ slug, pr: row }): Promise<{ slug: string; pr: OpenPr }> => {
-    const ci = readers.get(slug)!;
-    let pr = row;
-    try {
-      pr = await fetchOnePr(slug, row.number, gh, '60s');
-    } catch (err) {
-      ci.errors.record(err);
-    }
-    const ciSummary = await readCi(ci, pr.headSha || null);
-    return { slug, pr: withNeeds({ ...pr, ...ciSummary }, viewer, requested.has(key(slug, pr.number))) };
-  });
   const repositories = await Promise.all([...bySlug.keys()].map(async (slug): Promise<OpenPrRepo> => ({
     slug,
     projects: projects.get(slug.toLowerCase()) ?? [],
     merge: await merges.get(slug)!,
-    pullRequests: read.filter((r) => r.slug === slug).map((r) => r.pr).sort(compareOpenPrs),
-    ciError: readers.get(slug)!.errors.message,
+    pullRequests: [...bySlug.get(slug)!.values()]
+      .map((pr) => withNeeds(pr, viewer, requested.has(key(slug, pr.number))))
+      .sort(compareOpenPrs),
+    ciError: errors.get(slug)!.message,
   })));
   repositories.sort(compareRepos);
-  rollups.save();
 
   const owners = ownerReads.map((r) => r.owner);
   return {

@@ -590,6 +590,23 @@ budget are fast-follow. POSIX-only in v1. `reviewDecision` is deliberately never
 REST-derived (it is a GraphQL-computed branch-protection/CODEOWNERS decision;
 approximating it could let the merge loop bypass review).
 
+**The open-PR reads are one GraphQL query per repository or owner, a measured
+exception to the REST-first rule.** `agents projects prs <name>` lists a repository's
+open PRs with one paginated `repository.pullRequests` query, and the all-orgs
+`agents projects prs` (AGI Menu's GitHub tab) runs one paginated `search` per owner
+plus one for `review-requested:@me`; both return each PR's head, `mergeable`,
+`mergeStateStatus` and check rollup in the same page (`PR_NODE_FIELDS` and
+`prFromNode` in [`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts)).
+A page of 100 PRs costs 2 GraphQL points (measured with `rateLimit { cost }`). It
+replaced a per-PR fan-out of three REST requests and three `gh` processes
+(`pulls/{n}`, `check-runs`, `status`): on a 102-PR repository the read went from
+about 40 s to 6.7 s, and the all-orgs read of 203 PRs in 28 repositories used to
+take 97.9 s and 39 CPU-seconds. The rule above targets poll loops and per-item
+GraphQL calls; a bounded read that removes a per-item REST fan-out spends less of
+both budgets. GitHub computes `mergeable` lazily, so a cold read can report
+`UNKNOWN` (null here) until the next one, exactly as the REST `pulls/{n}` read did.
+Merged-PR and default-branch checks still use the cached REST rollup.
+
 The `agents projects prs` write verbs follow the same budget rule
 ([`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts), documented in
 [`docs/projects.md`](docs/projects.md)): `merge`, `review --approve` and `comment`

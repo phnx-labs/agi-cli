@@ -20,6 +20,7 @@ import {
   setProjectPrAutoMerge,
   BLOCKED_WITHOUT_ADMIN,
   OWN_PR_APPROVAL,
+  prFromNode,
 } from './project-prs.js';
 import { repoPathClaims } from '../projects.js';
 import type { ProjectDef } from '../projects.js';
@@ -58,7 +59,11 @@ type Routes = Record<string, string | Error | ((args: string[]) => string)>;
 function recordedGh(routes: Routes) {
   const asked: string[] = [];
   const gh = async (args: string[]) => {
-    const endpoint = args[0] === 'api' ? (args[1] === '-X' ? `${args[2]} ${args[3]}` : args[1]) : args.join(' ');
+    const field = (name: string) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+    const endpoint = args[0] !== 'api' ? args.join(' ')
+      : args[1] === '-X' ? `${args[2]} ${args[3]}`
+      : args[1] === 'graphql' && field('owner') ? `graphql ${field('owner')}/${field('name')}`
+      : args[1];
     asked.push(endpoint);
     const hit = routes[endpoint];
     if (hit === undefined) throw new Error(`unexpected gh ${args.join(' ')}`);
@@ -68,11 +73,25 @@ function recordedGh(routes: Routes) {
   return { gh, asked };
 }
 
-const prLine = (number: number, sha: string) => JSON.stringify({
+const GRAPHQL = JSON.parse(fs.readFileSync(new URL('./testdata/project-prs-graphql.json', import.meta.url), 'utf-8')) as {
+  nodes: Array<Record<string, unknown>>;
+};
+const OPEN = 'graphql acme/mono';
+const ndjson = (rows: readonly unknown[]) => rows.map((r) => JSON.stringify(r)).join('\n');
+/** A bare open-PR node: no checks, mergeability not yet computed. */
+const prNode = (number: number, sha: string, extra: Record<string, unknown> = {}) => ({
+  number, title: `PR ${number}`, url: `https://github.com/acme/mono/pull/${number}`, isDraft: false,
+  state: 'OPEN', createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', body: '',
+  author: { __typename: 'User', login: 'octocat', avatarUrl: '' }, repository: { nameWithOwner: 'acme/mono' },
+  headRefName: `b${number}`, baseRefName: 'main', headRefOid: sha, mergeable: 'UNKNOWN', mergeStateStatus: 'UNKNOWN',
+  autoMergeRequest: null, commits: { nodes: [{ commit: { statusCheckRollup: null } }] }, ...extra,
+});
+const restPr = (number: number, sha: string) => JSON.stringify({
   number, title: `PR ${number}`, url: `https://github.com/acme/mono/pull/${number}`, isDraft: false,
   state: 'OPEN', createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', login: 'octocat',
   avatarUrl: '', headRefName: `b${number}`, baseRefName: 'main', headSha: sha, body: '', mergeable: null, mergeableState: null,
 });
+const fixtureNode = (number: number) => GRAPHQL.nodes.find((n) => n.number === number)!;
 
 describe('monorepo scoping', () => {
   it('classifies by path prefix, never by a name that merely starts the same', () => {
@@ -93,10 +112,10 @@ describe('monorepo scoping', () => {
   it('lists only this project\'s and repo-wide PRs of a shared repo, reading each head\'s files once', async () => {
     const rush = { name: 'rush', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/rush' } as ProjectDef;
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
-    const routes: Record<string, string> = {
+    const routes: Routes = {
       'repos/acme/mono': 'acme/mono\n',
       'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-      'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'a1'), prLine(2, 'b2'), prLine(3, 'c3')].join('\n'),
+      [OPEN]: ndjson([prNode(1, 'a1'), prNode(2, 'b2'), prNode(3, 'c3')]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/2/files?per_page=100': 'rush/cli/main.ts\nprix/api.ts\n',
       'repos/acme/mono/pulls/3/files?per_page=100': 'docs/guide.md\n',
@@ -118,7 +137,7 @@ describe('monorepo scoping', () => {
     const { gh, asked } = recordedGh({
       'repos/acme/mono': 'acme/mono\n',
       'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-      'repos/acme/mono/pulls?state=open&per_page=100': prLine(9, 'd4'),
+      [OPEN]: ndjson([prNode(9, 'd4')]),
     });
     const envelope = await buildProjectPrs(solo, {}, gh, [solo]);
     expect(envelope.repositories[0].pullRequests.map((pr) => [pr.number, pr.scope])).toEqual([[9, null]]);
@@ -151,7 +170,7 @@ describe('CI at a glance and recently merged PRs', () => {
     ...REST,
     'repos/acme/mono': repoRead,
     'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-    'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2'), prLine(3, 'o3')].join('\n'),
+    [OPEN]: ndjson(GRAPHQL.nodes),
   });
 
   it('classifies each open head\'s REST rollup and names the failing checks', async () => {
@@ -168,24 +187,55 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
-  it('carries mergeable and mergeableState from each open PR\'s cached REST read, never GraphQL', async () => {
+  it('reads every open PR, its merge state and its checks in one GraphQL list, with no per-PR read', async () => {
     const { gh, asked } = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(repo.ciError).toBeNull();
-    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
-      [1, false, 'dirty'],
-      [2, true, 'clean'],
-      [3, null, 'unknown'],
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState, pr.headSha])).toEqual([
+      [1, false, 'dirty', 'o1'],
+      [2, true, 'clean', 'o2'],
+      [3, null, 'unknown', 'o3'],
     ]);
-    expect(asked.filter((e) => /^repos\/acme\/mono\/pulls\/[123]$/.test(e)).sort()).toEqual([1, 2, 3].map((n) => `repos/acme/mono/pulls/${n}`));
-    expect(asked.some((e) => e.includes('graphql'))).toBe(false);
+    expect(asked.filter((e) => e === OPEN)).toHaveLength(1);
+    expect(asked.some((e) => /^repos\/acme\/mono\/(pulls\/[123]$|commits\/o[123]\/)/.test(e))).toBe(false);
   });
 
-  it('keeps the list when one PR\'s merge-state read fails, naming the failure', async () => {
-    const { gh } = recordedGh({ ...soloRoutes(), 'repos/acme/mono/pulls/2': ghError('gh: Server Error (HTTP 502)\n') });
+  it('asks once per repository however many PRs it has', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => prNode(i + 1, `h${i + 1}`));
+    const { gh, asked } = recordedGh({ ...soloRoutes(), [OPEN]: ndjson(many) });
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
-    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([[1, false, 'dirty'], [2, null, null], [3, null, 'unknown']]);
-    expect(repo.ciError).toContain('502');
+    expect(repo.pullRequests).toHaveLength(250);
+    expect(asked.filter((e) => e.startsWith('graphql'))).toEqual([OPEN]);
+    expect(asked.filter((e) => /\/commits\/h\d+\//.test(e) || /\/pulls\/\d+$/.test(e) && !/pulls\/(10|13|15)$/.test(e))).toEqual([]);
+  });
+
+  it('a failed open-PR list fails that repository and marks the read partial', async () => {
+    const { gh } = recordedGh({ ...soloRoutes(), [OPEN]: ghError('GraphQL: API rate limit exceeded for user ID 1.\n') });
+    const envelope = await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
+    expect(envelope.partial).toBe(true);
+    expect(envelope.repositories[0]).toMatchObject({ pullRequests: [] });
+    expect(envelope.repositories[0].error).toMatch(/rate limit|Command failed/);
+  });
+
+  it('maps a GraphQL node to the REST shape: bot suffix, lowercased merge state, check run over a same-named status', () => {
+    const node = prNode(4, 'h4', {
+      author: { __typename: 'Bot', login: 'dependabot', avatarUrl: 'https://avatars.githubusercontent.com/in/29110?v=4' },
+      mergeable: 'MERGEABLE', mergeStateStatus: 'HAS_HOOKS',
+      autoMergeRequest: { enabledBy: { login: 'octocat' }, mergeMethod: 'SQUASH' },
+      commits: { nodes: [{ commit: { statusCheckRollup: { contexts: { nodes: [
+        { __typename: 'StatusContext', context: 'test', state: 'FAILURE', targetUrl: '' },
+        { __typename: 'CheckRun', name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: '' },
+      ] } } } }] },
+    });
+    const { slug, pr } = prFromNode(node);
+    expect(slug).toBe('acme/mono');
+    expect(pr).toMatchObject({
+      author: { login: 'dependabot[bot]' }, mergeable: true, mergeableState: 'has_hooks', headSha: 'h4',
+      autoMerge: { enabledBy: 'octocat', method: 'squash' }, ciState: 'SUCCESS', failingChecks: [], checks: null,
+    });
+    expect(prFromNode(prNode(5, 'h5', { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })).pr)
+      .toMatchObject({ author: { login: 'octocat' }, mergeable: false, mergeableState: 'dirty', ciState: null });
+    expect(prFromNode(prNode(6, 'h6')).pr).toMatchObject({ mergeable: null, mergeableState: 'unknown' });
   });
 
   it('lists merges in the last 7 days, newest first, keeping one at the cutoff and dropping one a millisecond earlier', async () => {
@@ -202,17 +252,15 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.recentlyMerged[2]).toMatchObject({ mergedAt: '2026-09-27T12:00:00Z', ciState: 'SUCCESS' });
   });
 
-  it('caches only a finished rollup: a warm run re-reads just the running and check-less commits', async () => {
+  it('caches finished rollups of merged and default-branch commits: a warm run re-reads none of them', async () => {
     const cacheDir = freshCache();
     await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
     const warm = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, warm.gh, [solo], { nowMs: NOW, cacheDir })).repositories;
-    expect(warm.asked.filter((e) => e.endsWith('/check-runs')).sort()).toEqual([
-      'repos/acme/mono/commits/o1/check-runs',
-      'repos/acme/mono/commits/o3/check-runs',
-    ]);
+    expect(warm.asked.filter((e) => e.endsWith('/check-runs'))).toEqual([]);
     expect(warm.asked.filter((e) => /pulls\/(10|13|15)$/.test(e))).toEqual([]);
     expect(repo.pullRequests.map((pr) => pr.ciState)).toEqual(['FAILURE', 'SUCCESS', null]);
+    expect(repo.defaultBranch).toMatchObject({ ciState: 'FAILURE' });
     expect(repo.recentlyMerged.map((pr) => [pr.number, pr.mergedBy, pr.ciState])).toEqual([
       [13, 'hubot', 'FAILURE'], [10, null, 'SUCCESS'], [15, 'hubot', 'SUCCESS'],
     ]);
@@ -223,20 +271,20 @@ describe('CI at a glance and recently merged PRs', () => {
     const red = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE', link: '' });
     const green = JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', link: '' });
     const routesWith = (checkRuns: string): Routes => ({
-      ...soloRoutes(), 'repos/acme/mono/commits/o1/check-runs': checkRuns, 'repos/acme/mono/commits/o1/status': '',
+      ...soloRoutes(), 'repos/acme/mono/commits/d0d0d0d/check-runs': checkRuns, 'repos/acme/mono/commits/d0d0d0d/status': '',
     });
     const first = await buildProjectPrs(solo, {}, recordedGh(routesWith(red)).gh, [solo], { nowMs: NOW, cacheDir });
-    expect(first.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE', failingChecks: ['test'] });
+    expect(first.repositories[0].defaultBranch).toMatchObject({ ciState: 'FAILURE', failingChecks: ['test'] });
 
     const early = recordedGh(routesWith(green));
     const stillRed = await buildProjectPrs(solo, {}, early.gh, [solo], { nowMs: NOW + FAILING_ROLLUP_TTL_MS - 1, cacheDir });
-    expect(early.asked).not.toContain('repos/acme/mono/commits/o1/check-runs');
-    expect(stillRed.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'FAILURE' });
+    expect(early.asked).not.toContain('repos/acme/mono/commits/d0d0d0d/check-runs');
+    expect(stillRed.repositories[0].defaultBranch).toMatchObject({ ciState: 'FAILURE' });
 
     const due = recordedGh(routesWith(green));
     const nowGreen = await buildProjectPrs(solo, {}, due.gh, [solo], { nowMs: NOW + FAILING_ROLLUP_TTL_MS, cacheDir });
-    expect(due.asked).toContain('repos/acme/mono/commits/o1/check-runs');
-    expect(nowGreen.repositories[0].pullRequests[0]).toMatchObject({ number: 1, ciState: 'SUCCESS', failingChecks: [] });
+    expect(due.asked).toContain('repos/acme/mono/commits/d0d0d0d/check-runs');
+    expect(nowGreen.repositories[0].defaultBranch).toMatchObject({ ciState: 'SUCCESS', failingChecks: [] });
   });
 
   it('trusts a green SHA for an hour, then re-reads it so a late workflow shows up', async () => {
@@ -245,16 +293,16 @@ describe('CI at a glance and recently merged PRs', () => {
 
     const withinHour = recordedGh(soloRoutes());
     await buildProjectPrs(solo, {}, withinHour.gh, [solo], { nowMs: NOW + PASSING_ROLLUP_TTL_MS - 1, cacheDir });
-    expect(withinHour.asked).not.toContain('repos/acme/mono/commits/o2/check-runs');
+    expect(withinHour.asked).not.toContain('repos/acme/mono/commits/c10/check-runs');
 
     const late = [
       JSON.stringify({ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS', link: '' }),
       JSON.stringify({ name: 'deploy-preview', status: 'COMPLETED', conclusion: 'FAILURE', link: '' }),
     ].join('\n');
-    const afterHour = recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/o2/check-runs': late });
+    const afterHour = recordedGh({ ...soloRoutes(), 'repos/acme/mono/commits/c10/check-runs': late });
     const [repo] = (await buildProjectPrs(solo, {}, afterHour.gh, [solo], { nowMs: NOW + PASSING_ROLLUP_TTL_MS, cacheDir })).repositories;
-    expect(afterHour.asked).toContain('repos/acme/mono/commits/o2/check-runs');
-    expect(repo.pullRequests[1]).toMatchObject({ number: 2, ciState: 'FAILURE', failingChecks: ['deploy-preview'] });
+    expect(afterHour.asked).toContain('repos/acme/mono/commits/c10/check-runs');
+    expect(repo.recentlyMerged.find((pr) => pr.number === 10)).toMatchObject({ ciState: 'FAILURE', failingChecks: ['deploy-preview'] });
   });
 
   it('does not trust a cached rollup from the future after the clock steps backwards', async () => {
@@ -262,13 +310,13 @@ describe('CI at a glance and recently merged PRs', () => {
     await buildProjectPrs(solo, {}, recordedGh(soloRoutes()).gh, [solo], { nowMs: NOW, cacheDir });
     const back = recordedGh(soloRoutes());
     await buildProjectPrs(solo, {}, back.gh, [solo], { nowMs: NOW - 1, cacheDir });
-    expect(back.asked).toContain('repos/acme/mono/commits/o2/check-runs');
+    expect(back.asked).toContain('repos/acme/mono/commits/c10/check-runs');
   });
 
   it('drops a malformed cache entry on load: the repo still returns, and the commit is re-read', async () => {
     const cacheDir = freshCache();
     fs.writeFileSync(path.join(cacheDir, 'project-pr-ci.json'), JSON.stringify({
-      'acme/mono@o2': { items: 'not-an-array', readAt: NOW },
+      'acme/mono@c10': { items: 'not-an-array', readAt: NOW },
       'acme/mono@d0d0d0d': { items: [{ name: 'test', status: 'COMPLETED', conclusion: 'SUCCESS' }] },
     }));
     fs.writeFileSync(path.join(cacheDir, 'project-pr-merged.json'), JSON.stringify({ 'acme/mono#13': { mergedBy: 7 } }));
@@ -278,9 +326,9 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.error).toBeNull();
     expect(repo.ciError).toBeNull();
     expect(asked).toEqual(expect.arrayContaining([
-      'repos/acme/mono/commits/o2/check-runs', 'repos/acme/mono/commits/d0d0d0d/check-runs', 'repos/acme/mono/pulls/13',
+      'repos/acme/mono/commits/c10/check-runs', 'repos/acme/mono/commits/d0d0d0d/check-runs', 'repos/acme/mono/pulls/13',
     ]));
-    expect(repo.pullRequests[1]).toMatchObject({ number: 2, ciState: 'SUCCESS' });
+    expect(repo.recentlyMerged.find((pr) => pr.number === 10)).toMatchObject({ ciState: 'SUCCESS' });
     expect(repo.defaultBranch).toMatchObject({ ciState: 'FAILURE' });
     expect(repo.recentlyMerged[0]).toMatchObject({ number: 13, mergedBy: 'hubot' });
   });
@@ -339,16 +387,16 @@ describe('CI at a glance and recently merged PRs', () => {
     const { gh } = recordedGh({
       ...soloRoutes(),
       [CLOSED_PAGE(1)]: serverError,
-      'repos/acme/mono/commits/o1/check-runs': rateLimited,
+      'repos/acme/mono/commits/d0d0d0d/check-runs': rateLimited,
     });
     const envelope = await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() });
     const [repo] = envelope.repositories;
     expect(envelope.partial).toBe(false);
     expect(repo.error).toBeNull();
     expect(repo.ciError).toBe('API rate limit exceeded for user ID 1. (HTTP 403)');
-    expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState])).toEqual([[1, null], [2, 'SUCCESS'], [3, null]]);
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState])).toEqual([[1, 'FAILURE'], [2, 'SUCCESS'], [3, null]]);
     expect(repo.recentlyMerged).toEqual([]);
-    expect(repo.defaultBranch).toMatchObject({ name: 'main', ciState: 'FAILURE' });
+    expect(repo.defaultBranch).toMatchObject({ name: 'main', ciState: null });
   });
 
   it('scopes merged PRs in a shared repo like open ones, and keeps both in the files cache', async () => {
@@ -356,7 +404,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
     const routes: Routes = {
       ...soloRoutes(),
-      'repos/acme/mono/pulls?state=open&per_page=100': prLine(1, 'o1'),
+      [OPEN]: ndjson([fixtureNode(1)]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
       'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
       'repos/acme/mono/pulls/10/files?per_page=100': 'rush/cli/main.ts\n',
@@ -379,7 +427,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
     const routes: Routes = {
       ...soloRoutes(),
-      'repos/acme/mono/pulls?state=open&per_page=100': [prLine(1, 'o1'), prLine(2, 'o2')].join('\n'),
+      [OPEN]: ndjson([fixtureNode(1), fixtureNode(2)]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
       'repos/acme/mono/pulls/2/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
@@ -391,15 +439,16 @@ describe('CI at a glance and recently merged PRs', () => {
     await buildProjectPrs(rush, {}, recordedGh(routes).gh, [rush, prix], { nowMs: NOW, cacheDir });
     const again = recordedGh(routes);
     const [repo] = (await buildProjectPrs(prix, {}, again.gh, [rush, prix], { nowMs: NOW, cacheDir })).repositories;
-    expect(again.asked).not.toContain('repos/acme/mono/commits/o2/check-runs');
+    expect(again.asked).not.toContain('repos/acme/mono/commits/c15/check-runs');
     expect(repo.pullRequests.map((pr) => [pr.number, pr.ciState])).toEqual([[2, 'SUCCESS']]);
+    expect(repo.recentlyMerged.map((pr) => [pr.number, pr.ciState])).toEqual([[13, 'FAILURE'], [15, 'SUCCESS']]);
   });
 
   it('--number carries the same verdict from the REST rollup and no merged list', async () => {
     const { gh } = recordedGh({
       'repos/acme/mono': repoRead,
       'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'repos/acme/mono/pulls/1': restPr(1, 'o1'),
       'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: 'APPROVED', headRefOid: 'o1' }),
       'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
       'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
@@ -416,7 +465,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const routes = (review: string | Error) => recordedGh({
       'repos/acme/mono': repoRead,
       'user': '{"login":"octocat"}\n',
-      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'repos/acme/mono/pulls/1': restPr(1, 'o1'),
       'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': review,
       'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
       'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],
@@ -439,7 +488,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const detail = recordedGh({
       'repos/acme/mono': failing,
       'user': '{"login":"octocat"}\n',
-      'repos/acme/mono/pulls/1': prLine(1, 'o1'),
+      'repos/acme/mono/pulls/1': restPr(1, 'o1'),
       'pr view 1 --repo acme/mono --json reviewDecision,headRefOid': JSON.stringify({ reviewDecision: null, headRefOid: 'o1' }),
       'repos/acme/mono/commits/o1/check-runs': REST['repos/acme/mono/commits/o1/check-runs'],
       'repos/acme/mono/commits/o1/status': REST['repos/acme/mono/commits/o1/status'],

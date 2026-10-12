@@ -2,11 +2,6 @@
   "_comment": "Recorded `gh api --jq` answers for acme/mono, keyed by endpoint. An array is printed as one JSON object per line, the way --jq streams it. The clock for these rows is 2026-10-04T12:00:00Z, so the merged window starts at 2026-09-27T12:00:00Z.",
   "routes": {
     "repos/acme/mono/branches/main": "d0d0d0d\n",
-
-    "repos/acme/mono/pulls/1": [{ "number": 1, "mergeable": false, "mergeableState": "dirty" }],
-    "repos/acme/mono/pulls/2": [{ "number": 2, "mergeable": true, "mergeableState": "clean" }],
-    "repos/acme/mono/pulls/3": [{ "number": 3, "mergeable": null, "mergeableState": "unknown" }],
-
     "repos/acme/mono/commits/o1/check-runs": [
       { "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "link": "" },
       { "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" },
@@ -17,12 +12,6 @@
       { "name": "ci/external", "state": "ERROR", "link": "" },
       { "name": "ci/coverage", "state": "SUCCESS", "link": "" }
     ],
-    "repos/acme/mono/commits/o2/check-runs": [
-      { "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" }
-    ],
-    "repos/acme/mono/commits/o2/status": [],
-    "repos/acme/mono/commits/o3/check-runs": [],
-    "repos/acme/mono/commits/o3/status": [],
     "repos/acme/mono/commits/d0d0d0d/check-runs": [
       { "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "link": "" },
       { "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS", "link": "" }
