@@ -1214,7 +1214,7 @@ spawn, that prompt never runs.
   worker, its `notify`-scoped device token. A box with neither logs the failure
   to deliver; `agents doctor` reports it as `owner-not-signed-in`.
 - **Deduped server-side** on `routine:<job>:<runId>`, so a run reaches the owner
-  at most once even if two daemons report it. Quiet hours hold it back.
+  at most once even if two daemons report it.
 
 ## Commands
 
