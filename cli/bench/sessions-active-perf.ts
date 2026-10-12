@@ -184,7 +184,7 @@ async function benchDistributedFanOut(binDir: string): Promise<{
   parallelismThresholdMs: number;
   pass: boolean;
 }> {
-  const { gatherActiveSessions } = await import('../src/commands/ps-roster.js');
+  const { gatherActiveSessions } = await import('../src/lib/session/active.js');
 
   setShimMode(binDir, 'peer');
   setShimLatency(binDir, PEER_LATENCY_MS);
