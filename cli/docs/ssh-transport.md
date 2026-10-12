@@ -53,7 +53,7 @@ passed it. The un-multiplexed callers were precisely the hot ones:
 | P1 | `followHostTask` ([`progress.ts`](../src/lib/hosts/progress.ts)) — the poll behind every `run --device` / `teams … --watch` | **2 un-muxed ssh / 1.5 s ≈ 4,800 process spawns/hour**, per followed job |
 | P2 | `ensureHostReady` ([`ready.ts`](../src/lib/hosts/ready.ts)) — runs before every dispatch | **3 sequential connections** (reachable + version + agent listing), 2 un-muxed |
 | P3 | `sshExec`/`sshStream` default | multiplexing opt-in; the common paths skipped it |
-| P4 | `runRemoteSessions` ([`session/remote/remote.ts`](../src/lib/session/remote/remote.ts)) | a **private copy** of the ssh options with no multiplexing |
+| P4 | `runRemoteSessions` (`session/remote/remote.ts`, removed with `agents sessions` in PHNX-4227) | a **private copy** of the ssh options with no multiplexing |
 | P5 | secrets push, the `-N` tunnel, and other direct `spawn('ssh')` sites | bypass the choke point; some under-specified (no `ConnectTimeout`) |
 | P6 | `devices add` / host enrollment ([`lib/hosts/registry.ts`](../src/lib/hosts/registry.ts)) | a duplicate reachability probe |
 | P7 | `SSH_OPTS` | no keepalive — a dropped link hangs instead of dying |
