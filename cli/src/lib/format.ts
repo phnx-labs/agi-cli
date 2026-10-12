@@ -107,18 +107,8 @@ export function parseCommaSeparatedList(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
-export function visibleWidth(s: string): number {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1b\[[0-9;]*m/g, '').length;
-}
-
 export function padRight(s: string, width: number): string {
   return s.length >= width ? s : s + ' '.repeat(width - s.length);
-}
-
-export function padVisible(s: string, width: number): string {
-  const w = visibleWidth(s);
-  return w >= width ? s : s + ' '.repeat(width - w);
 }
 
 export function isJsonMode(opts: { json?: boolean }): boolean {

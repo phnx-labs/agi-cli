@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { visibleWidth, padVisible } from '../lib/format.js';
+import { stringWidth, padToWidth } from '../lib/text/width.js';
 import { stripAnsi } from '../lib/session/width.js';
 import { interruptibleSpinner } from '../lib/spinner.js';
 import * as fs from 'fs';
@@ -373,19 +373,19 @@ function renderTable(rows: RepoRow[], compact: boolean): void {
 
   const headers = ['REPO', 'BRANCH', 'SYNC', 'CHANGES'];
   const tableCells = [...cells.values()];
-  const aliasW = Math.max(headers[0].length, ...rows.map((r) => r.alias.length));
-  const branchW = Math.max(headers[1].length, 0, ...tableCells.map((c) => visibleWidth(c[0])));
-  const syncW = Math.max(headers[2].length, 0, ...tableCells.map((c) => visibleWidth(c[1])));
-  const changesW = Math.max(headers[3].length, 0, ...tableCells.map((c) => visibleWidth(c[2])));
+  const aliasW = Math.max(headers[0].length, ...rows.map((r) => stringWidth(r.alias)));
+  const branchW = Math.max(headers[1].length, 0, ...tableCells.map((c) => stringWidth(c[0])));
+  const syncW = Math.max(headers[2].length, 0, ...tableCells.map((c) => stringWidth(c[1])));
+  const changesW = Math.max(headers[3].length, 0, ...tableCells.map((c) => stringWidth(c[2])));
 
   console.log(
     `  ${chalk.gray(headers[0].padEnd(aliasW))}  ${chalk.gray(headers[1].padEnd(branchW))}  ${chalk.gray(headers[2].padEnd(syncW))}  ${chalk.gray(headers[3].padEnd(changesW))}  ${chalk.gray('REMOTE')}`,
   );
   for (const r of rows) {
-    const aliasCol = chalk.cyan(r.alias.padEnd(aliasW));
+    const aliasCol = chalk.cyan(padToWidth(r.alias, aliasW));
     const c = cells.get(r.alias);
     if (c) {
-      console.log(`  ${aliasCol}  ${padVisible(c[0], branchW)}  ${padVisible(c[1], syncW)}  ${padVisible(c[2], changesW)}  ${c[3]}`);
+      console.log(`  ${aliasCol}  ${padToWidth(c[0], branchW)}  ${padToWidth(c[1], syncW)}  ${padToWidth(c[2], changesW)}  ${c[3]}`);
     } else {
       console.log(`  ${aliasCol}  ${r.raw}`);
     }
@@ -397,7 +397,7 @@ export function wrapPhrases(parts: string[], width: number): string[] {
   let cur = '';
   for (const p of parts) {
     const cand = cur ? `${cur}, ${p}` : p;
-    if (cur && visibleWidth(cand) > width) {
+    if (cur && stringWidth(cand) > width) {
       lines.push(cur);
       cur = p;
     } else {
@@ -517,9 +517,9 @@ export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
   if (cells.length === 0) return [];
 
   const headers = ['DEVICE', 'REPO', 'SYNC', 'CHANGES'];
-  const devW = Math.max(headers[0].length, ...cells.map((c) => visibleWidth(c.device)));
-  const repoW = Math.max(headers[1].length, ...cells.map((c) => visibleWidth(c.repo)));
-  const syncW = Math.max(headers[2].length, ...cells.map((c) => visibleWidth(c.sync)));
+  const devW = Math.max(headers[0].length, ...cells.map((c) => stringWidth(c.device)));
+  const repoW = Math.max(headers[1].length, ...cells.map((c) => stringWidth(c.repo)));
+  const syncW = Math.max(headers[2].length, ...cells.map((c) => stringWidth(c.sync)));
 
   const lines: string[] = [];
   lines.push(
@@ -527,7 +527,7 @@ export function renderDeviceStatusRows(results: DeviceRepoStatus[]): string[] {
   );
   for (const c of cells) {
     lines.push(
-      `  ${chalk.cyan(padVisible(c.device, devW))}  ${padVisible(c.repo, repoW)}  ${padVisible(c.sync, syncW)}  ${c.changes}`,
+      `  ${chalk.cyan(padToWidth(c.device, devW))}  ${padToWidth(c.repo, repoW)}  ${padToWidth(c.sync, syncW)}  ${c.changes}`,
     );
   }
   return lines;

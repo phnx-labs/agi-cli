@@ -4,6 +4,7 @@ import {
   resolveDeviceIntent, parseRemoteRepoRows, renderDeviceStatusRows, NO_REPO_FANOUT_ENV,
   type ChangeAction, type DeviceRepoStatus,
 } from './repo.js';
+import { stringWidth } from '../lib/text/width.js';
 
 function plain(s: string): string {
   // eslint-disable-next-line no-control-regex
@@ -133,6 +134,20 @@ describe('wrapPhrases', () => {
   it('measures visible width, ignoring ANSI color codes', () => {
     const red = (s: string) => `[31m${s}[39m`;
     expect(wrapPhrases([red('aaaa'), red('bbbb')], 10)).toEqual([`${red('aaaa')}, ${red('bbbb')}`]);
+  });
+
+  it('counts a wide character as two terminal columns', () => {
+    expect(wrapPhrases(['日本語', '日本'], 10)).toEqual(['日本語', '日本']);
+  });
+});
+
+describe('renderDeviceStatusRows alignment', () => {
+  it('keeps the SYNC column aligned when a repo alias has wide characters', () => {
+    const lines = renderDeviceStatusRows([
+      { device: 'box', reachable: true, rows: [{ alias: '日本語', raw: 'r1' }, { alias: 'abc', raw: 'r2' }] },
+    ]).map(plain);
+    const columns = lines.slice(1).map((l) => stringWidth(l.slice(0, l.indexOf('r'))));
+    expect(new Set(columns).size).toBe(1);
   });
 });
 

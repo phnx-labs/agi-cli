@@ -1,9 +1,11 @@
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomic.js';
+import { getLogsDir } from '../state.js';
 
-export const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', '.cache', 'logs', 'watchdog.log');
+export function watchdogLogPath(): string {
+  return path.join(getLogsDir(), 'watchdog.log');
+}
 
 export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'undelivered' | 'rotate' | 'error';
 
@@ -82,7 +84,7 @@ export function parseWatchdogEvents(text: string): WatchdogEvent[] {
   return events;
 }
 
-export function readWatchdogEvents(logPath = WATCHDOG_LOG_PATH): WatchdogEvent[] {
+export function readWatchdogEvents(logPath = watchdogLogPath()): WatchdogEvent[] {
   if (!fs.existsSync(logPath)) return [];
   return parseWatchdogEvents(fs.readFileSync(logPath, 'utf8'));
 }
@@ -122,7 +124,7 @@ export function appendWatchdogEvents(
 ): void {
 
   if (events.length === 0) return;
-  const logPath = opts.logPath ?? WATCHDOG_LOG_PATH;
+  const logPath = opts.logPath ?? watchdogLogPath();
   const maxLines = opts.maxLines ?? WATCHDOG_LOG_MAX_LINES;
   const lockPath = path.join(path.dirname(logPath), '.watchdog.log.lock');
   try {

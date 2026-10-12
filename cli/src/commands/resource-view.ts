@@ -1,6 +1,6 @@
 
 import chalk from 'chalk';
-import { truncate, padVisible, termLink } from '../lib/format.js';
+import { truncate, termLink } from '../lib/format.js';
 import type { AgentId } from '../lib/types.js';
 import { agentLabel } from '../lib/agents.js';
 import { itemPicker } from '../lib/picker.js';
@@ -107,19 +107,19 @@ function filterRows(rows: ResourceRow[], query: string): ResourceRow[] {
 
 function formatPickerRow(row: ResourceRow, opts: ResourceViewOptions): string {
   const linkTarget = opts.linkFor?.(row);
-  const padded = chalk.cyan(padVisible(row.name, opts.nameCap ?? 22));
+  const padded = chalk.cyan(padToWidth(row.name, opts.nameCap ?? 22));
   const name = linkTarget ? termLink(padded, linkTarget) : padded;
   const extra = opts.extraLabel
-    ? chalk.gray(padVisible(row.extra ?? '-', 10))
+    ? chalk.gray(padToWidth(row.extra ?? '-', 10))
     : '';
   const extra2 = opts.extra2Label
-    ? chalk.gray(padVisible(row.extra2 ?? '-', 16))
+    ? chalk.gray(padToWidth(row.extra2 ?? '-', 16))
     : '';
   const descRaw = row.description ? truncate(row.description, 40) : '';
   if (!syncEnabled(opts)) {
     return `${name} ${extra}${extra2}${chalk.gray(row.description ? truncate(row.description, 84) : '')}`;
   }
-  const desc = padVisible(chalk.gray(descRaw), 42);
+  const desc = padToWidth(chalk.gray(descRaw), 42);
   const sync = formatSyncSummary(row.targets, opts);
   return `${name} ${extra}${extra2}${desc} ${sync}`;
 }

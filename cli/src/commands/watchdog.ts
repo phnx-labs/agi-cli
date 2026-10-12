@@ -17,7 +17,7 @@ import {
 } from '../lib/watchdog/runner.js';
 import { isWatchdogRotateEnabled, listRotateStates, setWatchdogRotateEnabled } from '../lib/watchdog/rotate.js';
 import { loadWatchdogSessions, runWatchdogPass } from '../lib/watchdog/service.js';
-import { readWatchdogEvents, WATCHDOG_LOG_PATH } from '../lib/watchdog/log.js';
+import { readWatchdogEvents, watchdogLogPath } from '../lib/watchdog/log.js';
 import { selectWatchdogHistory } from '../lib/watchdog/history.js';
 import { sessionHeadline } from '../lib/session/title.js';
 
@@ -360,11 +360,11 @@ export function registerWatchdogCommand(program: Command): void {
         includeTicks: opts.all === true,
       });
       if (globals.json === true) {
-        console.log(JSON.stringify({ logPath: WATCHDOG_LOG_PATH, events: entries }, null, 2));
+        console.log(JSON.stringify({ logPath: watchdogLogPath(), events: entries }, null, 2));
         return;
       }
       if (entries.length === 0) {
-        console.log(chalk.dim(`No Watchdog events found in ${WATCHDOG_LOG_PATH}`));
+        console.log(chalk.dim(`No Watchdog events found in ${watchdogLogPath()}`));
         return;
       }
       for (const entry of entries) {
@@ -373,7 +373,7 @@ export function registerWatchdogCommand(program: Command): void {
         const reason = entry.reason ? ` · ${entry.reason}` : '';
         console.log(`${chalk.dim(when)}  ${entry.kind.padEnd(8)}  ${chalk.bold(session)}  ${entry.agent ?? '-'}  ${entry.message}${reason}`);
       }
-      console.log(chalk.dim(`${entries.length} event${entries.length === 1 ? '' : 's'} · ${WATCHDOG_LOG_PATH}`));
+      console.log(chalk.dim(`${entries.length} event${entries.length === 1 ? '' : 's'} · ${watchdogLogPath()}`));
     });
 
 

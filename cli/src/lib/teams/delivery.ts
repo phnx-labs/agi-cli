@@ -1,4 +1,5 @@
 
+import chalk from 'chalk';
 import { AgentStatus } from './agents.js';
 
 export type TeammateDelivery =
@@ -49,4 +50,17 @@ export function deliveryColorKey(delivery: TeammateDelivery, processStatus: stri
   if (delivery === 'pr_open') return 'pr_open';
   if (delivery === 'stranded') return 'stranded';
   return String(processStatus);
+}
+
+export function statusColor(status: string): (s: string) => string {
+  switch (status) {
+    case 'pending': return chalk.blue;
+    case 'running': return chalk.yellow;
+    case 'completed': return chalk.green;
+    case 'pr_open': return chalk.magenta;
+    case 'stranded': return chalk.yellow;
+    case 'failed': return chalk.red;
+    case 'stopped': return chalk.gray;
+    default: return chalk.white;
+  }
 }
