@@ -282,21 +282,44 @@ export function addNativeAccount(
   return account;
 }
 
+export const PEER_ACCOUNT_ROW_LIMIT = 256;
+
+export function peerAccountRow(record: NativeAccountRecord): NativeAccountRecord {
+  const { id, name, agent, identityKey, identityLabel, createdOn } = record;
+  return {
+    id, name, agent, identityKey, scope: 'version', provisioning: 'per-device',
+    ...(identityLabel ? { identityLabel } : {}),
+    ...(createdOn ? { createdOn } : {}),
+  };
+}
+
+function missingPeerRows(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  records: readonly NativeAccountRecord[],
+): NativeAccountRecord[] {
+  const known = listNativeAccounts(meta);
+  const missing: NativeAccountRecord[] = [];
+  for (const record of records.slice(0, PEER_ACCOUNT_ROW_LIMIT)) {
+    if (record.scope !== 'version' || record.provisioning !== 'per-device') continue;
+    if (Object.hasOwn(meta.accounts?.native ?? {}, record.id)) continue;
+    const taken = [...known, ...missing].some(account => account.agent === record.agent
+      && (account.identityKey === record.identityKey || account.name === record.name));
+    if (!taken) missing.push(peerAccountRow(record));
+  }
+  return missing;
+}
+
 export function adoptPeerNativeAccounts(records: readonly NativeAccountRecord[]): string[] {
-  const adopted: string[] = [];
+  if (missingPeerRows(readMeta(), records).length === 0) return [];
+  let adopted: NativeAccountRecord[] = [];
   updateMeta(current => {
+    adopted = missingPeerRows(current, records);
+    if (adopted.length === 0) return current;
     const native = { ...current.accounts?.native };
-    for (const record of records) {
-      if (record.scope !== 'version' || native[record.id]) continue;
-      const known = listNativeAccounts({ accounts: { native }, deviceAccounts: current.deviceAccounts });
-      if (known.some(account => account.agent === record.agent
-        && (account.identityKey === record.identityKey || account.name === record.name))) continue;
-      native[record.id] = record;
-      adopted.push(record.id);
-    }
-    return adopted.length === 0 ? current : { ...current, accounts: { ...current.accounts, native } };
+    for (const row of adopted) native[row.id] = row;
+    return { ...current, accounts: { ...current.accounts, native } };
   });
-  return adopted;
+  return adopted.map(row => row.id);
 }
 
 export function labelNativeAccount(

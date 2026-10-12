@@ -811,6 +811,22 @@ describe('adoptPeerNativeAccounts', () => {
     expect(readMeta().accounts?.native?.[local.id]?.name).toBe('socials-local');
   });
 
+  it('adopts identity fields only, never a credential reference or unknown field', () => {
+    const peer = record({ id: 'cred-row', name: 'cred-row', identityKey: 'grok:user=cred',
+      workerCredential: { bundle: 'prod-aws', key: 'AWS_SECRET', kind: 'api-key', mintedAt: 'x' }, extra: 'x' });
+    expect(adoptPeerNativeAccounts([peer as never])).toEqual(['cred-row']);
+    const row = readMeta().accounts?.native?.['cred-row'] as Record<string, unknown>;
+    expect(row.workerCredential).toBeUndefined();
+    expect(row.extra).toBeUndefined();
+    expect(row).toMatchObject({ scope: 'version', provisioning: 'per-device' });
+  });
+
+  it('adopts only per-device rows, and at most PEER_ACCOUNT_ROW_LIMIT of them', () => {
+    expect(adoptPeerNativeAccounts([record({ id: 'portable-row', name: 'portable-row', identityKey: 'grok:user=p', provisioning: 'portable' })])).toEqual([]);
+    const many = Array.from({ length: 300 }, (_, i) => record({ id: `bulk-${i}`, name: `bulk-${i}`, identityKey: `grok:user=bulk-${i}` }));
+    expect(adoptPeerNativeAccounts(many)).toHaveLength(256);
+  });
+
   it('ignores device-scoped rows', () => {
     expect(adoptPeerNativeAccounts([record({ id: 'device-row', name: 'device-only', identityKey: 'grok:user=d', scope: 'device' })])).toEqual([]);
   });
