@@ -827,6 +827,15 @@ describe('adoptPeerNativeAccounts', () => {
     expect(adoptPeerNativeAccounts(many)).toHaveLength(256);
   });
 
+  it('rejects ids that are not plain slugs, and a repeated id in one batch', () => {
+    expect(adoptPeerNativeAccounts([record({ id: '__proto__', name: 'proto', identityKey: 'grok:user=proto' })])).toEqual([]);
+    expect(adoptPeerNativeAccounts([
+      record({ id: 'dup-id', name: 'dup-a', identityKey: 'grok:user=dup-a' }),
+      record({ id: 'dup-id', name: 'dup-b', identityKey: 'grok:user=dup-b' }),
+    ])).toEqual(['dup-id']);
+    expect(readMeta().accounts?.native?.['dup-id']?.name).toBe('dup-a');
+  });
+
   it('ignores device-scoped rows', () => {
     expect(adoptPeerNativeAccounts([record({ id: 'device-row', name: 'device-only', identityKey: 'grok:user=d', scope: 'device' })])).toEqual([]);
   });

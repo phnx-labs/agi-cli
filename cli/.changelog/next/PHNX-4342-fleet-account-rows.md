@@ -7,7 +7,8 @@
   it already exchanges with peers. A worker adds any row
   it lacks when the sender is headed and created that row; it never overwrites or
   removes a local row. Only per-device accounts travel this way, and only their identity
-  fields; a credential reference never does. Each worker still signs in for itself with
-  `--per-device`.
+  fields; a credential reference never does. Rows added before the `provisioning` field
+  existed are not sent; workers already have those from earlier user-repo pulls. Each
+  worker still signs in for itself with `--per-device`.
   Source: `cli/src/lib/daemon/account-state-daemon-service.ts`,
   `cli/src/lib/accounting/usage-sync.ts`, `cli/src/lib/account-registry.ts`.

@@ -283,6 +283,7 @@ export function addNativeAccount(
 }
 
 export const PEER_ACCOUNT_ROW_LIMIT = 256;
+const PEER_ACCOUNT_ID = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,63}$/;
 
 export function peerAccountRow(record: NativeAccountRecord): NativeAccountRecord {
   const { id, name, agent, identityKey, identityLabel, createdOn } = record;
@@ -300,9 +301,9 @@ function missingPeerRows(
   const known = listNativeAccounts(meta);
   const missing: NativeAccountRecord[] = [];
   for (const record of records.slice(0, PEER_ACCOUNT_ROW_LIMIT)) {
-    if (record.scope !== 'version' || record.provisioning !== 'per-device') continue;
+    if (record.scope !== 'version' || record.provisioning !== 'per-device' || !PEER_ACCOUNT_ID.test(record.id)) continue;
     if (Object.hasOwn(meta.accounts?.native ?? {}, record.id)) continue;
-    const taken = [...known, ...missing].some(account => account.agent === record.agent
+    const taken = [...known, ...missing].some(account => account.id === record.id || account.agent === record.agent
       && (account.identityKey === record.identityKey || account.name === record.name));
     if (!taken) missing.push(peerAccountRow(record));
   }
