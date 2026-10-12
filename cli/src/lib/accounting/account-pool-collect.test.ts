@@ -73,6 +73,11 @@ describe('foldRegistryCandidates', () => {
     expect(foldRegistryCandidates('cursor', inputs()).filter((c) => c.providerAccount)).toEqual([]);
   });
 
+  it('includeKeyed (resume with an explicit --account) folds key accounts in, so the named one can match', () => {
+    expect(foldRegistryCandidates('claude', inputs(), true).filter((c) => c.providerAccount).map((c) => c.providerAccount))
+      .toEqual(['claude-setup', 'or-key']);
+  });
+
   it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {
     const noSecret: RegistryAccountRecord[] = [{ name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: false }];
     const out = foldRegistryCandidates('claude', inputs({ records: noSecret }));
