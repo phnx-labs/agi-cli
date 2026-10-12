@@ -111,7 +111,7 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
 
   if (target.kind === 'remote') {
     console.log(chalk.gray(`${short} lives on ${target.machine} — detaching it there over SSH…`));
-    const rc = await runOnPeer(['sessions', 'detach', target.sessionId, '--local'], target.machine);
+    const rc = await runOnPeer(['ps', 'detach', target.sessionId, '--local'], target.machine);
     if (rc === 'no-target') {
       console.error(chalk.red(`Can't reach ${target.machine} to detach ${short}.`));
       process.exitCode = 1;
