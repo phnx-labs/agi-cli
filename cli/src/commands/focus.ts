@@ -498,6 +498,7 @@ export async function focusResolvedSession(
   fallback: UnreachableFallback,
   attachOnly: boolean,
   reconnectReattach: boolean = false,
+  deps: TakeoverDeps = {},
 ): Promise<void> {
   const active = liveById.get(meta.id);
   if (active && isAttachableLiveSession(active)) {
@@ -520,6 +521,10 @@ export async function focusResolvedSession(
     ));
   }
   const remote = sessionProcessHost(meta, self);
+  if (!(deps.interactive ?? isInteractiveTerminal())) {
+    await resumeInTab(active ?? activeFromMeta(meta), remote, { ...deps, meta, interactive: false });
+    return;
+  }
   if (remote) {
     console.log(chalk.gray(`Recovering ${meta.shortId} on ${remote}…`));
     const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true, sessionId: meta.id });

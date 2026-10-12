@@ -1449,7 +1449,11 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   there. When the owning device cannot be reached or its `ps stop` exits non-zero
   (`runOnPeer` reports a one-shot hop's non-zero exit as `failed`), focus MUST NOT
   open a tab and MUST exit 1. When the run was stopped but the tab then fails to
-  open, the error MUST say the run was stopped and how to resume it. The tab backend MUST come from `resolveLaunchBackend` over the live
+  open, the error MUST say the run was stopped and how to resume it. A session
+  with no live process focused by a caller with no TTY MUST open in a tab the
+  same way (never `resumeSessionInPlace`, never a `runOnPeer` TTY hop), and MUST
+  exit 1 with the reason when no backend is available or the tab is not
+  confirmed; with a TTY, recovery keeps its in-place or SSH behavior. The tab backend MUST come from `resolveLaunchBackend` over the live
   roster's host samples, never from the first installed app. A caller with no
   TTY (AGI Menu) focusing a session owned by another device MUST open a local tab
   running the portable `agents run auto --resume <id> --interactive`, which routes
