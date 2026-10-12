@@ -29,12 +29,11 @@ export interface OwnerNotifyResult {
   delivered: OwnerChannel[];
   queued: OwnerChannel[];
   skipped: Array<{ channel: OwnerChannel; reason: string }>;
-  suppressed: null | 'duplicate' | 'quiet_hours';
+  suppressed: null | 'duplicate';
 }
 
 export interface OwnerPreferencesPatch {
   preferences?: Array<{ event: OwnerEvent; channel: OwnerChannel; enabled: boolean }>;
-  settings?: { timezone?: string; quietStart?: string | null; quietEnd?: string | null };
   destinations?: { imessage?: { address: string } | null };
 }
 
@@ -153,7 +152,6 @@ export async function putOwnerPreferences(patch: OwnerPreferencesPatch): Promise
 
 export function describeOwnerResult(result: OwnerNotifyResult): string {
   if (result.suppressed === 'duplicate') return 'suppressed: already sent';
-  if (result.suppressed === 'quiet_hours') return 'suppressed: quiet hours';
   const parts: string[] = [];
   if (result.delivered.length) parts.push(`delivered ${result.delivered.join(', ')}`);
   if (result.queued.length) parts.push(`Rush is sending ${result.queued.join(', ')}`);

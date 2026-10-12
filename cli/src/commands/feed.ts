@@ -126,8 +126,8 @@ as {message} and {ticket}; a missing placeholder skips that sink. A milestone is
 the owner when the sink has minLevel: important. Add --level important for a
 phone-worthy successful update. Use --blocked only when work cannot continue.
 With no sinks configured, an important post or a block reaches the owner through
-your account (agents auth login); a block is a needs_you event and bypasses
-quiet hours. The account's preferences pick email, Slack or iMessage.
+your account (agents auth login); a block is a needs_you event. The account's
+preferences pick email, Slack or iMessage.
 `;
 
 const FEED_NO_FANOUT_ENV = 'AGENTS_FEED_LOCAL';

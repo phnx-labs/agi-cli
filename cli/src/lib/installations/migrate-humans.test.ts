@@ -43,22 +43,22 @@ afterAll(async () => {
 });
 
 describe('humansToPreferencesPatch', () => {
-  it('maps severity policy onto events, the iMessage handle onto a destination, and quiet hours onto settings', () => {
+  it('maps severity policy onto events, the iMessage handle onto a destination, and reports quiet hours as dropped', () => {
     const { patch, dropped } = migrate.humansToPreferencesPatch(yaml.parse(HUMANS));
     const enabled = (event: string) => patch.preferences!.filter((p) => p.event === event && p.enabled).map((p) => p.channel).sort();
     expect(enabled('needs_you')).toEqual(['imessage', 'slack']);
     expect(enabled('failed')).toEqual(['slack']);
     expect(enabled('message')).toEqual(['slack']);
     expect(enabled('completed')).toEqual([]);
-    expect(patch.settings).toEqual({ timezone: 'America/Los_Angeles', quietStart: '22:00', quietEnd: '07:30' });
+    expect(patch).not.toHaveProperty('settings');
     expect(patch.destinations).toEqual({ imessage: { address: '+15555550123' } });
-    expect(dropped).toEqual(['telegram (openclaw-telegram)']);
+    expect(dropped).toEqual(['telegram (openclaw-telegram)', 'quietHours (quiet hours no longer exist)', 'timezone (quiet hours no longer exist)']);
   });
 
-  it('reports a quiet_hours key written by an older CLI instead of silently dropping it', () => {
+  it('reports a quiet_hours key written by an older CLI as dropped too', () => {
     const { patch, dropped } = migrate.humansToPreferencesPatch(yaml.parse(HUMANS.replace('quietHours:', 'quiet_hours:')));
-    expect(patch.settings).toEqual({ timezone: 'America/Los_Angeles' });
-    expect(dropped).toContain('quiet_hours (older key; set quietHours or use console Settings)');
+    expect(patch).not.toHaveProperty('settings');
+    expect(dropped).toContain('quiet_hours (quiet hours no longer exist)');
   });
 });
 
@@ -83,12 +83,13 @@ describe('migrateHumansToAccount — one-shot upload of humans.yaml', () => {
     fs.rmSync(userDir, { recursive: true, force: true });
   });
 
-  it('signed in: PUTs the settings to /me/preferences, moves the file to trash, and commits the removal', async () => {
+  it('signed in: PUTs the preferences to /me/preferences, moves the file to trash, and commits the removal', async () => {
     identity.writeSession({ access_token: api.sessionToken });
     expect(await migrate.migrateHumansToAccount(userDir, path.join(userDir, '.failed-stamp'))).toBe('migrated');
     const put = api.requests.find((r) => r.method === 'PUT' && r.path === '/me/preferences');
     expect(put?.bearer).toBe(api.sessionToken);
-    expect(put?.body).toMatchObject({ destinations: { imessage: { address: '+15555550123' } }, settings: { timezone: 'America/Los_Angeles' } });
+    expect(put?.body).toMatchObject({ destinations: { imessage: { address: '+15555550123' } } });
+    expect(put?.body).not.toHaveProperty('settings');
     expect(fs.existsSync(path.join(userDir, 'humans.yaml'))).toBe(false);
     expect(execFileSync('git', ['-C', userDir, 'ls-files', 'humans.yaml'], { encoding: 'utf-8' })).toBe('');
     expect(execFileSync('git', ['-C', userDir, 'status', '--porcelain', '--', 'humans.yaml'], { encoding: 'utf-8' })).toBe('');

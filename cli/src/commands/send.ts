@@ -95,7 +95,7 @@ const SHARED_NOTES = `
 
   --to owner posts one notification to your account (agents auth login). The
   account's preferences, edited in the console Settings page, decide which of
-  email, Slack and iMessage it reaches; quiet hours and dedup apply there. A box
+  email, Slack and iMessage it reaches; dedup applies there. A box
   with no Phoenix session or worker device token fails loud instead. --to owner
   takes no --channel, --thread or --attach.
 
