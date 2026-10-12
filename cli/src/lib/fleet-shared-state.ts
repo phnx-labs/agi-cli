@@ -6,6 +6,7 @@ import { assertValidDeviceName } from './devices/registry.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock, withFileLockAsync } from './fs-atomic.js';
 import { getUserAgentsDir } from './state.js';
 import type { CachedUsageSnapshot } from './accounting/usage.js';
+import type { NativeAccountRecord } from './types.js';
 
 export const FLEET_SHARED_STATE_VERSION = 1;
 export const FLEET_SHARED_STATE_FILE = 'daemon-state.json';
@@ -51,6 +52,7 @@ export interface FleetSharedDeviceState {
   };
   accounts?: {
     rows: unknown[];
+    native?: NativeAccountRecord[];
   };
   ownerNotify?: {
     signedIn: boolean;
@@ -107,7 +109,11 @@ export function parseFleetSharedDeviceStateEnvelope(parsed: unknown, owner?: str
     throw new Error('unrecognized session mirror');
   }
   const accounts = parsed.accounts;
-  if (accounts !== undefined && (!isRecord(accounts) || !Array.isArray(accounts.rows))) {
+  if (
+    accounts !== undefined
+    && (!isRecord(accounts) || !Array.isArray(accounts.rows)
+      || (accounts.native !== undefined && !Array.isArray(accounts.native)))
+  ) {
     throw new Error('unrecognized account verdict rows');
   }
   const ownerNotify = parsed.ownerNotify;

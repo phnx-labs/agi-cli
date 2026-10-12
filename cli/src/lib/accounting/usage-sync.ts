@@ -20,7 +20,7 @@
  * scheduled because a repo was bloated. Git now carries human-authored
  * resources only; `devices/<device>/daemon-state.json` is untracked.
  */
-import { isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
+import { configuredDeviceRole, isHeadedDeviceRole, selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../device-config.js';
 import {
   FLEET_SHARED_STATE_VERSION,
   parseFleetSharedDeviceStateEnvelope,
@@ -271,7 +271,21 @@ interface ApplyPeerStateOptions {
 export interface ApplyPeerStateResult {
   path: string;
   merged: number;
+  adoptedAccounts: string[];
   receivedAt: number;
+}
+
+async function adoptHeadedPeerAccounts(state: FleetSharedDeviceState): Promise<string[]> {
+  const native = state.accounts?.native;
+  if (!native?.length) return [];
+  if (!isHeadedDeviceRole(configuredDeviceRole(state.device))) return [];
+  const { isAgentId } = await import('../types.js');
+  const records = native.filter((record) => typeof record?.id === 'string' && typeof record.name === 'string'
+    && isAgentId(record.agent) && typeof record.identityKey === 'string' && record.scope === 'version'
+    && normalizeHost(record.createdOn ?? '') === normalizeHost(state.device));
+  if (records.length === 0) return [];
+  const { adoptPeerNativeAccounts } = await import('../account-registry.js');
+  return adoptPeerNativeAccounts(records);
 }
 
 // Peer state is newest-wins and can never overwrite this device's own publisher file.
@@ -288,7 +302,8 @@ export async function applyPeerFleetState(
   const merged = state.usage
     ? await ingestPeerClaudeUsageRows(stampSyncRows(state.usage.rows, state.device), options.cachePath)
     : 0;
-  return { path: write.path, merged, receivedAt };
+  const adoptedAccounts = await adoptHeadedPeerAccounts(state);
+  return { path: write.path, merged, adoptedAccounts, receivedAt };
 }
 
 export async function buildFleetStateExchangeCommand(os?: string): Promise<string> {

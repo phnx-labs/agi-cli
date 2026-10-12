@@ -17,6 +17,7 @@ import { invalidateInstalledVersionsCache } from './installations/store.js';
 import {
   addAccount,
   addNativeAccount,
+  adoptPeerNativeAccounts,
   bindAccount,
   findNativeAccountByIdentity,
   findUnifiedAccount,
@@ -780,5 +781,37 @@ describe('findNativeAccountByIdentity', () => {
     expect(findNativeAccountByIdentity(meta, 'muse', { accountKey: null, email: null })).toBeNull();
     expect(findNativeAccountByIdentity(meta, 'claude', null)).toBeNull();
     expect(findNativeAccountByIdentity({ accounts: {} }, 'claude', { accountKey: 'claude:account=a1:org=o1' })).toBeNull();
+  });
+});
+
+describe('adoptPeerNativeAccounts', () => {
+  const record = (over: Record<string, unknown> = {}) => ({
+    id: '349137fb-0ff0-4ae8-9928-d9c48b65e076',
+    name: 'socials',
+    agent: 'grok' as const,
+    identityKey: 'grok:user=fdeeceb9:org=d9c5f7c4',
+    identityLabel: 'social@getrush.ai',
+    scope: 'version' as const,
+    provisioning: 'per-device' as const,
+    createdOn: 'zion',
+    ...over,
+  });
+
+  it('adds a headed peer row this device lacks, keeping its id', () => {
+    expect(adoptPeerNativeAccounts([record()])).toEqual(['349137fb-0ff0-4ae8-9928-d9c48b65e076']);
+    const row = readMeta().accounts?.native?.['349137fb-0ff0-4ae8-9928-d9c48b65e076'];
+    expect(row).toMatchObject({ name: 'socials', agent: 'grok', provisioning: 'per-device', createdOn: 'zion' });
+    expect(adoptPeerNativeAccounts([record()])).toEqual([]);
+  });
+
+  it('never overwrites a local row for the same login or the same name', () => {
+    const local = addNativeAccount('socials-local', 'grok', 'grok:user=same:org=same', 'social@getrush.ai', 'version');
+    expect(adoptPeerNativeAccounts([record({ id: 'peer-a', name: 'socials-peer', identityKey: 'grok:user=same:org=same' })])).toEqual([]);
+    expect(adoptPeerNativeAccounts([record({ id: 'peer-b', name: 'socials-local', identityKey: 'grok:user=other:org=other' })])).toEqual([]);
+    expect(readMeta().accounts?.native?.[local.id]?.name).toBe('socials-local');
+  });
+
+  it('ignores device-scoped rows', () => {
+    expect(adoptPeerNativeAccounts([record({ id: 'device-row', name: 'device-only', identityKey: 'grok:user=d', scope: 'device' })])).toEqual([]);
   });
 });

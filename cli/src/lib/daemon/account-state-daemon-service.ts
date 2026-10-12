@@ -6,7 +6,7 @@ import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import { runUsageRefreshTick, refreshLocalFleetAuthState } from '../daemon-ticks.js';
 import type { AuthProbeRow, AuthVerdict } from '../auth-health.js';
-import { getDaemonDir } from '../state.js';
+import { getDaemonDir, readMeta } from '../state.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { execFileBounded } from '../exec-bounded.js';
 import { fleetSharedStatePath, FLEET_SHARED_STATE_VERSION } from '../fleet-shared-state.js';
@@ -133,6 +133,9 @@ export async function publishAccountDaemonStateRows(
       : row.health.verdict === 'error' ? 'unverified' : row.health.verdict,
     checkedAt: new Date(row.health.checkedAt).toISOString(),
   }));
+  const native = headed
+    ? Object.values(readMeta().accounts?.native ?? {}).filter((account) => account.scope === 'version')
+    : undefined;
   await withFileLockAsync(file, async () => {
     const raw = await fsp.readFile(file, 'utf-8');
     let current: Record<string, unknown> = {};
@@ -150,7 +153,7 @@ export async function publishAccountDaemonStateRows(
       ...current,
       version: FLEET_SHARED_STATE_VERSION,
       device,
-      accounts: { rows: accountRows },
+      accounts: { rows: accountRows, ...(native?.length ? { native } : {}) },
     };
     const serialized = `${JSON.stringify(next, null, 2)}\n`;
     if (serialized === raw) return;
