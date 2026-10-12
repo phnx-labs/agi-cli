@@ -620,24 +620,7 @@ describe('tmux gate (tmux.enabled on this device)', () => {
   });
 });
 
-describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () => {
-  it('defaults to 30 minutes in ms when unset', async () => {
-    const { resolveBrowserTaskIdleMs } = await freshModules();
-    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
-  });
-
-  it('reflects a stored value, in ms', async () => {
-    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
-    setConfigValue('browser.task-idle-minutes', 15);
-    expect(await resolveBrowserTaskIdleMs()).toBe(15 * 60_000);
-  });
-
-  it('0 resolves to null — the "idle reaping is off" signal, not a zero-ms window', async () => {
-    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
-    setConfigValue('browser.task-idle-minutes', 0);
-    expect(await resolveBrowserTaskIdleMs()).toBeNull();
-  });
-
+describe('browser.task-idle-minutes (RUSH-2622)', () => {
   it('rejects a negative value', async () => {
     const { setConfigValue } = await freshModules();
     expect(() => setConfigValue('browser.task-idle-minutes', -1)).toThrow(/must be >= 0/);
@@ -650,10 +633,9 @@ describe('resolveBrowserTaskIdleMs (browser.task-idle-minutes, RUSH-2622)', () =
   });
 
   it('cannot be set for a peer at all — it is machine-local', async () => {
-    const { resolveBrowserTaskIdleMs, setConfigValue } = await freshModules();
+    const { setConfigValue } = await freshModules();
     expect(() => setConfigValue('browser.task-idle-minutes', 15, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
-    expect(await resolveBrowserTaskIdleMs()).toBe(30 * 60_000);
   });
 });
 
@@ -755,35 +737,5 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
       zion: 'worker',
       'mac-mini': 'personal',
     });
-  });
-});
-
-describe('devicesPinningBrowserProfile', () => {
-  function writeDeviceDoc(device: string, body: string): void {
-    const dir = path.join(TMP, '.agents', 'devices', device);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, 'agents.yaml'), body);
-  }
-
-  it('reports WHICH key each device pinned, not just that it matched', async () => {
-    writeDeviceDoc('peerbox', 'config:\n  defaultBrowserProfile: demo\n');
-    writeDeviceDoc('otherbox', 'config:\n  browserViewer: demo\n');
-    writeDeviceDoc('bothbox', 'config:\n  defaultBrowserProfile: demo\n  browserViewer: demo\n');
-
-    const { devicesPinningBrowserProfile } = await freshModules();
-    const hits = devicesPinningBrowserProfile('demo');
-
-    expect(hits).toEqual([
-      { device: 'bothbox', key: 'browser.profile' },
-      { device: 'bothbox', key: 'browser.viewer' },
-      { device: 'otherbox', key: 'browser.viewer' },
-      { device: 'peerbox', key: 'browser.profile' },
-    ]);
-  });
-
-  it('ignores devices pinning a different profile', async () => {
-    writeDeviceDoc('peerbox', 'config:\n  defaultBrowserProfile: something-else\n');
-    const { devicesPinningBrowserProfile } = await freshModules();
-    expect(devicesPinningBrowserProfile('demo')).toEqual([]);
   });
 });

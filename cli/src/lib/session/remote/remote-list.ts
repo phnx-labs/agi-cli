@@ -13,7 +13,7 @@ import {
 import { connectionEndedNotice } from '../../hosts/reconnect.js';
 import { sshTargetFor } from '../../devices/connect.js';
 import { resolveDeviceProfile } from '../../devices/resolve-profile.js';
-import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
+import { loadDevices, type DeviceProfile } from '../../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../../remote-agents-json.js';
 import type { RemoteToolBin } from '../../hosts/remote-cmd.js';
@@ -36,19 +36,6 @@ export function remoteListCommand(forwardedArgs: string[], os?: string): string 
     i === 0 ? t : shellQuote(t),
   ).join(' ');
   return `bash -lc ${shellQuote(inner)}`;
-}
-
-export function parseRemoteList(stdout: string, machine: string): SessionMeta[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripClixml(stdout));
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) return [];
-  return parsed.flatMap((value) => value && typeof value === 'object' && !Array.isArray(value)
-    ? [{ ...(value as SessionMeta), machine, _remote: true }]
-    : []);
 }
 
 const SAFE_RESOLVER_KEYS = new Set([
@@ -130,13 +117,6 @@ interface RemoteListResult {
   sessions: SessionMeta[];
   deviceCount: number;
   unreachable: string[];
-}
-
-export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean {
-  if (!isDialableDevice(d)) return false;
-  if (normalizeHost(d.name) === self) return false;
-  const platform = resolveDeviceProfile(d).platform;
-  return platform === 'windows' || platform === 'linux' || platform === 'macos';
 }
 
 interface GatherRemoteListOptions {

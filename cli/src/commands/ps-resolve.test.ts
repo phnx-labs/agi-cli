@@ -9,7 +9,7 @@ import {
   metadataResolveForwardedArgs,
   fleetCandidatesByQuery,
 } from '../lib/session/selection.js';
-import { parseRemoteList } from '../lib/session/remote-list.js';
+import { parseRemoteListPayload } from '../lib/session/remote-list.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { repoRoot, writeUpdateCache, writeClaudeSession, runAgents, indexSessions } from './sessions.test-fixture.js';
 
@@ -158,7 +158,7 @@ describe('agents ps resolve — the peer resolver protocol', () => {
       expect(peerRows[0]).not.toHaveProperty('filePath');
       expect(peerRows[0]).not.toHaveProperty('plan');
 
-      const remoteRows = parseRemoteList(peer.stdout, 'peer-one');
+      const remoteRows = parseRemoteListPayload(peer.stdout, 'peer-one', true).items;
       const mirrored = remoteRows.map(row => ({ ...row, machine: 'peer-two' }));
       const candidates = fleetCandidatesByQuery([...remoteRows, ...mirrored], 'recap resolver');
       expect(candidates).toHaveLength(1);

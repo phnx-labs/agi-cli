@@ -9,7 +9,6 @@ import {
   getBackupsDir,
   getCommandsDir,
   getHooksDir,
-  getPackagesDir,
   getPluginsDir,
   getRoutinesDir,
   getRunsDir,
@@ -44,7 +43,6 @@ describe('state paths', () => {
     const userRoot = path.join(os.homedir(), '.agents');
     const cache = path.join(userRoot, '.cache');
 
-    expect(getPackagesDir()).toBe(path.join(cache, 'packages'));
     expect(getShimsDir()).toBe(path.join(cache, 'shims'));
   });
 

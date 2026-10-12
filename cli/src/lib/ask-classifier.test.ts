@@ -10,7 +10,7 @@ import {
   suppressionDigest,
 } from './ask-classifier.js';
 import { blockIdForSession, listBlocks, publishBlock, type OpenBlock } from './feed/feed.js';
-import { drain, mailboxDir } from './mailbox.js';
+import { mailboxDir, readBox } from './mailbox.js';
 
 function makeBlock(sessionId: string, text: string, over?: Partial<OpenBlock>): OpenBlock {
   return {
@@ -83,7 +83,7 @@ describe('filterBlocksForFeed', () => {
     expect(r.suppressed).toBe(true);
     expect(r.autoAnswer).toMatch(/continue/i);
     expect(listBlocks(dir)).toHaveLength(0);
-    expect(drain(mailboxDir('stall-1', mailboxRoot)).map((m) => m.text)).toEqual(['Yes, continue.']);
+    expect(readBox(mailboxDir('stall-1', mailboxRoot)).map((m) => m.text)).toEqual(['Yes, continue.']);
   });
 
   it('suppressionDigest summarizes auto-resolved stalls', () => {

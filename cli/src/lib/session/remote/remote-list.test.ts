@@ -8,10 +8,8 @@ import { Server, type Connection } from 'ssh2';
 import { sessionHeadline } from '../title.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import {
-  parseRemoteList,
   parseRemoteListPayload,
   parsePeerPreviewDigest,
-  isAutomaticSessionPeer,
   remoteListCommand,
   sshCapture,
   peerHopCloseNotice,
@@ -20,7 +18,6 @@ import {
   quietLoginShell,
 } from './remote-list.js';
 import { SSH_CONN_FAILURE_CODE, RemoteUtf8Accumulator } from '../../ssh-exec.js';
-import type { DeviceProfile } from '../../devices/registry.js';
 
 interface RealSshPeer {
   port: number;
@@ -130,103 +127,6 @@ describe.skipIf(process.platform === 'win32')('sshCapture direct timeout connect
   });
 });
 
-describe('isAutomaticSessionPeer', () => {
-  it('keeps manual and probe-reachable computers in both fleet sweeps', () => {
-    const manual = {
-      name: 'manual-linux',
-      platform: 'linux',
-      address: { via: 'manual', host: 'manual.example' },
-      auth: { method: 'key' },
-    } as DeviceProfile;
-    const probed = {
-      name: 'sleepy-mac',
-      platform: 'macos',
-      tailscale: { online: false },
-      reachability: { reachable: true },
-      auth: { method: 'key' },
-    } as DeviceProfile;
-
-    expect(isAutomaticSessionPeer(manual, 'local')).toBe(true);
-    expect(isAutomaticSessionPeer(probed, 'local')).toBe(true);
-    expect(isAutomaticSessionPeer({ ...manual, name: 'local' }, 'local')).toBe(false);
-  });
-});
-
-describe('parseRemoteList', () => {
-  it('tags every parsed session with the source machine', () => {
-    const stdout = JSON.stringify([
-      { id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z', filePath: '/r/a.jsonl' },
-      { id: 'b', shortId: 'b', agent: 'codex', timestamp: '2026-07-02T00:00:00Z', filePath: '/r/b.jsonl' },
-    ]);
-    const out = parseRemoteList(stdout, 'zion');
-    expect(out).toHaveLength(2);
-    expect(out.every((s) => s.machine === 'zion')).toBe(true);
-    expect(out[0].id).toBe('a');
-  });
-
-  it('carries a peer\'s daemon-generated title through the fan-out (PHNX-3797)', () => {
-    const stdout = JSON.stringify([{
-      id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z',
-      filePath: '/peer/a.jsonl',
-      topic: 'the fleet list headline is the agent last message',
-      generatedTitle: 'Session headline ladder fix',
-    }]);
-    const [row] = parseRemoteList(stdout, 'zion');
-    expect(row.generatedTitle).toBe('Session headline ladder fix');
-    expect(sessionHeadline(row)).toBe('Session headline ladder fix');
-  });
-
-  it('marks every parsed row _remote so it routes read/resume back over SSH', () => {
-    const stdout = JSON.stringify([
-      { id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z', filePath: '/peer/a.jsonl' },
-    ]);
-    const out = parseRemoteList(stdout, 'zion');
-    expect(out[0]._remote).toBe(true);
-  });
-
-  it('overrides any machine tag the peer set on its own rows', () => {
-    const stdout = JSON.stringify([
-      { id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z', filePath: '/r/a.jsonl', machine: 'their-local-name' },
-    ]);
-    const out = parseRemoteList(stdout, 'mark');
-    expect(out[0].machine).toBe('mark');
-  });
-
-  it('returns [] on non-JSON (a login-shell banner leaked into stdout)', () => {
-    expect(parseRemoteList('bash: agents: command not found\n', 'zion')).toEqual([]);
-  });
-
-  it('parses a payload a Windows peer prefixed with a PowerShell CLIXML banner (RUSH-2286)', () => {
-    const payload = JSON.stringify([
-      { id: 'w', shortId: 'w', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: 'C:\\r\\w.jsonl' },
-    ]);
-    const polluted =
-      '#< CLIXML\n' +
-      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
-      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
-      payload;
-    const out = parseRemoteList(polluted, 'win-mini');
-    expect(out).toHaveLength(1);
-    expect(out[0].id).toBe('w');
-    expect(out[0].machine).toBe('win-mini');
-  });
-
-  it('returns [] when the top level is not an array', () => {
-    expect(parseRemoteList(JSON.stringify({ error: 'nope' }), 'zion')).toEqual([]);
-  });
-
-  it('drops non-object entries but keeps the valid ones', () => {
-    const stdout = JSON.stringify([null, 'weird', 42, { id: 'x', shortId: 'x', agent: 'claude', timestamp: '2026-07-01T00:00:00Z', filePath: '/r/x.jsonl' }]);
-    const out = parseRemoteList(stdout, 'mark');
-    expect(out).toHaveLength(1);
-    expect(out[0].machine).toBe('mark');
-  });
-
-  it('returns [] on empty stdout (peer produced nothing)', () => {
-    expect(parseRemoteList('', 'zion')).toEqual([]);
-  });
-});
-
 describe('RemoteUtf8Accumulator', () => {
   it('preserves a multibyte code point split across SSH stdout chunks', () => {
     const bytes = Buffer.from('before 界 after', 'utf8');
@@ -248,6 +148,32 @@ describe('parseRemoteListPayload', () => {
       }],
       valid: true,
     });
+  });
+
+  it('carries a peer\'s daemon-generated title through the fan-out (PHNX-3797)', () => {
+    const stdout = JSON.stringify([{
+      id: 'a', shortId: 'a', agent: 'claude', timestamp: '2026-07-01T00:00:00Z',
+      filePath: '/peer/a.jsonl',
+      topic: 'the fleet list headline is the agent last message',
+      generatedTitle: 'Session headline ladder fix',
+    }]);
+    const [row] = parseRemoteListPayload(stdout, 'zion').items;
+    expect(row.generatedTitle).toBe('Session headline ladder fix');
+    expect(sessionHeadline(row)).toBe('Session headline ladder fix');
+  });
+
+  it('parses a payload a Windows peer prefixed with a PowerShell CLIXML banner (RUSH-2286)', () => {
+    const payload = JSON.stringify([
+      { id: 'w', shortId: 'w', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: 'C:\\r\\w.jsonl' },
+    ]);
+    const polluted =
+      '#< CLIXML\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><MS><AV>Preparing modules for first use.</AV></MS></Obj></Objs>\n' +
+      payload;
+    const { items, valid } = parseRemoteListPayload(polluted, 'win-mini');
+    expect(valid).toBe(true);
+    expect(items.map((row) => [row.id, row.machine])).toEqual([['w', 'win-mini']]);
   });
 
   it('accepts the production resolver projection with launch mode and custom harness', async () => {

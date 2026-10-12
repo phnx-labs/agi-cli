@@ -1186,58 +1186,7 @@ export function shouldPurgeCompletedOneShotRoutine(
   return hasCompletedOneShotRun(config, now);
 }
 
-export interface WebhookContext {
-  source: string;
-  event: string;
-  action?: string;
-  issue?: unknown;
-  updatedFrom?: unknown;
-  pull_request?: unknown;
-  repository?: unknown;
-}
-
-function getPath(obj: unknown, path: string): unknown {
-  const parts = path.split('.');
-  let current: unknown = obj;
-  for (const part of parts) {
-    if (current === null || current === undefined) return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-export function substituteWebhookPrompt(prompt: string, context: WebhookContext): string {
-  return prompt.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
-    const value = getPath(context, rawPath.trim());
-    if (value === undefined || value === null) return '';
-    return String(value);
-  });
-}
-
-export function substituteWebhookCommand(command: string, context: WebhookContext): string {
-
-  return command.replace(/\{\{([^{}]+)\}\}/g, (_, rawPath: string) => {
-    const value = getPath(context, rawPath.trim());
-    if (value === undefined || value === null) return "''";
-    return `'${String(value).replace(/'/g, `'\\''`)}'`;
-  });
-}
-
-export function assertShellSubstitutionSupported(
-  command: string,
-  platform: NodeJS.Platform = process.platform,
-): void {
-
-  if (platform === 'win32' && /\{\{[^{}]+\}\}/.test(command)) {
-    throw new Error(
-      'run.command with {{…}} placeholders is not supported on Windows: the values come from an ' +
-        'untrusted webhook payload and cmd.exe cannot be quoted safely. Use run.prompt, or a ' +
-        'command with no placeholders.',
-    );
-  }
-}
-
-export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): string {
+export function resolveJobPrompt(config: JobConfig): string {
   const now = new Date();
   const tz = config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -1258,10 +1207,6 @@ export function resolveJobPrompt(config: JobConfig, context?: WebhookContext): s
     for (const [key, value] of Object.entries(config.variables)) {
       prompt = prompt.replace(new RegExp(`\\{${key}\\}`, 'g'), value);
     }
-  }
-
-  if (context) {
-    prompt = substituteWebhookPrompt(prompt, context);
   }
 
   const latestRun = getLatestCompletedRun(config.name);

@@ -1,68 +1,6 @@
-
-import { spawn, type ChildProcess } from 'child_process';
-import { SSH_OPTS, assertValidSshTarget } from './ssh-exec.js';
 import { getDevice, type DeviceProfile } from './devices/registry.js';
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { hostNameFor } from './devices/ssh-config.js';
-
-interface StartTunnelOptions {
-  extraSshArgs?: string[];
-}
-
-export function buildTunnelArgs(
-  user: string,
-  host: string,
-  localPort: number,
-  remotePort: number,
-  extraSshArgs: string[] = [],
-): string[] {
-  return [
-    '-L',
-    `${localPort}:127.0.0.1:${remotePort}`,
-    `${user}@${host}`,
-    '-N',
-    ...extraSshArgs,
-    ...SSH_OPTS,
-  ];
-}
-
-export function startSSHTunnel(
-  user: string,
-  host: string,
-  localPort: number,
-  remotePort: number,
-  opts: StartTunnelOptions = {},
-): Promise<ChildProcess> {
-  return new Promise((resolve, reject) => {
-    try {
-      assertValidSshTarget(`${user}@${host}`);
-    } catch (err) {
-      reject(err as Error);
-      return;
-    }
-    const args = buildTunnelArgs(user, host, localPort, remotePort, opts.extraSshArgs);
-
-    const tunnel = spawn('ssh', args, {
-      stdio: ['ignore', 'ignore', 'pipe'],
-      detached: false,
-      windowsHide: true,
-    });
-
-    let stderr = '';
-    tunnel.stderr?.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    tunnel.on('error', (err) => {
-      reject(new Error(`SSH tunnel failed: ${err.message}`));
-    });
-
-    setTimeout(() => {
-      if (tunnel.killed) reject(new Error(`SSH tunnel died: ${stderr}`));
-      else resolve(tunnel);
-    }, 500);
-  });
-}
 
 interface ResolvedRemoteDevice {
   device: DeviceProfile;

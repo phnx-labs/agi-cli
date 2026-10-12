@@ -46,7 +46,6 @@ const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
-const SYSTEM_WEBHOOKS_DIR = path.join(SYSTEM_AGENTS_DIR, 'webhooks');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -57,7 +56,6 @@ const HISTORY_DIR = path.join(USER_AGENTS_DIR, '.history');
 const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
 const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
-const WEBHOOKS_DIR = path.join(USER_AGENTS_DIR, 'webhooks');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
 const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 const DAEMON_CONFIG_DIR = path.join(USER_AGENTS_DIR, 'daemon');
@@ -287,7 +285,6 @@ export function getUserSubagentsDir(): string { return USER_SUBAGENTS_DIR; }
 
 export function getSystemWorkflowsDir(): string { return SYSTEM_WORKFLOWS_DIR; }
 export function getUserWorkflowsDir(): string { return USER_WORKFLOWS_DIR; }
-export function getUserSecretsDir(): string { return USER_SECRETS_DIR; }
 export function getSecretsDbPath(): string {
   return process.env.AGENTS_SECRETS_DB ?? path.join(USER_SECRETS_DIR, 'secrets.db');
 }
@@ -306,30 +303,18 @@ export function getHistoryDir(): string { return HISTORY_DIR; }
 
 export function getCacheDir(): string { return CACHE_DIR; }
 
-export function getPackagesDir(): string { return PACKAGES_DIR; }
-
 export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
 
 export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
 
 export function getDaemonConfigDir(): string { return process.env.AGENTS_DAEMON_CONFIG_DIR ?? DAEMON_CONFIG_DIR; }
 
-export function getWebhooksDir(): string { return process.env.AGENTS_WEBHOOKS_DIR ?? WEBHOOKS_DIR; }
-
 export function getSystemRoutinesDir(): string { return process.env.AGENTS_SYSTEM_ROUTINES_DIR ?? SYSTEM_ROUTINES_DIR; }
-
-export function getSystemWebhooksDir(): string { return process.env.AGENTS_SYSTEM_WEBHOOKS_DIR ?? SYSTEM_WEBHOOKS_DIR; }
 
 export function getProjectRoutinesDir(cwd: string = process.cwd()): string | null {
   const projectAgentsDir = getProjectAgentsDir(cwd);
   if (!projectAgentsDir) return null;
   return path.join(projectAgentsDir, 'routines');
-}
-
-export function getProjectWebhooksDir(cwd: string = process.cwd()): string | null {
-  const projectAgentsDir = getProjectAgentsDir(cwd);
-  if (!projectAgentsDir) return null;
-  return path.join(projectAgentsDir, 'webhooks');
 }
 
 export function getRunsDir(): string { return RUNS_DIR; }
@@ -419,8 +404,6 @@ export function getRuntimeStateDir(): string { return process.env.AGENTS_STATE_D
 export function getCompanionDir(): string { return COMPANION_CACHE_DIR; }
 
 export function getBrowserRuntimeDir(): string { return BROWSER_RUNTIME_DIR; }
-
-export function getBrowserDurableDir(): string { return path.join(HISTORY_DIR, 'browser-profiles'); }
 
 export function getHelpersDir(): string { return HELPERS_DIR; }
 
