@@ -108,16 +108,15 @@ groups:
   - id: sessions
     when:
       - cli/src/lib/session/**
-      - cli/src/commands/sessions.ts
-      - cli/src/commands/sessions.test.ts
       - cli/src/commands/sessions.*.test.ts
       - cli/src/commands/sessions.test-fixture.ts
       - cli/src/commands/__tests__/sessions-*.test.ts
+      - cli/src/commands/ps-*.test.ts
       - cli/bench/sessions-active-perf.ts
     tests:
-      - cli/src/commands/sessions.cli-list.test.ts
-      - cli/src/commands/sessions.cli-tools.test.ts
-      - cli/src/commands/sessions.render.test.ts
+      - cli/src/commands/ps-resolve.test.ts
+      - cli/src/commands/ps-preview.test.ts
+      - cli/src/commands/ps-lifecycle.test.ts
     checks: [typecheck, sessions-bench]
     budget_sec: 240
 
@@ -160,7 +159,6 @@ groups:
       - cli/src/lib/reserved-stores.test.ts
       - cli/src/lib/sync-passphrase.ts
       - cli/src/lib/sync-passphrase.test.ts
-      - cli/src/commands/secrets-passthrough.ts
       - cli/src/commands/setup-secrets.ts
     checks: [typecheck]
     budget_sec: 240
