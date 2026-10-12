@@ -337,8 +337,6 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
   let devices: Awaited<ReturnType<typeof loadDevices>>;
   try { devices = await loadDevices(); } catch { await local; return; }
   const self = machineId();
-  // Resolved profiles: the operator config (`platform`) decides the remote shell
-  // family, exactly as streamFromPeer dials it — never the discovered platform.
   const peers = Object.values(devices).map(resolveDeviceProfile).filter((device) => isDialableDevice(device) && normalizeHost(device.name) !== self && ['windows', 'linux', 'macos'].includes(device.platform));
   const tasks = peers.map((device) => {
     const scope = normalizeHost(device.name);
