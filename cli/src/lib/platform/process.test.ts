@@ -1,9 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isAlive, killTree, backgroundSpawnOptions } from './process.js';
+import { isAlive, killTree, backgroundSpawnOptions, childExitCode } from './process.js';
+
+describe('childExitCode', () => {
+  it.skipIf(process.platform === 'win32')('reports a signal-killed child as 128+signal, never as success', () => {
+    const killed = spawnSync(process.execPath, ['-e', "process.kill(process.pid, 'SIGTERM')"]);
+    expect(killed.status).toBeNull();
+    expect(childExitCode(killed.status, killed.signal)).toBe(143);
+  });
+
+  it('passes a normal exit status through and treats a spawn failure as 1', () => {
+    expect(childExitCode(spawnSync(process.execPath, ['-e', 'process.exit(3)']).status, null)).toBe(3);
+    expect(childExitCode(null, null)).toBe(1);
+  });
+});
 
 describe('isAlive', () => {
   it('is true for the current process', () => {
