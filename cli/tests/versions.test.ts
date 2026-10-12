@@ -73,6 +73,7 @@ vi.mock('../src/lib/state.js', () => {
     get getSystemPromptcutsPath() { return () => nodePath.join(state().AGENTS_DIR, 'promptcuts.yaml'); },
     get getUserPromptcutsPath() { return () => nodePath.join(state().AGENTS_DIR, 'promptcuts.yaml'); },
     get getProjectAgentsDir() { return () => state().PROJECT_AGENTS_DIR; },
+    get getLogsDir() { return () => process.env.AGENTS_LOGS_DIR!; },
     get getEnabledExtraRepos() { return () => []; },
     get ensureAgentsDir() { return () => nodeFs.mkdirSync(state().AGENTS_DIR, { recursive: true }); },
     get readMeta() { return () => state().META; },
