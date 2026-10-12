@@ -64,13 +64,11 @@ describe('menubar snapshot', () => {
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
         'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
-        'menubar.menu.artifactApps': [],
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
       setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
       setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
       setConfigValue('menubar.menu.homeGoals', ['company', 'myDay']);
-      setConfigValue('menubar.menu.artifactApps', ['md=com.microsoft.VSCode']);
       setConfigValue('menubar.menu.groupTicketsByMilestone', true);
       setConfigValue('menubar.statusbar.goalCountdown', true);
       expect(scalarOnly(buildMenuPreferences())).toBe(true);
@@ -91,7 +89,6 @@ describe('menubar snapshot', () => {
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
         'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
-        'menubar.menu.artifactApps': ['md=com.microsoft.VSCode'],
       });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;

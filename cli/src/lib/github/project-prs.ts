@@ -167,30 +167,6 @@ export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<Pr
   return parseNdjson(out).map(rowToProjectPr);
 }
 
-const OPEN_MERGE_STATE_QUERY =
-  'query=query($owner: String!, $name: String!, $endCursor: String) { repository(owner: $owner, name: $name) { ' +
-  'pullRequests(states: OPEN, first: 100, after: $endCursor) { pageInfo { hasNextPage endCursor } nodes { number mergeable mergeStateStatus } } } }';
-
-export async function listOpenMergeStates(
-  repo: string,
-  gh: GhExec = ghExec,
-): Promise<Map<number, Pick<ProjectPr, 'mergeable' | 'mergeableState'>>> {
-  const [owner, name] = repo.split('/');
-  const out = await gh([
-    'api', 'graphql', '--paginate', '--cache', '60s',
-    '-f', OPEN_MERGE_STATE_QUERY, '-f', `owner=${owner}`, '-f', `name=${name}`,
-    '--jq', '.data.repository.pullRequests.nodes[] | {number, mergeable, mergeStateStatus}',
-  ]);
-  const states = new Map<number, Pick<ProjectPr, 'mergeable' | 'mergeableState'>>();
-  for (const row of parseNdjson(out)) {
-    states.set(Number(row.number), {
-      mergeable: row.mergeable === 'MERGEABLE' ? true : row.mergeable === 'CONFLICTING' ? false : null,
-      mergeableState: typeof row.mergeStateStatus === 'string' ? row.mergeStateStatus.toLowerCase() : null,
-    });
-  }
-  return states;
-}
-
 export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghExec, cache?: string): Promise<ProjectPr> {
   const out = await gh(['api', `repos/${repo}/pulls/${number}`, ...(cache ? ['--cache', cache] : []), '--jq', PR_JQ]);
   const rows = parseNdjson(out);
@@ -458,6 +434,21 @@ interface MergedDetail {
   deletions: number;
 }
 
+async function readMergeState(
+  slug: string,
+  number: number,
+  gh: GhExec,
+  errors: CiErrors,
+): Promise<Partial<Pick<ProjectPr, 'mergeable' | 'mergeableState'>>> {
+  try {
+    const { mergeable, mergeableState } = await fetchOnePr(slug, number, gh, '60s');
+    return { mergeable, mergeableState };
+  } catch (err) {
+    errors.record(err);
+    return {};
+  }
+}
+
 async function readMergedDetail(
   slug: string,
   number: number,
@@ -637,19 +628,14 @@ export async function buildProjectPrs(
         const ci: CiReader = { slug, gh, rollups, errors, nowMs, reads: new Map() };
         const tagRead: Promise<{ tag: TagRead | null; error: string | null }> = readLatestTag(slug, gh, npm)
           .then((tag) => ({ tag, error: null }), (err: unknown) => ({ tag: null, error: ghFailure(err) }));
-        const [listedRest, mergeStates, mergedRead, defaultBranch] = await Promise.all([
+        const [listed, mergedRead, defaultBranch] = await Promise.all([
           listOpenPrs(slug, gh),
-          listOpenMergeStates(slug, gh).catch((err: unknown) => {
-            errors.record(err);
-            return null;
-          }),
           listRecentlyMerged(slug, sinceMs, gh).catch((err: unknown) => {
             errors.record(err);
             return null;
           }),
           readDefaultBranch(ci),
         ]);
-        const listed = listedRest.map((pr) => ({ ...pr, ...mergeStates?.get(pr.number) }));
         const mergedListed = mergedRead?.merged ?? null;
         let pullRequests: ProjectPr[] = listed;
         let merged = mergedListed ?? [];
@@ -675,7 +661,10 @@ export async function buildProjectPrs(
           : null;
         merged = merged.slice(0, MERGED_LIMIT);
         const [openCi, recentlyMerged] = await Promise.all([
-          mapBounded(pullRequests, 8, (pr) => readCi(ci, pr.headSha)),
+          mapBounded(pullRequests, 8, async (pr) => {
+            const [prCi, mergeState] = await Promise.all([readCi(ci, pr.headSha), readMergeState(slug, pr.number, gh, errors)]);
+            return { ...prCi, ...mergeState };
+          }),
           mapBounded(merged, 8, async (m): Promise<MergedPr> => {
             const [detail, mergeCi] = await Promise.all([
               readMergedDetail(slug, m.pr.number, gh, details, errors),

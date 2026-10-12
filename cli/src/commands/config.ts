@@ -463,7 +463,7 @@ export function registerConfigCommand(program: Command): void {
       agents config set devices.mac-mini.max-agents 4
       agents config set updates.auto off
       agents config set updates.claude.auto off
-      agents config set menubar.menu.tabOrder home,goals,sessions,projects,inbox
+      agents config set menubar.menu.tabOrder home,goals,sessions,inbox
       agents config set menubar.menu.pinnedProjects '["Rush","AGI Menu"]'
       agents config set menubar.menu.homeGoals company,myDay
       agents config set menubar.statusbar.goalCountdown on
