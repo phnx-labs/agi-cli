@@ -144,7 +144,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(folded?.request ? { request: folded.request } : {}),
     ...(folded?.timeline ? { timeline: folded.timeline } : {}),
     ...(folded?.files ? { files: folded.files } : {}),
-    ...(folded?.model ? { model: folded.model } : {}),
+    ...(folded?.model ?? session.model ? { model: folded?.model ?? session.model } : {}),
     ...(folded?.failures ? { failures: folded.failures } : {}),
     ...(folded?.activityHistogram ? { activityHistogram: folded.activityHistogram } : {}),
     ...(folded?.userTurns ? { userTurns: folded.userTurns } : {}),

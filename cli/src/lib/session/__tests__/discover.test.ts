@@ -416,6 +416,11 @@ describe('readGrokMeta', () => {
     expect(() => new Date(r!.meta.timestamp).toISOString()).not.toThrow();
   });
 
+  it('takes the model from current_model_id', () => {
+    const fp = writeSummary({ info: { id: uuid, cwd: '/tmp/x' }, current_model_id: 'grok-4.7' });
+    expect(readGrokMeta(fp)!.meta.model).toBe('grok-4.7');
+  });
+
   it('returns null for malformed json', () => {
     const fp = path.join(dir, uuid, 'summary.json');
     fs.writeFileSync(fp, '{ not valid json');

@@ -1676,9 +1676,12 @@ normative — a change that widens/narrows a cell is a spec change.
   nothing sets it); real cost accounting lives in the separate budget ledger
   (`lib/budget/ledger.ts`). If per-harness metadata parity is the intended
   contract (SES-16), this is the break.
-- **SES-GAP-3.** No `model` and no `repo`/git-remote field is persisted on
-  `SessionMeta` — only transient `SessionEvent.model` and `gitBranch`/`worktreeSlug`
-  (`sessions-cli/src/lib/session/types.ts:32,105,135`). Surfacing either needs a schema addition.
+- **SES-GAP-3.** No `repo`/git-remote field is persisted on `SessionMeta` — only
+  `gitBranch`/`worktreeSlug` (`sessions-cli/src/lib/session/types.ts`). Surfacing it
+  needs a schema addition. (`model` is resolved: `SessionMeta.model` is the indexed
+  `sessions.model`, filled by the harness indexers whose files record one, and a history
+  watch row falls back to it when the timeline pass never folded the session,
+  PHNX-4330.)
 - **SES-GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
   is **not implemented** (`lib/session/sync/agents.ts:130-138`) — opencode
   sessions are not included in `agents sessions export` today.

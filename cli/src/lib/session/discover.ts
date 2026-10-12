@@ -4014,6 +4014,7 @@ export function readCursorMeta(
     label: title,
     messageCount: events.filter((event) => event.type === 'message').length,
     todos: extractTodoProgressFromEvents(events),
+    model: events.filter((event) => event.type === 'init' && event.model).pop()?.model,
   };
 
   return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n'), events };
@@ -4117,7 +4118,7 @@ export function readKimiMeta(
   }
 
   const prior = parsePriorKimiState(priorRow);
-  const { messageCount, tokenCount, outputTokens, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
+  const { messageCount, tokenCount, outputTokens, model, newState } = parseKimiWireMetricsIncremental(sessionDir, prior);
 
   const meta: SessionMeta = {
     id: sessionId,
@@ -4131,18 +4132,20 @@ export function readKimiMeta(
     messageCount,
     tokenCount: tokenCount > 0 ? tokenCount : undefined,
     outputTokens: outputTokens > 0 ? outputTokens : undefined,
+    model,
   };
 
   return { meta, content: lastPrompt || '', parserState: JSON.stringify(newState) };
 }
 
 export interface KimiParserState {
-  v: 2;
+  v: 3;
   offset: number;
   messageCount: number;
   tokenCount: number;
   outputTokens: number;
   firstUserMessage?: string;
+  model?: string;
 }
 
 function kimiWireUserText(event: any): string | undefined {
@@ -4157,10 +4160,12 @@ function kimiWireUserText(event: any): string | undefined {
 }
 
 function applyKimiWireEvent(
-  acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string },
+  acc: { messageCount: number; tokenCount: number; outputTokens: number; firstUserMessage?: string; model?: string },
   event: any,
 ): void {
-  if (event.type === 'context.append_message') {
+  if (event.type === 'llm.request' && typeof (event.modelAlias || event.model) === 'string') {
+    acc.model = event.modelAlias || event.model;
+  } else if (event.type === 'context.append_message') {
     acc.messageCount++;
     if (!acc.firstUserMessage) acc.firstUserMessage = kimiWireUserText(event);
   } else if (event.type === 'usage.record' && event.usage) {
@@ -4173,19 +4178,19 @@ function applyKimiWireEvent(
 export function parseKimiWireMetricsIncremental(
   sessionDir: string,
   prior: KimiParserState | null,
-): { messageCount: number; tokenCount: number; outputTokens: number; newState: KimiParserState } {
+): { messageCount: number; tokenCount: number; outputTokens: number; model?: string; newState: KimiParserState } {
   const wirePath = path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
 
   const stat = safeStatSync(wirePath);
   if (!stat) {
-    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 2, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
+    return { messageCount: 0, tokenCount: 0, outputTokens: 0, newState: { v: 3, offset: 0, messageCount: 0, tokenCount: 0, outputTokens: 0 } };
   }
 
   const canIncrement = prior !== null && stat.size > prior.offset;
   const fromOffset = canIncrement ? prior!.offset : 0;
   const acc = canIncrement
-    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens, firstUserMessage: prior!.firstUserMessage }
-    : { messageCount: 0, tokenCount: 0, outputTokens: 0, firstUserMessage: undefined as string | undefined };
+    ? { messageCount: prior!.messageCount, tokenCount: prior!.tokenCount, outputTokens: prior!.outputTokens, firstUserMessage: prior!.firstUserMessage, model: prior!.model }
+    : { messageCount: 0, tokenCount: 0, outputTokens: 0, firstUserMessage: undefined as string | undefined, model: undefined as string | undefined };
 
   let consumedBytes = 0;
   let fd: number | undefined;
@@ -4224,7 +4229,8 @@ export function parseKimiWireMetricsIncremental(
     messageCount: acc.messageCount,
     tokenCount: acc.tokenCount,
     outputTokens: acc.outputTokens,
-    newState: { v: 2, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens, firstUserMessage: acc.firstUserMessage },
+    model: acc.model,
+    newState: { v: 3, offset: fromOffset + consumedBytes, messageCount: acc.messageCount, tokenCount: acc.tokenCount, outputTokens: acc.outputTokens, firstUserMessage: acc.firstUserMessage, model: acc.model },
   };
 }
 
@@ -4232,7 +4238,7 @@ function parsePriorKimiState(row: { parserState: string | null } | undefined): K
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as KimiParserState;
-    if (parsed?.v !== 2 || typeof parsed.offset !== 'number') return null;
+    if (parsed?.v !== 3 || typeof parsed.offset !== 'number') return null;
     return parsed;
   } catch {
     return null;
@@ -4399,6 +4405,7 @@ export function readGrokMeta(
     topic,
     firstUserMessage: readGrokFirstUserMessage(sessionDir),
     messageCount,
+    model: typeof summary?.current_model_id === 'string' && summary.current_model_id ? summary.current_model_id : undefined,
   };
 
   return { meta, content: topic || '' };

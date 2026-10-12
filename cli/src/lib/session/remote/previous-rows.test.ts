@@ -12,6 +12,7 @@ process.env.USERPROFILE = tmpHome;
 
 let db: typeof import('../db.js');
 let readPreviousSessionsForWatch: typeof import('./watch.js').readPreviousSessionsForWatch;
+let toPreviousSessionWatchRow: typeof import('./watch.js').toPreviousSessionWatchRow;
 const scope = 'test-device';
 const now = Date.now();
 
@@ -34,7 +35,7 @@ function seed(meta: Partial<SessionMeta> & Pick<SessionMeta, 'id' | 'agent'>, ex
 
 beforeAll(async () => {
   db = await import('../db.js');
-  ({ readPreviousSessionsForWatch } = await import('./watch.js'));
+  ({ readPreviousSessionsForWatch, toPreviousSessionWatchRow } = await import('./watch.js'));
   db.getDB();
 });
 
@@ -63,5 +64,14 @@ describe('readPreviousSessionsForWatch', () => {
     expect(rows.every((row) => row.id.startsWith('eligible-'))).toBe(true);
     expect(rows.every((row) => row.filePath && fs.existsSync(row.filePath))).toBe(true);
     expect(rows.some((row) => row.agent === 'grok')).toBe(true);
+  });
+});
+
+describe('toPreviousSessionWatchRow', () => {
+  it('reports the indexed model for a session the timeline pass never folded', () => {
+    seed({ id: 'grok-unfolded', agent: 'grok', model: 'grok-4.7' }, true);
+    const indexed = db.getSessionById('grok-unfolded')!;
+    expect(db.readSessionTimelineAny('grok-unfolded')).toBeUndefined();
+    expect(toPreviousSessionWatchRow(scope, indexed, []).model).toBe('grok-4.7');
   });
 });
