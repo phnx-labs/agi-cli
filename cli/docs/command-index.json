@@ -2199,7 +2199,7 @@
             },
             {
               "flags": "--since <dur>",
-              "description": "Only lines newer than this (e.g. 1h, 30m)",
+              "description": "Only lines newer than this (e.g. 1h, 30m, 1w, or an ISO date)",
               "long": "--since",
               "required": true,
               "optional": false,

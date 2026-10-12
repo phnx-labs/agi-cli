@@ -40,6 +40,12 @@ describe('parseDuration', () => {
     expect(parseDuration('2days')).toBe(172800);
   });
 
+  it('parses weeks', () => {
+    expect(parseDuration('1w')).toBe(604800);
+    expect(parseDuration('1week')).toBe(604800);
+    expect(parseDuration('2weeks')).toBe(1209600);
+  });
+
   it('rejects garbage', () => {
     expect(parseDuration('abc')).toBeNull();
     expect(parseDuration('')).toBeNull();

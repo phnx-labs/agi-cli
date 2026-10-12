@@ -245,4 +245,26 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     }
   },
   );
+
+  it('logs --since accepts weeks and refuses an unparseable value instead of meaning "now"', () => {
+    const home = makeHome();
+    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    fs.mkdirSync(daemonDir, { recursive: true });
+    const lines = [
+      { ts: new Date(Date.now() - 30 * 86_400_000).toISOString(), level: 'INFO', message: 'a month ago' },
+      { ts: new Date(Date.now() - 2 * 86_400_000).toISOString(), level: 'INFO', message: 'two days ago' },
+    ];
+    fs.writeFileSync(path.join(daemonDir, 'logs.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+    try {
+      const week = run(home, ['logs', '--since', '1week', '--json']);
+      expect(week.status).toBe(0);
+      expect(JSON.parse(String(week.stdout)).map((e: { message: string }) => e.message)).toEqual(['two days ago']);
+
+      const bogus = run(home, ['logs', '--since', 'soonish', '--json']);
+      expect(bogus.status).not.toBe(0);
+      expect(String(bogus.stderr)).toContain('Invalid --since value: soonish');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
 });
