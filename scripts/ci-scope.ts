@@ -6,8 +6,6 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 export const POLICY_VERSION = 'impact-v1';
 export const IMPACT_BUDGET_SEC = 85;
-// A change that selects this many CLI test files is a whole-suite change: it runs
-// as cli-full (1200 s) instead of overrunning a group budget sized for a narrow one.
 export const CLI_FULL_MIN_SELECTED_TESTS = 300;
 
 export interface CiScope {
