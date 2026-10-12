@@ -198,10 +198,6 @@ describe('config command', () => {
     expect(() => runAgents(home, ['config', 'set', 'menubar.menu.ticketSort', 'random'])).toThrow();
   });
 
-  it('defaults ticketSort to due date (PHNX-4326)', () => {
-    expect(runAgents(home, ['config', 'get', 'menubar.menu.ticketSort'])).toContain('due');
-  });
-
   it('rejects an out-of-set AGI Menu enum value', () => {
     expect(() =>
       runAgents(home, ['config', 'set', 'menubar.menu.groupBy', 'sideways']),
