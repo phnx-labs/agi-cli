@@ -19,7 +19,7 @@ export async function resumeSessionInPlace(session: SessionMeta): Promise<void> 
   const owner = sessionOwnerDevice(session);
   if (owner) {
     console.error(chalk.red(`Session ${session.shortId} belongs to ${owner} — it cannot resume on this machine.`));
-    console.error(chalk.gray(`  Resume it there: agents sessions resume ${session.id}`));
+    console.error(chalk.gray(`  Resume it there: agents run auto --resume ${session.id}`));
     process.exitCode = 1;
     return;
   }

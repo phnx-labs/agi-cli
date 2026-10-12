@@ -169,7 +169,7 @@ async function runSessionsPrune(options: PruneOptions): Promise<void> {
     console.log(chalk.gray('Session prune flags are accepted for compatibility but do not delete data.'));
   }
   console.log(chalk.yellow('Session history is durable. agents-cli does not hard-delete session records.'));
-  console.log(chalk.gray('Browse sessions with: agents sessions'));
+  console.log(chalk.gray('Browse sessions with: sessions'));
 }
 
 async function runRunsPrune(options: PruneOptions): Promise<void> {

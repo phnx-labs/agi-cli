@@ -62,7 +62,7 @@ export async function maybePickBrowserProfile(deps: {
   if (!chosen) return false;
   console.log(
     chalk.green(`Browser: '${chosen}'`) +
-      chalk.dim(' — this machine\'s default (agents browser use to change).'),
+      chalk.dim(' — this machine\'s default (browser use to change).'),
   );
   return true;
 }

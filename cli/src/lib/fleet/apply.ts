@@ -288,7 +288,7 @@ export function probeDevice(device: DeviceProfile, opts?: ProbeOptions): DeviceP
   }
   let remoteBundles: Record<string, string> | undefined;
   if (opts?.withSecrets) {
-    const listCmd = buildRemoteAgentsInvocation(['secrets', 'list', '--json'], undefined, hint, remoteEnv(device.platform));
+    const listCmd = buildRemoteAgentsInvocation(['list', '--json'], undefined, hint, remoteEnv(device.platform), 'secrets');
     const lres = sshExec(target, listCmd, { timeoutMs: 30000, multiplex: true, extraSshArgs });
     if (lres.code === 0) remoteBundles = parseRemoteBundles(lres.stdout);
   }

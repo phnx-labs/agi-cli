@@ -20,7 +20,7 @@ export interface ForkDeps {
 function defaultDeps(): ForkDeps {
   return {
     runPreview: (sub) => {
-      const p = getCliLaunch(['sessions', 'preview', ...sub]);
+      const p = getCliLaunch(['ps', 'preview', ...sub]);
       const r = spawnSync(p.command, p.args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'inherit'] });
       return { status: r.status, stdout: r.stdout ?? '' };
     },
@@ -118,8 +118,8 @@ export async function runFork(
   process.exitCode = child.status ?? 0;
 }
 
-export function registerSessionsForkCommand(sessionsCmd: Command): void {
-  const cmd = sessionsCmd
+export function registerForkCommand(program: Command): void {
+  const cmd = program
     .command('fork <session>')
     .description('Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.')
     .option('--name <label>', 'Session label for the fork (default: "fork of <original>")')
@@ -127,16 +127,5 @@ export function registerSessionsForkCommand(sessionsCmd: Command): void {
     .option('--terminal [backend]', 'Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place');
 
   setHelpSections(cmd, FORK_HELP);
-  cmd.action((session: string, options: ForkOptions) => runFork(session, options));
-}
-
-export function registerForkCommand(program: Command): void {
-  const cmd = program
-    .command('fork <session>', { hidden: true })
-    .description('Branch a session into a new same-harness sibling, seeded with a recap so it continues the work (also `agents sessions fork`).')
-    .option('--name <label>', 'Session label for the fork (default: "fork of <original>")')
-    .option('--device <host>', 'Place the sibling on a fleet device (name or "auto"); defaults to here')
-    .option('--terminal [backend]', 'Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place');
-
   cmd.action((session: string, options: ForkOptions) => runFork(session, options));
 }

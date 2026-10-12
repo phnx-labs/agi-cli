@@ -92,7 +92,7 @@ export interface AddProfileOptions {
 }
 
 /**
- * Copy a value from an `agents secrets` bundle into a profile's own keychain
+ * Copy a value from an `secrets` bundle into a profile's own keychain
  * item — a one-time copy, not a live link. `spec` is `<bundle>` or
  * `<bundle>:<key>`; the key is required only when the bundle has more than one.
  *
@@ -142,7 +142,7 @@ export async function applyFromSecrets(
     bundle = await readBundle(bundleName);
   } catch (err) {
     if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
-    throw new Error(`Secrets bundle '${bundleName}' not found. List bundles with 'agents secrets list'.`);
+    throw new Error(`Secrets bundle '${bundleName}' not found. List bundles with 'secrets list'.`);
   }
   const keys = Object.keys(bundle.vars);
   const key = requestedKey ?? (keys.length === 1 ? keys[0] : undefined);

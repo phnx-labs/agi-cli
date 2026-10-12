@@ -15,7 +15,7 @@ import { runOnPeer } from '../lib/session/remote-list.js';
 import { buildBackgroundArgv, resolveDetachTarget, resolveOne } from './detach-core.js';
 import { setHelpSections } from '../lib/help.js';
 
-export function registerDetachCommand(program: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+export function registerDetachCommand(program: Command): void {
   const cmd = program
     .command('detach')
     .argument('<id>', 'Short or full id of the live session to background')
@@ -27,7 +27,7 @@ export function registerDetachCommand(program: Command, group: 'sessions' | 'ps'
   setHelpSections(cmd, {
     examples: `
       # Background a live session: its terminal closes, the agent keeps working headless
-      agents ${group} detach 4b2f1a9c
+      agents ps detach 4b2f1a9c
 
       # Bring it back into a terminal later
       agents ps focus 4b2f1a9c
@@ -138,7 +138,7 @@ async function detachAction(id: string, opts: { local?: boolean } = {}): Promise
 
   console.log(
     chalk.green(`◒ Backgrounded ${agent} ${short}`) +
-      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents sessions resume ${short}`),
+      chalk.gray(` — running headless (pid ${pid}). Bring it back: agents ps focus ${short}`),
   );
   console.log(chalk.gray(`  logs: ${logFile}`));
 }

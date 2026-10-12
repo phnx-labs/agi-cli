@@ -46,6 +46,7 @@ import {
   LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
   RETIRED_TOP_LEVEL_COMMANDS,
+  removedToolGroupMessage,
   registerAllCommands,
   type ModuleLoader,
 } from './cli/command-registry.js';
@@ -715,20 +716,15 @@ program.on('command:*', (operands) => {
 
 const passedArgs = normalizeResumeDeviceArgs(process.argv.slice(2));
 process.argv.splice(2, process.argv.length - 2, ...passedArgs);
-if (passedArgs[0] === 'sessions') {
-  const nestedVersionIndex = passedArgs.indexOf('--version', 1);
-  if (nestedVersionIndex >= 0) {
-    const nestedVersion = passedArgs[nestedVersionIndex + 1];
-    if (!nestedVersion || nestedVersion.startsWith('-')) {
-      console.error("error: option '--version <version>' argument missing");
-      process.exit(1);
-    }
-    passedArgs[nestedVersionIndex] = '--session-version';
-    process.argv[nestedVersionIndex + 2] = '--session-version';
-  }
-}
 const requestedCommandIndex = commandTokenIndex(passedArgs);
 const requestedCommand = requestedCommandIndex === undefined ? undefined : passedArgs[requestedCommandIndex];
+const removedGroupMessage = requestedCommand === undefined
+  ? undefined
+  : removedToolGroupMessage(requestedCommand, passedArgs.slice(requestedCommandIndex! + 1));
+if (removedGroupMessage) {
+  console.error(removedGroupMessage);
+  process.exit(1);
+}
 const verboseStartup = passedArgs.includes('--verbose');
 const helpAllRequested = passedArgs.includes('--help-all');
 const helpOrVersionRequested = passedArgs.some(

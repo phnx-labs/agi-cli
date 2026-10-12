@@ -648,7 +648,7 @@ export function registerRunCommand(program: Command): void {
     .option('--since <time>', 'With a bare --resume: only sessions newer than this (default 30d; e.g. 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'With a bare --resume: maximum sessions loaded into the picker (default 200)')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `agents sessions` and resolves by it (and `agents events logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `sessions` and `agents ps` and resolves by it (and `agents events logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',
@@ -1070,7 +1070,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         const { sessionsResumeAction } = await import('./sessions-resume.js');
         const { toRemotePortable } = await import('../lib/project-root.js');
         const device = options.host || options.device || options.on || options.computer;
-        await sessionsResumeAction(undefined, prompt, {
+        await sessionsResumeAction({
           agent: normalizedAgentSpec.split('#')[0] === RUN_AUTO_KEYWORD ? undefined : normalizedAgentSpec.split('#')[0],
           account: options.account,
           model: options.model,
@@ -1131,18 +1131,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
 
       if (typeof options.resume === 'string' && options.resume.trim()) {
         const selector = options.resume.trim();
-        const injectedSource = (() => {
-          try {
-            const parsed = JSON.parse(process.env.AGENTS_RESUME_SOURCE_JSON ?? 'null');
-            return parsed?.id === selector ? parsed as import('@phnx-labs/sessions-cli/reader').SessionMeta : undefined;
-          } catch {
-            return undefined;
-          }
-        })();
-        delete process.env.AGENTS_RESUME_SOURCE_JSON;
-        const outcome = injectedSource
-          ? { kind: 'resolved' as const, session: injectedSource }
-          : await (await import('../lib/session/selection.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
+        const outcome = await (await import('../lib/session/selection.js')).resolveSessionMetadataValue(selector, { agent: runBaseAgentId ?? undefined });
         if (outcome.kind === 'partial') {
           const offline = outcome.failedPeers;
           console.error(chalk.yellow(`Warning: ${offline.length} device(s) unreachable, not checked: ${offline.join(', ')}`));
@@ -1164,7 +1153,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         if (!autoHarnessRequested && requestedAgent !== resolvedResumeSource.agent) {
           console.error(chalk.red(
             `Session ${resolvedResumeSource.shortId} belongs to ${resolvedResumeSource.agent}, not ${requestedAgent}. ` +
-            `Use: agents sessions resume ${resolvedResumeSource.id}`,
+            `Use: agents run auto --resume ${resolvedResumeSource.id}`,
           ));
           process.exit(1);
         }
@@ -1858,7 +1847,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
             const handle = task.name ?? task.id;
             console.log(
               chalk.green(`Dispatched to ${host.name}${task.name ? ` as "${task.name}"` : ''}.`) + '\n' +
-              chalk.gray(`  Status:  agents sessions ${handle}`) + chalk.gray('   (compact digest — use this)') + '\n' +
+              chalk.gray(`  Status:  agents ps preview ${handle}`) + chalk.gray('   (compact digest — use this)') + '\n' +
               chalk.gray(`  Raw log: agents events logs ${handle} -f`) + chalk.gray('   (heavy, only if needed)'),
             );
             process.exit(0);

@@ -2,8 +2,8 @@
  * context.ts — everything agents-cli knows that the standalone `computer`
  * engine cannot work out for itself, serialized as one JSON object onto fd 3.
  *
- * This is the whole contract of the consumer half, and it is deliberately four
- * fields wide. The engine accepts exactly this shape:
+ * This is the whole contract of the consumer half, and it is deliberately
+ * small. The engine accepts exactly this shape:
  *
  *   version      `1`. The engine matches on it; a field added later must be
  *                optional so an older engine keeps working.
@@ -11,10 +11,6 @@
  *                rules in the agents permissions resource layer. The engine
  *                would have to re-learn resource layering to compute this.
  *   peers        which executables the daemon accepts a connection from.
- *   target       the `--device <name>` target, resolved against the fleet:
- *                devices registry, ssh identity, platform. The engine matches
- *                its own `--device <alias>` against this instead of reading a
- *                registry it does not have. Absent for a local invocation.
  *   session      who is acting — actor id and agent session — so an action
  *                lands in the right session history.
  *
@@ -37,16 +33,6 @@
 
 import { resolveActor } from '../actor.js';
 import { loadComputerAllowList, loadDefaultPeers } from './policy.js';
-import { resolveRemoteDevice } from '../ssh-tunnel.js';
-
-export interface ComputerTargetContext {
-  alias: string;
-  host: string;
-  user: string;
-  hostname: string;
-  platform: string;
-  sshArgs: string[];
-}
 
 interface ComputerSessionContext {
   sessionId?: string;
@@ -58,7 +44,6 @@ interface ComputerContext {
   version: 1;
   permissions?: { allow: string[] };
   peers: { allow: string[] };
-  target?: ComputerTargetContext;
   session: ComputerSessionContext;
 }
 
@@ -72,36 +57,12 @@ function agentSessionId(env: NodeJS.ProcessEnv = process.env): string | undefine
     || undefined;
 }
 
-interface BuildContextOptions {
-  device?: string;
-  host?: string;
-  computerBin?: string;
-  target?: ComputerTargetContext;
-}
-
-export async function buildComputerContext(opts: BuildContextOptions = {}): Promise<ComputerContext> {
-  let target: ComputerTargetContext | undefined = opts.target;
-  if (!target && opts.device) {
-    const resolved = await resolveRemoteDevice(opts.device, {
-      expectPlatform: 'windows',
-      forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
-    });
-    target = {
-      alias: opts.device,
-      host: resolved.target,
-      user: resolved.user,
-      hostname: resolved.host,
-      platform: resolved.device.platform,
-      sshArgs: resolved.identityArgs,
-    };
-  }
-
+export async function buildComputerContext(opts: { computerBin?: string } = {}): Promise<ComputerContext> {
   return {
     version: 1,
-    ...(!opts.device && !opts.host && !process.env.COMPUTER_HELPER_TCP && !process.env.COMPUTER_HELPER_VNC
+    ...(!process.env.COMPUTER_HELPER_TCP && !process.env.COMPUTER_HELPER_VNC
       ? { permissions: { allow: loadComputerAllowList() } } : {}),
     peers: { allow: loadDefaultPeers({ computerBin: opts.computerBin }) },
-    ...(target ? { target } : {}),
     session: {
       sessionId: agentSessionId(),
       launchId: process.env.AGENT_LAUNCH_ID,

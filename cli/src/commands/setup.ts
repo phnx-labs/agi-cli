@@ -24,6 +24,7 @@ import { registerSetupTermCommand, runTermWizard, isTermCliInstalled } from './s
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupAccountsCommand, runAccountsSetupWizard } from './setup-accounts.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
+import { registerSetupSessionBackupCommand } from './setup-session-backup.js';
 import { hasMintedSetupToken } from '../lib/auth-mint.js';
 import { registerAliasCommand } from './alias.js';
 import { registerBetaCommands } from './beta.js';
@@ -219,7 +220,7 @@ export async function runSetup(program: Command, options: RunSetupOptions = {}):
           .map(i => `${agentLabel(i.agentId)} (${sessionCounts[i.agentId] || 0})`)
           .join(', ');
         console.log(chalk.gray(`\n${totalSessions} sessions available across ${breakdown}`));
-        console.log(chalk.cyan('  agents sessions') + chalk.gray('  # browse them'));
+        console.log(chalk.cyan('  sessions') + chalk.gray('  # browse them'));
       }
     }
   }
@@ -377,6 +378,7 @@ export function registerSetupCommand(program: Command): void {
   registerSetupAccountsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
   registerSetupWatchdogCommand(setupCmd);
+  registerSetupSessionBackupCommand(setupCmd);
   registerAliasCommand(setupCmd);
   registerBetaCommands(setupCmd);
 

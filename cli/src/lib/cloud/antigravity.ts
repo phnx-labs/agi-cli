@@ -72,7 +72,7 @@ export class AntigravityCloudProvider implements CloudProvider {
           if (env[k]) return env[k];
         }
         throw new Error(
-          `Secrets bundle '${this.secretsBundle}' has no ${KEY_NAMES.join(' or ')}. Add one: agents secrets add ${this.secretsBundle} GEMINI_API_KEY`,
+          `Secrets bundle '${this.secretsBundle}' has no ${KEY_NAMES.join(' or ')}. Add one: secrets add ${this.secretsBundle} GEMINI_API_KEY`,
         );
       } catch (err) {
         throw new Error(`Could not read Gemini API key from bundle '${this.secretsBundle}': ${(err as Error).message}`);

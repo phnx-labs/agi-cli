@@ -410,7 +410,7 @@ function renderSingle(payload: OutputPayload, scenario: PricingScenario): void {
   out.push(...headerLines(payload, scenario));
   out.push('');
   if (payload.burn.sessionCount === 0) {
-    out.push(chalk.gray('No sessions with cost data found. Run `agents sessions --all` to index, then retry.'));
+    out.push(chalk.gray('No sessions with cost data found. Run `sessions --all` to index, then retry.'));
     console.log(out.join('\n'));
     return;
   }

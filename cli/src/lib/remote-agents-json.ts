@@ -12,13 +12,14 @@ import {
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from './devices/registry.js';
-import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from './hosts/remote-cmd.js';
+import { remoteShellFor, buildWindowsAgentsCommand, buildWindowsToolCommand, stripClixml, type RemoteToolBin } from './hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './machine-id.js';
 
 const REMOTE_TIMEOUT_MS = 12_000;
 
 interface RemoteAgentsJsonOptions<T> {
   args: string[];
+  bin?: RemoteToolBin;
   noFanoutEnv: string;
   hosts?: string[];
   parse: (stdout: string, machine: string) => T[] | RemoteAgentsJsonParseResult<T>;
@@ -70,12 +71,14 @@ export function parseRemoteAgentsJsonPayload<T>(
     : { items: [], parseFailed: true };
 }
 
-export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?: string): string {
+export function remoteAgentsJsonCommand(args: string[], noFanoutEnv: string, os?: string, bin: RemoteToolBin = 'agents'): string {
 
   if (remoteShellFor(os) === 'powershell') {
-    return buildWindowsAgentsCommand({ args, env: { [noFanoutEnv]: '1' } });
+    return bin === 'agents'
+      ? buildWindowsAgentsCommand({ args, env: { [noFanoutEnv]: '1' } })
+      : buildWindowsToolCommand(bin, args, { [noFanoutEnv]: '1' });
   }
-  const inner = `${noFanoutEnv}=1 agents ${args.map(shellQuote).join(' ')}`;
+  const inner = `${noFanoutEnv}=1 ${bin} ${args.map(shellQuote).join(' ')}`;
   return `bash -lc ${shellQuote(inner)}`;
 }
 
@@ -172,7 +175,7 @@ export async function gatherRemoteAgentsJson<T>(
   let earlyResolved = false;
 
   const results = await Promise.all(targets.map(async (target) => {
-    const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os);
+    const command = remoteAgentsJsonCommand(options.args, options.noFanoutEnv, target.os, options.bin);
     const result = await capture(target.target, command, {
       timeoutMs: options.timeoutMs ?? REMOTE_TIMEOUT_MS,
       signal: controller?.signal,
@@ -183,7 +186,7 @@ export async function gatherRemoteAgentsJson<T>(
       if (!cancelled) {
         skipped.push(target.name);
         if (!options.quiet) {
-          process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no agents CLI — skipped\n`));
+          process.stderr.write(chalk.gray(`  ${target.name}: unreachable or no ${options.bin ?? 'agents'} CLI — skipped\n`));
         }
       }
       return [] as T[];

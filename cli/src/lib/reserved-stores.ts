@@ -37,7 +37,7 @@ export class ReservedBundleWrongBackendError extends Error {
     super(
       `Bundle '${bundle}' is reserved for file-backed setup-tokens (headless, fleet-shareable). ` +
         `A ${backend}-backed '${bundle}' bundle is ignored by usage/probe instead of authenticating. ` +
-        `Recreate it as file-backed: agents secrets delete ${bundle} --yes && agents secrets create ${bundle} --backend file`,
+        `Recreate it as file-backed: secrets delete ${bundle} --yes && secrets create ${bundle} --backend file`,
     );
     this.name = 'ReservedBundleWrongBackendError';
     this.bundle = bundle;

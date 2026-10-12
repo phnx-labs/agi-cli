@@ -57,7 +57,7 @@ interface MigrateOptions {
   agentWrapup?: boolean;
 }
 
-export function registerSessionsMigrateCommand(sessionsCmd: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+export function registerSessionsMigrateCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('migrate [session-id]')
     .alias('relocate')
@@ -72,31 +72,31 @@ export function registerSessionsMigrateCommand(sessionsCmd: Command, group: 'ses
   setHelpSections(cmd, {
     examples: `
       # Move the session in THIS pane onto the least-busy fleet worker
-      agents ${group} migrate --auto
+      agents ps migrate --auto
 
       # Move a specific session onto a named host
-      agents ${group} migrate a1b2c3d4 --device yosemite-s1
+      agents ps migrate a1b2c3d4 --device yosemite-s1
 
       # Spin up a fresh ephemeral box and move onto it
-      agents ${group} migrate --lease
+      agents ps migrate --lease
 
       # Copy (don't stop the source), letting the agent wrap up its own dirty tree
-      agents ${group} migrate --device box-a --keep --agent-wrapup
+      agents ps migrate --device box-a --keep --agent-wrapup
     `,
     notes: `
       - Without a [session-id], migrate resolves the session running in THIS tmux pane ($TMUX_PANE).
       - Default --mode rehydrate: the transcript is shipped to the target and the agent reads it there
-        with 'agents sessions <id>' (its own judgment on --last/--include so long tool output can't
+        with 'sessions <id>' (its own judgment on --last/--include so long tool output can't
         blow context), then continues. Robust across every harness.
       - --mode resume attempts a native '<agent> --resume' on the target — faithful, but best-effort:
         the target agent must have the session registered, so migrate falls back to rehydrate when it can't.
       - The source is stopped only AFTER the target's session is confirmed live; --keep skips the stop (copy).
-      - Every migrate appends to the ledger — see 'agents ${group} migrations' for where each session went.
+      - Every migrate appends to the ledger — see 'agents ps migrations' for where each session went.
     `,
   });
 
   cmd.action(async (sessionId: string | undefined, options: MigrateOptions) => {
-    await sessionsMigrateAction(sessionId, options, group);
+    await sessionsMigrateAction(sessionId, options);
   });
 }
 
@@ -442,7 +442,7 @@ export function rehydrateCommand(source: SessionMeta): string[] {
   const origin = source.machine ? ` from ${source.machine}` : '';
   const prompt = [
     `You are continuing session ${source.shortId}, migrated to this machine${origin}.`,
-    `Its full transcript is here — read it with \`agents sessions ${source.shortId}\`.`,
+    `Its full transcript is here — read it with \`sessions ${source.shortId}\`.`,
     `It supports --markdown, role filters (e.g. --include user,assistant), and --last N;`,
     `use them so large tool outputs don't blow your context — skim the recent turns first,`,
     `widen only if you need to, then continue the work where it left off.`,
@@ -450,7 +450,7 @@ export function rehydrateCommand(source: SessionMeta): string[] {
   return [cli, prompt];
 }
 
-async function sessionsMigrateAction(sessionId: string | undefined, options: MigrateOptions, group: 'sessions' | 'ps'): Promise<void> {
+async function sessionsMigrateAction(sessionId: string | undefined, options: MigrateOptions): Promise<void> {
   if (options.mode && options.mode !== 'resume' && options.mode !== 'rehydrate') {
     fail(`--mode must be 'resume' or 'rehydrate' (got "${options.mode}").`);
   }
@@ -498,7 +498,7 @@ async function sessionsMigrateAction(sessionId: string | undefined, options: Mig
   recordMigration({ ...base, status: 'completed' });
   console.log(
     chalk.green(`\nMigrated ${source.shortId} to ${target.name}${options.keep ? ' (copy)' : ''}.`) +
-      chalk.gray(` Tracked in 'agents ${group} migrations'.`),
+      chalk.gray(` Tracked in 'agents ps migrations'.`),
   );
 }
 
@@ -520,7 +520,7 @@ async function stopSource(source: SessionMeta, active: ActiveSession | undefined
   else console.log(chalk.yellow(`  Source tmux session ${name} was already gone.`));
 }
 
-export function registerSessionsMigrationsCommand(sessionsCmd: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+export function registerSessionsMigrationsCommand(sessionsCmd: Command): void {
   const cmd = sessionsCmd
     .command('migrations')
     .description('Show the migration ledger — sessions handed off to/from other machines.')
@@ -535,7 +535,7 @@ export function registerSessionsMigrationsCommand(sessionsCmd: Command, group: '
       return;
     }
     if (recs.length === 0) {
-      console.log(chalk.gray(`No migrations recorded yet. Move one: agents ${group} migrate --auto`));
+      console.log(chalk.gray(`No migrations recorded yet. Move one: agents ps migrate --auto`));
       return;
     }
     recs.reverse();

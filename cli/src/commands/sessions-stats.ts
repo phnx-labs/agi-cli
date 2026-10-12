@@ -75,10 +75,6 @@ function installedResources(
   return [...byKey.values()];
 }
 
-export function registerSessionsStatsCommand(sessionsCmd: Command): void {
-  configureStatsCommand(sessionsCmd.command('stats'), 'agents sessions stats');
-}
-
 export function registerInsightsResourcesCommand(insightsCmd: Command): void {
   configureStatsCommand(insightsCmd.command('resources'), 'agents insights resources');
 }
@@ -122,7 +118,7 @@ function configureStatsCommand(stats: Command, spelling: string): void {
       - Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.
       - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run \`agents daemon index backfill resources\` once to fold in historical sessions (a low coverage line means it hasn't run).
       - --plugin filters the resource rows (this plugin's skills/commands), distinct from \`sessions --plugin\`, which filters SESSIONS.
-      - The window is all time unless --since narrows it. \`agents insights resources\` is the canonical spelling of this report (\`agents sessions stats\` is the legacy one); --json keeps \`kind: "sessions-stats"\` under either spelling.
+      - The window is all time unless --since narrows it. --json emits \`kind: "sessions-stats"\`.
     `,
   });
 }
@@ -287,7 +283,7 @@ function renderHuman(args: {
   out.push(
     chalk.gray(`  coverage: ${coverage.scanned}/${coverage.total} sessions scanned · ${coverage.covered} carry an explicit invocation`) +
       (coverage.total > 0 && coverage.scanned / coverage.total < 0.5
-        ? chalk.yellow('  — run `agents sessions backfill resources` to fold in history')
+        ? chalk.yellow('  — run `agents daemon index backfill resources` to fold in history')
         : ''),
   );
   out.push(chalk.gray('  signal: explicit invocations only (slash commands + Skill tool); auto-triggered skills read as 0; skills from Claude+Kimi, slash-commands Claude-only'));

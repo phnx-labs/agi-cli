@@ -23,7 +23,6 @@ export function registerDaemonIndexCommand(daemonCmd: Command): void {
     `,
     notes: `
       - The daemon's session-index service keeps new and changed sessions current on its own; these verbs are explicit maintenance on top of it.
-      - Each verb is the same engine as its legacy \`agents sessions\` spelling (\`--roots\`, \`optimize\`, \`backfill\`).
     `,
   });
 

@@ -55,7 +55,7 @@ export const COMPUTER_APP_GATED_VERBS = [
 
 export function formatComputerPermissionGrantHint(bundleId?: string): string {
   const target = bundleId && bundleId.length > 0 ? bundleId : '<bundle-id>';
-  return `add Computer(${target}) to a permissions group, then \`agents computer reload\`\n` +
+  return `add Computer(${target}) to a permissions group, then \`computer reload\`\n` +
     `app-targeted computer verbs are gated by Computer(<bundle-id>): ${COMPUTER_APP_GATED_VERBS.join(', ')}`;
 }
 

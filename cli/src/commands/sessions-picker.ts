@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import { truncate, humanDuration, formatBytes } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '@phnx-labs/sessions-cli/reader';
 import { sessionDisplayAgent } from '@phnx-labs/sessions-cli/reader';
-import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
+import { fetchPeerPreviewDigest, resolvePeerTarget, runOnPeer } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTail, readSessionHead } from '@phnx-labs/sessions-cli/reader';
 import { safeTeamText } from '@phnx-labs/sessions-cli/reader';
@@ -33,8 +33,8 @@ import {
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isPromptCancelled } from '../lib/format.js';
-import { runOnPeer } from '../lib/session/remote-list.js';
-import { RESUME_PINNED_ENV, sessionOwnerDevice } from '../lib/session/resume-owner.js';
+import { sessionOwnerDevice } from '../lib/session/resume-owner.js';
+import { sessionRecoveryRunArgs } from '../lib/session/recovery.js';
 import { resumeSessionInPlace } from '../lib/session/resume-command.js';
 import { filterSessionsByQuery, type SessionSearchScope } from '../lib/session/selection.js';
 import {
@@ -1083,14 +1083,19 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
   if (isIdlessLiveRow(picked.session)) {
     const where = picked.session.machine ? ` on ${picked.session.machine}` : '';
     console.log(chalk.yellow(`This session hasn't reported a session id yet — nothing to open${where}.`));
-    console.log(chalk.gray(`Watch for it with: agents sessions --active${picked.session.machine ? ` --device ${picked.session.machine}` : ''}`));
+    console.log(chalk.gray(`Watch for it with: agents ps${picked.session.machine ? ` --device ${picked.session.machine}` : ''}`));
     return;
   }
   if (picked.action === 'view') {
     const readFrom = transcriptOnPeerOf(picked.session);
     if (readFrom) {
-      const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], readFrom);
-      if (rc === 'no-target') warnNoPeerTarget(readFrom, picked.session);
+      const peer = await resolvePeerTarget(readFrom);
+      if (!peer) {
+        warnNoPeerTarget(readFrom, picked.session);
+        return;
+      }
+      const { runSessions } = await import('../lib/sessions-client.js');
+      process.exitCode = await runSessions([picked.session.id, '--markdown', '--host', `ssh://${peer.target}`]);
       return;
     }
     await renderSession(picked.session, 'summary', {});
@@ -1105,11 +1110,7 @@ async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boolean> {
   const owner = sessionOwnerDevice(session);
   if (!owner) return false;
   console.log(chalk.gray(`Resuming ${session.shortId} on ${owner} over SSH...`));
-  const rc = await runOnPeer(['sessions', 'resume', session.id], owner, {
-    tty: true,
-    env: { [RESUME_PINNED_ENV]: '1' },
-    sessionId: session.id,
-  });
+  const rc = await runOnPeer(sessionRecoveryRunArgs(session), owner, { tty: true, sessionId: session.id });
   if (rc === 'no-target') warnNoPeerTarget(owner, session);
   return true;
 }

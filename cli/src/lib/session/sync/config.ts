@@ -1,9 +1,9 @@
 /**
  * R2 credential resolution + this machine's stable identity. Two consumers read
- * these fields: `agents sessions export --encrypt` / `import` use only the shared
+ * these fields: `sessions export --encrypt` / `import` use only the shared
  * `R2_SYNC_ENC_KEY` transcript key (`resolveSyncEncKey`), falling back to an
  * ephemeral key when no bundle is configured; and the off-box backup target
- * (`agents sessions export --to-r2` / `import --from-r2`, RUSH-2437) uses the full
+ * (`sessions export --to-r2` / `import --from-r2`, RUSH-2437) uses the full
  * credential set (account/bucket/access keys/endpoint) to talk to R2 through the
  * network client in `./r2.ts`. The `--to-r2`/`--from-r2` paths gate on
  * `isSyncConfigured()` and fail loud when the bundle is absent (no silent
@@ -42,7 +42,7 @@ function resolveR2Config(): R2Config {
   if (missing.length > 0) {
     throw new Error(
       `Session R2 transport: bundle '${SYNC_BUNDLE}' is missing ${missing.join(', ')}. ` +
-      `Add them with: agents secrets add ${SYNC_BUNDLE} <KEY>`,
+      `Add them with: secrets add ${SYNC_BUNDLE} <KEY>`,
     );
   }
 

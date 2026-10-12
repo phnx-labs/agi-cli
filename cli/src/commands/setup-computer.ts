@@ -32,7 +32,7 @@ export async function runComputerWizard(): Promise<boolean> {
     console.log(chalk.yellow('`agents setup computer` configures the macOS helper (local control).'));
     console.log(
       chalk.dim(
-        'On Windows, provision a remote host from a Mac/Linux box instead: `agents computer setup --device <device>`.',
+        'On Windows, provision a remote host from a Mac/Linux box instead: `computer setup --device <device>`.',
       ),
     );
     return false;
@@ -78,7 +78,7 @@ export async function runComputerWizard(): Promise<boolean> {
 
     if (!trusted) {
       console.log(chalk.yellow('\nAccessibility not granted yet.'));
-      console.log(chalk.dim('Finish both grants in System Settings, then run: ') + chalk.cyan('agents computer start'));
+      console.log(chalk.dim('Finish both grants in System Settings, then run: ') + chalk.cyan('computer start'));
       console.log(chalk.dim('  Accessibility:    System Settings > Privacy & Security > Accessibility'));
       console.log(chalk.dim('  Screen Recording: System Settings > Privacy & Security > Screen Recording'));
     }
@@ -94,7 +94,7 @@ export async function runComputerWizard(): Promise<boolean> {
   console.log(chalk.dim('    allow:'));
   console.log(chalk.dim('      - "Computer(com.apple.finder)"'));
   console.log(chalk.dim('      - "Computer(com.apple.notes)"'));
-  console.log(chalk.dim('  Then reload: ') + chalk.cyan('agents computer reload'));
+  console.log(chalk.dim('  Then reload: ') + chalk.cyan('computer reload'));
 
   return trusted;
 }
@@ -122,7 +122,7 @@ async function pollForTrust(): Promise<boolean> {
 export function registerSetupComputerCommand(setupCmd: Command): void {
   setupCmd
     .command('computer')
-    .description('Set up `agents computer` (macOS) — install the signed helper and grant control permissions.')
+    .description('Set up `computer` (macOS) — install the signed helper and grant control permissions.')
     .option('--install-only', 'Install the standalone Computer CLI without starting the helper or changing permissions')
     .option('--terminal [backend]', 'Open interactive setup in a detected or selected terminal')
     .action(async (options: { installOnly?: boolean; terminal?: boolean | string }) => {

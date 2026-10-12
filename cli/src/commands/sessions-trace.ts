@@ -24,8 +24,33 @@ import type {
 } from '@phnx-labs/sessions-cli/reader';
 import type { TrajectoryStep } from '@phnx-labs/sessions-cli/reader';
 import type { LineageEdge, LineageNode, SessionLineage } from '@phnx-labs/sessions-cli/reader';
-import { parseAgentFilter } from '../lib/session/selection.js';
-import { selectSessions } from './sessions-export.js';
+import { filterSessionsByQuery, parseAgentFilter } from '../lib/session/selection.js';
+import { looksLikeSessionId, resolveSessionById } from '../lib/session/discover.js';
+import { findSessionsById } from '../lib/session/db.js';
+
+export function selectSessions(metas: SessionMeta[], selectors: string[]): SessionMeta[] {
+  if (selectors.length === 0) return metas;
+
+  const byId: SessionMeta[] = [];
+  const unmatched: string[] = [];
+  for (const sel of selectors) {
+    const trimmed = sel.trim();
+    const hits = resolveSessionById(metas, trimmed);
+    const resolved = hits.length > 0 || !looksLikeSessionId(trimmed) ? hits : findSessionsById(trimmed);
+    if (resolved.length > 0) byId.push(...resolved);
+    else unmatched.push(trimmed);
+  }
+  if (byId.length > 0 && unmatched.length === 0) {
+    const seen = new Set<string>();
+    return byId.filter(s => (seen.has(s.id) ? false : (seen.add(s.id), true)));
+  }
+  const missingIds = unmatched.filter(looksLikeSessionId);
+  if (missingIds.length > 0) {
+    process.stderr.write(chalk.red(`No session with id ${missingIds.join(', ')} on this machine.\n`));
+    return [];
+  }
+  return filterSessionsByQuery(metas, selectors.join(' '));
+}
 
 export const SESSIONS_TRACE_SCHEMA_VERSION = 1;
 
@@ -467,10 +492,6 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
   });
 
   return cmd;
-}
-
-export function registerSessionsTraceCommand(sessionsCmd: Command): void {
-  configureTraceCommand(sessionsCmd.command('trace <selectors...>'));
 }
 
 export function registerTraceCommand(program: Command): void {

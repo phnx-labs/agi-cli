@@ -218,7 +218,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
 
   if (groups.length === 0) {
     out.push('');
-    out.push(chalk.gray('  No sessions in scope. Try a wider --since, or run `agents sessions --all` to index.'));
+    out.push(chalk.gray('  No sessions in scope. Try a wider --since, or run `sessions --all` to index.'));
     console.log(out.join('\n'));
     return;
   }
@@ -307,7 +307,7 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
       out.push(`  ${padToWidth(action.priority, 7)} ${padToWidth(action.category, 11)} ` +
         `${String(action.evidenceCount).padStart(8)}  ${padToWidth(action.sampleSessionIds.join(', '), 25)} ${action.action}`);
     }
-    out.push(chalk.gray('  drill into a sample session:  agents sessions trace <id>'));
+    out.push(chalk.gray('  drill into a sample session:  agents trace <id>'));
   }
 
   out.push('');
@@ -581,7 +581,6 @@ function configureInsightsCommand(cmd: Command): void {
       The behavioural report parses in-scope transcripts once and caches facets; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.
 
-      \`agents sessions insights\` is the legacy spelling of \`agents insights\`.
       Repeat \`--agent\` to compare several harnesses in one report.
 
       Everything except \`--narrative\` is local and makes no network calls.
@@ -596,8 +595,4 @@ export function registerInsightsCommand(program: Command): void {
   registerOutputCommand(cmd);
   registerPerfSubcommand(cmd);
   registerInsightsResourcesCommand(cmd);
-}
-
-export function registerSessionsInsightsCommand(sessions: Command): void {
-  configureInsightsCommand(sessions.command('insights'));
 }

@@ -109,13 +109,9 @@ function statusWord(status: LiveStatusFilter): string {
   return status === 'orphaned' ? 'orphaned' : status;
 }
 
-export function registerFocusCommand(
-  program: Command,
-  opts: { group?: 'sessions' | 'ps'; hidden?: boolean } = {},
-): void {
-  const group = opts.group ?? 'sessions';
+export function registerFocusCommand(program: Command): void {
   const cmd = program
-    .command('focus', { hidden: opts.hidden ?? true })
+    .command('focus')
     .argument('[selector]', 'Session id/prefix, agent@version, or topic/path search')
     .option('--launch-id <id>', 'Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine\'s hook records)')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
@@ -161,22 +157,22 @@ export function registerFocusCommand(
   setHelpSections(cmd, {
     examples: `
       # Focus a session directly (attach a living pane, otherwise recover it)
-      agents ${group} focus a1b2c3d4
+      agents ps focus a1b2c3d4
 
       # Multi-select live sessions; each opens as a tab in this terminal
-      agents ${group} focus
+      agents ps focus
 
       # Scope the picker to one device's orphaned sessions
-      agents ${group} focus --orphan --device yosemite-s0
+      agents ps focus --orphan --device yosemite-s0
 
       # Resolve latest on yosemite-s0, then pick from that version's sessions
-      agents ${group} focus claude@latest --device yosemite-s0
+      agents ps focus claude@latest --device yosemite-s0
 
       # Attach only — refuse if nothing is joinable
-      agents ${group} focus a1b2c3d4 --attach-only
+      agents ps focus a1b2c3d4 --attach-only
 
       # Pick from live sessions on this machine only
-      agents ${group} focus --local
+      agents ps focus --local
     `,
     notes: `
       - space toggles a session, enter opens the selected set; a single check + enter opens just one.
@@ -210,7 +206,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
     if (!resolved) {
       console.error(chalk.red(`No session recorded for launch id ${opts.launchId} on ${machineId()}.`));
       console.error(chalk.gray('  The run may have failed before its SessionStart hook fired.'));
-      console.error(chalk.gray('  Look for it:  agents sessions --active'));
+      console.error(chalk.gray('  Look for it:  agents ps'));
       process.exitCode = 1;
       return;
     }
@@ -361,7 +357,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
   }
   if (activeById.size === 0) {
     const scope = describeScope(statuses, hosts);
-    console.log(chalk.gray(`No live sessions to focus${scope}. To resume a past one: agents sessions resume`));
+    console.log(chalk.gray(`No live sessions to focus${scope}. To resume a past one: agents run auto --resume`));
     return;
   }
 
@@ -516,7 +512,7 @@ export async function focusResolvedSession(
     ));
     console.error(chalk.gray(
       `  Prior context is in the transcript — starting recovery.\n` +
-      `  To see what happened: agents sessions preview ${meta.shortId}`
+      `  To see what happened: agents ps preview ${meta.shortId}`
     ));
   }
   const remote = sessionProcessHost(meta, self);
@@ -769,7 +765,7 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   if (results[0].ok) console.log(line);
   else {
     console.error(chalk.red(line));
-    console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${meta.id}`));
+    console.error(chalk.gray(`  Resume it in this terminal instead: agents run auto --resume ${meta.id}`));
     process.exitCode = 1;
   }
 };

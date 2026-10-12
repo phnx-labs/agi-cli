@@ -76,7 +76,7 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
     unwatched: !viewingIn,
     viewingIn,
     recovery: resumable
-      ? { command: 'agents', args: ['sessions', 'resume', row.sessionId!, '--device', scope], ...(row.cwd ? { cwd: row.cwd } : {}) }
+      ? { command: 'agents', args: ['ps', 'focus', row.sessionId!], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
   };
 }
@@ -163,14 +163,13 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     unwatched: true,
     viewingIn: null,
     recovery: resumable
-      ? { command: 'agents', args: ['sessions', 'resume', session.id, '--device', sourceDevice], ...(session.cwd ? { cwd: session.cwd } : {}) }
+      ? { command: 'agents', args: ['ps', 'focus', session.id], ...(session.cwd ? { cwd: session.cwd } : {}) }
       : null,
   };
 }
 
 function demoteWatchRow(scope: string, row: SessionWatchRow): SessionWatchRow | null {
   if (!row.sessionId || row.rowKey === previousSessionWatchRowKey(scope, row.sessionId)) return null;
-  const sourceDevice = row.sourceDevice || scope;
   return {
     ...row,
     context: 'recent',
@@ -182,7 +181,7 @@ function demoteWatchRow(scope: string, row: SessionWatchRow): SessionWatchRow | 
     unwatched: true,
     viewingIn: null,
     recovery: row.resumable
-      ? { command: 'agents', args: ['sessions', 'resume', row.sessionId, '--device', sourceDevice], ...(row.cwd ? { cwd: row.cwd } : {}) }
+      ? { command: 'agents', args: ['ps', 'focus', row.sessionId], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
   };
 }
@@ -414,7 +413,7 @@ interface WatchFleetOptions {
 }
 
 function remoteWatchCommand(os: string): string {
-  const args = ['sessions', 'watch', '--json', '--local'];
+  const args = ['ps', 'watch', '--json', '--local'];
   return remoteShellFor(os) === 'powershell'
     ? buildWindowsAgentsCommand({ args })
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;

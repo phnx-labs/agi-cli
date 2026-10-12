@@ -130,7 +130,7 @@ function shellQuoteHost(value: string): string {
 export function buildRotateReplayText(oldSessionId: string): string {
   return (
     `Resume previous work by loading session ${oldSessionId}. ` +
-    `Run \`agents sessions ${oldSessionId}\` to load the transcript, assess current state, then continue working.`
+    `Run \`sessions ${oldSessionId}\` to load the transcript, assess current state, then continue working.`
   );
 }
 

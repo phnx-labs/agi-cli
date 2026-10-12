@@ -8,13 +8,15 @@ import { isBookmarked } from '../lib/session/bookmarks.js';
 import { discoverSessions, isCompleteSessionId } from '../lib/session/discover.js';
 import { buildSessionDetailBlock, formatLiveStatusHeadline, notFoundByIdMessage, sessionTranscriptStamp } from '../lib/session/presentation.js';
 import { runOnPeer, shouldIncludeLocal } from '../lib/session/remote-list.js';
-import { applyScopeFilters, metadataResolveOutcome, resolveSessionMetadataValue, resolveSessionQuery, selectorAllowsEarlyExit } from '../lib/session/selection.js';
+import { applyScopeFilters, computeLocalMetadataMatches, metadataResolveOutcome, resolveSessionMetadataValue, resolveSessionQuery, selectorAllowsEarlyExit, serializeResolvedSessionsJson } from '../lib/session/selection.js';
+import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { registerSessionsStopCommand } from './sessions-stop.js';
 import { registerFocusCommand } from './focus.js';
 import { registerDetachCommand } from './detach.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
+import { registerSessionsWatchCommand } from './sessions-watch.js';
 
 export const PS_STATUSES: readonly LiveStatusFilter[] = [
   'working',
@@ -96,6 +98,9 @@ export function registerPsCommand(program: Command): void {
 
       # Where migrated sessions went
       agents ps migrations
+
+      # Stream live and recoverable session rows for a long-lived UI
+      agents ps watch --json
     `,
     notes: `
       - On a TTY with no --status, ps opens the session picker filtered to running
@@ -128,15 +133,53 @@ export function registerPsCommand(program: Command): void {
     });
   });
 
-  registerSessionsStopCommand(ps, 'ps');
-  registerFocusCommand(ps, { group: 'ps', hidden: false });
-  registerDetachCommand(ps, 'ps');
-  registerSessionsMigrateCommand(ps, 'ps');
-  registerSessionsMigrationsCommand(ps, 'ps');
-  registerSessionPreviewCommand(ps, 'ps');
+  registerSessionsStopCommand(ps);
+  registerFocusCommand(ps);
+  registerDetachCommand(ps);
+  registerSessionsMigrateCommand(ps);
+  registerSessionsMigrationsCommand(ps);
+  registerSessionPreviewCommand(ps);
+  registerSessionsWatchCommand(ps);
+  registerPeerResolveCommand(ps);
 }
 
-export function registerSessionPreviewCommand(parent: Command, group: 'ps' | 'sessions'): void {
+// Fleet protocol: a peer answers another box's selector or launch-id lookup from its own index.
+function registerPeerResolveCommand(ps: Command): void {
+  ps.command('resolve', { hidden: true })
+    .argument('[selector]')
+    .option('--launch-id <id>')
+    .option('-a, --agent <agent>')
+    .option('-p, --project <name>')
+    .option('--json')
+    .option('--local')
+    .action(async (selector: string | undefined, opts: { launchId?: string; agent?: string; project?: string; json?: boolean }) => {
+      if (!opts.json) {
+        console.error(chalk.red('ps resolve requires --json.'));
+        process.exit(1);
+      }
+      if (opts.launchId !== undefined) {
+        const launchId = opts.launchId.trim();
+        if (!launchId) throw new Error('--launch-id requires a non-empty launch id.');
+        const { loadHookSessionIndex } = await import('../lib/session/hook-sessions.js');
+        const record = loadHookSessionIndex().byLaunchId.get(launchId);
+        process.stdout.write(JSON.stringify({ launchId, sessionId: record?.session_id ?? null }) + '\n');
+        return;
+      }
+      if (process.env[NO_FANOUT_ENV] !== '1') {
+        console.error(chalk.red('ps resolve is an internal fleet protocol.'));
+        process.exit(1);
+      }
+      const trimmed = selector?.trim();
+      if (!trimmed) {
+        console.error(chalk.red('ps resolve requires a non-empty selector.'));
+        process.exit(1);
+      }
+      const matches = await computeLocalMetadataMatches(trimmed, { agent: opts.agent, project: opts.project, local: true });
+      process.stdout.write(serializeResolvedSessionsJson(matches));
+    });
+}
+
+export function registerSessionPreviewCommand(parent: Command): void {
   const previewCmd = parent
     .command('preview')
     .argument('<id>', 'Full session ID or displayed 8-character short ID')
@@ -151,24 +194,25 @@ export function registerSessionPreviewCommand(parent: Command, group: 'ps' | 'se
 
   setHelpSections(previewCmd, {
     examples: `
-      # Preview by the 8-character ID shown in agents ${group}
-      agents ${group} preview 407b8dd5
+      # Preview by the 8-character ID shown in agents ps
+      agents ps preview 407b8dd5
 
       # A full UUID resolves on the first device that owns it
-      agents ${group} preview c70ecdea-6210-4039-9845-246a3a7a9942
+      agents ps preview c70ecdea-6210-4039-9845-246a3a7a9942
 
       # Stay on this machine or restrict the authoritative lookup to one peer
-      agents ${group} preview 407b8dd5 --local
-      agents ${group} preview 407b8dd5 --device zion
+      agents ps preview 407b8dd5 --local
+      agents ps preview 407b8dd5 --device zion
 
       # Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch
-      agents ${group} preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh
+      agents ps preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh
     `,
     notes: `
       - Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.
       - Short IDs wait for every selected device so ambiguity is never hidden.
       - Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.
-      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.${group === 'ps' ? "\n      - Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device." : ''}
+      - A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's "cache" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.
+      - Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device.
     `,
   });
 
@@ -266,7 +310,7 @@ export async function renderSessionPreview(
   const session = outcome.session;
   const transcriptPeer = transcriptOnPeerOf(session);
   if (transcriptPeer) {
-    const args = ['sessions', 'preview', session.id, '--local'];
+    const args = ['ps', 'preview', session.id, '--local'];
     if (scope.json) args.push('--json');
     const rendered = await runOnPeer(args, transcriptPeer);
     if (rendered === 'no-target') {

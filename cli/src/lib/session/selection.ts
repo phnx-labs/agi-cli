@@ -420,7 +420,7 @@ export function metadataResolveForwardedArgs(
   selector: string,
   scope: Pick<SessionFilterOptions, 'agent' | 'project'>,
 ): string[] {
-  const args = ['sessions', '--resolve-safe-v1', selector, '--json', '--all', '--local'];
+  const args = ['ps', 'resolve', selector, '--json', '--local'];
   if (scope.agent) args.push('--agent', scope.agent);
   if (scope.project) args.push('--project', scope.project);
   return args;

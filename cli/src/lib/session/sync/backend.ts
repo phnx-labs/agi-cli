@@ -62,7 +62,7 @@ export function resolveSessionsBackend(opts: ResolveSessionsBackendOpts = {}): S
       throw new Error(
         "Not signed in, and no r2.backups bucket is configured. Run 'agents auth login' to " +
         'back up to the managed Phoenix store (zero setup), or add the r2.backups bundle to ' +
-        'use your own bucket: agents secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY',
+        'use your own bucket: secrets add r2.backups R2_ACCOUNT_ID R2_BUCKET_NAME R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY',
       );
     }
     throw err;
