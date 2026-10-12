@@ -1,0 +1,161 @@
+{
+ "_comment": "Raw GraphQL PullRequest nodes (PR_NODE_FIELDS) for acme/mono, recorded shape from gh api graphql, anonymized.",
+ "nodes": [
+  {
+   "number": 1,
+   "title": "PR 1",
+   "url": "https://github.com/acme/mono/pull/1",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-09-30T00:00:00Z",
+   "updatedAt": "2026-10-01T00:00:00Z",
+   "body": "",
+   "author": {
+    "__typename": "User",
+    "login": "octocat",
+    "avatarUrl": "https://avatars.githubusercontent.com/u/1?v=4"
+   },
+   "repository": {
+    "nameWithOwner": "acme/mono"
+   },
+   "headRefName": "b1",
+   "baseRefName": "main",
+   "headRefOid": "o1",
+   "mergeable": "CONFLICTING",
+   "mergeStateStatus": "DIRTY",
+   "autoMergeRequest": null,
+   "commits": {
+    "nodes": [
+     {
+      "commit": {
+       "statusCheckRollup": {
+        "contexts": {
+         "nodes": [
+          {
+           "__typename": "StatusContext",
+           "context": "ci/external",
+           "state": "ERROR",
+           "targetUrl": ""
+          },
+          {
+           "__typename": "StatusContext",
+           "context": "ci/coverage",
+           "state": "SUCCESS",
+           "targetUrl": ""
+          },
+          {
+           "__typename": "CheckRun",
+           "name": "test",
+           "status": "COMPLETED",
+           "conclusion": "FAILURE",
+           "detailsUrl": ""
+          },
+          {
+           "__typename": "CheckRun",
+           "name": "lint",
+           "status": "COMPLETED",
+           "conclusion": "SUCCESS",
+           "detailsUrl": ""
+          },
+          {
+           "__typename": "CheckRun",
+           "name": "deploy",
+           "status": "COMPLETED",
+           "conclusion": "CANCELLED",
+           "detailsUrl": ""
+          },
+          {
+           "__typename": "CheckRun",
+           "name": "e2e",
+           "status": "IN_PROGRESS",
+           "conclusion": null,
+           "detailsUrl": ""
+          }
+         ]
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "number": 2,
+   "title": "PR 2",
+   "url": "https://github.com/acme/mono/pull/2",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-09-30T00:00:00Z",
+   "updatedAt": "2026-10-01T00:00:00Z",
+   "body": "",
+   "author": {
+    "__typename": "User",
+    "login": "octocat",
+    "avatarUrl": "https://avatars.githubusercontent.com/u/2?v=4"
+   },
+   "repository": {
+    "nameWithOwner": "acme/mono"
+   },
+   "headRefName": "b2",
+   "baseRefName": "main",
+   "headRefOid": "o2",
+   "mergeable": "MERGEABLE",
+   "mergeStateStatus": "CLEAN",
+   "autoMergeRequest": null,
+   "commits": {
+    "nodes": [
+     {
+      "commit": {
+       "statusCheckRollup": {
+        "contexts": {
+         "nodes": [
+          {
+           "__typename": "CheckRun",
+           "name": "test",
+           "status": "COMPLETED",
+           "conclusion": "SUCCESS",
+           "detailsUrl": ""
+          }
+         ]
+        }
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "number": 3,
+   "title": "PR 3",
+   "url": "https://github.com/acme/mono/pull/3",
+   "isDraft": false,
+   "state": "OPEN",
+   "createdAt": "2026-09-30T00:00:00Z",
+   "updatedAt": "2026-10-01T00:00:00Z",
+   "body": "",
+   "author": {
+    "__typename": "User",
+    "login": "octocat",
+    "avatarUrl": "https://avatars.githubusercontent.com/u/3?v=4"
+   },
+   "repository": {
+    "nameWithOwner": "acme/mono"
+   },
+   "headRefName": "b3",
+   "baseRefName": "main",
+   "headRefOid": "o3",
+   "mergeable": "UNKNOWN",
+   "mergeStateStatus": "UNKNOWN",
+   "autoMergeRequest": null,
+   "commits": {
+    "nodes": [
+     {
+      "commit": {
+       "statusCheckRollup": null
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

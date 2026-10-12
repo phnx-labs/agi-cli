@@ -155,16 +155,76 @@ export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
   };
 }
 
+// One GraphQL page carries 100 PRs with their merge state and check rollup for
+// 2 points, where the per-PR REST reads it replaced cost three requests and three
+// gh processes for each PR.
+export const PR_NODE_FIELDS = `
+  number title url isDraft state createdAt updatedAt body
+  author { __typename login avatarUrl }
+  repository { nameWithOwner }
+  headRefName baseRefName headRefOid mergeable mergeStateStatus
+  autoMergeRequest { enabledBy { login } mergeMethod }
+  commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+    __typename
+    ... on CheckRun { name status conclusion detailsUrl }
+    ... on StatusContext { context state targetUrl }
+  } } } } } }`;
+
+const OPEN_PRS_QUERY = `query($owner: String!, $name: String!, $endCursor: String) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 100, after: $endCursor) {
+      pageInfo { hasNextPage endCursor }
+      nodes { ${PR_NODE_FIELDS} }
+    }
+  }
+}`;
+
+const MERGEABLE: Record<string, boolean> = { MERGEABLE: true, CONFLICTING: false };
+
+function rollupFromContexts(contexts: Array<Record<string, unknown>>): RollupItem[] {
+  const byName = new Map<string, RollupItem>();
+  for (const c of contexts) {
+    if (c.__typename !== 'StatusContext') continue;
+    const name = String(c.context ?? '');
+    if (!byName.has(name)) byName.set(name, { name, state: String(c.state ?? ''), link: String(c.targetUrl ?? '') });
+  }
+  for (const c of contexts) {
+    if (c.__typename !== 'CheckRun') continue;
+    const name = String(c.name ?? '');
+    byName.set(name, { name, status: String(c.status ?? ''), conclusion: String(c.conclusion ?? ''), link: String(c.detailsUrl ?? '') });
+  }
+  return [...byName.values()];
+}
+
+/** A `PR_NODE_FIELDS` node as the REST-shaped `ProjectPr`, CI folded in, with its repository's slug. */
+export function prFromNode(node: Record<string, unknown>): { slug: string; pr: ProjectPr } {
+  const rec = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
+  const author = rec(node.author);
+  const auto = isRecord(node.autoMergeRequest) ? node.autoMergeRequest : null;
+  const commits = rec(node.commits).nodes;
+  const commit = rec(rec(Array.isArray(commits) ? commits[0] : null).commit);
+  const contexts = rec(rec(commit.statusCheckRollup).contexts).nodes;
+  const pr = rowToProjectPr({
+    ...node,
+    login: `${author.login ?? ''}${author.__typename === 'Bot' ? '[bot]' : ''}`,
+    avatarUrl: author.avatarUrl ?? '',
+    headSha: node.headRefOid ?? '',
+    mergeable: MERGEABLE[String(node.mergeable)] ?? null,
+    mergeableState: typeof node.mergeStateStatus === 'string' ? node.mergeStateStatus.toLowerCase() : null,
+    autoMerge: auto ? { enabledBy: rec(auto.enabledBy).login ?? '', method: String(auto.mergeMethod ?? '').toLowerCase() } : null,
+  });
+  const items = rollupFromContexts(Array.isArray(contexts) ? contexts.filter(isRecord) : []);
+  return { slug: String(rec(node.repository).nameWithOwner ?? ''), pr: { ...pr, ...ciFromRollupItems(items) } };
+}
+
 export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<ProjectPr[]> {
+  const [owner, name] = repo.split('/');
   const out = await gh([
-    'api',
-    `repos/${repo}/pulls?state=open&per_page=100`,
-    '--paginate',
-    '--cache', '60s',
-    '--jq',
-    `.[] | ${PR_JQ}`,
+    'api', 'graphql', '--paginate',
+    '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `query=${OPEN_PRS_QUERY}`,
+    '--jq', '.data.repository.pullRequests.nodes[]',
   ]);
-  return parseNdjson(out).map(rowToProjectPr);
+  return parseNdjson(out).map((node) => prFromNode(node).pr);
 }
 
 export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghExec, cache?: string): Promise<ProjectPr> {
@@ -434,21 +494,6 @@ interface MergedDetail {
   deletions: number;
 }
 
-async function readMergeState(
-  slug: string,
-  number: number,
-  gh: GhExec,
-  errors: CiErrors,
-): Promise<Partial<Pick<ProjectPr, 'mergeable' | 'mergeableState'>>> {
-  try {
-    const { mergeable, mergeableState } = await fetchOnePr(slug, number, gh, '60s');
-    return { mergeable, mergeableState };
-  } catch (err) {
-    errors.record(err);
-    return {};
-  }
-}
-
 async function readMergedDetail(
   slug: string,
   number: number,
@@ -660,27 +705,19 @@ export async function buildProjectPrs(
           ? withMergesSince(tag, mergedListed ? merged.map((m) => m.pr) : null, { sinceMs, truncated: mergedRead?.truncated ?? false, base: defaultBranch?.name ?? null })
           : null;
         merged = merged.slice(0, MERGED_LIMIT);
-        const [openCi, recentlyMerged] = await Promise.all([
-          mapBounded(pullRequests, 8, async (pr) => {
-            const [prCi, mergeState] = await Promise.all([readCi(ci, pr.headSha), readMergeState(slug, pr.number, gh, errors)]);
-            return { ...prCi, ...mergeState };
-          }),
-          mapBounded(merged, 8, async (m): Promise<MergedPr> => {
-            const [detail, mergeCi] = await Promise.all([
-              readMergedDetail(slug, m.pr.number, gh, details, errors),
-              readCi(ci, m.pr.mergeCommitSha),
-            ]);
-            return { ...m.pr, ...(detail ?? {}), ...mergeCi };
-          }),
-        ]);
-        pullRequests = pullRequests.map((pr, i) => ({ ...pr, ...openCi[i] }));
+        const recentlyMerged = await mapBounded(merged, 8, async (m): Promise<MergedPr> => {
+          const [detail, mergeCi] = await Promise.all([
+            readMergedDetail(slug, m.pr.number, gh, details, errors),
+            readCi(ci, m.pr.mergeCommitSha),
+          ]);
+          return { ...m.pr, ...(detail ?? {}), ...mergeCi };
+        });
         const { merge, error: mergeError } = await mergeRead;
         if (mergeError !== null) errors.record(mergeError);
         if (mergedListed) {
           details.prune(slug, new Set(mergedListed.map((m) => String(m.pr.number))));
           if (defaultBranch) {
             rollups.prune(slug, new Set([
-              ...listed.map((pr) => pr.headSha),
               ...mergedListed.flatMap((m) => (m.pr.mergeCommitSha ? [m.pr.mergeCommitSha] : [])),
               defaultBranch.sha,
             ]));
