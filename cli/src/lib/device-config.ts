@@ -56,9 +56,7 @@ export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'linear', '
 const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
-/** Home's sections in AGI Menu, in their default order (PHNX-4326 round 5). */
 export const MENUBAR_HOME_SECTIONS = ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'] as const;
-/** The artifact kinds AGI Menu picks an opening app for (`artifactApps` entries are `<kind>=<bundle id>`). */
 export const MENUBAR_ARTIFACT_KINDS = ['image', 'html', 'markdown'] as const;
 
 export function resolveMenubarTabOrder(stored: readonly string[]): string[] {
