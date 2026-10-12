@@ -12,10 +12,10 @@ export function registerSessionsWatchCommand(parent: Command): void {
   setHelpSections(command, {
     examples: `
       # Subscribe to session changes for a long-lived UI consumer
-      agents sessions watch --json
+      agents ps watch --json
 
       # Subscribe only to this machine
-      agents sessions watch --json --local
+      agents ps watch --json --local
     `,
     notes: `
       - Each line is one versioned reset, upsert, remove, scope, or heartbeat envelope.

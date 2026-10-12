@@ -299,7 +299,7 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   }
   if (b.needy) {
     console.log(`${indent}  ${chalk.yellow('needy:')} ${b.needy.askCountLastHour}/${b.needy.threshold} asks in the last hour`);
-    console.log(`${indent}  ${chalk.dim(`inspect: ag sessions ${b.sessionId}`)}`);
+    console.log(`${indent}  ${chalk.dim(`inspect: sessions ${b.sessionId}`)}`);
   }
 
   if (!b.answer && !b.parkedAt && b.kind !== 'control') {

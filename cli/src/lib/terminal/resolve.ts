@@ -24,7 +24,7 @@ export function addressabilityRecoveryHint(session: ActiveSession, fallbackId?: 
   const resumeId = sid ?? fallbackId;
   const shortId = resumeId ? resumeId.slice(0, 8) : '<id>';
   const device = session.machine ?? machineId();
-  const resumeCmd = resumeId ? `agents sessions resume ${shortId}` : 'agents sessions resume <id>';
+  const resumeCmd = resumeId ? `agents run auto --resume ${shortId}` : 'agents run auto --resume <id>';
   const tmuxCmd = `agents config set devices.${device}.tmux on`;
   const interactive = session.context === 'terminal' || !!session.tty;
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { configureRootCommand } from '../lib/startup/root-command.js';
 import { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
-export { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS } from '../lib/startup/command-registry.js';
+export { KNOWN_TOP_LEVEL_COMMANDS, RETIRED_TOP_LEVEL_COMMANDS, removedToolGroupMessage } from '../lib/startup/command-registry.js';
 
 export type Registrar = (program: Command) => void;
 
@@ -35,7 +35,6 @@ const loadModels: ModuleLoader = async () => (await import('../commands/models.j
 export const loadPrune: ModuleLoader = async () => (await import('../commands/prune.js')).registerPruneCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
 const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
-const loadSecrets: ModuleLoader = async () => (await import('../commands/secrets-passthrough.js')).registerSecretsCommands;
 const loadMenubar: ModuleLoader = async () => (await import('../commands/menubar.js')).registerMenubarCommands;
 const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;
 const loadRefreshRules: ModuleLoader = async () => (await import('../commands/refresh-rules.js')).registerRefreshRulesCommand;
@@ -43,15 +42,12 @@ const loadFactory: ModuleLoader = async () => (await import('../commands/factory
 const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 const loadTrace: ModuleLoader = async () => (await import('../commands/sessions-trace.js')).registerTraceCommand;
 const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
-const loadBrowser: ModuleLoader = async () => (await import('../commands/browser.js')).registerBrowserCommand;
-const loadComputer: ModuleLoader = async () => (await import('../commands/computer.js')).registerComputerCommand;
 const loadEvents: ModuleLoader = async () => (await import('../commands/events.js')).registerEventsCommand;
 const loadSsh: ModuleLoader = async () => (await import('../commands/ssh.js')).registerSshCommands;
 const loadRepo: ModuleLoader = async () => (await import('../commands/repo.js')).registerRepoCommands;
 const loadSetup: ModuleLoader = async () => (await import('../commands/setup.js')).registerSetupCommand;
 const loadUninstall: ModuleLoader = async () => (await import('../commands/uninstall.js')).registerUninstallCommands;
 const loadUpgrade: ModuleLoader = async () => (await import('../commands/upgrade.js')).registerUpgradeCommand;
-export const loadSessions: ModuleLoader = async () => (await import('../commands/sessions.js')).registerSessionsCommands;
 export const loadTeams: ModuleLoader = async () => (await import('../commands/teams.js')).registerTeamsCommands;
 const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 const loadPs: ModuleLoader = async () => (await import('../commands/ps.js')).registerPsCommand;
@@ -63,7 +59,6 @@ const loadAuth: ModuleLoader = async () => (await import('../commands/auth.js'))
 const loadRecordings: ModuleLoader = async () => (await import('../commands/recordings.js')).registerRecordingsCommand;
 
 export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
-  'sessions',
   'teams',
   'cloud',
 ]);
@@ -102,7 +97,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   doctor: [loadDoctor],
   harness: [loadHarness],
   harnesses: [loadHarness],
-  secrets: [loadSecrets],
   menubar: [loadMenubar],
   sync: [loadSync],
   'refresh-rules': [loadRefreshRules],
@@ -110,8 +104,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   insights: [loadInsights],
   trace: [loadTrace],
   watchdog: [loadWatchdog],
-  browser: [loadBrowser],
-  computer: [loadComputer],
   events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],
@@ -121,7 +113,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   setup: [loadSetup],
   uninstall: [loadUninstall],
   upgrade: [loadUpgrade],
-  sessions: [loadSessions],
   teams: [loadTeams],
   cloud: [loadCloud],
   ps: [loadPs],

@@ -8,7 +8,6 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 import { machineId } from './machine-id.js';
 import { assertValidDeviceName, assertRegistrableDeviceName } from './devices/registry.js';
 import { migrateDeviceConfigStores } from './devices/config-migration.js';
-import { parseAddress } from './address.js';
 import type { FleetManifest } from './fleet/types.js';
 import { isAgentId } from './types.js';
 
@@ -169,28 +168,6 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Browser profile `browser start` resolves to without --profile (set via `browser use`).',
   },
   {
-    name: 'computer.host',
-    yamlKey: 'computerHost',
-    scope: 'device',
-    visibility: 'shared',
-    type: 'string',
-    description:
-      'The --host address (PHNX-4090) `agents computer --device <name>` forwards to the standalone engine: ' +
-      'ssh://[user@]host[:port], vnc://host[:port], or tcp://host:port. Unset falls back to the fleet ssh ' +
-      'identity (ssh://user@host resolved against the device registry).',
-    validate: (v) => {
-      try {
-        const addr = parseAddress(v as string);
-        if (addr.scheme !== 'ssh' && addr.scheme !== 'vnc' && addr.scheme !== 'tcp') {
-          return `computer.host speaks ssh://, vnc:// and tcp:// only (got ${addr.scheme}://).`;
-        }
-        return null;
-      } catch (err: any) {
-        return err?.message ?? String(err);
-      }
-    },
-  },
-  {
     name: 'browser.device',
     yamlKey: 'defaultBrowserDevice',
     scope: 'user',
@@ -270,7 +247,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'bool',
     defaultValue: false,
     description:
-      "Whether other fleet machines may drive THIS device's browser over `browser --device <this-device>` or `agents ssh <this-device> …` (`agents browser` / `ag browser` / standalone `browser`). " +
+      "Whether other fleet machines may drive THIS device's browser over `browser --device <this-device>` or `agents ssh <this-device> browser …`. " +
       'Default off — a fleet-remote drive is refused until the owner runs `browser remote-control on`.',
   },
   {

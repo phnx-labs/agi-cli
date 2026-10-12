@@ -91,7 +91,7 @@ async function resolveInteractiveChoices(opts: SetupFleetOptions): Promise<{
     default: 'key',
     choices: [
       { name: 'key — use your SSH agent / on-disk public keys', value: 'key' },
-      { name: 'password — read the login password from an agents secrets bundle', value: 'password' },
+      { name: 'password — read the login password from an secrets bundle', value: 'password' },
     ],
   });
   return {

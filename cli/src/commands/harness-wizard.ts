@@ -173,7 +173,7 @@ async function askKeySource(io: WizardIO, draft: HarnessDraft, provider: string)
           message: `How should '${provider}' get its key?`,
           choices: [
             { name: 'Type a key now', value: TYPE_NOW },
-            { name: 'Use an existing agents secrets bundle', value: FROM_SECRETS },
+            { name: 'Use an existing secrets bundle', value: FROM_SECRETS },
           ],
         })
       : TYPE_NOW;

@@ -94,7 +94,7 @@ async function costAction(options: CostOptions): Promise<void> {
   }
 
   if (totalSessions === 0) {
-    console.log(chalk.gray('No sessions with cost data found. Run `agents sessions --all` to index, then retry.'));
+    console.log(chalk.gray('No sessions with cost data found. Run `sessions --all` to index, then retry.'));
     return;
   }
 

@@ -17,7 +17,7 @@ export function readCloudflareCreds(
     throw new Error(
       `The '${bundle}' bundle does not exist. ` +
         `Pass credentials directly with --token <t> [--account <id>], or create it: ` +
-        `agents secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
+        `secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
     );
   }
   const { env } = readAndResolveBundleEnv(bundle, {
@@ -38,7 +38,7 @@ export function readCloudflareCreds(
       `No Cloudflare API token in the '${bundle}' bundle ` +
         `(keys present: ${keys.length ? keys.join(', ') : 'none'}). ` +
         `Pass it directly with --token <t> [--account <id>], or add it: ` +
-        `agents secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
+        `secrets add ${bundle} CLOUDFLARE_API_TOKEN`,
     );
   }
   return { apiToken, accountId };

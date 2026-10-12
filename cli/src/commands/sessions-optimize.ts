@@ -8,10 +8,6 @@ interface OptimizeOpts {
   json?: boolean;
 }
 
-export function registerSessionsOptimizeCommand(sessionsCmd: Command): void {
-  registerOptimizeCommand(sessionsCmd, 'agents sessions optimize');
-}
-
 export function registerOptimizeCommand(parent: Command, invocation: string): void {
   const cmd = parent
     .command('optimize')

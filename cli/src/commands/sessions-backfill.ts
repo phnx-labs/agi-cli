@@ -277,10 +277,6 @@ export async function runTitlesBackfill(options: TitleBackfillOptions): Promise<
   };
 }
 
-export function registerSessionsBackfillCommand(sessionsCmd: Command): void {
-  registerBackfillCommand(sessionsCmd, 'agents sessions backfill');
-}
-
 export function registerBackfillCommand(parent: Command, invocation: string): void {
   const backfill = parent.command('backfill').description('Populate derived session data explicitly.');
   const tools = backfill

@@ -128,7 +128,7 @@ export function cursorApiError(action: string, status: number, text: string): Er
     return new Error(`Cursor Cloud Agents requires a paid Cursor plan; this API key belongs to a plan without Cloud Agents access. ${message}`);
   }
   if (status === 401 || code === 'unauthorized' || code === 'api_key_not_found') {
-    return new Error(`Cursor Cloud authentication failed (${status}${code ? ` ${code}` : ''}). Check CURSOR_API_KEY in the configured agents secrets bundle. ${message}`);
+    return new Error(`Cursor Cloud authentication failed (${status}${code ? ` ${code}` : ''}). Check CURSOR_API_KEY in the configured secrets bundle. ${message}`);
   }
   return new Error(`Cursor Cloud ${action} failed (${status}${code ? ` ${code}` : ''}): ${message}`);
 }
@@ -151,13 +151,13 @@ export class CursorCloudProvider implements CloudProvider {
       try {
         const { env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:cursor', agentOnly: true });
         if (env[KEY_NAME]) return env[KEY_NAME];
-        throw new Error(`Secrets bundle '${this.secretsBundle}' has no ${KEY_NAME}. Add one: agents secrets add ${this.secretsBundle} ${KEY_NAME}`);
+        throw new Error(`Secrets bundle '${this.secretsBundle}' has no ${KEY_NAME}. Add one: secrets add ${this.secretsBundle} ${KEY_NAME}`);
       } catch (err) {
         throw new Error(`Could not read Cursor API key from bundle '${this.secretsBundle}': ${(err as Error).message}`);
       }
     }
     if (process.env[KEY_NAME]) return process.env[KEY_NAME];
-    throw new Error(`Cursor cloud needs an API key. Set cloud.providers.cursor.secretsBundle in ~/.agents/agents.yaml after running: agents secrets add cursor ${KEY_NAME}`);
+    throw new Error(`Cursor cloud needs an API key. Set cloud.providers.cursor.secretsBundle in ~/.agents/agents.yaml after running: secrets add cursor ${KEY_NAME}`);
   }
 
   capabilities(): ProviderCapabilities {

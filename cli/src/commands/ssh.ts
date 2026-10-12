@@ -2320,9 +2320,8 @@ launched from — 'agents ssh yosemite-s0' from ~/src/app lands in ~/src/app on
 the target when it exists, else the remote home. Same portable-cwd rule as
 'agents run --device'. Passing a command keeps the remote home.
 
-An 'agents browser …', 'ag browser …', or standalone 'browser …' command is
-stamped AGENTS_FLEET_REMOTE so the target's browser.remote-control consent
-gate applies, same as 'agents browser <verb> --device <name>'.
+A 'browser …' command is stamped AGENTS_FLEET_REMOTE so the target's
+browser.remote-control consent gate applies, same as 'browser <verb> --device <name>'.
 
 --argv takes a JSON array of strings and delivers each element as exactly ONE
 token on the peer, so a token containing a space, '&', '|', '$' or a quote

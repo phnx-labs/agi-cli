@@ -82,7 +82,7 @@ export class SessionProjection {
         ...chosen, rowKey, sourceDevice: owner, machine: owner,
         observerTerminals,
         recovery: chosen.resumable && chosen.sessionId
-          ? { command: 'agents', args: ['sessions', 'resume', chosen.sessionId, '--device', owner], ...(chosen.cwd ? { cwd: chosen.cwd } : {}) }
+          ? { command: 'agents', args: ['ps', 'focus', chosen.sessionId], ...(chosen.cwd ? { cwd: chosen.cwd } : {}) }
           : null,
       });
     }

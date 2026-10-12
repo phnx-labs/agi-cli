@@ -143,31 +143,6 @@ export function activeBrowserSeed(opts: {
   };
 }
 
-export function bareBrowserSeed(opts: {
-  teams?: boolean;
-  agent?: string;
-  all?: boolean;
-  since?: string;
-  host?: string[];
-  inTeam?: string;
-  bookmarks?: boolean;
-  routine?: boolean | string;
-}): Partial<BrowserFilter> {
-  const scoped = (opts.host?.length ?? 0) > 0;
-  const wholeTeam = !!opts.inTeam;
-  return {
-    teams: !!opts.teams,
-    bookmarks: !!opts.bookmarks,
-    routine: opts.routine ?? false,
-    agent: opts.agent,
-    device: opts.host?.length === 1 ? normalizeDeviceSeed(opts.host[0]) : undefined,
-    team: opts.inTeam,
-    projectScope: opts.all || scoped || wholeTeam ? 'all' : 'repo',
-    window: opts.since ?? (opts.all || wholeTeam ? undefined : '30d'),
-    statuses: [],
-  };
-}
-
 function copyToClipboard(text: string): boolean {
   const candidates =
     process.platform === 'darwin'
@@ -231,6 +206,7 @@ async function fetchRawPool(
       const forwarded = remotePoolArgs(f, fixedFilters);
       const remoteResult = await gatherRemoteList(forwarded, remoteHosts, {
         timeoutMs: BROWSER_PEER_TIMEOUT_MS,
+        bin: 'sessions',
       });
       unreachable = remoteResult.unreachable;
       if (remoteResult.sessions.length > 0) rows = mergeLocalFirst([...rows, ...remoteResult.sessions], self);
@@ -244,7 +220,7 @@ async function fetchRawPool(
 }
 
 export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[] {
-  const forwarded = ['sessions', '--all', '--json', '--limit', String(f.team ? WHOLE_TEAM_POOL_LIMIT : f.limit)];
+  const forwarded = ['--all', '--json', '--local', '--limit', String(f.team ? WHOLE_TEAM_POOL_LIMIT : f.limit)];
   if (f.window) forwarded.push('--since', f.window);
   if (f.until) forwarded.push('--until', f.until);
   if (f.project) forwarded.push('--project', f.project);
@@ -254,7 +230,6 @@ export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[
   }
   if (f.skill) forwarded.push('--skill', f.skill);
   if (f.plugin) forwarded.push('--plugin', f.plugin);
-  if (f.unmanaged) forwarded.push('--unmanaged');
   if (f.sort !== 'timestamp') forwarded.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
   if (f.agent && (fixedFilters || f.agent.includes('@'))) forwarded.push('--agent', f.agent);
   if (f.teams) forwarded.push('--teams');

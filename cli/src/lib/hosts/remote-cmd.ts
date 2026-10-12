@@ -101,10 +101,10 @@ export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
   terminal:
     '--terminal opens a tab on THIS machine; it cannot be combined with --device. ' +
     'Drop --terminal to dispatch to the device, or drop --device to open the tab here. ' +
-    'To watch a remote run in a terminal, dispatch it and follow with `agents sessions focus <id>`.',
+    'To watch a remote run in a terminal, dispatch it and follow with `agents ps focus <id>`.',
   secrets:
     '--secrets cannot cross the SSH boundary — Keychain values are never sent to a host implicitly. ' +
-    'Provision the bundle on the host first (agents secrets export --device <name>), then run without --secrets; ' +
+    'Provision the bundle on the host first (secrets export <bundle> --host <name>), then run without --secrets; ' +
     'workflow frontmatter secrets resolve from the HOST\'s own keychain.',
   secretsKeys: '--secrets-keys applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
   allowExpired: '--allow-expired applies to --secrets bundles, which cannot cross the SSH boundary (see --secrets).',
@@ -112,16 +112,21 @@ export const RUN_OPTION_REJECT_MESSAGES: Record<string, string> = {
   resumeBare: '--resume with no id opens the interactive picker, which cannot run across a detached host dispatch. Pass a concrete session id: agents run <agent> --resume <id> --device <name>.',
 };
 
+export type RemoteToolBin = 'agents' | 'sessions' | 'secrets';
+
 export function buildRemoteAgentsInvocation(
   forwardedArgs: string[],
   remoteCwd?: string,
   os?: string,
   env?: Record<string, string>,
+  bin: RemoteToolBin = 'agents',
 ): string {
   if (remoteShellFor(os) === 'powershell') {
-    return buildWindowsAgentsCommand({ args: forwardedArgs, cwd: remoteCwd, env });
+    return bin === 'agents'
+      ? buildWindowsAgentsCommand({ args: forwardedArgs, cwd: remoteCwd, env })
+      : buildWindowsToolCommand(bin, forwardedArgs, env);
   }
-  const inner = ['agents', ...forwardedArgs].map(shellQuote).join(' ');
+  const inner = [bin, ...forwardedArgs].map(shellQuote).join(' ');
   const withCwd = remoteCwd ? `cd ${shellQuote(remoteCwd)} && ${inner}` : inner;
   const exports = posixEnvExports(env);
   if (!exports) {
@@ -244,6 +249,13 @@ export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
   return renderPowershellCommand(windowsAgentsScript(cmd));
 }
 
+export function buildWindowsToolCommand(bin: Exclude<RemoteToolBin, 'agents'>, args: string[], env?: Record<string, string>): string {
+  const parts = [POWERSHELL_PROGRESS_SILENCE];
+  if (env) for (const [k, v] of Object.entries(env)) parts.push(`$env:${k} = ${powershellQuote(v)}`);
+  parts.push(`& ${bin} ${args.map(powershellQuote).join(' ')}`, 'exit $LASTEXITCODE');
+  return renderPowershellCommand(parts.join('; '));
+}
+
 export function buildWindowsStdinAgentsCommand(args: string[]): string {
 
   const forwarded = args.map(powershellQuote).join(' ');
@@ -260,18 +272,3 @@ export function buildWindowsStdinAgentsCommand(args: string[]): string {
   return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
 }
 
-export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: boolean; policyNever?: boolean } = {}): string {
-  const force = opts.force ? ' --force' : '';
-  const policy = opts.policyNever ? ' --policy never --i-understand' : '';
-  const script = [
-    POWERSHELL_PROGRESS_SILENCE,
-    '$in = [Console]::In.ReadToEnd()',
-    '$tmp = $null',
-    `try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); ` +
-      `& agents secrets import ${powershellQuote(bundle)} --from $tmp${force}${policy}; $code = $LASTEXITCODE } ` +
-      `finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }`,
-    'if ($null -eq $code) { $code = 1 }',
-    'exit $code',
-  ].join('; ');
-  return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
-}

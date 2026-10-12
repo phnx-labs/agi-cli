@@ -8,7 +8,7 @@ process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
-const { selectSessions } = await import('./sessions-export.js');
+const { selectSessions } = await import('./sessions-trace.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
 function meta(id: string, extra: Partial<SessionMeta> = {}): SessionMeta {

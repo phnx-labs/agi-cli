@@ -7,16 +7,11 @@ import { spawn } from 'node:child_process';
 import { realpathSync, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { findInPath } from './agent-spec/agents.js';
-import { buildComputerContext, type ComputerTargetContext } from './computer/context.js';
-import { recordComputerAction } from './computer/record.js';
-import { resolveRemoteDevice } from './ssh-tunnel.js';
-import { getConfigValue } from './device-config.js';
-import { parseAddress, sshTarget } from './address.js';
+import { buildComputerContext } from './computer/context.js';
 
 const INSTALL_HINT = 'npm i -g @phnx-labs/computer-cli';
 
 export const COMPUTER_CONTEXT_FD = 3;
-export const COMPUTER_EVENTS_FD = 4;
 
 export class ComputerClientError extends Error {
   code: string;
@@ -66,160 +61,12 @@ export function invocation(bin: string): { command: string; prefix: string[] } {
   return { command: bin, prefix: [] };
 }
 
-export interface ComputerActionEvent {
-  event?: string;
-  command: string;
-  invocationId?: string;
-  pid?: number;
-  targetPid?: number;
-  bundle?: string;
-  host?: string;
-  task?: string;
-  sessionId?: string;
-  launchId?: string;
-  actor?: string;
-  [key: string]: unknown;
-}
-
-export function parseEventLines(
-  buffer: string,
-): { events: ComputerActionEvent[]; rest: string } {
-  const events: ComputerActionEvent[] = [];
-  const parts = buffer.split('\n');
-  const rest = parts.pop() ?? '';
-  for (const line of parts) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const parsed = JSON.parse(trimmed) as unknown;
-      if (parsed && typeof parsed === 'object' && typeof (parsed as ComputerActionEvent).command === 'string') {
-        events.push(parsed as ComputerActionEvent);
-      }
-    } catch {
-    }
-  }
-  return { events, rest };
-}
-
-interface RunComputerOptions {
-  argv: string[];
-  context: unknown;
-  onEvent?: (event: ComputerActionEvent) => void;
-  capture?: boolean;
-}
-
 interface RunComputerResult {
   exitCode: number;
   stdout: string;
 }
 
-export async function runComputer(opts: RunComputerOptions): Promise<RunComputerResult> {
-  const bin = resolveComputerBin();
-  const { command, prefix } = invocation(bin);
-
-  const child = spawn(command, [...prefix, ...opts.argv], {
-    stdio: ['inherit', opts.capture ? 'pipe' : 'inherit', 'inherit', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      COMPUTER_CONTEXT_FD: String(COMPUTER_CONTEXT_FD),
-      COMPUTER_EVENTS_FD: String(COMPUTER_EVENTS_FD),
-    },
-  });
-
-  const contextPipe = child.stdio[COMPUTER_CONTEXT_FD] as NodeJS.WritableStream | null;
-  const eventsPipe = child.stdio[COMPUTER_EVENTS_FD] as NodeJS.ReadableStream | null;
-
-  if (contextPipe) {
-    contextPipe.on('error', () => {});
-    contextPipe.end(JSON.stringify(opts.context) + '\n');
-  }
-
-  let stdout = '';
-  if (opts.capture && child.stdout) {
-    child.stdout.setEncoding('utf-8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout += chunk;
-    });
-  }
-
-  let pending = '';
-  const drained = new Promise<void>((resolve) => {
-    if (!eventsPipe) return resolve();
-    eventsPipe.setEncoding('utf-8');
-    eventsPipe.on('data', (chunk: string) => {
-      const { events, rest } = parseEventLines(pending + chunk);
-      pending = rest;
-      for (const event of events) opts.onEvent?.(event);
-    });
-    eventsPipe.on('error', () => resolve());
-    eventsPipe.on('end', () => {
-      const { events } = parseEventLines(pending.endsWith('\n') ? pending : pending + '\n');
-      pending = '';
-      for (const event of events) opts.onEvent?.(event);
-      resolve();
-    });
-  });
-
-  const exitCode = await new Promise<number>((resolve, reject) => {
-    child.on('error', (err) => {
-      reject(new ComputerClientError('COMPUTER_SPAWN_FAILED', `Could not run \`${bin}\`: ${err.message}`));
-    });
-    child.on('close', (code, signal) => {
-      if (code == null) return resolve(signal ? 128 + (osSignalNumber(signal) ?? 0) : 1);
-      resolve(code);
-    });
-  });
-
-  await drained;
-  return { exitCode, stdout };
-}
-
-function osSignalNumber(signal: NodeJS.Signals): number | undefined {
-  const table: Partial<Record<NodeJS.Signals, number>> = {
-    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGPIPE: 13, SIGTERM: 15,
-  };
-  return table[signal];
-}
-
-export function withHostFlag(argv: string[], host?: string): string[] {
-  if (!host) return argv;
-  if (argv.some((arg) => arg === '--host' || arg.startsWith('--host='))) return argv;
-  const [verb, ...rest] = argv;
-  return [verb, '--host', host, ...rest];
-}
-
-export async function resolveDeviceHost(device: string): Promise<{ host: string; target: ComputerTargetContext }> {
-  const configured = getConfigValue('computer.host', { device }).value as string | undefined;
-  if (configured) {
-    const addr = parseAddress(configured);
-    if (addr.scheme === 'vnc' || addr.scheme === 'tcp') {
-      return { host: configured, target: { alias: device, host: addr.host, user: addr.user ?? '', hostname: addr.host, platform: addr.scheme, sshArgs: [] } };
-    }
-    const resolved = await resolveRemoteDevice(device, {});
-    const target = sshTarget(addr);
-    return {
-      host: configured,
-      target: { alias: device, host: target, user: addr.user ?? resolved.user, hostname: addr.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
-    };
-  }
-  const resolved = await resolveRemoteDevice(device, {
-    expectPlatform: 'windows',
-    forWhat: '`agents computer --device` drives the Windows computer-helper daemon, so it',
-  });
-  return {
-    host: `ssh://${resolved.target}`,
-    target: { alias: device, host: resolved.target, user: resolved.user, hostname: resolved.host, platform: resolved.device.platform, sshArgs: resolved.identityArgs },
-  };
-}
-
-export interface ForwardToComputerOptions {
-  argv: string[];
-  device?: string;
-  record?: boolean;
-  capture?: boolean;
-}
-
-export async function forwardToComputer(opts: ForwardToComputerOptions): Promise<RunComputerResult> {
+export async function forwardToComputer(opts: { argv: string[]; capture?: boolean }): Promise<RunComputerResult> {
   let bin: string;
   try {
     bin = resolveComputerBin();
@@ -230,34 +77,54 @@ export async function forwardToComputer(opts: ForwardToComputerOptions): Promise
     }
     throw err;
   }
+  const { command, prefix } = invocation(bin);
+  const context = await buildComputerContext({ computerBin: bin });
 
-  const hostFlag = opts.argv.findIndex(arg => arg === '--host' || arg.startsWith('--host='));
-  let host = hostFlag < 0 ? undefined : (opts.argv[hostFlag].includes('=') ? opts.argv[hostFlag].slice(7) : opts.argv[hostFlag + 1]);
-  let target: ComputerTargetContext | undefined;
-  if (!host && opts.device) {
-    const resolved = await resolveDeviceHost(opts.device);
-    host = resolved.host;
-    target = resolved.target;
-  }
-  const context = await buildComputerContext({ device: opts.device, host, target, computerBin: bin });
-
-  return runComputer({
-    argv: withHostFlag(opts.argv, host),
-    context,
-    capture: opts.capture,
-    onEvent: opts.record === false
-      ? undefined
-      : (event) => recordComputerAction(event, { device: opts.device }),
+  const child = spawn(command, [...prefix, ...opts.argv], {
+    stdio: ['inherit', opts.capture ? 'pipe' : 'inherit', 'inherit', 'pipe'],
+    env: { ...process.env, COMPUTER_CONTEXT_FD: String(COMPUTER_CONTEXT_FD) },
   });
+
+  const contextPipe = child.stdio[COMPUTER_CONTEXT_FD] as NodeJS.WritableStream | null;
+  if (contextPipe) {
+    contextPipe.on('error', () => {});
+    contextPipe.end(JSON.stringify(context) + '\n');
+  }
+
+  let stdout = '';
+  if (opts.capture && child.stdout) {
+    child.stdout.setEncoding('utf-8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+  }
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    child.on('error', (err) => {
+      reject(new ComputerClientError('COMPUTER_SPAWN_FAILED', `Could not run \`${bin}\`: ${err.message}`));
+    });
+    child.on('close', (code, signal) => {
+      if (code == null) return resolve(signal ? 128 + (osSignalNumber(signal) ?? 0) : 1);
+      resolve(code);
+    });
+  });
+  return { exitCode, stdout };
+}
+
+function osSignalNumber(signal: NodeJS.Signals): number | undefined {
+  const table: Partial<Record<NodeJS.Signals, number>> = {
+    SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGPIPE: 13, SIGTERM: 15,
+  };
+  return table[signal];
 }
 
 export async function installComputerHelperMacLocal(): Promise<void> {
-  const { exitCode } = await forwardToComputer({ argv: ['setup'], record: false });
+  const { exitCode } = await forwardToComputer({ argv: ['setup'] });
   if (exitCode !== 0) throw new Error(`\`computer setup\` failed (exit ${exitCode})`);
 }
 
 export async function activateComputerHelperMacLocal(): Promise<{ trusted: boolean }> {
-  const { exitCode } = await forwardToComputer({ argv: ['start'], record: false });
+  const { exitCode } = await forwardToComputer({ argv: ['start'] });
   if (exitCode !== 0) throw new Error(`\`computer start\` failed (exit ${exitCode})`);
   return { trusted: await probeComputerTrust() };
 }
@@ -275,11 +142,7 @@ export function parseTrustFromStatusJson(stdout: string): boolean {
 
 export async function probeComputerTrust(): Promise<boolean> {
   try {
-    const { exitCode, stdout } = await forwardToComputer({
-      argv: ['status', '--json'],
-      record: false,
-      capture: true,
-    });
+    const { exitCode, stdout } = await forwardToComputer({ argv: ['status', '--json'], capture: true });
     if (exitCode !== 0) return false;
     return parseTrustFromStatusJson(stdout);
   } catch {

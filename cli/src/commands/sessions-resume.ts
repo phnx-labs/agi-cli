@@ -1,13 +1,12 @@
 import * as fs from 'fs';
 import chalk from 'chalk';
-import { Option, type Command } from 'commander';
-import { isAgentTmuxAlias, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
+import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { discoverSessions } from '../lib/session/discover.js';
 import { filterTeamSessions } from '@phnx-labs/sessions-cli/reader';
 import { multiItemPicker, itemPicker } from '../lib/picker.js';
 import { buildPreview } from './sessions-picker.js';
 import { formatPickerLabel, pickerColumnsFor } from '../lib/session/presentation.js';
-import { parseAgentFilter, resolveSessionMetadataValue, sessionMatchesQuery } from '../lib/session/selection.js';
+import { parseAgentFilter, sessionMatchesQuery } from '../lib/session/selection.js';
 import {
   openSurfaces,
   describeLaunch,
@@ -20,24 +19,32 @@ import {
   type EngineContext,
   type Packing,
 } from '../lib/terminal/index.js';
-import { isInteractiveTerminal, isPromptCancelled, normalizeSingleDeviceOption } from './utils.js';
-import { setHelpSections } from '../lib/help.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { confirm } from '@inquirer/prompts';
 import { spawn } from 'node:child_process';
-import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches, sessionRecoveryPeer, sessionTranscriptReadable } from '../lib/session/recovery.js';
-import { buildResumeRemoteArgs, runStrictResume, stillRunningNotice, wantsStrictResume, type StrictResumeOptions } from './resume.js';
 import { localProjectFolder, toRemotePortable } from '../lib/project-root.js';
 import { liveSessionProcesses } from '../lib/session/pid-registry.js';
-import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 import { sessionHeadline } from '../lib/session/title.js';
 import { stripRoutingFlags, type StripSpec } from '../lib/hosts/remote-cmd.js';
 
 export const CONFIRM_THRESHOLD = 5;
 
-interface ResumeOptions extends StrictResumeOptions {
+export function stillRunningNotice(shortId: string, pid: number, host: string): string {
+  return `An older copy of ${shortId} is still running on ${host} (pid ${pid}). It was left alone.\n`;
+}
+
+interface ResumeOptions {
   agent?: string;
+  account?: string;
+  model?: string;
+  mode?: string;
+  interactive?: boolean;
+  headless?: boolean;
+  cwd?: string;
+  quiet?: boolean;
+  here?: boolean;
   all?: boolean;
   teams?: boolean;
   since?: string;
@@ -49,218 +56,69 @@ interface ResumeOptions extends StrictResumeOptions {
   vscodium?: boolean;
   terminalApp?: boolean;
   splits?: boolean;
-  attachOnly?: boolean;
-  local?: boolean;
-  runArgs?: string[];
-}
-
-export function registerSessionsResumeCommand(sessionsCmd: Command): void {
-  const cmd = sessionsCmd
-    .command('resume')
-    .argument('[query]', 'Session id/tmux alias/label for strict resume, or text that filters the picker')
-    .argument('[prompt]', 'Optional follow-up prompt (same conversation, account and origin device)')
-    .description('Resume a session by id (strict), or multi-select history into terminal tabs/splits.')
-    .option('-a, --agent <agent>', 'Filter by agent type and version (e.g., claude, codex@0.116.0)')
-    .option('--account <account>', 'Filter by the account that owns the conversation')
-    .option('--model <model>', 'Override the resumed session model')
-    .option('--all', 'Include sessions from every directory (not just current project)')
-    .option('--teams', 'Include team-spawned sessions (hidden by default)')
-    .option('--since <time>', 'Only sessions newer than this (e.g., 2h, 7d, 4w, or ISO date)')
-    .option('-n, --limit <n>', 'Maximum number of sessions to load into the picker', '200')
-    .addOption(new Option('--resume-device <alias>').hideHelp()
-      .argParser((value: string, previous: string[] = []) => [...previous, value]))
-    .option('--device <alias>', 'Open on the session origin device over SSH; the device must match every selected session')
-    .option('--iterm', 'Force the iTerm backend')
-    .option('--ghostty', 'Force the Ghostty backend')
-    .option('--tmux', 'Force the tmux backend')
-    .option('--vscodium', 'Force the VSCodium agent-terminal backend (swarm-ext)')
-    .option('--terminal-app', 'Force macOS Terminal.app (no split support — panes become tabs)')
-    .option('--splits', 'Pack two sessions side by side per tab (default: one tab per session)')
-    .option('-m, --mode <mode>', 'Strict resume: override the recorded launch mode')
-    .option('-i, --interactive', 'Strict resume: interactive even when a prompt is provided')
-    .option('--headless', 'Strict resume: headless (a prompt is required)')
-    .option('--cwd <path>', 'Strict resume: override the recorded working directory')
-    .option('-q, --quiet', 'Strict resume: suppress routing banners')
-    .option('--here', 'Strict resume: run on this machine even if the session belongs to another device')
-    .option('--local', 'Only this machine (skip the cross-host sweep)')
-    .option('--attach-only', 'With an id/alias: attach a living pane only — never resume a copy');
-
-  setHelpSections(cmd, {
-    examples: `
-      # Continue one session by id (canonical: agents run --resume; auto infers the harness)
-      agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897
-      agents run claude --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897 "finish the tests"
-
-      # Attach a living pane, or recover an ended one (canonical: agents ps focus)
-      agents ps focus 019fd114
-      agents ps focus 019fd114 --attach-only
-
-      # Pick several sessions; each opens in its own tab
-      agents sessions resume
-
-      # Pre-filter the pool before selecting (space in the filter → use [query])
-      agents sessions resume "auth middleware"
-
-      # Strict resume by tmux alias, overriding the recorded mode
-      agents sessions resume ag-codex-c1f3d813 --mode edit
-
-      # Force a backend / side-by-side splits / a remote host
-      agents sessions resume --ghostty
-      agents sessions resume --vscodium
-      agents sessions resume --splits
-      agents sessions resume --device zion --tmux
-    `,
-    notes: `
-      - Strict path (id/tmux alias/label + optional prompt/--mode/--headless/--here): restores the harness, device, account, cwd, model, and mode using the installed binary. Searches the fleet; a local full-id hit resumes with zero SSH. \`agents run <agent|auto> --resume <id>\` is the canonical spelling.
-      - Attach a live pane without forking: agents ps focus <id> --attach-only.
-      - This is the ONE verb for getting back in. It detects the state: a live tmux pane is attached, a headless session comes to the foreground, an ended one recovers on its owning device.
-      - A UUID/prefix or ag-<agent>-<suffix> alias bypasses the picker. A live alias attaches by name even when the session index cannot attribute it.
-      - Going the other way (foreground -> background) is 'agents ps detach <id>'.
-      - With no identity selector, space toggles a session, enter confirms, and tab toggles the preview pane.
-      - Layout: one tab per session by default. --splits packs session pairs side by side in each tab.
-      - Backend: auto-detected from the terminal you're in (iTerm / Ghostty / tmux); override with --iterm/--ghostty/--tmux/--vscodium.
-      - --vscodium opens each session as an agent terminal tab in VSCodium via the swarm-ext extension (works with --device too).
-      - --device <alias> opens the terminal surface on that device only when it is the selected sessions' origin; recovery never migrates a session to another device.
-      - Recovery uses the installed harness and the conversation's account on its origin device. Context replay requires an explicit choice.
-      - Local picks without transcripts are skipped before opening a tab. Remote picks are validated on their origin device.
-      - agents run claude --resume opens this same picker; claude#work filters it with --account work.
-    `,
-  });
-
-  cmd.action(async (query: string | undefined, prompt: string | undefined, options: ResumeOptions) => {
-    await sessionsResumeAction(query, prompt, resolveResumeOptions(cmd, options));
-  });
-}
-
-const RESUME_PARENT_COLLISION_FLAGS = ['agent', 'all', 'teams', 'since', 'limit', 'local'] as const;
-
-export function resolveResumeOptions(cmd: Command, local: ResumeOptions): ResumeOptions {
-  const parent = cmd.parent;
-  const { resumeDevice, ...resolved } = local as ResumeOptions & { resumeDevice?: string[] };
-  const parentOpts = parent?.opts() as Record<string, unknown> | undefined;
-  for (const key of RESUME_PARENT_COLLISION_FLAGS) {
-    if (parent?.getOptionValueSource(key) === 'cli') {
-      (resolved as Record<string, unknown>)[key] = parentOpts?.[key];
-    }
-  }
-  const rawDeviceTargets = [
-    ...(resumeDevice ?? []),
-    ...(local.device ? [local.device] : []),
-    ...((parentOpts?.device as string[] | undefined) ?? []),
-    ...((parentOpts?.devices as string[] | undefined) ?? []),
-  ];
-  if (rawDeviceTargets.length > 0) {
-    resolved.device = normalizeSingleDeviceOption(rawDeviceTargets, 'sessions resume');
-  }
-  return resolved;
+  runArgs: string[];
 }
 
 export async function sessionsResumeAction(
-  query: string | undefined,
-  prompt: string | undefined,
   options: ResumeOptions,
 ): Promise<void> {
-  if (options.attachOnly && (prompt !== undefined || options.agent || options.account || options.model || options.mode || options.interactive || options.headless || options.cwd || options.here)) {
-    throw new Error('--attach-only cannot be combined with --agent, a follow-up prompt, or options that change the running session. Pass the session ID without filters.');
-  }
-  const strictOpts: StrictResumeOptions = {
-    agent: parseAgentFilter(options.agent).agent,
-    account: options.account,
-    model: options.model,
-    mode: options.mode,
-    interactive: options.interactive,
-    headless: options.headless,
-    cwd: options.cwd,
-    quiet: options.quiet,
-    here: options.here,
-    local: options.local,
-  };
-
-  const explicitSurface = !!(options.iterm || options.ghostty || options.tmux || options.vscodium || options.terminalApp || options.device);
-  const direct = !!query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts));
-
-  if (query && direct && !explicitSurface) {
-    const hosts = options.device ? [options.device] : [];
-    if (!options.agent && !options.account && !options.model && !wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
-      return;
-    }
-    if (!options.agent && !options.account && !options.model && resumeUsesLifecycleDispatch(query, prompt, options)) {
-      await dispatchSessionLifecycleInPlace(query.trim(), hosts, !!options.attachOnly, !!options.local);
-      return;
-    }
-    await runStrictResume(query.trim(), prompt, strictOpts);
-    return;
-  }
-
-  if (!direct && !isInteractiveTerminal()) {
-    console.error(chalk.red('sessions resume needs an interactive terminal (or pass a session id for strict resume).'));
+  if (!isInteractiveTerminal()) {
+    console.error(chalk.red('agents run --resume needs an interactive terminal to pick sessions; pass a session id instead.'));
     process.exitCode = 1;
     return;
   }
 
-
   let chosen: SessionMeta[] | null;
-  if (query && direct) {
-    const outcome = await resolveSessionMetadataValue(query, { local: options.local, hosts: options.device ? [options.device] : undefined, agent: parseAgentFilter(options.agent).agent });
-    if (outcome.kind !== 'resolved') {
-      console.error(chalk.red(`No session matching "${query}" (${outcome.kind}).`));
-      process.exitCode = 1;
-      return;
-    }
-    chosen = [outcome.session];
-  } else {
-    const { agent, version } = parseAgentFilter(options.agent);
-    const limit = parseInt(options.limit || '200', 10);
-    const since = options.since ?? (options.all ? undefined : '30d');
+  const { agent, version } = parseAgentFilter(options.agent);
+  const limit = parseInt(options.limit || '200', 10);
+  const since = options.since ?? (options.all ? undefined : '30d');
 
-    let sessions = await discoverSessions({
-      agent,
-      version,
-      all: options.all,
-      cwd: process.cwd(),
-      since,
-      sortBy: 'timestamp',
-      limit: options.account ? undefined : limit,
-      unbounded: !!options.account,
-      excludeTeamOrigin: !options.teams,
+  let sessions = await discoverSessions({
+    agent,
+    version,
+    all: options.all,
+    cwd: process.cwd(),
+    since,
+    sortBy: 'timestamp',
+    limit: options.account ? undefined : limit,
+    unbounded: !!options.account,
+    excludeTeamOrigin: !options.teams,
+  });
+  const { visible } = filterTeamSessions(sessions, !!options.teams);
+  sessions = visible;
+  if (options.account) {
+    const { findUnifiedAccount } = await import('../lib/account-registry.js');
+    const { readMeta } = await import('../lib/state.js');
+    const { sessionMatchesAccount } = await import('../lib/session/recovery.js');
+    const account = findUnifiedAccount(options.account, readMeta(), undefined, agent as import('../lib/types.js').AgentId | undefined);
+    if (!account) throw new Error(`Unknown account '${options.account}'.`);
+    const context = account.kind === 'native'
+      ? await (await import('../lib/exec-account-home.js')).resolveNativeSpawnHome(account.agent, account, readMeta(), { readOnly: true }).catch(() => null)
+      : null;
+    sessions = sessions.filter(session => sessionMatchesAccount(session, account, context?.execHome)).slice(0, limit);
+  }
+
+  if (sessions.length === 0) {
+    console.log(chalk.gray('No sessions found. Try --all or a different --since window.'));
+    return;
+  }
+
+  const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
+  try {
+    chosen = await multiItemPicker<SessionMeta>({
+      message: 'Select sessions to resume:',
+      items: sessions,
+      filter: (q: string) => (q.trim() ? sessions.filter((s) => sessionMatchesQuery(s, q)) : sessions),
+      labelFor: (s, q) => formatPickerLabel(s, q, cols),
+      keyFor: (s) => s.id,
+      buildPreview,
+      pageSize: 15,
+      emptyMessage: 'No sessions match.',
+      enterHint: 'resume',
     });
-    const { visible } = filterTeamSessions(sessions, !!options.teams);
-    sessions = visible;
-    if (options.account) {
-      const { findUnifiedAccount } = await import('../lib/account-registry.js');
-      const { readMeta } = await import('../lib/state.js');
-      const { sessionMatchesAccount } = await import('../lib/session/recovery.js');
-      const account = findUnifiedAccount(options.account, readMeta(), undefined, agent as import('../lib/types.js').AgentId | undefined);
-      if (!account) throw new Error(`Unknown account '${options.account}'.`);
-      const context = account.kind === 'native'
-        ? await (await import('../lib/exec-account-home.js')).resolveNativeSpawnHome(account.agent, account, readMeta(), { readOnly: true }).catch(() => null)
-        : null;
-      sessions = sessions.filter(session => sessionMatchesAccount(session, account, context?.execHome)).slice(0, limit);
-    }
-
-    if (sessions.length === 0) {
-      console.log(chalk.gray('No sessions found. Try --all or a different --since window.'));
-      return;
-    }
-
-    const cols = { ...pickerColumnsFor(sessions), gutter: 6 };
-    try {
-      chosen = await multiItemPicker<SessionMeta>({
-        message: 'Select sessions to resume:',
-        items: sessions,
-        filter: (q: string) => (q.trim() ? sessions.filter((s) => sessionMatchesQuery(s, q)) : sessions),
-        labelFor: (s, q) => formatPickerLabel(s, q, cols),
-        keyFor: (s) => s.id,
-        buildPreview,
-        pageSize: 15,
-        initialSearch: query,
-        emptyMessage: 'No sessions match.',
-        enterHint: 'resume',
-      });
-    } catch (err) {
-      if (isPromptCancelled(err)) return;
-      throw err;
-    }
+  } catch (err) {
+    if (isPromptCancelled(err)) return;
+    throw err;
   }
   if (!chosen || chosen.length === 0) return;
 
@@ -285,7 +143,7 @@ export async function sessionsResumeAction(
     process.exitCode = 1;
     return;
   }
-  let items = resumable.map((session) => buildSelectedResumeSurface(session, prompt, options));
+  let items = resumable.map((session) => buildSelectedResumeSurface(session, options));
 
   const ctx = currentContext();
   const backend = await resolveBackend(options, ctx, items.length);
@@ -301,7 +159,7 @@ export async function sessionsResumeAction(
       }
       if (!it.project) {
         console.error(chalk.red(`Can't open ${sessionLabel(it.session)}: no local folder matches ${it.session.cwd ?? `project "${it.session.project ?? 'unknown'}"`}, so there is no VSCodium window to put it in.`));
-        console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${it.session.id}`));
+        console.error(chalk.gray(`  Resume it in this terminal instead: agents run auto --resume ${it.session.id}`));
         process.exitCode = 1;
         continue;
       }
@@ -324,7 +182,7 @@ export async function sessionsResumeAction(
     if (items.length > 1) {
       console.log(chalk.gray(`Resuming ${items.length} sessions one at a time (no tab-capable terminal detected).`));
     }
-    for (const it of items) await spawnCliInPlace(buildSelectedResumeArgs(it.session.id, prompt, options));
+    for (const it of items) await spawnCliInPlace(buildSelectedResumeArgs(it.session.id, options));
     return;
   }
 
@@ -353,7 +211,7 @@ export async function sessionsResumeAction(
       return;
     }
     console.error(chalk.red(line));
-    console.error(chalk.gray(`  Resume it in this terminal instead: agents sessions resume ${s.id}`));
+    console.error(chalk.gray(`  Resume it in this terminal instead: agents run auto --resume ${s.id}`));
     process.exitCode = 1;
   });
 }
@@ -370,55 +228,43 @@ const RUN_RESUME_PICKER_SPECS: StripSpec[] = [
   { long: 'limit', short: 'n', takesValue: true },
 ];
 
-export function buildSelectedResumeArgs(id: string, prompt: string | undefined, options: ResumeOptions): string[] {
-  if (options.runArgs) {
-    const args = stripRoutingFlags(options.runArgs, RUN_RESUME_PICKER_SPECS);
-    const boundary = args.indexOf('--');
-    const index = args.findIndex((arg, i) => (boundary < 0 || i < boundary) && (arg === '--resume' || arg === '--resume='));
-    if (index < 0) throw new Error('The run command did not contain a bare --resume selector.');
-    args.splice(index, 1, '--resume', id);
-    if (options.device) {
-      let remoteCwd: string | undefined;
-      let localCwd: string | undefined;
-      for (let i = 0; i < args.length && args[i] !== '--'; i++) {
-        if (args[i] === '--remote-cwd') {
-          remoteCwd = args[i + 1];
-          args.splice(i--, 2);
-        } else if (args[i].startsWith('--remote-cwd=')) {
-          remoteCwd = args[i].slice('--remote-cwd='.length);
-          args.splice(i--, 1);
-        } else if (args[i] === '--cwd') {
-          localCwd = args[i + 1];
-          args.splice(i--, 2);
-        } else if (args[i].startsWith('--cwd=')) {
-          localCwd = args[i].slice('--cwd='.length);
-          args.splice(i--, 1);
-        } else if (['-D', '--device', '--host', '--where', '--on', '--computer'].includes(args[i])) {
-          args.splice(i, 2);
-          i--;
-        } else if ((/^(?:--(?:device|host|where|on|computer)=|-D.)/.test(args[i]))) {
-          args.splice(i, 1);
-          i--;
-        }
-      }
-      const effectiveCwd = remoteCwd ?? options.cwd ?? (localCwd ? toRemotePortable(localCwd) : undefined);
-      if (effectiveCwd !== undefined) {
-        const end = args.indexOf('--');
-        args.splice(end < 0 ? args.length : end, 0, '--cwd', effectiveCwd);
+export function buildSelectedResumeArgs(id: string, options: ResumeOptions): string[] {
+  const args = stripRoutingFlags(options.runArgs, RUN_RESUME_PICKER_SPECS);
+  const boundary = args.indexOf('--');
+  const index = args.findIndex((arg, i) => (boundary < 0 || i < boundary) && (arg === '--resume' || arg === '--resume='));
+  if (index < 0) throw new Error('The run command did not contain a bare --resume selector.');
+  args.splice(index, 1, '--resume', id);
+  if (options.device) {
+    let remoteCwd: string | undefined;
+    let localCwd: string | undefined;
+    for (let i = 0; i < args.length && args[i] !== '--'; i++) {
+      if (args[i] === '--remote-cwd') {
+        remoteCwd = args[i + 1];
+        args.splice(i--, 2);
+      } else if (args[i].startsWith('--remote-cwd=')) {
+        remoteCwd = args[i].slice('--remote-cwd='.length);
+        args.splice(i--, 1);
+      } else if (args[i] === '--cwd') {
+        localCwd = args[i + 1];
+        args.splice(i--, 2);
+      } else if (args[i].startsWith('--cwd=')) {
+        localCwd = args[i].slice('--cwd='.length);
+        args.splice(i--, 1);
+      } else if (['-D', '--device', '--host', '--where', '--on', '--computer'].includes(args[i])) {
+        args.splice(i, 2);
+        i--;
+      } else if ((/^(?:--(?:device|host|where|on|computer)=|-D.)/.test(args[i]))) {
+        args.splice(i, 1);
+        i--;
       }
     }
-    return args;
+    const effectiveCwd = remoteCwd ?? options.cwd ?? (localCwd ? toRemotePortable(localCwd) : undefined);
+    if (effectiveCwd !== undefined) {
+      const end = args.indexOf('--');
+      args.splice(end < 0 ? args.length : end, 0, '--cwd', effectiveCwd);
+    }
   }
-  const args = buildResumeRemoteArgs(id, prompt, options);
-  if (options.here) args.push('--here');
-  if (options.local) args.push('--local');
-  if (options.attachOnly) args.push('--attach-only');
   return args;
-}
-
-export function isDirectResumeSelector(query: string): boolean {
-  const selector = query.trim();
-  return looksLikeSessionId(selector) || isAgentTmuxAlias(selector);
 }
 
 export function partitionResumableSelections(
@@ -432,22 +278,6 @@ export function partitionResumableSelections(
     (deferredToPeer || sessionTranscriptReadable(s) ? resumable : skipped).push(s);
   }
   return { resumable, skipped };
-}
-
-export function resumeUsesLifecycleDispatch(
-  query: string | undefined,
-  prompt: string | undefined,
-  options: Pick<ResumeOptions, 'attachOnly' | 'local' | 'mode' | 'interactive' | 'headless' | 'here'>,
-): boolean {
-  if (!query || !isDirectResumeSelector(query)) return false;
-  if (!options.attachOnly && !options.local) return false;
-  return !wantsStrictResume(prompt, {
-    mode: options.mode,
-    interactive: options.interactive,
-    headless: options.headless,
-    here: options.here,
-    local: options.local,
-  });
 }
 
 export async function dispatchSessionLifecycleInPlace(
@@ -466,7 +296,7 @@ export function buildSessionLifecycleArgs(
   local = false,
 ): string[] {
   return [
-    'sessions', 'focus', selector,
+    'ps', 'focus', selector,
     ...hosts.flatMap(host => ['--device', host]),
     ...(attachOnly ? ['--attach-only'] : []),
     ...(local ? ['--local'] : []),
@@ -492,7 +322,6 @@ export function resolveResumePacking(options: Pick<ResumeOptions, 'splits'>): Pa
 
 export function buildSelectedResumeSurface(
   session: SessionMeta,
-  prompt: string | undefined,
   options: ResumeOptions,
 ): SurfaceItem & { session: SessionMeta } {
   const requestedCwd = options.cwd || session.cwd;
@@ -507,7 +336,7 @@ export function buildSelectedResumeSurface(
     session,
     cwd,
     project,
-    command: ['agents', ...inTabArgs(buildSelectedResumeArgs(session.id, prompt, options), options)].map(shellQuote),
+    command: ['agents', ...inTabArgs(buildSelectedResumeArgs(session.id, options))].map(shellQuote),
   };
 }
 
@@ -527,8 +356,8 @@ async function reportLiveProcesses(session: SessionMeta): Promise<void> {
   for (const pid of pids) process.stdout.write(chalk.yellow(stillRunningNotice(session.shortId, pid, host ?? self)));
 }
 
-function inTabArgs(args: string[], options: Pick<ResumeOptions, 'attachOnly'>): string[] {
-  if (options.attachOnly || args.includes('--quiet')) return args;
+function inTabArgs(args: string[]): string[] {
+  if (args.includes('--quiet')) return args;
   const boundary = args.indexOf('--');
   return boundary < 0 ? [...args, '--quiet'] : [...args.slice(0, boundary), '--quiet', ...args.slice(boundary)];
 }
@@ -545,7 +374,7 @@ export function resumeHostMismatch(
 }
 
 export async function resolveBackend(
-  options: ResumeOptions,
+  options: Pick<ResumeOptions, 'iterm' | 'ghostty' | 'tmux' | 'vscodium' | 'terminalApp' | 'device'>,
   ctx: EngineContext,
   count: number,
 ): Promise<Backend | 'inplace' | 'cancel'> {

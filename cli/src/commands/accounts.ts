@@ -87,7 +87,7 @@ async function secretFromBundle(raw: string): Promise<string> {
     vars = (await readBundle(bundle)).vars;
   } catch (err) {
     if (!isSecretsClientError(err, 'NOT_FOUND')) throw err;
-    throw new Error(`Secrets bundle '${bundle}' not found. List bundles with 'agents secrets list'.`);
+    throw new Error(`Secrets bundle '${bundle}' not found. List bundles with 'secrets list'.`);
   }
   if (!(key in vars)) {
     const available = Object.keys(vars).join(', ') || '(none)';
@@ -100,7 +100,7 @@ async function secretFromBundle(raw: string): Promise<string> {
     if (!isSecretsClientError(err, 'LOCKED')) throw err;
     throw new Error(
       `Secrets bundle '${bundle}' is not unlocked for a prompt-free read. ` +
-      `Unlock it first with 'agents secrets unlock ${bundle}', then retry.`,
+      `Unlock it first with 'secrets unlock ${bundle}', then retry.`,
     );
   }
 }
@@ -343,7 +343,7 @@ export function registerAccountsCommand(program: Command): void {
 agents accounts list claude
 agents accounts list --json
 agents accounts list --fleet`,
-    notes: 'One row per account per harness: the account name, its usage bars (`*` stale), then nothing at all when the account is healthy. A state worth acting on trails the row — `rate-limited` (the usage snapshot via `deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429), `expired`/`revoked`/`missing`, partial fleet coverage (`usable on 3 of 5 boxes`), then the exact repair command. `live`, `unverified`, `ready` and `per-device` are the ordinary cases and print nothing. For the identity behind an account use `agents accounts view <name>`; for per-device state use `--fleet`; for everything use `--json`. Reserved credential stores are not listed here; `agents secrets` is the place those show.',
+    notes: 'One row per account per harness: the account name, its usage bars (`*` stale), then nothing at all when the account is healthy. A state worth acting on trails the row — `rate-limited` (the usage snapshot via `deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429), `expired`/`revoked`/`missing`, partial fleet coverage (`usable on 3 of 5 boxes`), then the exact repair command. `live`, `unverified`, `ready` and `per-device` are the ordinary cases and print nothing. For the identity behind an account use `agents accounts view <name>`; for per-device state use `--fleet`; for everything use `--json`. Reserved credential stores are not listed here; `secrets` is the place those show.',
   });
 
 
@@ -562,7 +562,7 @@ agents accounts migrate --dry-run --device worker-1`,
           throw new Error(`Unknown ${selector.agent} account '${selector.name}'.`);
         }
         const account = unified.kind === 'provider'
-          ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
+          ? { ...publicAccount(inspectAccount(unified.name)), custody: 'secrets (policy never)', attached: accountBindings(unified.id, meta) }
           : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
         if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
         console.log(chalk.bold(account.name));
@@ -703,6 +703,6 @@ agents run claude#work
 agents accounts logout claude
 agents accounts migrate --dry-run
 agents accounts migrate --apply`,
-    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `agents secrets vault unlock`.',
+    notes: 'An account is a credential SLOT, not an installation: `accounts add <harness> [name]` runs the native login in a fresh HOME-shaped slot of the one managed install, registers the fleet-wide row, and mints the durable worker credential (claude: setup-token; codex/grok/cursor/opencode: --api-key or a prompt) in one step. Headed devices only — workers are provisioned automatically. `accounts login <harness>#<name>` re-auths into the same slot and re-mints; `accounts default <harness> [name]` is the one default write path. Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Leftover per-account installations fold with `agents accounts migrate --dry-run|--apply`. Synced vault unlock is `secrets vault unlock`.',
   });
 }

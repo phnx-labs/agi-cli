@@ -154,7 +154,7 @@ export function formatInUseDeferral(name: string, activity: InstallationActivity
       ? activity.processes[0]
       : activity.processes.map((p) => `\n    ${p}`).join('');
     return `${name} is in use by ${activity.processes.length === 1 ? 'a running process' : `${activity.processes.length} running processes`} — ${list}. `
-      + 'Finish that session (agents sessions stop <id> for an agents session), then retry.';
+      + 'Finish that session (agents ps stop <id> for an agents session), then retry.';
   }
   return `${name} has a launch in flight; retry once it has started or exited.`;
 }

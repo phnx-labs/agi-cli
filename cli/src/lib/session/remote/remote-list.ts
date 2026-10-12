@@ -15,6 +15,7 @@ import { sshTargetFor } from '../../devices/connect.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../../remote-agents-json.js';
+import type { RemoteToolBin } from '../../hosts/remote-cmd.js';
 import { normalizeHost } from '../sync/config.js';
 import { NO_FANOUT_ENV } from '../remote-active.js';
 import { terminalWidth } from '../../text/width.js';
@@ -139,6 +140,7 @@ export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean 
 interface GatherRemoteListOptions {
   isDefinitive?: (session: SessionMeta, machine: string) => boolean;
   timeoutMs?: number;
+  bin?: RemoteToolBin;
 }
 
 export async function gatherRemoteList(
@@ -146,9 +148,10 @@ export async function gatherRemoteList(
   hosts?: string[],
   opts?: GatherRemoteListOptions,
 ): Promise<RemoteListResult> {
-  const safeResolver = forwardedArgs.includes('--resolve-safe-v1');
+  const safeResolver = forwardedArgs[0] === 'ps' && forwardedArgs[1] === 'resolve';
   const result = await gatherRemoteAgentsJson<SessionMeta>({
     args: forwardedArgs,
+    bin: opts?.bin,
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
     timeoutMs: opts?.timeoutMs,
@@ -208,7 +211,7 @@ export async function fetchPeerPreviewEnvelope(
 ): Promise<PeerPreviewEnvelopeResult> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return { ok: false, reason: 'no-target' };
-  const cmd = remoteListCommand(['sessions', 'preview', sessionId, '--local', '--json'], peer.os);
+  const cmd = remoteListCommand(['ps', 'preview', sessionId, '--local', '--json'], peer.os);
   const capture = await sshCapture(peer.target, cmd, timeoutMs);
   if (capture.code !== 0) return { ok: false, reason: 'unreachable' };
   try {

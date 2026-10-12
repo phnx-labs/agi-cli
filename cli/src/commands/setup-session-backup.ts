@@ -20,7 +20,7 @@ interface BackupSetupOptions {
   domain: string;
 }
 
-export async function handleSessionsBackupSetup(opts: BackupSetupOptions): Promise<void> {
+export async function handleSessionBackupSetup(opts: BackupSetupOptions): Promise<void> {
   const { input } = await import('@inquirer/prompts');
   const { apiToken, accountId: bundledAccountId } = readCloudflareCreds(opts.bundle, {
     apiToken: opts.token,
@@ -38,20 +38,20 @@ export async function handleSessionsBackupSetup(opts: BackupSetupOptions): Promi
     phoenixIdBase: PHOENIX_ID_BASE,
   });
   console.log(chalk.green(`Managed session-backup endpoint ready → ${chalk.bold(result.baseUrl)}`));
-  console.log(chalk.dim('Signed-in users now back up with `agents sessions export --to-r2` — no r2.backups bucket.'));
+  console.log(chalk.dim('Signed-in users now back up with `sessions export --to-r2` — no r2.backups bucket.'));
 }
 
 const BACKUP_SETUP_EXAMPLES = `
-  $ secrets exec cloudflare -- agents sessions backup-setup
+  $ secrets exec cloudflare -- agents setup session-backup
   Provision the managed session-backup Worker + R2 bucket (creds from the bundle).
 
-  $ agents sessions backup-setup --account <id> --domain sessions.example.com
+  $ agents setup session-backup --account <id> --domain sessions.example.com
   Provision against a private account service and custom domain.
 `.trimStart();
 
-export function registerSessionsBackupSetupCommand(sessionsCmd: Command): void {
-  const cmd = sessionsCmd
-    .command('backup-setup')
+export function registerSetupSessionBackupCommand(setupCmd: Command): void {
+  const cmd = setupCmd
+    .command('session-backup')
     .description('(operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup')
     .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
     .option('--worker <name>', 'Worker name', DEFAULT_SESSIONS_WORKER_NAME)
@@ -61,7 +61,7 @@ export function registerSessionsBackupSetupCommand(sessionsCmd: Command): void {
     .option('--domain <host>', 'custom domain to map', DEFAULT_SESSIONS_DOMAIN)
     .action(async (opts: BackupSetupOptions) => {
       try {
-        await handleSessionsBackupSetup(opts);
+        await handleSessionBackupSetup(opts);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exitCode = 1;

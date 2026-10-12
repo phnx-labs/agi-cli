@@ -6,7 +6,7 @@ import { stopInteractive } from './detach.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { setHelpSections } from '../lib/help.js';
 
-export function registerSessionsStopCommand(program: Command, group: 'sessions' | 'ps' = 'sessions'): void {
+export function registerSessionsStopCommand(program: Command): void {
   const cmd = program
     .command('stop')
     .argument('<id>', 'Short or full id of the live session to stop')
@@ -18,10 +18,10 @@ export function registerSessionsStopCommand(program: Command, group: 'sessions' 
   setHelpSections(cmd, {
     examples: `
       # Stop a live session by a short id prefix
-      agents ${group} stop 4b2f1a9c
+      agents ps stop 4b2f1a9c
 
       # Only look on this machine (skip the fleet sweep)
-      agents ${group} stop 4b2f1a9c --local
+      agents ps stop 4b2f1a9c --local
     `,
     notes: `
       stop ENDS the session; it does not background it. To keep an agent working

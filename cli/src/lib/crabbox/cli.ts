@@ -149,7 +149,7 @@ function resolveLeaseEnvMemo(explicitBundle?: string): NodeJS.ProcessEnv | undef
         leaseEnvMemo = {
           error: new Error(
             `Could not load secrets bundle "${resolved.name}" for crabbox: ${(e as Error).message}. ` +
-              `Fix the bundle (agents secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
+              `Fix the bundle (secrets view ${resolved.name}) or unset lease.secretsBundle to use crabbox's own login.`,
           ),
         };
       }

@@ -130,7 +130,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
           return raw.trim();
         case 'browser.profile':
         case 'browser.viewer':
-        case 'computer.host':
           return raw.trim();
       }
       const unhandled: never = property;
@@ -439,9 +438,6 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
       case 'browser.viewer':
         if (device === machineId()) continue;
         key = `${prefix}browser.viewer`;
-        break;
-      case 'computer.host':
-        key = `${prefix}computer.host`;
         break;
       default:
         continue;

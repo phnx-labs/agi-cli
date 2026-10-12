@@ -1467,7 +1467,7 @@ export function removeVersion(agent: AgentId, version: string): boolean {
 export function printTrashFooter(moved: Array<{ agent: AgentId; version: string }>): void {
   if (moved.length === 0) return;
   console.log();
-  console.log(chalk.gray('Sessions remain accessible via `agents sessions`.'));
+  console.log(chalk.gray('Sessions remain accessible via `sessions`.'));
   if (moved.length === 1) {
     const { agent, version } = moved[0];
     console.log(chalk.gray(`Restore with: agents prune trash restore ${agent}@${version}`));

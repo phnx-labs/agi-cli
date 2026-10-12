@@ -2055,7 +2055,7 @@ export function registerTeamsCommands(program: Command): void {
         }
         console.log();
       }
-      console.log(chalk.gray(`${running.length} teammate${running.length === 1 ? '' : 's'} running. See 'agents sessions --active' for the full cross-context view.`));
+      console.log(chalk.gray(`${running.length} teammate${running.length === 1 ? '' : 's'} running. See 'agents ps' for the full cross-context view.`));
     });
 
   addHostOption(teams.command('start [team]'))

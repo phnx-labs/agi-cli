@@ -80,28 +80,3 @@ export function loadDefaultPeers(opts: { computerBin?: string } = {}): string[] 
   return [...out].sort();
 }
 
-function parseVncEndpoint(raw: string | undefined): { host: string; port: number } | null {
-  if (!raw || raw.length === 0) return null;
-  const idx = raw.lastIndexOf(':');
-  const host = idx >= 0 ? raw.slice(0, idx) : raw;
-  const portStr = idx >= 0 ? raw.slice(idx + 1) : '5901';
-  const port = Number(portStr);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
-  return { host: host || '127.0.0.1', port };
-}
-
-export function resolveTcpEndpoint(): { host: string; port: number; token: string | null } | null {
-  const raw = process.env.COMPUTER_HELPER_TCP;
-  if (!raw || raw.length === 0) return null;
-  const [hostPart, portPart] = raw.includes(':') ? raw.split(':') : ['127.0.0.1', raw];
-  const port = Number(portPart);
-  if (!Number.isInteger(port) || port <= 0) return null;
-  const token = process.env.COMPUTER_HELPER_TOKEN;
-  return { host: hostPart || '127.0.0.1', port, token: token && token.length > 0 ? token : null };
-}
-
-export function resolveVncEndpoint(): { host: string; port: number; password: string } | null {
-  const parsed = parseVncEndpoint(process.env.COMPUTER_HELPER_VNC);
-  if (!parsed) return null;
-  return { ...parsed, password: process.env.COMPUTER_HELPER_VNC_PASSWORD ?? '' };
-}

@@ -129,7 +129,6 @@ export type DeviceConfigProperty =
   | 'notes'
   | 'browser.profile'
   | 'browser.viewer'
-  | 'computer.host'
   | 'formFactor';
 
 const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
@@ -144,7 +143,6 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'browser.task-idle-minutes',
   'notes',
   'browser.profile',
-  'computer.host',
   'formFactor',
 ];
 
@@ -370,8 +368,6 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'browser.profile';
     case 'browser.viewer':
       return 'browser.viewer';
-    case 'computer.host':
-      return 'computer.host';
     case 'formFactor':
       return 'formFactor';
   }

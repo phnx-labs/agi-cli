@@ -70,8 +70,8 @@ NUDGE when the agent went idle and could keep going on its own:
 The nudge text MUST carry context, not shove:
 - Restate the goal and reference the conclusion the agent ALREADY reached.
 - Give ONE concrete next step — the specific action, the sensible default, or a TOOL it
-  forgot it has (e.g. "agents computer" to drive the Mac, "agents browser" for the web,
-  "agents ssh <mac> \\"agents computer …\\"" to drive a Mac from another box).
+  forgot it has (e.g. "computer" to drive the Mac, "browser" for the web,
+  "agents ssh <mac> \\"computer …\\"" to drive a Mac from another box).
 - Split the ask: drive the reversible, goal-advancing part now; flag only a genuinely
   disruptive sub-step for the human.
 - Tell it to use best judgment and finish end-to-end WITHOUT asking again.

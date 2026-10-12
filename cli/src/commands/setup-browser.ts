@@ -51,7 +51,7 @@ export async function runBrowserWizard(): Promise<boolean> {
 
   const chosen = configuredDefaultProfile();
   if (!chosen) {
-    console.log(chalk.dim('No default profile chosen. Run `agents browser use <name>` later to set one.'));
+    console.log(chalk.dim('No default profile chosen. Run `browser use <name>` later to set one.'));
     return false;
   }
   printOnboardingNextStep(chosen);
@@ -62,10 +62,10 @@ function printOnboardingNextStep(name: string): void {
   console.log(chalk.bold('\nOne manual step left:'));
   console.log(
     '  ' +
-      chalk.cyan(`agents browser start --profile ${name}`) +
+      chalk.cyan(`browser start --profile ${name}`) +
       chalk.dim('   # finish the browser first-run + sign in to any sites you want automated'),
   );
-  console.log(chalk.dim(`  Then check it's ready:  agents browser profiles doctor ${name}`));
+  console.log(chalk.dim(`  Then check it's ready:  browser profiles doctor ${name}`));
 }
 
 export function registerSetupBrowserCommand(setupCmd: Command): void {

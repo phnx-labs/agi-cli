@@ -526,7 +526,7 @@ export function formatProgressUpdate(ev: ActivityEvent, opts: { joined?: Progres
   }
   if (opts.joined?.prUrl) lines.push(`    ${chalk.gray(opts.joined.prUrl)}`);
 
-  lines.push(`    ${chalk.dim(`↳ ag focus ${shortId} · ag sessions ${shortId}`)}`);
+  lines.push(`    ${chalk.dim(`↳ ag focus ${shortId} · sessions ${shortId}`)}`);
   return lines.join('\n');
 }
 

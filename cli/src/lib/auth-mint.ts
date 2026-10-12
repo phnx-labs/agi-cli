@@ -212,7 +212,7 @@ export function seedReservedAuthToken(email: string, token: string): { key: stri
     const backend = bundleBackendSync(AUTH_BUNDLE);
     if (backend !== 'file') {
       throw new Error(
-        `Reserved bundle '${AUTH_BUNDLE}' exists with backend '${backend}', but usage/probe only reads a FILE-backed auth bundle. Recreate it with: agents secrets create ${AUTH_BUNDLE} --backend file --policy never --i-understand --force`,
+        `Reserved bundle '${AUTH_BUNDLE}' exists with backend '${backend}', but usage/probe only reads a FILE-backed auth bundle. Recreate it with: secrets create ${AUTH_BUNDLE} --backend file --policy never --i-understand --force`,
       );
     }
     const bundle = readBundleSync(AUTH_BUNDLE);
@@ -302,7 +302,7 @@ export function writeReservedStoreItem(
       const backend = bundleBackendSync(name);
       if (backend !== 'file') {
         throw new Error(
-          `Reserved store '${name}' exists with backend '${backend}', but worker provisioning only reads a FILE-backed store. Recreate it with: agents secrets delete ${name} --yes`,
+          `Reserved store '${name}' exists with backend '${backend}', but worker provisioning only reads a FILE-backed store. Recreate it with: secrets delete ${name} --yes`,
         );
       }
       const bundle = readBundleSync(name);

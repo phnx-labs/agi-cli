@@ -262,7 +262,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS tool_call_text USING fts5(
 
 -- Independent of scan_ledger: schema migration never forces the normal
 -- session index to reread history. Existing transcripts are backfilled only
--- by the explicit, bounded agents sessions backfill tools command.
+-- by the explicit, bounded agents daemon index backfill tools command.
 CREATE TABLE IF NOT EXISTS tool_scan_ledger (
   session_id TEXT PRIMARY KEY,
   file_path TEXT NOT NULL UNIQUE,
@@ -309,7 +309,7 @@ CREATE INDEX IF NOT EXISTS idx_session_resource_usage_plugin ON session_resource
 -- tool_scan_ledger. The normal incremental scan writes resource usage for every
 -- session it (re)parses, but a session indexed before #12 shipped keeps a fresh
 -- scan_ledger row and is never re-derived — so its skill/slash-command tallies
--- were never recorded. The "agents sessions backfill resources" command walks
+-- were never recorded. The "agents daemon index backfill resources" command walks
 -- history, re-parses each transcript from byte 0, and stamps coverage here
 -- (mtime + size + extractor_version) so reruns skip completed transcripts. This
 -- is a SCAN LEDGER, not a second copy of the usage data — the usage itself lives
@@ -460,7 +460,7 @@ CREATE TABLE IF NOT EXISTS browser_sessions (
 CREATE INDEX IF NOT EXISTS idx_browser_sessions_session ON browser_sessions(session_id);
 CREATE INDEX IF NOT EXISTS idx_browser_sessions_started ON browser_sessions(started_at DESC);
 
--- Durable metadata for one "agents computer" invocation (RUSH-2549). Computer-use
+-- Durable metadata for one "computer" invocation (RUSH-2549). Computer-use
 -- already resolves identity correctly -- stampProvenance stamps AGENT_SESSION_ID
 -- straight onto each computer.action event -- but those events live in the bounded
 -- audit ledger, which prunes at 7 days / 50 MiB (events.ts). So a run's history

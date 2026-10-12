@@ -103,10 +103,10 @@ function targetLabel(target: ReconnectTarget): string {
 
 export function recoveryHint(target: ReconnectTarget, host: string): string {
   if (target.kind === 'session') {
-    return `  Session ${target.id}\n  Resume:  agents sessions resume ${target.id}\n`;
+    return `  Session ${target.id}\n  Resume:  agents ps focus ${target.id}\n`;
   }
-  return `  Launch ${target.id}\n  agents ssh ${host} 'agents sessions focus --launch-id ${target.id} --local'\n`
-    + `  or pick it:  agents sessions --active\n`;
+  return `  Launch ${target.id}\n  agents ssh ${host} 'agents ps focus --launch-id ${target.id} --local'\n`
+    + `  or pick it:  agents ps\n`;
 }
 
 export function connectionEndedNotice(
@@ -120,7 +120,7 @@ export function connectionEndedNotice(
 
 export function connectionStartedNotice(target: ReconnectTarget, host: string): string | undefined {
   if (target.kind !== 'session') return undefined;
-  return `Session ${target.id} on ${host}\n  Resume later:  agents sessions resume ${target.id}\n`;
+  return `Session ${target.id} on ${host}\n  Resume later:  agents run auto --resume ${target.id}\n`;
 }
 
 export function startConnectionTarget(opts: {
@@ -172,7 +172,7 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
   const selector = target.kind === 'launch'
     ? ['--launch-id', target.id]
     : [target.id];
-  const inner = ['agents', 'sessions', 'focus', ...selector, '--local', '--reconnect-reattach']
+  const inner = ['agents', 'ps', 'focus', ...selector, '--local', '--reconnect-reattach']
     .map(shellQuote)
     .join(' ');
   return wrapRemoteExitCode(inner);

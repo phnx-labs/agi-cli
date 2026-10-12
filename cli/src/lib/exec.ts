@@ -1814,7 +1814,7 @@ export function buildFallbackPrompt(
     lines.push(
       ``,
       `Prior session ID: ${prevSessionId}`,
-      `Read the transcript by running: agents sessions ${prevSessionId}`,
+      `Read the transcript by running: sessions ${prevSessionId}`,
     );
   }
   lines.push(

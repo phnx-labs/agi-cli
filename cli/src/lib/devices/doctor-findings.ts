@@ -245,11 +245,11 @@ export function remediationFor(finding: DoctorFinding): string {
     case 'host-cli-invalid':
       return 'fix the manifest';
     case 'rc-secret-export':
-      return 'agents secrets add';
+      return 'secrets add';
     case 'env-secret-export':
       return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'auth-bundle-wrong-backend':
-      return 'agents secrets delete auth --yes && agents secrets create auth --backend file';
+      return 'secrets delete auth --yes && secrets create auth --backend file';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'ssh-key-enrollment':
@@ -620,8 +620,8 @@ function rcSecretFindings(device: string, rc: RcSecretFinding[]): DoctorFinding[
     const remediation = master
       ? g.remediation
       : n === 1
-        ? 'agents secrets add, then delete the rc line'
-        : `agents secrets add once per export (${n}), then delete each rc line`;
+        ? 'secrets add, then delete the rc line'
+        : `secrets add once per export (${n}), then delete each rc line`;
     out.push({
       severity: FINDING_SEVERITY['rc-secret-export'], kind: 'rc-secret-export', device,
       message: `${what} (${examples}) — readable by any same-user process`,
