@@ -116,7 +116,7 @@ describe('resolveInjectTargetForSession — refusals', () => {
     const r = resolveInjectTargetForSession(session({ host: undefined }));
     expect(r.addressable).toBe(false);
     if (!r.addressable) {
-      expect(r.hint).toContain('agents sessions resume');
+      expect(r.hint).toContain('agents run auto --resume');
       expect(r.hint).toContain('tmux');
     }
   });
@@ -128,7 +128,7 @@ describe('addressabilityRecoveryHint', () => {
     s.context = 'terminal';
     const hint = addressabilityRecoveryHint(s);
     expect(hint).toContain('Ghostty');
-    expect(hint).toContain('agents sessions resume aaaaaaaa');
+    expect(hint).toContain('agents run auto --resume aaaaaaaa');
     expect(hint).toContain('tmux');
   });
 
@@ -137,7 +137,7 @@ describe('addressabilityRecoveryHint', () => {
     s.context = 'headless';
     s.tty = undefined;
     const hint = addressabilityRecoveryHint(s);
-    expect(hint).toContain('agents sessions resume aaaaaaaa');
+    expect(hint).toContain('agents run auto --resume aaaaaaaa');
     expect(hint).not.toContain('Enable tmux');
   });
 
@@ -147,14 +147,14 @@ describe('addressabilityRecoveryHint', () => {
     const hint = addressabilityRecoveryHint(s);
     expect(hint).toContain('IDE terminal');
     expect(hint).toContain('session id');
-    expect(hint).toContain('agents sessions resume');
+    expect(hint).toContain('agents run auto --resume');
   });
 
   it('renders the real id from the fallback when the live session id is absent (PHNX-3070)', () => {
     const s = session({ host: 'codium', sessionId: undefined }) as ActiveSession;
     s.context = 'terminal';
     const hint = addressabilityRecoveryHint(s, 'ffffffff-1111-2222-3333-444444444444');
-    expect(hint).toContain('agents sessions resume ffffffff');
+    expect(hint).toContain('agents run auto --resume ffffffff');
     expect(hint).not.toContain('resume <id>');
   });
 
@@ -163,6 +163,6 @@ describe('addressabilityRecoveryHint', () => {
     s.context = 'headless';
     s.tty = undefined;
     const hint = addressabilityRecoveryHint(s);
-    expect(hint).toContain('agents sessions resume <id>');
+    expect(hint).toContain('agents run auto --resume <id>');
   });
 });

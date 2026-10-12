@@ -17,14 +17,14 @@ source "$_scripts_dir/lib/common.sh"
 
 command -v crabbox >/dev/null || die "crabbox not installed"
 
-if [[ -z "${SANDBOX_SECRETS_EXEC:-}" ]] && command -v agents >/dev/null; then
+if [[ -z "${SANDBOX_SECRETS_EXEC:-}" ]] && command -v secrets >/dev/null; then
   chain=()
   want=()
   [[ -z "${HCLOUD_TOKEN:-}" ]] && want+=(hetzner.com)
   [[ -z "${GITHUB_TOKEN:-}" && -z "${APP_ID:-}" ]] && want+=(github.com)
   [[ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]] && want+=(anthropic.com)
   for b in ${want[@]+"${want[@]}"}; do
-    if agents secrets exec "$b" -- true 2>/dev/null; then chain+=(agents secrets exec "$b" --); fi
+    if secrets exec "$b" -- true 2>/dev/null; then chain+=(secrets exec "$b" --); fi
   done
   if [[ ${#chain[@]} -gt 0 ]]; then
     SANDBOX_SECRETS_EXEC=1 exec "${chain[@]}" "$0" "$@"

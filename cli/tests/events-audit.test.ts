@@ -77,7 +77,7 @@ describe('audit event log', () => {
 
   it('attributes an SSH origin to a remote user (SSH_CONNECTION → transport + client IP)', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'list'], {
+    runCli(home, ['config', 'list'], {
       SSH_CONNECTION: '203.0.113.7 51828 10.0.0.3 22',
       SSH_TTY: '/dev/pts/4',
     });
@@ -91,14 +91,14 @@ describe('audit event log', () => {
 
   it('reads the trail back out and filters by module', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'list']);
+    runCli(home, ['config', 'list']);
     runCli(home, ['events', '--json']);
 
-    const res = runCli(home, ['events', '--module', 'secrets', '--json']);
+    const res = runCli(home, ['events', '--module', 'config', '--json']);
     expect(res.status).toBe(0);
     const records = JSON.parse(res.stdout) as Array<Record<string, unknown>>;
     expect(records.length).toBeGreaterThan(0);
-    expect(records.every((r) => r.module === 'secrets')).toBe(true);
+    expect(records.every((r) => r.module === 'config')).toBe(true);
   });
 
   it('--command matches a command path by prefix', () => {
@@ -113,7 +113,7 @@ describe('audit event log', () => {
 
   it('redacts a token-like positional arg before it hits the log', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
+    runCli(home, ['config', 'get', 'ghp_FAKETOKENVALUE123'], { SSH_CONNECTION: '' });
 
     const raw = fs.readFileSync(currentEventsPath(home), 'utf-8');
     expect(raw).not.toContain('ghp_FAKETOKENVALUE123');
@@ -122,7 +122,7 @@ describe('audit event log', () => {
 
   it('--since with a sub-day window returns today\'s events (not just whole days)', () => {
     const home = makeTempHome();
-    runCli(home, ['secrets', 'list']);
+    runCli(home, ['config', 'list']);
 
     const res = runCli(home, ['events', '--since', '2h', '--json']);
     expect(res.status).toBe(0);

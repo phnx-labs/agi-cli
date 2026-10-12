@@ -4,11 +4,13 @@
 > contributor spec: the data model, the render contract, and the known gaps, written
 > for whoever next changes this code. It is not user-facing CLI documentation (that
 > lives in `--help` output and the user docs); nothing here is shown to a person
-> running `agents sessions`.
+> running `agents ps` or the standalone `sessions` CLI.
 
 This directory owns everything about an "agent session": discovering transcripts on
 disk, parsing them per harness, detecting which are alive, indexing them for search,
-and rendering them for the `agents sessions` command. If code reasons about a session
+and feeding the session surfaces agents-cli still owns (`agents ps`, the resume
+picker, `agents ps preview`, the watch streams). Reading and rendering transcripts
+for a person is the standalone `sessions` CLI (PHNX-4227). If code reasons about a session
 as a first-class object, it lives here or speaks the types defined here.
 
 This README is the spec for two things that kept drifting and were never written down:
@@ -17,7 +19,7 @@ This README is the spec for two things that kept drifting and were never written
 2. **The session preview contract** — the fields the preview must show, why, and where
    each one comes from.
 
-It also records the fleet-scale requirement for the `--active` fan-out so the next
+It also records the fleet-scale requirement for the `agents ps` fan-out so the next
 rework does not silently regress it.
 
 All file:line anchors below are against the tree this doc was committed with; treat
@@ -38,12 +40,13 @@ parse.ts      parse a transcript into SessionEvent[]            ->  normalized e
 state.ts      derive durable signals (activity, awaiting, todos) ->  SessionState        (sessions-cli)
 active.ts     probe live processes (ps / tmux / teams / cloud)  ->  ActiveSession[]
 db.ts         SQLite index + FTS over SessionMeta               ->  SessionRow
-render.ts     summary + stats for `agents sessions <id>`        ->  text                (sessions-cli)
+render.ts     summary + stats for `sessions <id>`               ->  text                (sessions-cli)
 ```
 
 `types.ts` is the source of truth for the shapes every stage speaks. Cross-machine
-concerns live in `remote-active.ts` / `remote-list.ts` / `remote.ts` and the
-`sync/` subdir.
+concerns live in `remote-active.ts`, `remote/` (`remote-list.ts`, `peer-stream.ts`,
+`watch.ts`), and the `sync/` subdir (the managed backup Worker template and its
+provisioning).
 
 ## Canonical data model
 
@@ -62,12 +65,11 @@ count — and those facts are lost the moment the process exits unless we persis
 `session-cache.ts` is the daemon-warmed shared snapshot menubar / extension /
 watchdog / CLI read so they do not each re-fan-out a full gather. Each canonical
 snapshot write also appends only changed rows/removals to the active-session
-journal. `agents sessions watch --json` reads one startup snapshot and then tails
+journal. `agents ps watch --json` reads one startup snapshot and then tails
 that journal; watcher heartbeats never invoke another gather. Live status fields
 (`status`, `activity`, `preview`, …) only ride the snapshot/journal — never the immutable memo. Immutable identity fields (topic,
 label, cwd, …) are memoized by `(sessionId, transcriptMtimeMs)` so a transcript
-rewrite invalidates them. `remote.ts` is also cache-first: a reachable host
-skips SSH while its cache is fresh (it used to replay only on unreachable).
+rewrite invalidates them.
 
 ## The session preview contract
 
@@ -75,16 +77,14 @@ There are two distinct renders. Do not confuse them.
 
 - **Preview panel** — `buildPreview` (`sessions-picker.ts:114`) -> `formatHeader`
   (`sessions-picker.ts:167`) + `formatCompactPreview` (`sessions-picker.ts:310`).
-  This is what the interactive browser shows on `tab`, and what the non-interactive
-  `--preview` flag prints (`sessions.ts:1085`). `agents sessions preview <id>` uses
+  This is what the interactive browser shows on `tab`. `agents ps preview <id>` uses
   the same normalized preview digest after resolving full or displayed eight-character
   IDs across the selected fleet. It takes a `SessionMeta` plus, when available, the
   parsed `SessionEvent[]`. Transcript-derived facts are cached durably by the actual
   transcript mtime and size; live status is joined separately from the bounded 15-second
   active-session snapshot so a durable preview can never keep a stale running state.
-- **Full summary** — `renderSession` summary mode (`sessions.ts:1769`) ->
-  `renderSummaryHeader` (`render.ts:288`) + `renderSummary` (`render.ts:586`).
-  This is `agents sessions <id>`. It already renders a **Subagents (N)** section
+- **Full summary** — the standalone `sessions <id>`: `renderSummaryHeader` +
+  `renderSummary` in sessions-cli's `render.ts`. It already renders a **Subagents (N)** section
   (`render.ts:778`), counted from `Task`/agent tool calls (`render.ts:660`).
 
 The preview is the high-value surface: it is what a human reads to decide "is this the
@@ -100,7 +100,7 @@ with what, and how big it got.** The nine fields below are that contract.
 | 5 | tokens burned | total (and output) | yes — `sessions-picker.ts:201` | `SessionMeta.tokenCount` (`types.ts:128`), `outputTokens` (`types.ts:130`) |
 | 6 | duration | how long it ran | yes — `sessions-picker.ts:194` ("lasted") | `SessionMeta.durationMs` (`types.ts:133`) |
 | 7 | device it ran ON | the machine executing it | partial — remote-only note (`sessions-picker.ts:126`); not shown for local | `SessionMeta.machine` (`types.ts:205`); `ActiveSession.machine` (`active.ts:168`) |
-| 8 | device STARTED FROM | ssh/origin device that launched it | **no** — not in the preview panel (it is in the list row via `sshOriginTagFor`, `sessions-browser.ts:367`) | **not persisted** — live-only `ActiveSession.provenance.origin.device` (`provenance.ts:79`) |
+| 8 | device STARTED FROM | ssh/origin device that launched it | **no** — not in the preview panel (it is in the list row via `sshOriginTagFor`, `sessions-browser.ts:382`) | **not persisted** — live-only `ActiveSession.provenance.origin.device` (`provenance.ts:79`) |
 | 9 | fan-out left behind | sub-agents spawned + shells backgrounded | **yes** — both, on BOTH body paths (`sessions-picker.ts` `formatFanOut`) | `SessionMeta.subAgentCount` / `backgroundShellCount`, persisted as `sessions.sub_agent_count` / `background_shell_count` at scan time (schema v40) so a remote/unindexed row can render them |
 
 `*` model silently disappears for remote/unindexed rows: `formatMetaOnlyBody`
@@ -180,12 +180,12 @@ panel**. So this is a never-had-it gap to fill (the list above), not a regressio
 revert. The one thing that does silently vanish is model on remote/unindexed rows,
 for the `formatMetaOnlyBody` reason above.
 
-## Fleet `--active` behavior and the scale requirement
+## Fleet `agents ps` behavior and the scale requirement
 
 `agents ps` splits on TTY (`runLiveRoster`, `commands/ps-roster.ts:760-772`): an interactive terminal
 gets the browser (`sessions-browser.ts`), everything else gets the static
 `renderActiveSessions` dump. Both funnel through one fleet sweep, `gatherActiveSessions`
-(`sessions.ts:947`) = local `getActiveSessions()` + remote SSH fan-out
+(`commands/ps-roster.ts:416`) = local `getActiveSessions()` + remote SSH fan-out
 `gatherRemoteActive` (`remote-active.ts`), deduped by `${machine}:${sessionId}`
 (`dedupeByMachineSession`, `commands/ps-roster.ts`). The executing machine owns an
 offloaded session: its row replaces the dispatcher's `offloadedFrom` shim, and a
@@ -193,13 +193,13 @@ shim whose owner answered the sweep (a parseable JSON array) without that sessio
 is dropped (the tab is bound to a run that is no longer live there); remote
 teammates are exempt. Only a shim whose owner went unheard
 survives, as `unknown`. `SessionProjection` (`projection.ts`) applies the same rule
-to the watch stream, folding the tab into the owner row's `observerTerminals` (with the `workspaceDir` its editor window has open). A tab with no transcript of its own (an ssh tab from `agents sessions resume`, which also records its owner machine) folds into whichever device reports that session's transcript.
+to the watch stream, folding the tab into the owner row's `observerTerminals` (with the `workspaceDir` its editor window has open). A tab with no transcript of its own (an ssh tab opened by a resume, which also records its owner machine) folds into whichever device reports that session's transcript.
 
 The interactive running-filter live set is fleet-wide: the browser builds `live` from
-the same `gatherActiveSessions` (`sessions-browser.ts:446`), not the old local-only
+the same `gatherActiveSessions` (`sessions-browser.ts:443`), not the old local-only
 `getActiveSessions`, so the browser and the JSON dump can no longer disagree about what
 is running. Keep it that way — the local-only intersection was a real bug (a host
-showed 3 sessions while `--active --json` showed 30).
+showed 3 sessions while `agents ps --json` showed 30).
 
 **Requirement: the fan-out must stay fast at 100–200 devices.** It does not today.
 `gatherRemoteAgentsJson` (`remote-agents-json.ts:102`) is an unbounded
@@ -260,7 +260,7 @@ cutoff 24 h (`active.ts:245`).
 `agents ps` row (`printActiveRow`, `commands/ps-roster.ts:267`) renders **no time
 column at all** — only id, kind, host, the status word, badges, description. The
 browser/picker listings do carry both ends of the session — `sessionAgeParts` renders
-`<created> → <last activity>` (`relative-time.ts`, `timeCell` in `sessions.ts`), so the
+`<created> → <last activity>` (`relative-time.ts`, `timeCell` in `presentation.ts`), so the
 span is readable off the row — but each half is still an **unlabeled "X ago"** that
 renders identically for running and idle rows, not a called-out "idle for X" /
 "stuck for X". There is no explicit idle/stuck duration string anywhere.
@@ -278,9 +278,9 @@ exactly Gap 1.
 
 **Other accuracy caveats:**
 - **Stale cache + frozen clock.** The browser's default view (running filter off) reads
-  activity from the SQLite index via `discoverSessions` (`sessions-browser.ts:213`), not
-  a live scan; the live scan runs only under the running/`--active` filter and is fetched
-  once into `liveCache` (`sessions-browser.ts:414`), never re-polled. There is no
+  activity from the SQLite index via `discoverSessions` (`sessions-browser.ts:180`), not
+  a live scan; the live scan runs only under the running filter and is fetched
+  once into `liveCache` (`sessions-browser.ts:424`), never re-polled. There is no
   interval refresh, so the displayed "X ago" is frozen at load and does not tick up while
   you watch — the very cue a growing idle time would give.
 - **`input_required` is Claude-only (Codex partial).** Structural waiting keys off
@@ -291,6 +291,6 @@ exactly Gap 1.
   clock offset on an SSH-fanned peer shifts both the label and the running/idle boundary.
 
 **What "surface hung agents" needs (not built):** render an explicit idle/silence
-duration in the `--active` row from `lastActivityMs`; add a `stuck` status (or badge)
+duration in the `agents ps` row from `lastActivityMs`; add a `stuck` status (or badge)
 for pid-alive + silent-beyond-threshold instead of guessing `permission`; and make the
 "X ago" tick / auto-refresh so a growing idle time is visible without a manual reload.

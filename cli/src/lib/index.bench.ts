@@ -114,8 +114,8 @@ describe('registerEagerForRequest / COMMAND_LOADERS — real cold `node dist/ind
     runCli(['prune', '--help']);
   }, { time: 4000, iterations: 15 });
 
-  bench('`agents sessions --help` — lazy-tree command, the SQLite-backed session module (index.ts:1290-1291, LAZY_COMMAND_NAMES)', () => {
-    runCli(['sessions', '--help']);
+  bench('`agents ps --help` — one command loader, the live-session roster module', () => {
+    runCli(['ps', '--help']);
   }, { time: 4000, iterations: 15 });
 
   bench('`agents <unknown> --help` — registerAllEagerCommands() fallback, EVERY command module in the CLI (index.ts:1072-1161, 1271-1280)', () => {

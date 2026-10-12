@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_48 command groups · 425 commands._
+_45 command groups · 338 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -52,50 +52,6 @@ agents auth space role <email> <role>  Change a member's role (owner only for ad
 agents auth whoami                     Show the signed-in account
 ```
 
-## browser: Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
-
-```
-agents browser                 Drive a real browser (Chrome/Brave/Edge/Firefox/Arc) over CDP/BiDi — navigate, screenshot, click, capture; --device to drive a remote box
-agents browser click           Click an element by ref, or raw coordinates with --at X,Y
-agents browser console         Read console logs from a tab
-agents browser devices         List available device emulation presets
-agents browser done            Complete a task and close its tabs (resolves from caller identity when --task is omitted)
-agents browser download        Set the download directory for a task
-agents browser errors          Read page errors from a tab
-agents browser evaluate        Evaluate JavaScript in the current tab
-agents browser history         Show recent browser task history
-agents browser hover           Hover over an element by ref
-agents browser logs            Read merged rush-app + rush-cli logs for a task
-agents browser navigate        Navigate the current tab to a URL (creates a task and tab when none exist)
-agents browser pdf             Export the current tab as PDF via CDP — auto-saved under sessions/<task>/ when omitted
-agents browser press           Press a key (Enter, Tab, Escape, …)
-agents browser profiles        Manage browser profiles (create / list / edit / rename / show / remove / use / …)
-agents browser prune           Close tabs for abandoned tasks and mark them done — the reaper the daemon runs, on demand
-agents browser ps              List every browser/electron/tunnel process agents has tracked — works without the daemon
-agents browser record          Record a video of the page (record start / record stop)
-agents browser refs            Get DOM refs for interactive elements
-agents browser remote-control  Allow or deny other fleet machines driving THIS machine's browser (on/off; default off)
-agents browser requests        Read captured network requests; --format har emits a HAR 1.2 document
-agents browser responsebody    Wait for and read a response body by URL pattern
-agents browser screenshot      Take a screenshot — auto-saved per task; --output only to pick a specific path
-agents browser scroll          Scroll the page by a pixel amount (negatives scroll up/left)
-agents browser sessions        Browse captured screenshots, PDFs, recordings and downloads, grouped by task
-agents browser set             Set browser emulation options (set viewport / set device / set devices)
-agents browser show            Open a URL for a human to read (goes to browser.viewer; binds no task)
-agents browser start           Start a browser task — --profile/--url/--record/--title, and --device <name> to bind a remote box
-agents browser status          Show browser service state and running browser tasks
-agents browser stop            Stop a task and close its tabs; --profile detaches the profile; --service stops the IPC service
-agents browser stream          Keep one process + IPC socket open; read NDJSON requests from stdin, write NDJSON responses
-agents browser tab             Manage tabs (tab add / tab focus <id> / tab close [id])
-agents browser tabs            List tabs open for the current task; --all shows every tab in the profile browser
-agents browser tasks           List all browser tasks
-agents browser type            Type text into an element by ref
-agents browser upload          Upload file(s) — hidden inputs, drag-drop targets, and OS chooser interception
-agents browser use             Pick the profile `agents browser start` uses when no --profile is passed
-agents browser wait            Wait for a condition
-agents browser waitdownload    Wait for a download to complete
-```
-
 ## clis: Declare and install host CLI binaries (gh, higgsfield, glab, ...)
 
 ```
@@ -115,35 +71,6 @@ agents commands add [source]   Install commands from a source (GitHub, local) or
 agents commands list [agent]   Show which slash commands are installed and which agent versions they are synced to
 agents commands remove [name]  Delete a command from agents (interactive picker if no name given)
 agents commands view [name]    Read the full content of a command file with markdown rendering
-```
-
-## computer: Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
-
-```
-agents computer              Drive macOS apps via Accessibility, a Linux GUI desktop with --vnc, or a remote Windows device with --device — screenshot, click, type
-agents computer apps         List running apps the policy allows, with pid and bundle id
-agents computer ax-action    Perform a raw accessibility action on an element
-agents computer click        Click an element by id, or a coordinate pair
-agents computer describe     Dump an app's accessibility tree — the element ids the interact verbs target
-agents computer drag         Drag from one point or element to another
-agents computer focus        Move keyboard focus to an element
-agents computer get-text     Read the text content of an element or a whole window
-agents computer key          Send a key or chord (e.g. cmd+s, escape)
-agents computer launch       Launch an allow-listed app by bundle id and wait for it to be ready
-agents computer raise        Bring an app to the front
-agents computer reload       Reload the allow-list policy (SIGHUP the local daemon) — or restart a remote Windows daemon with --device
-agents computer right-click  Right-click an element by id, or a coordinate pair
-agents computer run          Autonomously drive an app from a natural-language task (model loop over the computer verbs)
-agents computer screenshot   Capture a window (default: largest), enumerate windows (--list), or the whole display (--display)
-agents computer scroll       Scroll an element or the window under a coordinate
-agents computer sessions     Browse computer-driving history, grouped by run — the engine's own picker
-agents computer setup        Install the helper — locally to /Applications/ (macOS), or to a remote Windows device with --device
-agents computer start        Activate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
-agents computer status       Report install state, daemon state, and Accessibility trust — or a remote Windows daemon with --device
-agents computer stop         Deactivate the helper daemon — local launchd (macOS) or a remote Windows tunnel with --device
-agents computer type         Type into a focused element by id
-agents computer type-text    Type a literal string at the current focus
-agents computer wait         Wait for an element or condition to appear before continuing
 ```
 
 ## config: Get, set, list, and unset run defaults, tier overrides, the projects root, device options, and spend caps.
@@ -252,6 +179,12 @@ agents feed                         Operator inbox + agent status posts. Default
 agents feed answer <attention-key>  Atomically claim and deliver one answer to an open attention item
 agents feed post <text...>          Post a status update to the fleet activity stream (for agents)
 agents feed watch                   Stream the canonical agent, attention, tool, and activity projection as NDJSON
+```
+
+## fork: Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.
+
+```
+agents fork <session>  Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.
 ```
 
 ## harness: Custom harnesses — name a (host CLI + model) combo and run it like a native agent type.
@@ -419,6 +352,7 @@ agents ps migrate [session-id]  Relocate a running session onto another machine 
 agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
 agents ps preview <id>          Show one rich session card without rendering the full transcript
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
+agents ps watch                 Stream canonical live and recoverable session row changes as NDJSON
 ```
 
 ## recordings: Publish finished CleanShot recordings as organization-only artifacts.
@@ -470,7 +404,7 @@ agents routines scheduler-logs    Read scheduler log output (for debugging why a
 agents routines start             Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.
 agents routines stats [name]      Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
 agents routines status            Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.
-agents routines stop              Stop only the scheduler service. The shared daemon and its browser, secrets, usage, and monitoring services stay running.
+agents routines stop              Stop only the scheduler service. The shared daemon and its other services (usage sync, session index, watchdog, and the rest) stay running.
 agents routines sync [path]       Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).
 agents routines view [name]       Show the full YAML configuration for a routine
 agents routines webhook           Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.
@@ -493,47 +427,10 @@ agents rules view [agent]     Read the full content of a rule file with markdown
 agents run [agent] [prompt]  Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.
 ```
 
-## secrets: Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
-
-```
-agents secrets  Named bundles of env variables — passthrough to the standalone `secrets` CLI. Run `agents secrets --help` (or `agents setup secrets`) for the full subcommand list.
-```
-
 ## send: Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
 
 ```
 agents send [text]  Deliver a message through a channel provider (imessage, slack, desktop, mailbox, session, …). Prefer --text/--to flags.
-```
-
-## sessions: Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
-
-```
-agents sessions [query]                    Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
-agents sessions backfill                   Populate derived session data explicitly.
-agents sessions backfill resources         Derive historical skill/slash-command usage once into the local SQLite index.
-agents sessions backfill titles            Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.
-agents sessions backfill tools             Parse historical tool calls once into the local SQLite index.
-agents sessions backup-setup               (operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup
-agents sessions bookmark [ids...]          Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
-agents sessions detach <id>                Send a live agent to the background — stop its terminal, keep it working headless
-agents sessions export [selectors...]      Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions fork <session>             Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.
-agents sessions import [bundle]            Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.
-agents sessions inject <sessionId> <text>  Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.
-agents sessions insights                   How work looks — behavioural report (default) or counter mix (`mix`, recipes)
-agents sessions insights mix [recipe]      Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.
-agents sessions insights query             Raw usage-event query (usage.db)
-agents sessions migrate [session-id]       Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
-agents sessions migrations                 Show the migration ledger — sessions handed off to/from other machines.
-agents sessions optimize                   Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
-agents sessions preview <id>               Show one rich session card without rendering the full transcript
-agents sessions render <selectors...>      Render one or more sessions as readable, redacted Markdown for review or sharing.
-agents sessions resume [query] [prompt]    Resume a session by id (strict), or multi-select history into terminal tabs/splits.
-agents sessions share <session>            Publish one session as a redacted, self-contained web page and print the link.
-agents sessions stats                      Which skills/commands you actually invoke, and which installed ones are dead weight.
-agents sessions stop <id>                  Stop a live agent outright — end its process and tear down its tmux/mux session
-agents sessions trace <selectors...>       Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
-agents sessions watch                      Stream canonical live and recoverable session row changes as NDJSON
 ```
 
 ## setup: Set up agents-cli, or re-open the capability onboarding hub.
@@ -549,8 +446,8 @@ agents setup beta                             Enable or disable preview features
 agents setup beta disable <features...>       Disable one or more beta features.
 agents setup beta enable <features...>        Enable one or more beta features.
 agents setup beta list                        Show available beta features and whether they are enabled.
-agents setup browser                          Set up `agents browser` — install the Browser CLI, seed profiles, and pick this machine's default.
-agents setup computer                         Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
+agents setup browser                          Set up the standalone `browser` CLI — install it, seed profiles, and pick this machine's default.
+agents setup computer                         Set up `computer` (macOS) — install the signed helper and grant control permissions.
 agents setup fleet                            Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
 agents setup mine                             White-label the CLI — mint your own personally-named binary (e.g. `jack`).
 agents setup mine init <name>                 Mint your own branded CLI that runs every agents verb under <name>
@@ -558,6 +455,7 @@ agents setup mine list                        Show your brands and what each has
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
+agents setup session-backup                   (operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup
 agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.
 agents setup term                             Install the standalone `term` CLI (the PTY engine `agents accounts add`/`login` spawn) if missing.
 agents setup tools                            Install or upgrade the standalone sessions, browser, secrets, computer, and term CLIs to the versions this release pins

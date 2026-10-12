@@ -97,12 +97,10 @@ function pwshExactArgvScript(cmd: string[], prelude: string[]): string {
   ].join('\n');
 }
 
-export function isAgentsBrowserDrive(cmd: string[]): boolean {
+export function isBrowserDrive(cmd: string[]): boolean {
   if (cmd.length === 0) return false;
   const tokens = cmd.length === 1 && /\s/.test(cmd[0]!) ? cmd[0]!.trim().split(/\s+/) : cmd;
-  const bin = tokens[0];
-  if (bin === 'browser') return true;
-  return (bin === 'agents' || bin === 'ag') && tokens[1] === 'browser';
+  return tokens[0] === 'browser';
 }
 
 export function fleetRemotePrelude(
@@ -178,7 +176,7 @@ export function buildSshInvocation(
   device = resolveDeviceProfile(device);
   const target = sshTargetFor(device);
   const interactive = cmd.length === 0;
-  const needsProvenance = !interactive && isAgentsBrowserDrive(cmd) && !alreadyMarked(cmd, device);
+  const needsProvenance = !interactive && isBrowserDrive(cmd) && !alreadyMarked(cmd, device);
   const prelude = needsProvenance ? fleetRemotePrelude(device) : [];
   const remote = interactive
     ? buildInteractiveShellCommand(device, opts.interactiveCwd)

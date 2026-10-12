@@ -97,7 +97,7 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     expect(resolution.addressable).toBe(false);
     if (!resolution.addressable) {
       expect(resolution.hint).toBeDefined();
-      expect(resolution.hint).toContain('agents sessions resume');
+      expect(resolution.hint).toContain('agents run auto --resume');
       expect(resolution.hint).toContain('tmux');
     }
 
@@ -123,7 +123,7 @@ describe.skipIf(process.platform === 'win32')('bare interactive run addressabili
     expect(route.kind).toBe('refuse');
     if (route.kind === 'refuse') {
       expect(route.reason).toContain('no addressable terminal');
-      expect(route.reason).toContain('agents sessions resume');
+      expect(route.reason).toContain('agents run auto --resume');
       expect(route.reason).toContain('tmux');
     }
 

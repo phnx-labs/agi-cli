@@ -19,7 +19,6 @@ vi.mock('../lib/ssh-exec.js', async () => {
   return { ...actual, sshExec: sshExecMock, sshExecRaw: sshExecRawMock };
 });
 
-const { maybeLiveIndex } = await import('./sessions.js');
 const { renderSessionPreview } = await import('./ps.js');
 const { AgentProcess, AgentStatus } = await import('../lib/teams/agents.js');
 
@@ -69,37 +68,11 @@ function writeClaudeSession(sessionId: string, cwd: string): void {
   );
 }
 
-describe.skipIf(process.platform === 'win32')('maybeLiveIndex --local (RUSH-2118 default-listing gap)', () => {
-  it('a bare `agents sessions --local` (no --active) issues zero ssh for a remote-host teammate', async () => {
-    await makeRemoteTeammate('remote-running-local');
-
-    sshExecMock.mockReturnValue({ code: 0, stdout: '', stderr: '' });
-    sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
-
-    const index = await maybeLiveIndex({ local: true } as any);
-
-    expect(sshExecMock).not.toHaveBeenCalled();
-    expect(sshExecRawMock).not.toHaveBeenCalled();
-    expect(index?.size ?? 0).toBeGreaterThan(0);
-  });
-
-  it('sanity: without --local, the same remote-host teammate DOES get dialed', async () => {
-    await makeRemoteTeammate('remote-running-nonlocal');
-
-    sshExecMock.mockReturnValue({ code: 0, stdout: '', stderr: '' });
-    sshExecRawMock.mockReturnValue({ code: 0, stdout: Buffer.alloc(0), stderr: '' });
-
-    await maybeLiveIndex({} as any);
-
-    expect(sshExecRawMock).toHaveBeenCalled();
-  });
-});
-
-describe.skipIf(process.platform === 'win32')('renderSessionPreview --local (RUSH-2118 --preview gap)', () => {
+describe.skipIf(process.platform === 'win32')('renderSessionPreview --local (RUSH-2118 preview gap)', () => {
   const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   afterAll(() => consoleLogSpy.mockRestore());
 
-  it('`agents sessions --local --preview <id>` issues zero ssh for a remote-host teammate', async () => {
+  it('`agents ps preview <id> --local` issues zero ssh for a remote-host teammate', async () => {
     const sessionId = crypto.randomUUID();
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'rush2118-preview-cwd-'));
     writeClaudeSession(sessionId, cwd);

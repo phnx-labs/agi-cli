@@ -2,7 +2,7 @@
 name: devices
 description: "Register and connect to your machines over Tailscale SSH with agents-cli. Use this skill to sync devices from the tailnet, list them, open a shell on another machine, or see agent sessions running across your whole fleet."
 argument-hint: "[sync|list|show|add|set|ssh|update|run|fleet]"
-allowed-tools: Bash(agents devices*), Bash(agents fleet*), Bash(agents ssh*), Bash(agents sessions*), Bash(agents run*), Bash(agents hosts*), Bash(agents events*)
+allowed-tools: Bash(agents devices*), Bash(agents fleet*), Bash(agents ssh*), Bash(agents ps*), Bash(agents run*), Bash(agents hosts*), Bash(agents events*)
 user-invocable: true
 ---
 
@@ -12,7 +12,7 @@ Manage a registry of SSH device profiles and reach your other machines. The
 registry self-populates from `tailscale status --json`, so on a tailnet you
 rarely hand-enter a host. This skill teaches the `agents devices` /
 `agents fleet` (alias) and `agents ssh` CLIs, plus the fleet-wide
-`agents sessions --active` view.
+`agents ps` view.
 
 `agents fleet` is a synonym for `agents devices` — every subcommand works under
 either name (`agents fleet list` == `agents devices list`).
@@ -90,15 +90,15 @@ agents devices render --write    # write ~/.ssh/config.d/agents
 
 ## Fleet-wide active sessions
 
-`agents sessions --active` groups running agent sessions by machine, pins the
+`agents ps` groups running agent sessions by machine, pins the
 local box first (`▸ <name> ← this machine`), and folds in sessions from your
 registered, online devices over SSH:
 
 ```bash
-agents sessions --active           # this machine + every online device
-agents sessions --active --local   # this machine only (no SSH fan-out)
-agents sessions --active --device zion --device mac-mini   # specific machines
-agents sessions --active --json    # merged, machine-tagged, for scripts
+agents ps           # this machine + every online device
+agents ps --local   # this machine only (no SSH fan-out)
+agents ps --device zion --device mac-mini   # specific machines
+agents ps --json    # merged, machine-tagged, for scripts
 ```
 
 Unreachable or CLI-less hosts are skipped with a note, never fatal. If no

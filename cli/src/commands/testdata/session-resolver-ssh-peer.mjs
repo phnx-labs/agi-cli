@@ -103,7 +103,7 @@ const server = new Server({ hostKeys: [hostKey] }, (client) => {
         }
         runExecCommand(info.command).then(({ code, stdout, stderr }) => {
           if (mode === 'old-peer') {
-            const expectedError = "unknown option '--resolve-safe-v1'";
+            const expectedError = "unknown command 'resolve'";
             if (code !== 1 || !stderr.includes(expectedError)) {
               stream.stderr.write(`fixture: old CLI did not reject the protocol as expected (code=${code}): ${stderr}`);
               stream.exit(98);

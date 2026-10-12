@@ -1,28 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { Command } from 'commander';
 import {
   buildSelectedResumeArgs,
   buildSessionLifecycleArgs,
-  isDirectResumeSelector,
   partitionResumableSelections,
   resolveResumePacking,
-  resolveResumeOptions,
   buildSelectedResumeSurface,
   resumeHostMismatch,
-  resumeUsesLifecycleDispatch,
   sessionsResumeAction,
+  stillRunningNotice,
 } from './sessions-resume.js';
 import { sessionMatchesQuery } from '../lib/session/selection.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { shellQuote } from '../lib/terminal/index.js';
 import { execOnly } from '../lib/terminal/shell.js';
 import { buildFullCommandTree } from '../cli/command-registry.js';
-import { normalizeResumeDeviceArgs } from '../lib/startup/root-command.js';
 import { setArgvCommandTree } from '../lib/hosts/routing-flag.js';
 
 describe('resolveResumePacking', () => {
@@ -35,52 +30,32 @@ describe('resolveResumePacking', () => {
   });
 });
 
-describe('isDirectResumeSelector', () => {
-  it('treats UUID prefixes and tmux aliases as direct identities', () => {
-    expect(isDirectResumeSelector('019fd114')).toBe(true);
-    expect(isDirectResumeSelector('ag-codex-c1f3d813')).toBe(true);
-  });
-
-  it('keeps human search text in the multi-select picker', () => {
-    expect(isDirectResumeSelector('auth middleware')).toBe(false);
-    expect(isDirectResumeSelector('claude@2.1.218')).toBe(false);
-  });
-});
-
 describe('buildSessionLifecycleArgs', () => {
   it('routes an identity through focus and preserves source-device scope', () => {
     expect(buildSessionLifecycleArgs('ag-codex-c1f3d813', ['yosemite-s0'])).toEqual([
-      'sessions', 'focus', 'ag-codex-c1f3d813', '--device', 'yosemite-s0',
+      'ps', 'focus', 'ag-codex-c1f3d813', '--device', 'yosemite-s0',
     ]);
   });
 
   it('forwards --attach-only so the no-fork behaviour survives the collapse', () => {
     expect(buildSessionLifecycleArgs('019fd114', [], true)).toEqual([
-      'sessions', 'focus', '019fd114', '--attach-only',
+      'ps', 'focus', '019fd114', '--attach-only',
     ]);
   });
 
   it('omits the flag by default — the default stays attach-or-recover', () => {
-    expect(buildSessionLifecycleArgs('019fd114')).toEqual(['sessions', 'focus', '019fd114']);
-  });
-
-  it('routes resume <id> --attach-only / --local through focus, not strict resume', () => {
-    expect(resumeUsesLifecycleDispatch('019fd114', undefined, { attachOnly: true })).toBe(true);
-    expect(resumeUsesLifecycleDispatch('019fd114', undefined, { local: true })).toBe(true);
-    expect(resumeUsesLifecycleDispatch('019fd114', undefined, {})).toBe(false);
-    expect(resumeUsesLifecycleDispatch('019fd114', 'finish the tests', { attachOnly: true })).toBe(false);
-    expect(resumeUsesLifecycleDispatch('auth middleware', undefined, { attachOnly: true })).toBe(false);
+    expect(buildSessionLifecycleArgs('019fd114')).toEqual(['ps', 'focus', '019fd114']);
   });
 
   it('forwards --local so the extension remote path keeps working', () => {
     expect(buildSessionLifecycleArgs('019fd114', [], false, true)).toEqual([
-      'sessions', 'focus', '019fd114', '--local',
+      'ps', 'focus', '019fd114', '--local',
     ]);
   });
 
   it('keeps both the host scope and the flag together', () => {
     expect(buildSessionLifecycleArgs('019fd114', ['zion'], true)).toEqual([
-      'sessions', 'focus', '019fd114', '--device', 'zion', '--attach-only',
+      'ps', 'focus', '019fd114', '--device', 'zion', '--attach-only',
     ]);
   });
 });
@@ -135,7 +110,6 @@ describe('resume picker filter (in-memory, no DB)', () => {
 
   it('does not call filterSessionsByQuery (no DB scan per keystroke)', async () => {
     const resumeMod = await import('./sessions-resume.js');
-    const sessionsMod = await import('./sessions.js');
     expect((resumeMod as Record<string, unknown>)['filterSessionsByQuery']).toBeUndefined();
     expect(typeof sessionMatchesQuery).toBe('function');
     const s = { id: 'x', shortId: 'x', agent: 'claude', topic: 'test topic', cwd: '/tmp' } as SessionMeta;
@@ -144,16 +118,14 @@ describe('resume picker filter (in-memory, no DB)', () => {
   });
 });
 
-describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux socket, no mocking)', () => {
-  const randomAlias = (): string => `ag-claude-${randomBytes(4).toString('hex')}`;
-
-  it('a bare alias resume with no live local pane falls through to strict resume instead of hanging', async () => {
+describe('sessionsResumeAction', () => {
+  it('refuses to open the picker without an interactive terminal and names the id form', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const priorExitCode = process.exitCode;
     process.exitCode = undefined;
     try {
-      await sessionsResumeAction(randomAlias(), undefined, {});
-      expect(errSpy.mock.calls.flat().join('\n')).toContain('No session matching');
+      await sessionsResumeAction({ runArgs: ['run', 'claude', '--resume'] });
+      expect(errSpy.mock.calls.flat().join('\n')).toContain('agents run --resume needs an interactive terminal');
       expect(process.exitCode).toBe(1);
     } finally {
       errSpy.mockRestore();
@@ -161,37 +133,22 @@ describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux so
     }
   });
 
-  it('the same miss with --device scopes the gate off, still falls through cleanly', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const priorExitCode = process.exitCode;
-    process.exitCode = undefined;
-    try {
-      await sessionsResumeAction(randomAlias(), undefined, { device: 'nonexistent-device-xyz' });
-      expect(errSpy.mock.calls.flat().join('\n')).toMatch(/No session matching|unreachable/);
-      expect(process.exitCode).toBe(1);
-    } finally {
-      errSpy.mockRestore();
-      process.exitCode = priorExitCode;
-    }
+  it('reports an older copy left running, naming the host and pid', () => {
+    expect(stillRunningNotice('abc12345', 4242, 'zion'))
+      .toBe('An older copy of abc12345 is still running on zion (pid 4242). It was left alone.\n');
   });
 });
 
-
 describe('selected resume argv', () => {
   it('consumes placement already applied by the outer terminal surface', () => {
-    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs: ['run', 'claude#work', '--resume', '--device', 'worker', '--mode', 'plan'] })).toEqual(['run', 'claude#work', '--resume', 'abc12345', '--mode', 'plan']);
+    expect(buildSelectedResumeArgs('abc12345', { device: 'worker', runArgs: ['run', 'claude#work', '--resume', '--device', 'worker', '--mode', 'plan'] })).toEqual(['run', 'claude#work', '--resume', 'abc12345', '--mode', 'plan']);
   });
 
   it.each([['-D', 'worker'], ['-Dworker'], ['--on', 'worker'], ['--computer=worker']])('consumes placement alias %j and applies remote cwd', (...placement) => {
     const runArgs = ['run', 'claude', '--resume', ...placement, '--cwd', '/local', '--remote-cwd', '/srv/repo', '--', '--verbose'];
-    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs })).toEqual([
+    expect(buildSelectedResumeArgs('abc12345', { device: 'worker', runArgs })).toEqual([
       'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo', '--', '--verbose',
     ]);
-  });
-
-  it('rejects attach-only options that would launch a copy before lookup', async () => {
-    await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, mode: 'edit' })).rejects.toThrow('--attach-only cannot');
-    await expect(sessionsResumeAction('abc12345', undefined, { attachOnly: true, agent: 'codex' })).rejects.toThrow('--attach-only cannot');
   });
 
   it('drops the picker-only filters from the child run, keeping option values and passthrough intact', async () => {
@@ -201,13 +158,13 @@ describe('selected resume argv', () => {
         'run', 'claude', '--resume', '--all', '--teams', '--since=7d', '-n5', '--name', '--all', '--limit', '9',
         '--', '--all', '--since', '1d', '-n', '2',
       ];
-      expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs })).toEqual([
+      expect(buildSelectedResumeArgs('abc12345', { runArgs })).toEqual([
         'run', 'claude', '--resume', 'abc12345', '--name', '--all', '--', '--all', '--since', '1d', '-n', '2',
       ]);
-      expect(buildSelectedResumeArgs('abc12345', undefined, {
+      expect(buildSelectedResumeArgs('abc12345', {
         runArgs: ['run', 'claude', '--resume', '--teams', '--since=60d', '-bn5', '--name', '-bn5', '--', '-bn5'],
       })).toEqual(['run', 'claude', '--resume', 'abc12345', '-b', '--name', '-bn5', '--', '-bn5']);
-      expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs: ['run', 'claude', '--resume', '-bn', '5'] }))
+      expect(buildSelectedResumeArgs('abc12345', { runArgs: ['run', 'claude', '--resume', '-bn', '5'] }))
         .toEqual(['run', 'claude', '--resume', 'abc12345', '-b']);
     } finally {
       setArgvCommandTree(undefined);
@@ -216,43 +173,36 @@ describe('selected resume argv', () => {
 
   it('retains run flags and native passthrough while filling the selected identity', () => {
     const runArgs = ['run', 'claude#work', '--resume', '--raw', '--env', 'FEATURE=on', '--timeout', '3m', '--effort', 'high', '--', '--verbose'];
-    expect(buildSelectedResumeArgs('abc12345', undefined, { runArgs })).toEqual([
+    expect(buildSelectedResumeArgs('abc12345', { runArgs })).toEqual([
       'run', 'claude#work', '--resume', 'abc12345', '--raw', '--env', 'FEATURE=on', '--timeout', '3m', '--effort', 'high', '--', '--verbose',
     ]);
     expect(runArgs[3]).toBe('--raw');
   });
 
-  it('consumes surface flags while retaining attach-only and local scope', () => {
-    expect(buildSelectedResumeArgs('abc12345', undefined, { tmux: true, local: true, attachOnly: true })).toEqual([
-      'sessions', 'resume', 'abc12345', '--local', '--attach-only',
-    ]);
-    expect(buildSelectedResumeArgs('abc12345', undefined, { vscodium: true, here: true })).toEqual([
-      'sessions', 'resume', 'abc12345', '--here',
-    ]);
-  });
 });
 
 describe('selected resume terminal surface', () => {
   const session = (cwd?: string): SessionMeta => ({ id: 'abc12345', shortId: 'abc12345', cwd } as SessionMeta);
+  const run = (): string[] => ['run', 'claude', '--resume'];
 
   it.each([
     'finish the tests now please',
     "finish it's done: literal $(whoami), `id`, and a\nsecond line",
   ])('preserves prompt argv through the production surface and a real shell: %j', (prompt) => {
-    const surface = buildSelectedResumeSurface(session(), prompt, { headless: true });
+    const surface = buildSelectedResumeSurface(session(), { runArgs: ['run', 'claude', prompt, '--resume'] });
     const command = [
       shellQuote(process.execPath), '-e',
       shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'),
       ...surface.command.slice(1),
     ];
     const received = JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' }));
-    expect(received).toEqual(['sessions', 'resume', 'abc12345', prompt, '--headless', '--quiet']);
+    expect(received).toEqual(['run', 'claude', prompt, '--resume', 'abc12345', '--quiet']);
   });
 
   it('keeps raw run-picker argv until the terminal boundary', () => {
     const prompt = "finish it's done";
     const options = { runArgs: ['run', 'claude', prompt, '--resume'], headless: true };
-    const surface = buildSelectedResumeSurface(session(), undefined, options);
+    const surface = buildSelectedResumeSurface(session(), options);
     const command = [shellQuote(process.execPath), '-e', shellQuote('process.stdout.write(JSON.stringify(process.argv.slice(1)))'), ...surface.command.slice(1)];
     expect(JSON.parse(execFileSync('sh', ['-c', execOnly(command)], { encoding: 'utf8' })))
       .toEqual(['run', 'claude', prompt, '--resume', 'abc12345', '--quiet']);
@@ -263,44 +213,44 @@ describe('selected resume terminal surface', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-resume-cwd-'));
     try {
       const missing = path.join(root, 'only-on-the-origin');
-      expect(buildSelectedResumeSurface(session(root), undefined, {}).cwd).toBe(root);
-      expect(buildSelectedResumeSurface(session(missing), undefined, { here: true }).cwd).toBe(process.cwd());
-      expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker' }).cwd).toBe(missing);
-      expect(buildSelectedResumeSurface(session(missing), undefined, { device: 'worker', here: true }).cwd).toBe(missing);
+      expect(buildSelectedResumeSurface(session(root), { runArgs: run() }).cwd).toBe(root);
+      expect(buildSelectedResumeSurface(session(missing), { here: true, runArgs: run() }).cwd).toBe(process.cwd());
+      expect(buildSelectedResumeSurface(session(missing), { device: 'worker', runArgs: run() }).cwd).toBe(missing);
+      expect(buildSelectedResumeSurface(session(missing), { device: 'worker', here: true, runArgs: run() }).cwd).toBe(missing);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
   it("uses the run picker's effective remote cwd for both the terminal and the resumed command", () => {
     const runArgs = ['run', 'claude', '--resume', '--device', 'worker', '--cwd', '/local', '--remote-cwd', '/srv/repo'];
-    const surface = buildSelectedResumeSurface(session(), undefined, { device: 'worker', cwd: '/srv/repo', runArgs });
+    const surface = buildSelectedResumeSurface(session(), { device: 'worker', cwd: '/srv/repo', runArgs });
     expect(surface.cwd).toBe('/srv/repo');
     expect(surface.command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--cwd', '/srv/repo', '--quiet'].map(shellQuote));
   });
 
   it('makes run cwd portable once and leaves native passthrough arguments unchanged', () => {
     const runArgs = ['run', 'claude', '--resume', '--device=worker', '--cwd=' + path.join(os.homedir(), 'repo'), '--', '--cwd', '/native'];
-    expect(buildSelectedResumeArgs('abc12345', undefined, { device: 'worker', runArgs }))
+    expect(buildSelectedResumeArgs('abc12345', { device: 'worker', runArgs }))
       .toEqual(['run', 'claude', '--resume', 'abc12345', '--cwd', '~/repo', '--', '--cwd', '/native']);
   });
 
   it('opens a remote surface in the explicit cwd even when the recorded directory is gone', () => {
-    const surface = buildSelectedResumeSurface(session('/old/repo'), undefined, { device: 'worker', cwd: '/new/repo' });
+    const surface = buildSelectedResumeSurface(session('/old/repo'), { device: 'worker', cwd: '/new/repo', runArgs: run() });
     expect(surface.cwd).toBe('/new/repo');
     expect(surface.command.slice(-3)).toEqual(['--cwd', '/new/repo', '--quiet'].map(shellQuote));
   });
 
-  it('the command a tab runs opens straight into the agent (--quiet), except attach-only and a native passthrough', () => {
-    expect(buildSelectedResumeSurface(session(), undefined, {}).command).toEqual(['agents', 'sessions', 'resume', 'abc12345', '--quiet'].map(shellQuote));
-    expect(buildSelectedResumeSurface(session(), undefined, { attachOnly: true }).command).not.toContain('--quiet');
+  it('the command a tab runs opens straight into the agent (--quiet) exactly once, before a native passthrough', () => {
+    expect(buildSelectedResumeSurface(session(), { runArgs: run() }).command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--quiet'].map(shellQuote));
+    expect(buildSelectedResumeSurface(session(), { runArgs: [...run(), '--quiet'] }).command).toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--quiet'].map(shellQuote));
     const runArgs = ['run', 'claude', '--resume', '--', '--verbose'];
-    expect(buildSelectedResumeSurface(session(), undefined, { runArgs }).command)
+    expect(buildSelectedResumeSurface(session(), { runArgs }).command)
       .toEqual(['agents', 'run', 'claude', '--resume', 'abc12345', '--quiet', '--', '--verbose'].map(shellQuote));
   });
 
   it("refuses a remote surface with no cwd instead of sending this machine's path", () => {
-    expect(() => buildSelectedResumeSurface(session(), undefined, { device: 'worker' }))
+    expect(() => buildSelectedResumeSurface(session(), { device: 'worker', runArgs: run() }))
       .toThrow('without a recorded working directory. Pass --cwd <path>.');
-    expect(buildSelectedResumeSurface(session(), undefined, { device: 'worker', cwd: '/repo' }).cwd).toBe('/repo');
+    expect(buildSelectedResumeSurface(session(), { device: 'worker', cwd: '/repo', runArgs: run() }).cwd).toBe('/repo');
   });
 });
 
@@ -359,104 +309,5 @@ describe('partitionResumableSelections — the picker drops what recovery would 
       expect(resumable.map(s => s.shortId)).toEqual(['aaaaaaaa', 'cccccccc']);
       expect(skipped.map(s => s.shortId)).toEqual(['bbbbbbbb', 'dddddddd']);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
-  });
-});
-
-describe('resolveResumeOptions — recovering resume flags the parent command swallows', () => {
-  async function parseResume(argv: string[]): Promise<{ resumeCmd: Command; captured: Record<string, unknown> }> {
-    const program = await buildFullCommandTree();
-    program.exitOverride();
-    const sessionsCmd = program.commands.find((c) => c.name() === 'sessions');
-    if (!sessionsCmd) throw new Error('sessions command not registered');
-    const resumeCmd = sessionsCmd.commands.find((c) => c.name() === 'resume');
-    if (!resumeCmd) throw new Error('sessions resume not registered');
-    let captured: Record<string, unknown> = {};
-    resumeCmd.action((..._args: unknown[]) => { captured = resumeCmd.opts(); });
-    await program.parseAsync(['node', 'agents', ...normalizeResumeDeviceArgs(['sessions', ...argv])], { from: 'node' });
-    return { resumeCmd, captured };
-  }
-
-  it.each([
-    ['--device', 'yosemite-m5', '019fd0c8', 'finish it'],
-    ['019fd0c8', 'finish it', '--device', 'yosemite-m5'],
-    ['-D', 'yosemite-m5', '019fd0c8', 'finish it'],
-    ['-Dyosemite-m5', '019fd0c8', 'finish it'],
-    ['--devices=yosemite-m5', '019fd0c8', 'finish it'],
-  ])('preserves the selector and prompt with device arguments %j', async (...argv) => {
-    const { resumeCmd, captured } = await parseResume(['resume', ...argv, '--tmux']);
-    expect(resumeCmd.args).toEqual(['019fd0c8', 'finish it']);
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.device).toBe('yosemite-m5');
-    expect(resolved.tmux).toBe(true);
-  });
-
-  it('preserves a picker query after the device', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '--device', 'zion', 'auth middleware']);
-    expect(resumeCmd.args).toEqual(['auth middleware']);
-    expect(resolveResumeOptions(resumeCmd, captured as never).device).toBe('zion');
-  });
-
-  it('keeps resume\'s own 200 default when no --limit is typed, even though the parent default is 50', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897']);
-    expect(resumeCmd.parent?.getOptionValueSource('limit')).toBe('default');
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.limit).toBe('200');
-  });
-
-  it('an explicit --limit overrides resume\'s own default', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--limit', '9']);
-    expect(resumeCmd.parent?.getOptionValueSource('limit')).toBe('cli');
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.limit).toBe('9');
-  });
-
-  it('supports the plural --devices alias, collapsing to the one device', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--devices', 'zion']);
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.device).toBe('zion');
-  });
-
-  it('fails clearly on multiple devices instead of silently picking one', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--device', 'zion', '--device', 'yosemite-m5']);
-    expect(() => resolveResumeOptions(resumeCmd, captured as never)).toThrow(/sessions resume targets a single device/);
-  });
-
-  it('recovers --agent, --all, --teams, --since, and --local when explicitly typed', async () => {
-    const { resumeCmd, captured } = await parseResume([
-      'resume', '019fd0c8b3e977a2a1a4444698c4d897',
-      '--agent', 'codex', '--all', '--teams', '--since', '7d', '--local',
-    ]);
-    expect(captured.agent).toBeUndefined();
-    expect(captured.all).toBeUndefined();
-    expect(captured.teams).toBeUndefined();
-    expect(captured.since).toBeUndefined();
-    expect(captured.local).toBeUndefined();
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.agent).toBe('codex');
-    expect(resolved.all).toBe(true);
-    expect(resolved.teams).toBe(true);
-    expect(resolved.since).toBe('7d');
-    expect(resolved.local).toBe(true);
-  });
-
-  it('leaves resume-only flags (--mode/--headless/--cwd/--attach-only) untouched', async () => {
-    const { resumeCmd, captured } = await parseResume(['resume', '019fd0c8b3e977a2a1a4444698c4d897', '--headless', '--cwd', '/tmp/work']);
-    const resolved = resolveResumeOptions(resumeCmd, captured as never);
-    expect(resolved.headless).toBe(true);
-    expect(resolved.cwd).toBe('/tmp/work');
-  });
-
-  it('normal sibling `sessions backfill tools` inherited parsing (--since/--json/--local via optsWithGlobals) is unaffected by this fix', async () => {
-    const program = await buildFullCommandTree();
-    program.exitOverride();
-    const sessionsCmd = program.commands.find((c) => c.name() === 'sessions')!;
-    const backfill = sessionsCmd.commands.find((c) => c.name() === 'backfill')!;
-    const tools = backfill.commands.find((c) => c.name() === 'tools')!;
-    let captured: Record<string, unknown> | undefined;
-    tools.action((_opts: unknown, command: Command) => { captured = command.optsWithGlobals(); });
-    await program.parseAsync(['node', 'agents', 'sessions', 'backfill', 'tools', '--since', '7d', '--json', '--local'], { from: 'node' });
-    expect(captured?.since).toBe('7d');
-    expect(captured?.json).toBe(true);
-    expect(captured?.local).toBe(true);
   });
 });

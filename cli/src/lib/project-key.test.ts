@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { projectKeyFromCwd, repoAgentsDirForCwd, repoRootForCwd, resolveProjectKey } from './project-key.js';
 import { projectFromCwd } from './feed/activity.js';
-import { overviewProjectKey } from '../commands/sessions.js';
 
 describe('projectKeyFromCwd', () => {
   it('folds a worktree cwd to the repo it branched from', () => {
@@ -35,13 +34,12 @@ describe('projectKeyFromCwd', () => {
     expect(projectKeyFromCwd('/.agents/worktrees/slug')).toBe('slug');
   });
 
-  it('agrees across the sessions overview and the activity timeline', () => {
+  it('agrees with the activity timeline', () => {
     for (const cwd of [
       '/Users/m/src/agents-cli/.agents/worktrees/fix-thing',
       '/Users/m/src/agents-cli/.agents/worktrees/fix-thing/cli',
       '/Users/m/src/rush',
     ]) {
-      expect(overviewProjectKey({ cwd })).toBe(projectKeyFromCwd(cwd));
       expect(projectFromCwd(cwd)).toBe(projectKeyFromCwd(cwd));
     }
   });

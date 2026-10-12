@@ -44,12 +44,12 @@ function run(testHome: string, ...args: string[]): { status: number | null; stdo
 }
 
 describe('unknown-command spellcheck (RUSH-2329)', () => {
-  it('suggests sessions for session without auto-running it as unknown', () => {
+  it('suggests teams for team without auto-running it as unknown', () => {
     const home = seedHome();
     try {
-      const r = run(home, 'session', '--help');
-      expect(r.stderr).not.toContain("unknown command 'session'");
-      expect(`${r.stdout}${r.stderr}`.toLowerCase()).toMatch(/session/);
+      const r = run(home, 'team', '--help');
+      expect(r.stderr).not.toContain("unknown command 'team'");
+      expect(`${r.stdout}${r.stderr}`.toLowerCase()).toMatch(/teams/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
@@ -58,10 +58,10 @@ describe('unknown-command spellcheck (RUSH-2329)', () => {
   it('prints Did you mean for a near miss that is not distance 1', () => {
     const home = seedHome();
     try {
-      const r = run(home, 'sessin');
+      const r = run(home, 'devcs');
       expect(r.status).not.toBe(0);
-      expect(r.stderr).toContain("unknown command 'sessin'");
-      expect(r.stderr).toMatch(/Did you mean sessions\?/);
+      expect(r.stderr).toContain("unknown command 'devcs'");
+      expect(r.stderr).toMatch(/Did you mean devices\?/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

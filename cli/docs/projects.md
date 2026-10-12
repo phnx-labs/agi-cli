@@ -161,8 +161,7 @@ Definitions are syncable, not synced: after binding directories, push them with
 
 Definitions also rename the fleet's activity. `resolveProjectNameForCwd`
 (`lib/projects.ts`) is the single project resolver shared by `agents feed`
-(buckets and row chips), `agents feed post` (the stamped project), and the
-`agents sessions` overview: a cwd inside a defined project's root reads as the
+(buckets and row chips) and `agents feed post` (the stamped project): a cwd inside a defined project's root reads as the
 project's **name** — a multi-repo project is one bucket, not one per repo — and
 anything else falls back to the repository-level key (`lib/project-key.ts`). Each
 machine resolves its own cwds against its own (synced) definitions before events

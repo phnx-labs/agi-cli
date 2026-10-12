@@ -55,14 +55,23 @@ command group, the managed share Worker, and the `lib/share/` engine were remove
 `artifacts` CLI (`@phnx-labs/artifacts-cli`), driven as `artifacts share …` /
 `artifacts auth login`, mirroring the secrets (PHNX-3989) and computer (PHNX-4075)
 extractions. The standalone `sessions share <id>` publishes a transcript the same
-way; what stays here is the legacy `agents sessions share <id>`
-(`src/commands/sessions-share.ts`), which renders the transcript locally and
-shells out to `artifacts share`.
+way.
+
+`agents browser`, `agents computer`, `agents secrets` and `agents sessions` were
+removed (PHNX-4227) with no alias or forwarder: each exits 1 with one line naming
+the standalone CLI, or the agents home of a moved `sessions` verb
+(`removedToolGroupMessage`, [`src/lib/startup/command-registry.ts`](src/lib/startup/command-registry.ts)).
+The agents-owned verbs moved: live roster and lifecycle to `agents ps`
+(`stop`/`focus`/`detach`/`migrate`/`preview`/`watch`), resume to `agents run auto
+--resume <id>`, inject to `agents send --channel session`, fork to `agents fork`,
+index maintenance to `agents daemon index`, usage stats to `agents insights
+resources`, and the operator backup provisioning to `agents setup session-backup`.
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
 composes the existing session watcher with feed attention, activity, and **tool
 rows** (browser tasks + computer runs), while
-`agents sessions watch --json` remains the compatible session-only stream.
+`agents ps watch --json` is the session-only stream (it was `agents sessions
+watch` before PHNX-4227).
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
@@ -307,7 +316,7 @@ Two rules are not negotiable in a consumer or a future change:
 
 ### Session request + timeline on every row (PHNX-3939)
 
-Every session row — `agents ps --json`, `agents sessions watch --json`,
+Every session row — `agents ps --json`, `agents ps watch --json`,
 `feed watch --json`, history rows, and the fleet session mirror — carries three
 optional fields the AGI EXT sidebar renders directly:
 
@@ -628,7 +637,7 @@ signs out nothing else).
   account service for local/private backends.
 - The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
   holds its own copy of the same Phoenix bearer. The surfaces that use it are the managed
-  `agents sessions export/backup` target, which verifies the bearer at
+  session-backup Worker (`sessions export --to-r2`, provisioned by `agents setup session-backup`), which verifies the bearer at
   `${PHOENIX_ID_BASE}/api/v1/auth/me`, and owner notifications, which send it to rush/api
   (`RUSH_PROXY_BASE`, default `https://api.prix.dev`, `src/lib/rush-api.ts`). A worker never
   receives this bearer; it gets a `notify`-scoped device token instead (see owner
@@ -1282,17 +1291,6 @@ The new command is a **facade over the existing YAML storage**
 `AGENTS_SUMMARIZER_BASEURL` / `AGENTS_SUMMARIZER_MODEL`. See
 [§Per-session summarizer](#per-session-summarizer-phnx-3939).
 
-`devices.<name>.computer.host` (stored as `computerHost`, next to
-`defaultBrowserProfile`) is the `--host` address `agents computer --device
-<name>` forwards to the standalone `computer` engine (PHNX-4090): `ssh://[user@]host`
-(still resolved against the fleet for its ssh identity), `vnc://host[:port]`, or
-`tcp://host:port` — the same grammar shared with `secrets` (ssh-only) and
-`browser`. Unset falls back to the historical Windows-only ssh tunnel built from
-the fleet's own ssh identity. `agents secrets --device <name>` and `agents
-computer --device <name>` both rewrite `--device` to `--host` before exec —
-neither engine has a fleet registry of its own — while `agents view --device
-<name>` (not in `OWN_HOST_COMMANDS`) keeps SSHing the whole command, unchanged.
-
 `menubar.menu.*` (user-scope, central `agents.yaml`, syncs fleet-wide) are the
 **AGI Menu preferences** (PHNX-3999) — `defaultProject`, `workingRowsShown` (2/3/4),
 `showPreviews`, `projectPriorityFilter` (all/urgent/high/medium),
@@ -1585,7 +1583,7 @@ skipped silently). [`src/lib/agents.ts`](src/lib/agents.ts) is canonical — kee
 snapshot in sync. `workflows` is `claude`/`kimi`/`goose`/`antigravity` (≥1.0.6, written to the
 shared HOME-global `~/.gemini/config/global_workflows/`, not a per-version home), `openclaw` (Lobster `.lobster` files under `.openclaw/workflows/`), and `grok` (≥0.2.111, native Rhai under `.grok/workflows/`); `mcp` is universal; `allowlist` is
 `claude`/`cursor`/`opencode`/`antigravity`/`grok`/`kimi`/`droid`/`openclaw`/`copilot` (Copilot writes per-location approvals to `~/.copilot/permissions-config.json`; **Goose is deliberately NOT allowlist-capable** — its `permission.yaml` gates whole tools (`developer__shell`, `developer__text_editor`), so a canonical rule set could not be expressed or read back faithfully; OpenClaw is tool-level only —
-blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped). Ask rules (`ask:` in a permission group) are written where the native config has a per-rule prompt list: Claude `permissions.ask`, OpenCode `permission.bash` value `ask`, Codex `prefix_rule` decision `prompt` in `agents-ask.rules`, Grok `action = "ask"`, Kimi `decision = "ask"`, Droid `permissionRules` decision `ask`, and Antigravity `permissions.ask`. Cursor, Copilot, OpenClaw, and Hermes have no per-rule ask list; allow and deny still sync, and the ask rules are skipped with the reason on `PERMISSION_TARGETS`. A preset include that names a missing group throws, naming the preset and the group. `00-local` is the one optional per-machine group and is skipped when its file is absent; `subagents` is `claude`/`codex`/`kimi` (≥0.29.0, Claude-shaped `<name>.md` in `~/.kimi-code/agents/`; older kimi-code compiles its agent profiles into the bundle with no filesystem loader)/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22). **Warp Agent CLI (`oz`)** is the coding-agent CLI on Warp's Oz platform (the shared Warp binary invoked via the `oz` symlink). Install is self-updating via `brew install --cask oz` (macOS) / the `oz-stable` apt|yum|pacman package (Linux); config lives under `~/.warp/`, the rules/context file is `AGENTS.md`, and auth is `oz login` (browser OAuth) or a `WARP_API_KEY` token for headless/CI (`oz api-key create`). Headless run is `oz agent run --prompt "<task>" [--model <id>]`; autonomy is governed by the selected agent profile (`--profile`), not a per-run permission flag, so the single `edit` mode maps to no flags (mirrors Hermes). `mcp` covers stdio + http + headers via the Claude `.mcp.json` schema at `~/.warp/.mcp.json` (project `<root>/.warp/.mcp.json`); `skills` come from `--skill` + `oz agent skills`. `hooks`/`allowlist`/`commands`/`plugins`/`subagents`/`workflows`/`memory` are OFF: Oz has no event→shell hook registration, its permissions are profile-based (not a Claude tool allow/deny list), slash-commands are native/server-managed, and cloud agents/profiles are server-side (no installable subagent dir). Warp is intentionally **absent from `SESSION_AGENTS`** — Oz stores conversations server-side (retrieved with auth via `oz run conversation get <id>`), so there is no local transcript for `agents sessions` to index — and it exposes no usage/limits endpoint, so `agents view` shows no usage bar for it.
+blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`, sub-command patterns skipped). Ask rules (`ask:` in a permission group) are written where the native config has a per-rule prompt list: Claude `permissions.ask`, OpenCode `permission.bash` value `ask`, Codex `prefix_rule` decision `prompt` in `agents-ask.rules`, Grok `action = "ask"`, Kimi `decision = "ask"`, Droid `permissionRules` decision `ask`, and Antigravity `permissions.ask`. Cursor, Copilot, OpenClaw, and Hermes have no per-rule ask list; allow and deny still sync, and the ask rules are skipped with the reason on `PERMISSION_TARGETS`. A preset include that names a missing group throws, naming the preset and the group. `00-local` is the one optional per-machine group and is skipped when its file is absent; `subagents` is `claude`/`codex`/`kimi` (≥0.29.0, Claude-shaped `<name>.md` in `~/.kimi-code/agents/`; older kimi-code compiles its agent profiles into the bundle with no filesystem loader)/`grok`/`openclaw`/`droid`/`copilot`/`antigravity`/`cursor` (≥2026.1.22). **Warp Agent CLI (`oz`)** is the coding-agent CLI on Warp's Oz platform (the shared Warp binary invoked via the `oz` symlink). Install is self-updating via `brew install --cask oz` (macOS) / the `oz-stable` apt|yum|pacman package (Linux); config lives under `~/.warp/`, the rules/context file is `AGENTS.md`, and auth is `oz login` (browser OAuth) or a `WARP_API_KEY` token for headless/CI (`oz api-key create`). Headless run is `oz agent run --prompt "<task>" [--model <id>]`; autonomy is governed by the selected agent profile (`--profile`), not a per-run permission flag, so the single `edit` mode maps to no flags (mirrors Hermes). `mcp` covers stdio + http + headers via the Claude `.mcp.json` schema at `~/.warp/.mcp.json` (project `<root>/.warp/.mcp.json`); `skills` come from `--skill` + `oz agent skills`. `hooks`/`allowlist`/`commands`/`plugins`/`subagents`/`workflows`/`memory` are OFF: Oz has no event→shell hook registration, its permissions are profile-based (not a Claude tool allow/deny list), slash-commands are native/server-managed, and cloud agents/profiles are server-side (no installable subagent dir). Warp is intentionally **absent from `SESSION_AGENTS`** — Oz stores conversations server-side (retrieved with auth via `oz run conversation get <id>`), so there is no local transcript for `sessions` to index — and it exposes no usage/limits endpoint, so `agents view` shows no usage bar for it.
 **Gemini is hard-deprecated.** Keep the legacy `gemini` id only for parsing old
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
@@ -1649,7 +1647,7 @@ src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
                        #   ps.ts + ps-roster.ts: `agents ps`, the live roster (gatherActiveSessions/renderActiveSessions)
-                       #   and the stop/focus/detach/migrate verbs; the legacy `agents sessions --active` calls the same runLiveRoster (PHNX-4227)
+                       #   and the stop/focus/detach/migrate/preview/watch verbs (PHNX-4227)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
@@ -1661,13 +1659,9 @@ src/
     workflows-registry.ts  # WORKFLOW_TARGETS — declarative per-agent workflow shape (dir/layout/transform/marker); generic sync/list/remove/drift engine the staleness detector also reads
     installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies, shims.ts (shim generation, config symlink switching)
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
-    browser/           # `agents browser` CONSUMER of the standalone `browser` engine (@phnx-labs/browser-cli, PHNX-4101):
-                       #   context.ts (the fd-3 JSON handed to the engine — the --device target resolved against the fleet,
-                       #   session identity, remote-control consent). The engine keeps its own action history, so agents-cli
-                       #   opens no events pipe. `agents browser sessions` forwards to the engine's own `browser sessions` picker, and the feed reads its `--json` (PHNX-4227).
-                       #   The CDP/BiDi/Arc drivers, the IPC service, the chrome-data/profile
-                       #   store, the task index AND the whole remote SSH path live in the engine. The subprocess client is
-                       #   `lib/browser-client.ts` (fd-3 context only, no fallback), mirroring `computer-client.ts`.
+    browser/           # context.ts: the fd-3 JSON agents-cli hands the standalone `browser` engine when IT runs the
+                       #   engine (`agents setup browser`, `browser show` for a viewer). People and agents call `browser`
+                       #   directly; `agents browser` was removed (PHNX-4227). The feed reads `browser sessions --json`.
     projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
     project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
     session/           # session discovery, index writer and live identity (the parse/render reader is `@phnx-labs/sessions-cli/reader`, see the note below); also `migrate-targets.ts` (the `agents ps migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents insights resources` + `agents daemon index backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key). The cached multi-harness friction/correction/automation facets behind `agents insights` come from the reader's `insights` module (`@phnx-labs/sessions-cli/reader`), including a shell-command-by-binary breakdown (`bashCommands`/`bashCommandFailures`, keyed by its `bash-command` module's `bucketKey`) that splits the flat `Bash` tool count into `git commit`/`gh pr`/`agents ssh`/… so the tool mix and failed-tool loops name the actual command, not just the harness tool
@@ -1675,12 +1669,9 @@ src/
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
     cloud/             # Provider registry (Rush / Codex / Factory / Antigravity / Cursor / host)
     teams/             # `agents teams` orchestration
-    computer/          # `agents computer` CONSUMER of the standalone `computer` engine (PHNX-4075):
-                       #   policy.ts (permissions → the allow-list file), context.ts (the fd-3 JSON handed to
-                       #   the engine, incl. the --device target resolved against the fleet), record.ts (fd-4
-                       #   action events → `computer.action` feed events). `agents computer sessions` forwards to the engine's own `computer sessions` picker. The
-                       #   daemons, RPC, RFB/VNC, the model loop AND the whole remote path — Windows
-                       #   provisioning, the helper token, the ssh -L tunnel — live in the engine.
+    computer/          # policy.ts (permissions → the allow list) + context.ts (the fd-3 JSON) for the one place
+                       #   agents-cli still runs the standalone `computer` engine: `agents setup computer`.
+                       #   `agents computer` was removed (PHNX-4227); everything else is `computer …`.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
     profiles.ts        # Host CLI + endpoint + model bundles
 ```
@@ -1698,21 +1689,20 @@ tool-call index; searching it is the standalone `sessions --include tools`, PHNX
 `tool-store.ts`, `timeline-pass.ts`, `title.ts`), lifecycle/live-identity (`active.ts`,
 `discover.ts`, `pid-registry.ts`, `recovery.ts`, `mirror.ts`, `presence.ts`, `watch.ts`,
 `remote*`, `projection.ts`, `session-cache.ts`), CLI/fleet selector resolution
-(`selection.ts`), and `migrate-targets.ts`. `sync/`
-(the off-box backup client and the managed Worker template) is still a copy of
-sessions-cli's `./backup` module; the pinned `@phnx-labs/sessions-cli` 0.7.0
-already publishes that export, but nothing here imports it yet.
-Read queries (`agents sessions <query> [--json]`) exec the `sessions` bin from the
-`@phnx-labs/sessions-cli` dependency (`src/index.ts`, `lib/sessions-client.ts`);
-when no bin resolves they fail loud, with no in-process read. The
+(`selection.ts`), and `migrate-targets.ts`. `sync/` keeps only the managed
+session-backup Worker template and its provisioning (`agents setup session-backup`);
+the backup client itself is the standalone `sessions export --to-r2` / `import --from-r2`.
+Transcript reads are the standalone `sessions` CLI; agents-cli runs its bin
+(`lib/sessions-client.ts`) only for its own surfaces (`agents events logs`, the
+picker's remote transcript view), and fails loud when no bin resolves. The
 live-session **writer** is a separate package,
 [`packages/session-tracker`](../packages/session-tracker) — different data,
 different consumer; see its AGENTS.md.
 
-### `agents sessions` preview architecture (map before you touch it)
+### Session picker and preview architecture (map before you touch it)
 
-This maps agents-cli's own legacy `agents sessions` UI; users browse and read
-transcripts with the standalone `sessions` CLI and the live roster with `agents ps`.
+This maps the picker behind `agents ps` (and the `agents run --resume` picker);
+users browse and read transcripts with the standalone `sessions` CLI.
 The interactive UI is three picker variants in `src/lib/picker.ts`: `itemPicker`
 (single-select, `space` toggles preview), `dynamicPicker` (async data source, used
 by the session browser, `tab` toggles preview), and a multi-select variant. All
@@ -1740,10 +1730,9 @@ generates one itself.
 
 `agents ps preview <uuid-or-prefix>` uses the same card without the picker; the
 renderer and its registration live in `commands/ps.ts` and the detail block in
-`lib/session/presentation.ts`. `agents sessions preview` and `agents sessions
---preview` are the same command until the old group is removed, and both outbound
-peer calls still send the old `sessions preview` argv so an older receiver answers
-(PHNX-4227 R1).
+`lib/session/presentation.ts`. A peer is asked with `agents ps preview <id> --local
+--json`; a peer older than the PHNX-4227 release answers with an unknown-command
+error, which reads as unreachable.
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the
 transcript's actual mtime + size. Live status is deliberately outside that durable
@@ -1751,14 +1740,15 @@ digest and expires after 15 seconds through `session-cache.ts`. A remote-host ro
 whose lightweight digest was fleet-synced (a `mirrorSyncedAt` row — see §10 the
 session mirror, PHNX-3792) renders its topic + first-user preview INLINE from that
 local mirror with no per-row SSH; only a never-synced remote row still triggers the
-live `sessions preview <id> --local --json` fetch over SSH.
+live `agents ps preview <id> --local --json` fetch over SSH.
 
 Indexing is lazy — only `discoverSessions` writes the index — so a session THIS
-box just started is "running" in `--active` before it is indexed. The id resolver
+box just started is "running" in `agents ps` before it is indexed. The id resolver
 (`computeLocalMetadataMatches` in `lib/session/selection.ts`) therefore unions the indexed
 rows with the LIVE registry on a cold id miss, so `preview`/`resume`/`focus`
 resolve a running session with no transcript row yet (the fan-out peer answers
-from the same union, so it works cross-device too — SES-9b). The daemon keeps the
+from the same union through the hidden `agents ps resolve <selector> --json --local`
+peer protocol, so it works cross-device too — SES-9b). The daemon keeps the
 index current within seconds via `runSessionIndexWarmTick`, and the cold-miss
 repair waits for a concurrent scan rather than returning a stale read
 (`discoverSessions({ waitForScan })` — SES-9c). This is why a running session no
@@ -1778,13 +1768,11 @@ box win. Read the launcher-shim rule in
 [`docs/specifications.md` §Active sessions](docs/specifications.md#sessions) before
 touching any of it.
 
-Routing lives in `src/commands/sessions.ts`: `isBareBrowserListing`
-(+`hasNoBrowserDisqualifyingFlags`) gates the bare fleet-wide listing to the rich
-`runSessionBrowser` ([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts));
-a query/filter falls through to `pickSessionInteractive` → `sessionPicker`
-(both in [`src/commands/sessions-picker.ts`](src/commands/sessions-picker.ts)).
-`--flat`/`--tree`/`--json`/`--no-interactive` print non-interactive views with no
-preview. `PICKER_RECENT_COUNT = 15` caps the picker's list rows.
+The rich browser is `runSessionBrowser`
+([`src/commands/sessions-browser.ts`](src/commands/sessions-browser.ts)); its
+history pool asks each peer's standalone `sessions --all --json --local` over SSH.
+`sessionPicker` ([`src/commands/sessions-picker.ts`](src/commands/sessions-picker.ts))
+is the single-select variant. `PICKER_RECENT_COUNT = 15` caps the picker's list rows.
 
 Gotcha: the preview pane has **no guaranteed height** — `availablePreviewRows =
 terminalRows() - fixedRows` (`picker.ts`), and `limitPreviewHeight` returns `''` when
@@ -1810,11 +1798,11 @@ quietly resumed in `process.cwd()` (RUSH-2022, PHNX-3481).
 `sessionOwnerDevice`
 ([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one
 answer to "may this resume run here?". Every path that starts a harness from a picked
-row consults it first: the legacy `agents sessions resume` and the `agents sessions` picker hop to the
-owner (the user spellings are `agents ps focus <id>` and `agents run auto --resume <id>`). The batch
-`sessions resume` mostly inherits it for free: every TAB it opens runs the
-`agents sessions resume <id>` argv from `lib/session/resume-command.ts`, whose docblock
-already promised source-device routing — this is what makes that true. Its
+row consults it first: the session picker hops to the owner with
+`agents run auto --resume <id> --interactive` (the user spellings are `agents ps
+focus <id>` and `agents run auto --resume <id>`). The batch picker behind a bare
+`agents run <agent> --resume` mostly inherits it for free: every TAB it opens runs
+that `run` argv, and `agents run --resume <id>` routes to the source device itself. Its
 no-tab-backend path (`inplace`, which any Linux box in a plain ssh shell lands on)
 never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
 `resumeSessionInPlace` ([`src/lib/session/resume-command.ts`](src/lib/session/resume-command.ts)) is the LOCAL takeover and **fails loud** if it is handed a
@@ -2163,7 +2151,7 @@ release workflow.
 
 **Provisioning the `apple.com` bundle on a headless sign host.**
 `scripts/remote-sign-mac.sh` signs on a Mac over SSH with
-`agents secrets exec apple.com`, so that Mac needs the `apple.com` secrets bundle
+`secrets exec apple.com`, so that Mac needs the `apple.com` secrets bundle
 *on that host*. Push it with the standalone engine's **file backend** —
 `secrets export apple.com --host <signer> --remote-backend file` (**no
 passphrase required**: the remote keys it under a machine-local key and reads it
@@ -2172,8 +2160,7 @@ keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
 the bundle metadata but no readable secret items (the engine read-back-verifies a
 keychain push and fails loudly if it did not persist). The standalone takes
-`--host`; `agents secrets … --device <name>` rewrites `--device` to `--host`
-before exec. See [`docs/secrets.md`](docs/secrets.md) for what agents-cli still
+`--host`. See [`docs/secrets.md`](docs/secrets.md) for what agents-cli still
 owns.
 
 **Why the tarball no longer needs a Mac (RUSH-3100).** It used to bundle
@@ -2384,8 +2371,8 @@ bug; fix the drift. It uses RFC-2119 MUST/SHOULD language, cites the implementin
   clauses match distinct calls, tool queries never parse transcripts, and exact
   static program counts retain repeated sites with wrapper/effective roles;
   versioned tool envelopes do not replace the list/detail JSON contracts
-  (SES-31..SES-37, SES-IF-4a); `agents insights` (also reachable as `agents sessions insights`) emits aggregate-only
-  actions (SES-IF-4c); `agents insights resources` (older spelling `agents sessions stats`) emits its own versioned
+  (SES-31..SES-37, SES-IF-4a); `agents insights` emits aggregate-only
+  actions (SES-IF-4c); `agents insights resources` emits its own versioned
   `sessions-stats` rollup of skill/command usage and never the list/detail shape
   (SES-IF-4b); `sessions
   export --encrypt` seals every transcript

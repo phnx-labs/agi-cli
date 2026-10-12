@@ -17,10 +17,6 @@ export class BrowserClientError extends Error {
   }
 }
 
-export function isBrowserClientError(err: unknown): err is BrowserClientError {
-  return err instanceof BrowserClientError;
-}
-
 let cachedBin: string | undefined;
 
 function browserEntrypoint(bin: string): string {

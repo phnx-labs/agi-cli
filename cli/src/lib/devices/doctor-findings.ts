@@ -855,7 +855,7 @@ function widestOf(values: string[], min: number): number {
   return Math.max(...values.map(stringWidth), min);
 }
 
-export interface RenderOptions {
+interface RenderOptions {
   fleet: boolean;
   baseline?: string;
   header?: string;

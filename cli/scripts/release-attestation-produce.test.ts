@@ -939,10 +939,10 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     fs.writeFileSync(path.join(fx.fakebin, 'uname'), '#!/usr/bin/env bash\necho Darwin\n');
     fs.chmodSync(path.join(fx.fakebin, 'uname'), 0o755);
     fs.writeFileSync(
-      path.join(fx.fakebin, 'agents'),
+      path.join(fx.fakebin, 'secrets'),
       '#!/usr/bin/env bash\nfor a in "$@"; do shift; [ "$a" = "--" ] && break; done\nexec "$@"\n',
     );
-    fs.chmodSync(path.join(fx.fakebin, 'agents'), 0o755);
+    fs.chmodSync(path.join(fx.fakebin, 'secrets'), 0o755);
     const signer = path.join(fx.caller, 'cli/scripts/sign-cli-binary.sh');
     fs.writeFileSync(signer, `#!/usr/bin/env bash\necho SIGNER_RAN >> ${JSON.stringify(marker)}\n`);
     fs.chmodSync(signer, 0o755);

@@ -1,7 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { activeSessionProjectKey } from './sessions.js';
+import { activeSessionProjectKey } from '../lib/session/active.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function s(overrides: Partial<ActiveSession>): ActiveSession {

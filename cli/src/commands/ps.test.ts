@@ -48,16 +48,15 @@ describeLive('agents ps — real CLI against a live process', () => {
     return { tempHome, cwd, liveId, crashedId, sleeper };
   }
 
-  it('ps preview renders the same card as sessions preview and sessions --preview', () => {
+  it('ps preview renders one card whatever the id form or flag order', () => {
     const { tempHome, cwd, liveId, sleeper } = fixture();
     try {
-      const legacy = runAgents(['sessions', 'preview', liveId, '--local', '--json'], cwd, tempHome);
-      expect(legacy.status, legacy.stderr).toBe(0);
-      const card = JSON.parse(legacy.stdout);
+      const first = runAgents(['ps', 'preview', liveId, '--local', '--json'], cwd, tempHome);
+      expect(first.status, first.stderr).toBe(0);
+      const card = JSON.parse(first.stdout);
       expect(card).toMatchObject({ schemaVersion: 1, session: { id: liveId }, active: { pid: sleeper.pid } });
       expect(card).not.toHaveProperty('cache');
       for (const args of [
-        ['ps', 'preview', liveId, '--local', '--json'],
         ['ps', '--json', '--local', 'preview', liveId],
         ['ps', 'preview', liveId.slice(0, 8), '--local', '--json'],
       ]) {
@@ -66,18 +65,15 @@ describeLive('agents ps — real CLI against a live process', () => {
         expect(JSON.parse(ps.stdout)).toEqual(card);
       }
 
-      const textCard = (args: string[]) => runAgents(args, cwd, tempHome).stdout.replace(/\d+[smhd] ago/g, 'N ago');
       const text = runAgents(['ps', 'preview', liveId, '--local'], cwd, tempHome);
       expect(text.status, text.stderr).toBe(0);
       expect(text.stdout).toContain('Refactor the roster');
-      expect(textCard(['ps', 'preview', liveId, '--local'])).toBe(textCard(['sessions', 'preview', liveId, '--local']));
-      expect(textCard(['ps', 'preview', liveId, '--local'])).toBe(textCard(['sessions', liveId, '--preview', '--local']));
 
       const missing = 'feed9999-9999-4999-8999-999999999999';
       const gone = runAgents(['ps', 'preview', missing, '--local', '--json'], cwd, tempHome);
-      const legacyGone = runAgents(['sessions', 'preview', missing, '--local', '--json'], cwd, tempHome);
       expect(gone.status).toBe(1);
-      expect([gone.stdout, gone.stderr]).toEqual([legacyGone.stdout, legacyGone.stderr]);
+      expect(gone.stdout).toBe('');
+      expect(gone.stderr).toContain(missing);
       expect(runAgents(['ps', 'preview', '--help'], cwd, tempHome).stdout).toContain('agents ps preview 407b8dd5');
     } finally {
       sleeper.kill('SIGTERM');
@@ -85,7 +81,7 @@ describeLive('agents ps — real CLI against a live process', () => {
     }
   }, 180_000);
 
-  it('lists the same live roster as sessions --active, and filters by --status', () => {
+  it('lists the live roster and filters by --status', () => {
     const { tempHome, cwd, liveId, crashedId, sleeper } = fixture(11 * 60_000);
     try {
       const ps = runAgents(['ps', '--json', '--local'], cwd, tempHome);
@@ -95,10 +91,6 @@ describeLive('agents ps — real CLI against a live process', () => {
       expect(ids).toContain(liveId);
       expect(ids).not.toContain(crashedId);
       expect(rows.find((row) => row.sessionId === liveId)).toMatchObject({ pid: sleeper.pid, pidAlive: true });
-
-      const legacy = runAgents(['sessions', '--active', '--json', '--local'], cwd, tempHome);
-      expect(legacy.status, legacy.stderr).toBe(0);
-      expect((JSON.parse(legacy.stdout) as ActiveSession[]).map((row) => row.sessionId).sort()).toEqual([...ids].sort());
 
       const crashed = runAgents(['ps', '--status', 'crashed', '--json', '--local'], cwd, tempHome);
       expect(crashed.status, crashed.stderr).toBe(0);
@@ -197,7 +189,7 @@ describeLive('agents ps — real CLI against a live process', () => {
   }, 90_000);
 });
 
-describeLive('agents ps — parity with the sessions --active filters and the migration ledger', () => {
+describeLive('agents ps — roster filters and the migration ledger', () => {
   const bookmarkedId = 'b0000001-1111-4111-8111-111111111111';
   const plainId = 'b0000002-2222-4222-8222-222222222222';
   const waitingId = 'b0000003-3333-4333-8333-333333333333';
@@ -228,8 +220,16 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
         message: { id: `${indexedRoutineId}-m1`, model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'done' }],
           usage: { input_tokens: 10, output_tokens: 5 } } },
     ].map((entry) => JSON.stringify(entry)).join('\n') + '\n');
-    const indexed = runAgents(['sessions', '--routine', 'nightly-review', '--all', '--local', '--json'], cwd, tempHome);
-    expect(indexed.status, indexed.stderr).toBe(0);
+    const inProcess = (code: string) => {
+      const res = spawnSync(process.execPath, ['--import', tsxLoaderUrl, '-e', code], {
+        cwd,
+        env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' },
+        encoding: 'utf-8',
+      });
+      expect(res.status, res.stderr).toBe(0);
+    };
+    inProcess(`const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/discover.ts'))});
+      await m.discoverSessions({ all: true, cwd: process.cwd(), limit: 5000, waitForScan: true });`);
 
     const row = (sessionId: string, extra: Record<string, unknown> = {}) => ({
       context: 'terminal', kind: 'claude', status: 'running', sessionId, pid: sleeper.pid, pidAlive: true, cwd, ...extra,
@@ -242,54 +242,38 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
       row(indexedRoutineId),
       row(otherRoutineId, { origin: 'routine', routineName: 'weekly-audit' }),
     ];
-    const publish = () => {
-      const res = spawnSync(process.execPath, [
-        '--import', tsxLoaderUrl, '-e',
-        `const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
-         m.writeActiveSessionsCache('local', ${JSON.stringify(rows)}, { capturedAt: Date.now() });`,
-      ], {
-        cwd,
-        env: { ...process.env, HOME: tempHome, USERPROFILE: tempHome, AGENTS_SKIP_MIGRATION: '1', NODE_NO_WARNINGS: '1' },
-        encoding: 'utf-8',
-      });
-      expect(res.status, res.stderr).toBe(0);
-    };
+    const publish = () => inProcess(`const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
+      m.writeActiveSessionsCache('local', ${JSON.stringify(rows)}, { capturedAt: Date.now() });`);
     publish();
 
-    for (const id of [bookmarkedId, waitingId]) {
-      const bookmark = runAgents(['sessions', 'bookmark', id], cwd, tempHome);
-      expect(bookmark.status, bookmark.stderr).toBe(0);
-    }
+    inProcess(`const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/bookmarks.ts'))});
+      for (const id of ${JSON.stringify([bookmarkedId, waitingId])}) m.setBookmark(id, true);`);
     return { tempHome, cwd, sleeper, publish };
   }
 
-  it('selects the same rows for --bookmarks, --routine [name], and --status waiting', () => {
+  it('selects rows for --bookmarks, --routine [name], and --status waiting', () => {
     const { tempHome, cwd, sleeper, publish } = liveFixture();
     try {
-      const pair = (legacy: string[], replacement: string[]) => {
+      const pick = (flags: string[]) => {
         publish();
-        const before = runAgents(['sessions', '--active', ...legacy, '--json', '--local'], cwd, tempHome);
-        publish();
-        const after = runAgents(['ps', ...replacement, '--json', '--local'], cwd, tempHome);
-        expect(after.status, after.stderr).toBe(before.status);
-        expect(ids(after)).toEqual(ids(before));
-        return { ids: ids(after), status: after.status };
+        const result = runAgents(['ps', ...flags, '--json', '--local'], cwd, tempHome);
+        return { ids: ids(result), status: result.status };
       };
 
-      const everyone = pair([], []);
+      const everyone = pick([]);
       expect(everyone.ids).toEqual(
         [bookmarkedId, plainId, waitingId, hookRoutineId, indexedRoutineId, otherRoutineId].sort(),
       );
-      expect(pair(['--bookmarks'], ['--bookmarks']).ids).toEqual([bookmarkedId, waitingId].sort());
-      expect(pair(['--routine'], ['--routine']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
-      expect(pair(['--routines'], ['--routines']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
-      expect(pair(['--routine', 'nightly'], ['--routine', 'nightly']).ids).toEqual([hookRoutineId, indexedRoutineId].sort());
-      expect(pair(['--routine', 'weekly-audit'], ['--routine', 'weekly-audit']).ids).toEqual([otherRoutineId]);
+      expect(pick(['--bookmarks']).ids).toEqual([bookmarkedId, waitingId].sort());
+      expect(pick(['--routine']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
+      expect(pick(['--routines']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
+      expect(pick(['--routine', 'nightly']).ids).toEqual([hookRoutineId, indexedRoutineId].sort());
+      expect(pick(['--routine', 'weekly-audit']).ids).toEqual([otherRoutineId]);
 
-      const waiting = pair(['--waiting'], ['--status', 'waiting']);
+      const waiting = pick(['--status', 'waiting']);
       expect(waiting).toEqual({ ids: [waitingId], status: 1 });
-      expect(pair(['--bookmarks', '--waiting'], ['--bookmarks', '--status', 'waiting'])).toEqual({ ids: [waitingId], status: 1 });
-      expect(pair(['--routine', '--waiting'], ['--routine', '--status', 'waiting'])).toEqual({ ids: [], status: 0 });
+      expect(pick(['--bookmarks', '--status', 'waiting'])).toEqual({ ids: [waitingId], status: 1 });
+      expect(pick(['--routine', '--status', 'waiting'])).toEqual({ ids: [], status: 0 });
 
       const help = runAgents(['ps', '--help'], cwd, tempHome);
       expect(help.stdout).toContain('--bookmarks');
@@ -300,7 +284,7 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
     }
   }, 180_000);
 
-  it('ps migrations reads the same ledger as sessions migrations, with --session and text output', () => {
+  it('ps migrations reads the ledger, with --session and text output', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-ps-migrations-'));
     const cwd = path.join(tempHome, 'work');
     fs.mkdirSync(cwd, { recursive: true });
@@ -309,8 +293,6 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
       const empty = runAgents(['ps', 'migrations'], cwd, tempHome);
       expect(empty.status, empty.stderr).toBe(0);
       expect(empty.stdout).toContain('No migrations recorded yet. Move one: agents ps migrate --auto');
-      const legacyEmpty = runAgents(['sessions', 'migrations'], cwd, tempHome);
-      expect(legacyEmpty.stdout).toContain('No migrations recorded yet. Move one: agents sessions migrate --auto');
 
       const ledger = path.join(tempHome, '.agents', '.history', 'migrations.jsonl');
       fs.mkdirSync(path.dirname(ledger), { recursive: true });
@@ -323,13 +305,8 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
         record('bbbb2222-0000-4000-8000-000000000002', 'bbbb2222', 'box-two', '2026-10-06T02:00:00.000Z', 'failed'),
       ].map((r) => JSON.stringify(r)).join('\n') + '\n');
 
-      for (const args of [['--json'], ['--json', '--session', 'bbbb'], ['--session', 'aaaa1111-0000', '--json']]) {
-        const legacy = runAgents(['sessions', 'migrations', ...args], cwd, tempHome);
-        const ps = runAgents(['ps', 'migrations', ...args], cwd, tempHome);
-        expect(legacy.status, legacy.stderr).toBe(0);
-        expect(ps.status, ps.stderr).toBe(0);
-        expect(JSON.parse(ps.stdout)).toEqual(JSON.parse(legacy.stdout));
-      }
+      expect((JSON.parse(runAgents(['ps', 'migrations', '--session', 'aaaa1111-0000', '--json'], cwd, tempHome).stdout) as Array<{ shortId: string }>)
+        .map((r) => r.shortId)).toEqual(['aaaa1111']);
       expect((JSON.parse(runAgents(['ps', 'migrations', '--json'], cwd, tempHome).stdout) as unknown[]).length).toBe(2);
       expect((JSON.parse(runAgents(['ps', 'migrations', '--json', '--session', 'bbbb'], cwd, tempHome).stdout) as Array<{ shortId: string }>)
         .map((r) => r.shortId)).toEqual(['bbbb2222']);
@@ -340,14 +317,12 @@ describeLive('agents ps — parity with the sessions --active filters and the mi
 
       const text = runAgents(['ps', 'migrations'], cwd, tempHome);
       expect(text.status, text.stderr).toBe(0);
-      expect(text.stdout).toBe(runAgents(['sessions', 'migrations'], cwd, tempHome).stdout);
       expect(text.stdout).toContain('WHEN');
       expect(text.stdout.indexOf('bbbb2222')).toBeLessThan(text.stdout.indexOf('aaaa1111'));
       expect(text.stdout).toContain('src-box → box-two');
 
       const migrateHelp = runAgents(['ps', 'migrate', '--help'], cwd, tempHome);
       expect(migrateHelp.stdout).toContain("'agents ps migrations'");
-      expect(runAgents(['sessions', 'migrate', '--help'], cwd, tempHome).stdout).toContain("'agents sessions migrations'");
     } finally {
       fs.rmSync(tempHome, { recursive: true, force: true });
     }

@@ -2,23 +2,23 @@
 name: secrets
 description: "Manage named bundles of environment variables backed by the OS keychain (macOS Keychain, Linux libsecret, Windows Credential Manager). Create bundles, add secrets, generate passwords, and inject them into agent runs. Triggers on: 'API key', 'credentials', 'secrets bundle', 'inject env vars', '--secrets', 'keychain', 'credential manager'."
 argument-hint: "[create|add|list|view|import|export|rotate|generate]"
-allowed-tools: Bash(agents secrets*), Bash(secrets*)
+allowed-tools: Bash(secrets*), Bash(agents run*)
 user-invocable: true
 ---
 
 # Secrets
 
-Store credentials in the OS keychain and inject them into agent runs. The engine is the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`). `agents secrets` is a passthrough to the same binary. agi-cli does not ship the engine.
+Store credentials in the OS keychain and inject them into agent runs. The engine is the standalone **`secrets` CLI** (`@phnx-labs/secrets-cli`); call it directly. `agents secrets` was removed, and agi-cli does not ship the engine. agents-cli's part is `agents run --secrets <bundle>`, which injects a bundle into the agent it launches.
 
 ## Install
 
 ```bash
 agents clis install secrets
-# or: npm i -g @phnx-labs/secrets-cli@0.1.2
+# or: npm i -g @phnx-labs/secrets-cli@0.1.8
 # or: agents setup secrets
 ```
 
-No extra environment variables. After install, `secrets --version` prints `0.1.2`.
+No extra environment variables. After install, `secrets --version` prints `0.1.8` (the pin in `cli/src/lib/secrets-cli.ts`).
 
 The macOS broker is `secrets _agent-run`, not `agents daemon`. Socket: `$SECRETS_HOME/.cache/helpers/secrets-agent/`.
 
@@ -41,8 +41,8 @@ Store credentials in your OS keychain and inject them into agent runs. Nothing t
 
 ```bash
 # Create bundle with env refs
-agents secrets create prod
-agents secrets add prod DB_PASSWORD --env DB_PASSWORD
+secrets create prod
+secrets add prod DB_PASSWORD --env DB_PASSWORD
 
 # Pass at runtime
 DB_PASSWORD=xxx agents run claude "..." --secrets prod
@@ -56,16 +56,16 @@ DB_PASSWORD=xxx agents run claude "..." --secrets prod
 
 **1Password / iCloud Passwords**: Designed for humans, not agents. They require interactive authentication (biometrics, master password). An agent can't programmatically fetch or store credentials without you approving each access. And they can't *write* — if an agent generates a new API key, it can't save it back.
 
-**agents secrets**: Scoped bundles (agent only sees what you pass), OS keychain-backed (encrypted at rest), and agent-friendly (agents can read *and* write programmatically).
+**secrets**: Scoped bundles (agent only sees what you pass), OS keychain-backed (encrypted at rest), and agent-friendly (agents can read *and* write programmatically).
 
 ## "I need to give an agent access to my API keys"
 
 Create a bundle, add your keys, then pass the bundle when running agents:
 
 ```bash
-agents secrets create prod
-agents secrets add prod STRIPE_API_KEY      # prompts for value
-agents secrets add prod DATABASE_URL
+secrets create prod
+secrets add prod STRIPE_API_KEY      # prompts for value
+secrets add prod DATABASE_URL
 
 agents run claude "deploy the api" --secrets prod
 ```
@@ -77,13 +77,13 @@ The secrets inject as environment variables at runtime.
 Pipe it via stdin so it never appears in shell history:
 
 ```bash
-echo "$NEW_API_KEY" | agents secrets add prod STRIPE_KEY --value-stdin
+echo "$NEW_API_KEY" | secrets add prod STRIPE_KEY --value-stdin
 ```
 
 ## "I need a secure password"
 
 ```bash
-agents secrets generate --copy    # copies to clipboard, prints nothing
+secrets generate --copy    # copies to clipboard, prints nothing
 ```
 
 ## "I have multiple machines and want secrets to sync"
@@ -94,12 +94,12 @@ other end:
 
 ```bash
 # On one machine:
-agents secrets create work
-agents secrets add work SOME_KEY
-agents secrets push work
+secrets create work
+secrets add work SOME_KEY
+secrets push work
 
 # On another machine:
-agents secrets pull work      # work now exists locally too
+secrets pull work      # work now exists locally too
 ```
 
 A bundle created with `--synced` instead stores it in an age-encrypted local
@@ -111,7 +111,7 @@ folder) rather than through `api.prix.dev`.
 Add metadata when storing secrets:
 
 ```bash
-agents secrets add prod STRIPE_KEY --type api-key --expires 2027-12-31 --note "Live key, rotate annually"
+secrets add prod STRIPE_KEY --type api-key --expires 2027-12-31 --note "Live key, rotate annually"
 ```
 
 The `list` command shows secrets expiring in the next 30 days. Expired secrets show in red.
@@ -121,32 +121,32 @@ The `list` command shows secrets expiring in the next 30 days. Expired secrets s
 For browser logins, name the bundle after the domain — `x.com`, `linkedin.com`, `reddit.com` — and group keys by account handle. One bundle per site, any number of accounts inside. Every account carries a `--note` saying when to use it:
 
 ```bash
-agents secrets create x.com --description "X/Twitter accounts. Read key notes to pick the right one."
+secrets create x.com --description "X/Twitter accounts. Read key notes to pick the right one."
 
-agents secrets add x.com ZEFFMUKS_USERNAME --value zeffmuks \
+secrets add x.com ZEFFMUKS_USERNAME --value zeffmuks \
   --note "Personal account. Casual engagement, memes."
-agents secrets add x.com ZEFFMUKS_PASSWORD --type password \
+secrets add x.com ZEFFMUKS_PASSWORD --type password \
   --note "Password for @zeffmuks"
 
-agents secrets add x.com SOCIAL_GETRUSH_USERNAME --value social@getrush.ai \
+secrets add x.com SOCIAL_GETRUSH_USERNAME --value social@getrush.ai \
   --note "Official Rush brand account. Product marketing, announcements, replies as Rush."
-agents secrets add x.com SOCIAL_GETRUSH_PASSWORD --type password \
+secrets add x.com SOCIAL_GETRUSH_PASSWORD --type password \
   --note "Password for social@getrush.ai"
 ```
 
 Key naming: uppercase the handle, replace non-alphanumerics with `_`, suffix with `_USERNAME` / `_PASSWORD` (plus `_TOTP_SECRET` if the account has 2FA).
 
-To pick an account, run `agents secrets view x.com` — notes print in the clear while values stay masked, so you can read the key names and choose the right account without seeing any value. Then inject just that pair into the command that needs it — never print it:
+To pick an account, run `secrets view x.com` — notes print in the clear while values stay masked, so you can read the key names and choose the right account without seeing any value. Then inject just that pair into the command that needs it — never print it:
 
 ```bash
-agents secrets view x.com                  # read notes, choose the account
-agents secrets exec x.com --keys SOCIAL_GETRUSH_USERNAME,SOCIAL_GETRUSH_PASSWORD -- ./login-helper
+secrets view x.com                  # read notes, choose the account
+secrets exec x.com --keys SOCIAL_GETRUSH_USERNAME,SOCIAL_GETRUSH_PASSWORD -- ./login-helper
 ```
 
 ## "I have a .env file I want to import"
 
 ```bash
-agents secrets import prod --from .env.prod
+secrets import prod --from .env.prod
 ```
 
 Every key goes into Keychain. The same `--from` axis imports from other
@@ -158,9 +158,9 @@ Bundles from the pre-biometry era live in the iCloud Keychain and are invisible
 to every modern query. Recover them (macOS):
 
 ```bash
-agents secrets import --from icloud            # interactive multi-select
-agents secrets import <bundle> --from icloud   # one specific bundle
-agents secrets import --from icloud --purge    # also delete the iCloud copies
+secrets import --from icloud            # interactive multi-select
+secrets import <bundle> --from icloud   # one specific bundle
+secrets import --from icloud --purge    # also delete the iCloud copies
 ```
 
 ## "I need a secret that reads from a file or command at runtime"
@@ -168,9 +168,9 @@ agents secrets import --from icloud --purge    # also delete the iCloud copies
 Secrets can be dynamic references, not just static values:
 
 ```bash
-agents secrets add prod AWS_TOKEN --exec "aws sts get-session-token --query Credentials.SessionToken"
-agents secrets add prod CERT --file /path/to/cert.pem
-agents secrets add prod LOG_LEVEL --env LOG_LEVEL
+secrets add prod AWS_TOKEN --exec "aws sts get-session-token --query Credentials.SessionToken"
+secrets add prod CERT --file /path/to/cert.pem
+secrets add prod LOG_LEVEL --env LOG_LEVEL
 ```
 
 (Exec refs require creating the bundle with `--allow-exec`.)
@@ -180,10 +180,10 @@ agents secrets add prod LOG_LEVEL --env LOG_LEVEL
 macOS prompts Touch ID **per bundle, per process**, so running several agents at once (`agents teams`, parallel `agents run --secrets`) re-prompts once each. There's no OS setting to quiet it — but the **secrets-agent** does (macOS only):
 
 ```bash
-agents secrets unlock prod        # one Touch ID; held ~7 days (default)
+secrets unlock prod        # one Touch ID; held ~7 days (default)
 agents teams start my-feature     # every teammate reads prod silently
-agents secrets status             # what's held, and when it locks
-agents secrets lock               # wipe it; next read re-prompts
+secrets status             # what's held, and when it locks
+secrets lock               # wipe it; next read re-prompts
 ```
 
 `unlock` reads the bundle once and keeps the resolved values in a local broker behind a user-only socket; later runs read from memory with no prompt. The hold ends on its TTL (**default 7 days**, `--ttl 30m` to shorten), when you `lock`, or when the machine **sleeps / you log out**. A bare **screen-lock does NOT drop the hold** (it's already gated by the login session). Nothing is written to disk.
@@ -196,14 +196,14 @@ On a **locked** keychain bundle:
 |---|---|
 | `secrets list`, `secrets view` (no `--reveal`) | never — metadata / masked values only |
 | `secrets view --reveal`, `secrets exec` **at your terminal, outside an agent session** | one sheet, then reveals / runs (a deliberate human reveal/run) |
-| `secrets get <item>`, `secrets export` (`--to-file` / `--to-1password`) | **never** — automation primitives; fail fast to `agents secrets unlock` instead. `export` with no destination flag refuses outright and names `exec` / `view --reveal`; the raw-item `get <item>` stays available everywhere (shell hooks inside agent sessions depend on it — a single ad-hoc token is the accepted narrower residual) |
+| `secrets get <item>`, `secrets export` (`--to-file` / `--to-1password`) | **never** — automation primitives; fail fast to `secrets unlock` instead. `export` with no destination flag refuses outright and names `exec` / `view --reveal`; the raw-item `get <item>` stays available everywhere (shell hooks inside agent sessions depend on it — a single ad-hoc token is the accepted narrower residual) |
 | `secrets unlock` | one sheet — the deliberate unlock |
 | anything an **agent** launches (`AGENTS_RUNTIME`) or any no-TTY context | never — resolves broker-only, fails fast if not held |
 | anything on an **already-unlocked** bundle | never — served from the broker |
 
-So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline — `export` now also refuses without a real destination (`--device` / `--to-1password` / `--to-file`), so it never prints a bundle to stdout.
+So a sheet only ever appears for a deliberate human action (`unlock`, or a `view --reveal` / `exec` you type) on a *locked* bundle. `get`/`export` stay silent so they never block a script mid-pipeline — `export` now also refuses without a real destination (`--host` / `--to-1password` / `--to-file`), so it never prints a bundle to stdout.
 
-For a machine running lots of agents, run `agents secrets start` once to bring the broker up ahead of time, so a cold-started broker can't get starved under load. `agents secrets status` shows what's held and when it locks.
+For a machine running lots of agents, run `secrets start` once to bring the broker up ahead of time, so a cold-started broker can't get starved under load. `secrets status` shows what's held and when it locks.
 
 **You usually don't need `unlock` at all** — a bundle's default prompt policy is
 `hold` (ask once per hold window, `secrets.agent.holdMs` — 7d by default), so the
@@ -211,8 +211,8 @@ FIRST read of a run already populates the broker and every read after that in
 the same window is silent:
 
 ```bash
-agents secrets policy prod             # show the current policy
-agents secrets policy prod always      # switch to "ask every time" instead
+secrets policy prod             # show the current policy
+secrets policy prod always      # switch to "ask every time" instead
 ```
 
 `always` re-prompts on every read — reach for it on a high-value bundle where
@@ -229,13 +229,13 @@ name, event kind, count, agent — never a value) through one chokepoint, and su
 three ways:
 
 ```bash
-agents secrets view stripe.com          # usage summary + held state + per-agent
-agents secrets list --sort uses         # most-accessed bundles first
-agents secrets list --sort used         # most-recently-used first
-agents secrets activity stripe.com      # recent event timeline (last 90 days)
+secrets view stripe.com          # usage summary + held state + per-agent
+secrets list --sort uses         # most-accessed bundles first
+secrets list --sort used         # most-recently-used first
+secrets activity stripe.com      # recent event timeline (last 90 days)
 ```
 
-`agents secrets view` prints e.g. `usage: accessed 42× (last 2h ago) · exported 3× (last
+`secrets view` prints e.g. `usage: accessed 42× (last 2h ago) · exported 3× (last
 1d ago)`. The full audit trail is `agents events --module secrets`. Disable recording
 with `AGENTS_NO_USAGE_TRACK=1`.
 
@@ -247,9 +247,9 @@ its binary suffix (`slack.app`, `photoshop.exe`). Always pass `--description`; a
 undescribed bundle prints a "No description found" nudge in `list` / `view` / `create`.
 
 ```bash
-agents secrets create stripe.com --description "Stripe live + test API keys"
+secrets create stripe.com --description "Stripe live + test API keys"
 ```
 
 ## "What else can I do?"
 
-Run `agents secrets --help` — there's more: viewing/revealing values, rotating secrets with preserved metadata, exporting to shell, organizing by environment or service.
+Run `secrets --help` — there's more: viewing/revealing values, rotating secrets with preserved metadata, exporting to shell, organizing by environment or service.

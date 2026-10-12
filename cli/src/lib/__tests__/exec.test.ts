@@ -1259,14 +1259,14 @@ describeExec('buildFallbackPrompt', () => {
   it('uses plain-text handoff for non-Claude next agent even with session ID', () => {
     const prompt = buildFallbackPrompt('claude', uuid, 'codex', 'refactor auth');
     expect(prompt).toContain('previous claude session was interrupted by a rate limit');
-    expect(prompt).toContain(`agents sessions ${uuid}`);
+    expect(prompt).toContain(`running: sessions ${uuid}`);
     expect(prompt).toContain('Original request: refactor auth');
   });
 
   it('falls back to context note without session reference when no session ID is known', () => {
     const prompt = buildFallbackPrompt('codex', undefined, 'antigravity', 'write tests');
     expect(prompt).toContain('previous codex session was interrupted by a rate limit');
-    expect(prompt).not.toContain('agents sessions');
+    expect(prompt).not.toContain('running: sessions');
     expect(prompt).toContain('Original request: write tests');
   });
 

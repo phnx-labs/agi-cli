@@ -2,7 +2,6 @@
 import { describe, it, expect } from 'vitest';
 import { applyScopeFilters, matchesTeam } from '../../lib/session/selection.js';
 import { formatPickerLabel, teamBadge } from '../../lib/session/presentation.js';
-import { artifactLookupScope, buildRoutineChoices, buildRoutineRunGroups, filterSessionsByRoutine, hasNoBrowserDisqualifyingFlags } from '../sessions.js';
 import { resolveRoutineName } from '../ps-roster.js';
 import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
@@ -21,50 +20,6 @@ function meta(over: Partial<SessionMeta> = {}): SessionMeta {
   };
 }
 
-describe('hasNoBrowserDisqualifyingFlags — which views the browser can represent', () => {
-  it('a bare listing qualifies', () => {
-    expect(hasNoBrowserDisqualifyingFlags({}, undefined)).toBe(true);
-  });
-
-  it('a positional query does not — the peer runs FTS the browser cannot', () => {
-    expect(hasNoBrowserDisqualifyingFlags({}, 'auth bug')).toBe(false);
-  });
-
-  it('every render/filter flag the picker cannot express disqualifies', () => {
-    for (const opts of [
-      { flat: true },
-      { tree: true },
-      { markdown: true },
-      { until: '2026-01-01' },
-      { project: 'agents-cli' },
-      { sort: 'cost' },
-      { artifacts: true },
-      { artifact: 'x' },
-    ]) {
-      expect(hasNoBrowserDisqualifyingFlags(opts, undefined)).toBe(false);
-    }
-  });
-
-  it('keeps routine views grouped while routing a named team view through the shared browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ routine: true }, undefined)).toBe(false);
-    expect(hasNoBrowserDisqualifyingFlags({ routine: 'nightly-review' }, undefined)).toBe(false);
-    expect(hasNoBrowserDisqualifyingFlags({ teams: true, inTeam: 'redesign' }, undefined)).toBe(true);
-  });
-
-  it('keeps the bare grouped --teams report out of the flat browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ teams: true }, undefined)).toBe(false);
-  });
-
-  it('--cloud disqualifies: it lists provider tasks and has no host scope', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ cloud: true }, undefined)).toBe(false);
-  });
-
-  it('one host qualifies; two do not, because `y` can only copy back one --device', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ host: ['zion'] }, undefined)).toBe(true);
-    expect(hasNoBrowserDisqualifyingFlags({ host: ['zion', 'mac-mini'] }, undefined)).toBe(false);
-  });
-});
-
 describe('resolveRoutineName', () => {
   const names = ['nightly-review', 'release-notes', 'security-scan'];
 
@@ -79,56 +34,13 @@ describe('resolveRoutineName', () => {
     expect(resolveRoutineName('notes', ['release-notes', 'meeting-notes'])).toBeNull();
   });
 
-  it('removes another routine before a positional session ID can resolve', async () => {
+  it('removes another routine before a positional session ID can resolve', () => {
     const wanted = meta({ id: 'wanted-id', shortId: 'wanted', origin: 'routine', routineName: 'nightly-review' });
     const other = meta({ id: 'other-id', shortId: 'other', origin: 'routine', routineName: 'security-scan' });
-    const filtered = await filterSessionsByRoutine([wanted, other], 'nightly', false);
-
-    expect(filtered).not.toBeNull();
-    expect(resolveSessionById(filtered!, 'other-id')).toEqual([]);
-    expect(resolveSessionById(filtered!, 'wanted-id')).toEqual([wanted]);
     const globallyScoped = applyScopeFilters([wanted, other], { routine: 'nightly' });
     expect(resolveSessionById(globallyScoped, 'other-id')).toEqual([]);
     expect(resolveSessionById(globallyScoped, 'wanted-id')).toEqual([wanted]);
   });
-});
-
-describe('artifact lookup routine scope', () => {
-  it('excludes a session from another routine before resolving its artifacts', () => {
-    const wanted = meta({ id: 'wanted-id', origin: 'routine', routineName: 'nightly-review' });
-    const other = meta({ id: 'other-id', origin: 'routine', routineName: 'release-notes' });
-    const scoped = applyScopeFilters(
-      [wanted, other],
-      artifactLookupScope(undefined, undefined, 'nightly-review'),
-    );
-    expect(resolveSessionById(scoped, 'other-id')).toEqual([]);
-    expect(resolveSessionById(scoped, 'wanted-id')).toEqual([wanted]);
-  });
-});
-
-describe('routine picker and run grouping', () => {
-  const sessions = [
-    meta({ id: 'a', shortId: 'a', origin: 'routine', routineName: 'nightly', routineRunId: 'run-2', timestamp: '2026-08-05T02:00:00.000Z' }),
-    meta({ id: 'b', shortId: 'b', origin: 'routine', routineName: 'nightly', routineRunId: 'run-2', timestamp: '2026-08-05T02:01:00.000Z' }),
-    meta({ id: 'c', shortId: 'c', origin: 'routine', routineName: 'nightly', routineRunId: 'run-1', timestamp: '2026-08-04T02:00:00.000Z' }),
-    meta({ id: 'd', shortId: 'd', origin: 'routine', routineName: 'weekly', routineRunId: 'weekly-1', timestamp: '2026-08-03T02:00:00.000Z' }),
-  ];
-
-  it('summarizes last run, run count, and session count for each routine', () => {
-    expect(buildRoutineChoices(sessions)).toEqual([
-      { name: 'nightly', lastRunAt: '2026-08-05T02:01:00.000Z', runCount: 2, latestRunSessionCount: 2 },
-      { name: 'weekly', lastRunAt: '2026-08-03T02:00:00.000Z', runCount: 1, latestRunSessionCount: 1 },
-    ]);
-  });
-
-  it('groups selected sessions by run id and newest timestamp', () => {
-    const groups = buildRoutineRunGroups(sessions.slice(0, 3));
-    expect(groups.map((group) => [group.runId, group.timestamp, group.sessions.length])).toEqual([
-      ['run-2', '2026-08-05T02:01:00.000Z', 2],
-      ['run-1', '2026-08-04T02:00:00.000Z', 1],
-    ]);
-  });
-
 });
 
 describe('matchesTeam — --in-team spans both ends of the lineage', () => {

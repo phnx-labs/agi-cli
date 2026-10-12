@@ -149,7 +149,7 @@ function dirLedgerDisabled(): boolean {
 
 let cachedOpenClawWorkspaces: Map<string, string> | null = null;
 
-export interface DiscoverOptions {
+interface DiscoverOptions {
   agent?: SessionAgentId;
   includeUnmanaged?: boolean;
   onHiddenUnmanaged?: (count: number) => void;
@@ -182,7 +182,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-export interface ScanProgress {
+interface ScanProgress {
   agent: SessionAgentId;
   parsed: number;
   total: number;

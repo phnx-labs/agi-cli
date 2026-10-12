@@ -107,7 +107,7 @@ describe('selectFallback — --attach-only (old `go`) vs default resume', () => 
     await refuseFallback(s({ sessionId: 'dead1234', machine: os.hostname(), host: 'ghostty' }), undefined);
     const output = log.mock.calls.flat().join('\n');
     expect(output).toContain('no attach rail');
-    expect(output).toContain('agents sessions resume');
+    expect(output).toContain('agents run auto --resume dead1234');
     expect(output).toContain('tmux');
     expect(process.exitCode).toBe(1);
     process.exitCode = previous;
@@ -133,7 +133,7 @@ describe('focusResolvedSession --attach-only Path D (PHNX-3356)', () => {
     await focusResolvedSession(meta, new Map([[id, live]]), 'self-host', refuseFallback, true);
     const out = log.mock.calls.flat().join('\n');
     expect(out).toContain('no attach rail');
-    expect(out).toContain('agents sessions resume ffffffff');
+    expect(out).toContain('agents run auto --resume ffffffff');
     expect(out).not.toContain('resume <id>');
     expect(out).not.toContain('opening a new');
     expect(out).not.toContain('resuming it there');

@@ -163,7 +163,7 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
 
   test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'session', id: INJECTION_SID })], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--reconnect-reattach']);
+    expect(res.trimEnd().split('\n')).toEqual(['ps', 'focus', INJECTION_SID, '--local', '--reconnect-reattach']);
   });
 
   test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
@@ -186,7 +186,7 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
 
   test("the plain string, no shell needed: wraps in bash -lc around the peer's own recovery verb (attach-else-resume, no --attach-only)", () => {
     expect(reattachRemoteCommand(SESSION_TARGET)).toBe(
-      `bash -lc 'agents sessions focus ${SID} --local --reconnect-reattach; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+      `bash -lc 'agents ps focus ${SID} --local --reconnect-reattach; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
     );
   });
 });
@@ -227,20 +227,20 @@ describe('reattachRemoteCommand — a launch target resolves on the PEER, needin
   test.skipIf(!runsBash)('sends --launch-id, so the box holding the hook records does the lookup', () => {
     const cmd = reattachRemoteCommand({ kind: 'launch', id: LAUNCH_ID });
     const res = execFileSync('bash', ['-c', argvShim + cmd], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', LAUNCH_ID, '--local', '--reconnect-reattach']);
+    expect(res.trimEnd().split('\n')).toEqual(['ps', 'focus', '--launch-id', LAUNCH_ID, '--local', '--reconnect-reattach']);
   });
 
   test.skipIf(!runsBash)('a launch id needing shell quoting still round-trips intact — no injection', () => {
     const nasty = "a'b; touch /tmp/PWNED-launchid-test; #";
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'launch', id: nasty })], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', nasty, '--local', '--reconnect-reattach']);
+    expect(res.trimEnd().split('\n')).toEqual(['ps', 'focus', '--launch-id', nasty, '--local', '--reconnect-reattach']);
   });
 });
 
 describe('recoveryHint — the command printed when the loop gives up must exist (F7)', () => {
   test('a session target names the live resume verb, never the deprecated `agents reconnect`', () => {
     const hint = recoveryHint(SESSION_TARGET, 'zion');
-    expect(hint).toContain(`agents sessions resume ${SID}`);
+    expect(hint).toContain(`agents run auto --resume ${SID}`);
     expect(hint).not.toContain('agents reconnect');
   });
 
@@ -264,7 +264,7 @@ describe('connectionEndedNotice — the id left on the shell after SSH closes (R
     const s = connectionEndedNotice(SESSION_TARGET, 'yosemite-m2');
     expect(s).toContain('Connection to yosemite-m2 closed.');
     expect(s).toContain(`Session ${SID}`);
-    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).toContain(`agents run auto --resume ${SID}`);
     expect(s).not.toContain('dropped');
   });
 
@@ -286,7 +286,7 @@ describe('connectionStartedNotice — id while the connection exists (RUSH-3227 
   test('a known session id names the host, the full id, and resume-later', () => {
     const s = connectionStartedNotice(SESSION_TARGET, 'yosemite-m2');
     expect(s).toContain(`Session ${SID} on yosemite-m2`);
-    expect(s).toContain(`Resume later:  agents sessions resume ${SID}`);
+    expect(s).toContain(`Resume later:  agents run auto --resume ${SID}`);
   });
 
   test('a launch id is not a resume handle — print nothing', () => {
@@ -367,7 +367,7 @@ describe('notices — human readable', () => {
   });
 
   test('exhausted notice hands back the manual reconnect command', () => {
-    expect(exhaustedNotice(SESSION_TARGET, 'zion')).toContain(`agents sessions resume ${SID}`);
+    expect(exhaustedNotice(SESSION_TARGET, 'zion')).toContain(`agents run auto --resume ${SID}`);
     expect(exhaustedNotice(SESSION_TARGET, 'zion')).not.toContain('agents reconnect');
   });
 
@@ -376,7 +376,7 @@ describe('notices — human readable', () => {
     expect(s).toContain('zion');
     expect(s).toContain('kept dropping again within');
     expect(s).toContain(formatDuration(RECONNECT_WINDOW_MS));
-    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).toContain(`agents run auto --resume ${SID}`);
     expect(s).not.toContain('agents reconnect');
     expect(s).not.toContain("Couldn't reconnect");
     expect(s).not.toMatch(/Reconnected to \w+ \d+ times/);
@@ -422,7 +422,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(calls).toBeGreaterThan(6);
     expect(calls).toBeLessThan(100);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(true);
-    expect(writes.some((w) => w.includes(`agents sessions resume ${SID}`))).toBe(true);
+    expect(writes.some((w) => w.includes(`agents run auto --resume ${SID}`))).toBe(true);
   });
 
   test('agents-cli#1884: a link that reconnects and drops straight back out ALSO terminates', async () => {
@@ -445,7 +445,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(writes.some((w) => w.includes('attempt 7'))).toBe(true);
     expect(writes.some((w) => w.includes('kept dropping again within'))).toBe(true);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
-    expect(writes.some((w) => w.includes(`agents sessions resume ${SID}`))).toBe(true);
+    expect(writes.some((w) => w.includes(`agents run auto --resume ${SID}`))).toBe(true);
   });
 
   test('a mixed outage — unreachable attempts, then one that reconnects and drops out — reports the drop, not "couldn\'t reconnect"', async () => {
@@ -517,7 +517,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(notice).toContain('Stopped reconnecting');
     expect(notice).toContain('on zion. Recover it when the link is stable');
     expect(notice).not.toContain('still running');
-    expect(notice).toContain(`agents sessions resume ${SID}`);
+    expect(notice).toContain(`agents run auto --resume ${SID}`);
     expect(notice).not.toContain("Couldn't reconnect");
     expect(notice).not.toContain('Gave up');
   });
@@ -526,7 +526,7 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     const s = interruptedNotice(SESSION_TARGET, 'yosemite-s0');
     expect(s).toContain('94c75686');
     expect(s).toContain('yosemite-s0');
-    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).toContain(`agents run auto --resume ${SID}`);
   });
 
   test('the all-day-blinking session the feature exists for is still unbounded', async () => {

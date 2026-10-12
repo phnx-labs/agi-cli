@@ -12,7 +12,7 @@ const { Command } = await import('commander');
 const { getSetupStatus, registerSetupCommand, runSetup, runSetupHub } = await import('./setup.js');
 
 describe('agents setup command group', () => {
-  it('registers the browser/computer/fleet/mine/secrets/accounts/alias/beta capability subcommands', () => {
+  it('registers the browser/computer/fleet/mine/secrets/session-backup/accounts/alias/beta capability subcommands', () => {
     const program = new Command();
     registerSetupCommand(program);
     const setup = program.commands.find((c) => c.name() === 'setup');
@@ -21,7 +21,7 @@ describe('agents setup command group', () => {
 
 
 
-    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'term', 'tools', 'url-scheme', 'watchdog']);
+    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'session-backup', 'status', 'term', 'tools', 'url-scheme', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {

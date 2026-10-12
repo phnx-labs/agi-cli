@@ -11,9 +11,9 @@ terminal / under this pid."
 
 It is the **writer** side of live-session tracking. The reader that consumes these
 files is the VS Code extension (agi-ext `src/core/liveSession.ts`). This is a
-**different** surface from the CLI's `agents sessions` command
-(`cli/src/lib/session/`), which parses agent transcript logs, not these state
-files — don't conflate the two.
+**different** surface from the CLI's session indexer (`cli/src/lib/session/`,
+behind `agents ps`; the standalone `sessions` CLI reads the index it writes), which
+parses agent transcript logs, not these state files. Don't conflate the two.
 
 ## What it writes, where, and when
 

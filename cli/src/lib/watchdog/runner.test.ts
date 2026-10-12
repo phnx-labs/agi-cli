@@ -213,7 +213,7 @@ describe('runWatchdogTick — skips (no nudge)', () => {
     expect(o.addressable).toBe(false);
     expect(o.injected).toBeUndefined();
     expect(o.reason).toMatch(/un-addressable/i);
-    expect(o.reason).toContain('agents sessions resume sess-gho');
+    expect(o.reason).toContain('agents run auto --resume sess-gho');
     expect(o.reason).not.toContain('<id>');
     expect(result.counts.unaddressable).toBe(1);
     const flags = readFlags();
@@ -532,7 +532,7 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       expect(published).toHaveLength(1);
       expect(published[0].sessionId).toBe('sess-ghostty');
       expect(published[0].costOfDelay).toBe('high');
-      expect(published[0].questions[0].text).toContain('agents sessions resume sess-gho');
+      expect(published[0].questions[0].text).toContain('agents run auto --resume sess-gho');
       expect(published[0].questions[0].text).not.toContain('<id>');
       expect(readLedger()['sess-ghostty']).toBe(NOW);
     });
@@ -576,7 +576,7 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       const o = result.outcomes[0];
       expect(o.decision).toBe('skip');
       expect(o.addressable).toBe(false);
-      expect(o.reason).toContain('agents sessions resume sess-gho');
+      expect(o.reason).toContain('agents run auto --resume sess-gho');
       expect(o.reason).not.toContain('<id>');
       expect(readFlags()['sess-ghostty']).toBeDefined();
       expect(published).toHaveLength(0);

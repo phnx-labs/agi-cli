@@ -73,31 +73,6 @@ export function isHeadlessAlive(rec: DetachRecord): boolean {
   return true;
 }
 
-export async function takeOverDetachedSession(sessionId: string): Promise<boolean> {
-
-  const rec = readDetachRecord(sessionId);
-  if (!rec) return false;
-
-  if (isHeadlessAlive(rec)) {
-    try {
-      process.kill(rec.headlessPid, 'SIGTERM');
-    } catch (err) {
-      if (isHeadlessAlive(rec)) throw err;
-    }
-
-    const deadline = Date.now() + 2_000;
-    while (isHeadlessAlive(rec) && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    }
-    if (isHeadlessAlive(rec)) {
-      throw new Error(`Detached continuation ${rec.headlessPid} did not stop; refusing to resume a duplicate process.`);
-    }
-  }
-
-  clearDetachRecord(sessionId);
-  return true;
-}
-
 export function presenceFromStore(sessionId: string): Presence | undefined {
   const rec = readDetachRecord(sessionId);
   if (!rec) return undefined;

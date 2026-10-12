@@ -14,7 +14,7 @@ agents clis install secrets
 # or: agents setup secrets
 ```
 
-Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`). The legacy `agents secrets <anything>` spelling is a thin exec passthrough (`commands/secrets-passthrough.ts`) that forwards argv verbatim to the installed binary. The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
+Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`, or `secrets list --host <alias|user@host>` for another box). `agents secrets` was removed with no alias or forwarder (PHNX-4227): running it exits 1 with `error: 'agents secrets' was removed; use the standalone 'secrets' CLI (secrets --help).` The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it installs the pinned standalone (a declared `clis/secrets.yaml` if present, otherwise the same npm pin) and then hands off to the standalone's own `secrets migrate`.
 
 Read `secrets-client.md` for the process-client architecture (the wire
 protocol, the sync/async transports, the environment contract). This page
@@ -44,15 +44,13 @@ modules:
   profile is full trust. `bundle@host` (remote resolution over SSH) is
   agents-cli's own flag syntax, parsed and validated before the client is ever
   called.
-- **`agents secrets --device <name>` rewrites to `--host ssh://user@host`
-  (PHNX-4090).** The standalone `secrets` engine has no fleet registry of its
-  own — it only speaks `--host` in the address grammar shared with
-  `computer`/`browser` (`ssh://[user@]host`, or a bare `user@host`/alias,
-  since `secrets` never drives anything but ssh). `secrets-passthrough.ts`
-  (`rewriteDeviceToHost`) resolves the name against the fleet and rewrites the
-  forwarded argv before exec; an explicit `--host` the caller already typed is
-  left untouched. Called directly, the standalone takes the address itself:
-  `secrets list --host <alias|user@host>`.
+- **No fleet name resolution for bundle management.** The standalone speaks
+  only `--host` (`ssh://[user@]host`, or a bare `user@host` or ssh alias); it has
+  no `--device` and no fleet registry. The `--device` → `--host` rewrite that
+  `agents secrets` used to do went with that command (PHNX-4227). Fleet devices
+  become ssh aliases once `agents devices render --write` has written
+  `~/.ssh/config.d/agents` and `~/.ssh/config` includes it, so
+  `secrets export <bundle> --host <device>` then works with a device name.
 - **Accounts.** `agents accounts` reads and writes provider/native credentials
   as secrets bundles (`account-registry.ts`, `claude-account-token.ts`), and
   the reserved per-harness stores (`__<harness>__`, plus the legacy `auth`

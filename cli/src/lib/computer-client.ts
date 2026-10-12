@@ -66,7 +66,7 @@ interface RunComputerResult {
   stdout: string;
 }
 
-export async function forwardToComputer(opts: { argv: string[]; capture?: boolean }): Promise<RunComputerResult> {
+async function forwardToComputer(opts: { argv: string[]; capture?: boolean }): Promise<RunComputerResult> {
   let bin: string;
   try {
     bin = resolveComputerBin();

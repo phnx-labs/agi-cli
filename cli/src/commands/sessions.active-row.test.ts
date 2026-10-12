@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { backfillActiveRowsFromMeta } from './sessions.js';
+import { backfillActiveRowsFromMeta } from '../lib/session/active.js';
 import { renderActiveRowLines, filterActiveSessionsByRoutine } from './ps-roster.js';
 import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';

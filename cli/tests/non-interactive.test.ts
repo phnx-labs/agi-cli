@@ -247,7 +247,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
 
     expect(result.status).toBe(0);
     expect(combined).toContain(`Moved Claude@${version} to trash`);
-    expect(combined).toContain('Sessions remain accessible via `agents sessions`.');
+    expect(combined).toContain('Sessions remain accessible via `sessions`.');
     expect(combined).toContain(`Restore with: agents prune trash restore claude@${version}`);
     expect(fs.existsSync(versionDir)).toBe(false);
 

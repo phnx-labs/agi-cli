@@ -40,8 +40,7 @@ describe('buildComputerContext', () => {
     expect(context.peers.allow).toContain('/usr/local/bin/computer');
   });
 
-  it('keeps Mac bundle permissions out of remote and VNC contexts', async () => {
-    expect((await buildComputerContext({ host: 'windows-host' })).permissions).toBeUndefined();
+  it('keeps Mac bundle permissions out of VNC and TCP contexts', async () => {
     setEnv('COMPUTER_HELPER_VNC', 'localhost:5901');
     expect((await buildComputerContext()).permissions).toBeUndefined();
     setEnv('COMPUTER_HELPER_VNC', undefined);
@@ -58,9 +57,5 @@ describe('buildComputerContext', () => {
     expect(context.session.sessionId).toBe('claude-native');
     expect(context.session.launchId).toBe('launch-7');
     expect(typeof context.session.actor).toBe('string');
-  });
-
-  it('omits the target for a local invocation', async () => {
-    expect((await buildComputerContext()).target).toBeUndefined();
   });
 });

@@ -51,13 +51,13 @@ describe('Cursor Cloud API errors', () => {
 });
 
 describe('CursorCloudProvider auth', () => {
-  it('fails loud with the agents secrets command when no key is configured', async () => {
+  it('fails loud with the secrets command when no key is configured', async () => {
     const old = process.env.CURSOR_API_KEY;
     delete process.env.CURSOR_API_KEY;
     try {
       const provider = new CursorCloudProvider();
       expect(provider.capabilities().available).toBe(false);
-      await expect(provider.dispatch({ prompt: 'test' })).rejects.toThrow('agents secrets add cursor CURSOR_API_KEY');
+      await expect(provider.dispatch({ prompt: 'test' })).rejects.toThrow('after running: secrets add cursor CURSOR_API_KEY');
     } finally {
       if (old === undefined) delete process.env.CURSOR_API_KEY;
       else process.env.CURSOR_API_KEY = old;

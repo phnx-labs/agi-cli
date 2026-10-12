@@ -207,7 +207,7 @@ describe('buildRotateReplayText', () => {
   it('points the new session at the old transcript', () => {
     const text = buildRotateReplayText('old-123');
     expect(text).toContain('Resume previous work by loading session old-123');
-    expect(text).toContain('agents sessions old-123');
+    expect(text).toContain('`sessions old-123`');
     expect(text).toContain('continue working');
   });
 });
@@ -334,7 +334,7 @@ describe('runWatchdogTick — rotate state machine', () => {
     expect(calls).toHaveLength(5);
     const replay = calls[4];
     expect(replay.text).toContain('Resume previous work by loading session sess-tmux');
-    expect(replay.text).toContain('agents sessions sess-tmux');
+    expect(replay.text).toContain('`sessions sess-tmux`');
     expect((replay.target as { backend: string }).backend).toBe('tmux');
     const state = readRotateState(stateDir, 'sess-tmux');
     expect(state?.phase).toBe('done');
@@ -398,7 +398,7 @@ describe('runWatchdogTick — rotate state machine', () => {
     expect(o.decision).toBe('skip');
     expect(o.addressable).toBe(false);
     expect(o.reason).toMatch(/un-addressable/i);
-    expect(o.reason).toContain('agents sessions resume sess-gho');
+    expect(o.reason).toContain('agents run auto --resume sess-gho');
     expect(o.reason).not.toContain('<id>');
     expect(calls).toHaveLength(0);
     expect(readFlags()['sess-ghostty']).toBeDefined();

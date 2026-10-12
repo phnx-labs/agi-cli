@@ -152,7 +152,7 @@ describe('remoteAttachEndedNotice — ControlMaster close leaves the session id 
     const s = remoteAttachEndedNotice(SID, 'yosemite-m2', 0);
     expect(s).toContain('Connection to yosemite-m2 closed.');
     expect(s).toContain(`Session ${SID}`);
-    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).toContain(`agents ps focus ${SID}`);
   });
 
   it('a 255 drop prints dropped, not closed', () => {

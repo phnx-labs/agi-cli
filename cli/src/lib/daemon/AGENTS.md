@@ -96,14 +96,12 @@ record of `null` for it.
   a minute and every `bin` entry present; bun's write is not atomic).
   No-ops on a dev build, and on a shadowed install unless the disk is already
   newer (a relaunch installs nothing, so a shadow copy cannot make it unsafe);
-  the shadow no-op is logged once per process. Also reachable on demand via the `request-self-update`
-  browser-IPC action, which a version-skewed client now sends instead of just
-  printing `agents daemon restart` — `browser/ipc.ts`'s `reconcileDaemonVersion`.
-  That trigger is DECOUPLED from the install (PHNX-3605): the handler kicks the
-  self-update off in the background (`triggerSelfUpdateInBackground`, sharing the
-  same in-flight guard) and answers "triggered" immediately, so a version-skewed
-  `agents browser <verb>` — every one routes through this path — is never parked
-  behind the full check→download→install→verify).
+  the shadow no-op is logged once per process. `triggerSelfUpdateInBackground`
+  (`self-update-service.ts`) starts the same self-update in the background, sharing
+  the in-flight guard, so an on-demand caller is never parked behind the full
+  check→download→install→verify. Its former on-demand caller, the browser-IPC
+  `request-self-update` action, left with the browser engine (PHNX-4101); nothing in
+  this repo calls it today.
   When the tick does not exit for a relaunch, it also brings installed host CLIs
   up to their manifest pin (`upgradeOutdatedClis`, `cli-resources.ts`). A
   `clis/<name>.yaml` entry such as `npm: "@phnx-labs/secrets-cli@0.1.8"` is a
@@ -324,10 +322,9 @@ is no separate control socket. The daemon's `handleReload` diffs the reloaded
 supervised id, calls `supervisor.start(id)` / `supervisor.stop(id)` live — no
 daemon restart. It also drains any queued restart via
 `supervisor.restartOne(id)`. Most services disabled at boot are not registered
-and therefore still require an operator restart to enable. `browser-ipc` is the
-deliberate exception: it is always registered, with a stopped initial state
-when disabled, so `agents browser` can enable/reload the browser service without
-ever taking ownership of the shared daemon lifecycle. The inline scheduler is
+and therefore still require an operator restart to enable. (The former
+always-registered `browser-ipc` exception left with the browser engine, PHNX-4101;
+the standalone `browser` CLI runs its own IPC service.) The inline scheduler is
 re-evaluated directly by `handleReload`; `agents routines start|stop` toggles
 that service and sends SIGHUP while the daemon stays up (PHNX-3605).
 `agents daemon services` (no subcommand) reads
@@ -470,8 +467,8 @@ above is the source of truth for all of it.
 - **Interactive `agents daemon services` browser** (RUSH-3210) — a TTY-only view reusing
   `dynamicPicker` (`lib/picker.ts`), one row per service with a live-updating
   preview pane (log tail, last error, config) and inline
-  enable/disable/restart keybindings, mirroring the `agents sessions`
-  browser (`commands/sessions-browser.ts`). Deferred out of the P4 PR.
+  enable/disable/restart keybindings, mirroring the session
+  browser behind `agents ps` (`commands/sessions-browser.ts`). Deferred out of the P4 PR.
 - **Cross-device distribution patterns** (fanout / mirror / elected-singleton,
   described above) formalized as declared `placement` (`every-device` |
   `singleton`) and `distribution` (`fanout` | `mirror` | `local`) fields

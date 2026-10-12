@@ -124,7 +124,7 @@ agents cloud providers
 | `agents cloud list` | List cloud tasks (most recent first) |
 | `agents cloud status <id>` | Show task detail and latest status |
 | `agents cloud logs <id>` | Stream live output from a running task |
-| `agents cloud transcripts [selector]` | List captured Rush Cloud run transcripts, or render one (same output as `agents sessions --cloud`) |
+| `agents cloud transcripts [selector]` | List captured Rush Cloud run transcripts, or render one |
 | `agents cloud cancel <id>` | Cancel a running task |
 | `agents cloud message <id> <text>` | Send a follow-up to a finished or needs-review task |
 | `agents cloud providers` | List available providers and their status |

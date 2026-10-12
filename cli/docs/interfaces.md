@@ -14,7 +14,7 @@ The reaper (`browser prune`, also run by the engine every 5 minutes) closes only
 by abandoned tasks. It never closes user-created tabs or the shared browser window.
 Captures stay on disk; session linkage stores metadata.
 
-agents-cli is a consumer: `agents browser` forwards every verb to the engine and supplies
+agents-cli is a consumer: `browser` forwards every verb to the engine and supplies
 `--device` fleet resolution, remote-control consent, and the acting identity on fd 3. The
 seam is documented in [browser.md](browser.md).
 

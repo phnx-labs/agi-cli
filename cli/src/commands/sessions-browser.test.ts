@@ -6,7 +6,6 @@ import {
   cycleWindow,
   normalizeDeviceSeed,
   activeBrowserSeed,
-  bareBrowserSeed,
   buildInitialFilter,
   liveRowKey,
   indexLiveRows,
@@ -57,8 +56,8 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     expect(browserFilterToArgv({ ...base, bookmarks: true })).toEqual(['sessions', '--bookmarks']);
   });
 
-  it('running-only maps to --active', () => {
-    expect(browserFilterToArgv({ ...base, running: true })).toEqual(['sessions', '--active']);
+  it('running-only maps to agents ps', () => {
+    expect(browserFilterToArgv({ ...base, running: true })).toEqual(['agents', 'ps']);
   });
 
   it('all-dirs scope maps to --all; repo scope emits nothing', () => {
@@ -68,7 +67,7 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
 
   it('stacks every dimension in a stable, reproducible order', () => {
     const f: BrowserFilter = {
-      running: true,
+      running: false,
       teams: true,
       agent: 'claude',
       device: 'zion',
@@ -83,7 +82,6 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     };
     expect(browserFilterToArgv(f)).toEqual([
       'sessions',
-      '--active',
       '--teams',
       '-a',
       'claude',
@@ -123,9 +121,9 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
     expect(browserFilterToArgv(base, '   ')).toEqual(['sessions']);
   });
 
-  it('round-trips a live-status union without adding a redundant --active', () => {
-    expect(browserFilterToArgv({ ...base, running: true, statuses: ['orphaned', 'waiting'] })).toEqual([
-      'sessions', '--orphan', '--waiting',
+  it('round-trips a live-status union and device through agents ps', () => {
+    expect(browserFilterToArgv({ ...base, running: true, device: 'zion', statuses: ['orphaned', 'waiting'] })).toEqual([
+      'agents', 'ps', '--status', 'orphaned,waiting', '-D', 'zion',
     ]);
   });
 
@@ -135,6 +133,12 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
 });
 
 describe('remotePoolArgs — per-device version aliases', () => {
+  it("asks the peer's standalone sessions CLI for its local history, with no group word", () => {
+    expect(remotePoolArgs({ ...base, window: '7d', unmanaged: true }, false)).toEqual([
+      '--all', '--json', '--local', '--limit', '500', '--since', '7d',
+    ]);
+  });
+
   it('forwards latest unresolved so the peer resolves its own installed inventory', () => {
     expect(remotePoolArgs({ ...base, agent: 'claude@latest' }, true)).toContain('claude@latest');
   });
@@ -304,71 +308,20 @@ describe('activeBrowserSeed — the --active call-site filter (fleet-wide)', () 
     expect(activeBrowserSeed({ host: ['YOSEMITE-S1'] }).device).toBe('yosemite-s1');
     expect(activeBrowserSeed({}).device).toBeUndefined();
   });
-});
-
-describe('bareBrowserSeed — the bare-listing call-site filter', () => {
-  it('defaults to this-repo scope, widens to all dirs with --all', () => {
-    expect(bareBrowserSeed({}).projectScope).toBe('repo');
-    expect(bareBrowserSeed({ all: true }).projectScope).toBe('all');
-  });
-
-  it('is not running-only and seeds the window from --since', () => {
-    expect(bareBrowserSeed({}).running).toBeUndefined();
-    expect(bareBrowserSeed({ since: '7d' }).window).toBe('7d');
-  });
-
-  it('defaults the window to 30d, but --all widens it to all-time (undefined)', () => {
-    expect(bareBrowserSeed({}).window).toBe('30d');
-    expect(bareBrowserSeed({ all: true }).window).toBeUndefined();
-    expect(bareBrowserSeed({ all: true, since: '7d' }).window).toBe('7d');
-  });
-});
-
-describe('bareBrowserSeed — an explicit --device scope', () => {
-  it('forces all-dirs scope so a peer\'s rows are not filtered away', () => {
-    expect(bareBrowserSeed({ host: ['zion'] }).projectScope).toBe('all');
-    expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).projectScope).toBe('all');
-  });
-
-  it('seeds the device chip only when the scope names exactly one host', () => {
-    expect(bareBrowserSeed({ host: ['user@Zion.local'] }).device).toBe('zion');
-    expect(bareBrowserSeed({ host: ['zion', 'mac-mini'] }).device).toBeUndefined();
-    expect(bareBrowserSeed({}).device).toBeUndefined();
-  });
-
-  it('leaves the no-host behaviour untouched', () => {
-    expect(bareBrowserSeed({}).projectScope).toBe('repo');
-    expect(bareBrowserSeed({}).window).toBe('30d');
-  });
-
-  it('seeds the team filter from --in-team', () => {
-    expect(bareBrowserSeed({ inTeam: 'redesign' }).team).toBe('redesign');
-    expect(bareBrowserSeed({}).team).toBeUndefined();
-  });
 
   it('carries routine filters into the shared browser', () => {
-    expect(bareBrowserSeed({ routine: true }).routine).toBe(true);
-    expect(bareBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
     expect(activeBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
-  });
-
-  it('widens scope and window for --in-team, since a team outlives both defaults', () => {
-    const seed = bareBrowserSeed({ inTeam: 'redesign' });
-    expect(seed.projectScope).toBe('all');
-    expect(seed.window).toBeUndefined();
-  });
-
-  it('lets an explicit --since still bound an --in-team view', () => {
-    expect(bareBrowserSeed({ inTeam: 'redesign', since: '7d' }).window).toBe('7d');
+    expect(activeBrowserSeed({}).routine).toBe(false);
   });
 });
 
 describe('buildInitialFilter — the seed must survive into the live filter', () => {
   it('carries every seeded field through, not just the ones with defaults', () => {
-    const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'] });
+    const seed = activeBrowserSeed({ agent: 'codex', host: ['zion'], all: true, routine: 'nightly-review' });
     const filter = buildInitialFilter(seed);
 
-    expect(filter.team).toBe('redesign');
+    expect(filter.running).toBe(true);
+    expect(filter.routine).toBe('nightly-review');
     expect(filter.agent).toBe('codex');
     expect(filter.device).toBe('zion');
     expect(filter.projectScope).toBe('all');
@@ -376,7 +329,7 @@ describe('buildInitialFilter — the seed must survive into the live filter', ()
   });
 
   it('loses no key of the seed', () => {
-    const seed = bareBrowserSeed({ inTeam: 'redesign', agent: 'codex', host: ['zion'], teams: true });
+    const seed = activeBrowserSeed({ agent: 'codex', host: ['zion'], teams: true, bookmarks: true, since: '7d' });
     const filter = buildInitialFilter(seed) as Record<string, unknown>;
     for (const [key, value] of Object.entries(seed)) {
       expect({ key, value: filter[key] }).toEqual({ key, value });
@@ -606,10 +559,8 @@ describe('bookmarks survives the seed → filter copy', () => {
     expect(buildInitialFilter({}).bookmarks).toBe(false);
   });
 
-  it('is reachable from both entry points\u0027 seeds', () => {
-    expect(bareBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
+  it('is reachable from the live entry point\u0027s seed', () => {
     expect(activeBrowserSeed({ bookmarks: true }).bookmarks).toBe(true);
-    expect(bareBrowserSeed({}).bookmarks).toBe(false);
     expect(activeBrowserSeed({}).bookmarks).toBe(false);
   });
 });

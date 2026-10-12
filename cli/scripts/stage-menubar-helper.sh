@@ -83,7 +83,7 @@ SOURCE_FILE="$DOWNLOAD_DIR/$SOURCE_NAME"
 log "fetching $TAG from $BASE_URL"
 code="$(fetch "$SHA_URL" "$SHA_FILE")" || die "could not download $SHA_URL (network, DNS, or a mirror that is down)"
 [[ "$code" == "200" ]] \
-  || die "no $ASSET_NAME.sha256 on release $TAG (HTTP $code on $SHA_URL). Publish the helper from phnx-labs/agi-menu ('agents secrets exec apple.com -- scripts/release.sh $FLOOR' there) or point the menubar floor in src/lib/helper-versions.ts at a published release"
+  || die "no $ASSET_NAME.sha256 on release $TAG (HTTP $code on $SHA_URL). Publish the helper from phnx-labs/agi-menu ('secrets exec apple.com -- scripts/release.sh $FLOOR' there) or point the menubar floor in src/lib/helper-versions.ts at a published release"
 WANT_SHA="$(awk 'NR==1 {print $1}' "$SHA_FILE")"
 [[ "$WANT_SHA" =~ ^[0-9a-f]{64}$ ]] || die "malformed $ASSET_NAME.sha256 on $TAG: '$(head -c 120 "$SHA_FILE")'"
 

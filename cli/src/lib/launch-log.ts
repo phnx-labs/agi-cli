@@ -24,17 +24,15 @@ export function launchFailurePath(sessionId: string): string {
 export function launchSessionId(argv: string[]): string | undefined {
   const resume = argv.indexOf('--resume');
   if (resume >= 0 && argv[resume + 1] && !argv[resume + 1].startsWith('-')) return argv[resume + 1];
-  const verbs = ['resume', 'focus'];
-  if (argv[0] === 'sessions' && verbs.includes(argv[1] ?? '') && argv[2] && !argv[2].startsWith('-')) return argv[2];
-  return undefined;
+  const focused = argv[0] === 'ps' && argv[1] === 'focus' ? argv[2] : argv[0] === 'focus' ? argv[1] : undefined;
+  return focused && !focused.startsWith('-') ? focused : undefined;
 }
 
 export function launchesAgent(argv: string[]): boolean {
   const words = argv.filter((a) => !a.startsWith('-'));
   return words[0] === 'run'
     || words[0] === 'focus'
-    || (words[0] === 'ps' && words[1] === 'focus')
-    || (words[0] === 'sessions' && (words[1] === 'resume' || words[1] === 'focus'));
+    || (words[0] === 'ps' && words[1] === 'focus');
 }
 
 const AGENT_STARTED = '[agents] launch handed to the agent';

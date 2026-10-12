@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { fleetNotFoundMessage, executionKind, printRoutineDrilldown, serializeSessionPickerRows, type RoutineDrilldown } from './sessions.js';
 import { resolveSessionQuery, metadataResolveOutcome, isDefinitiveMatch, selectorAllowsEarlyExit, resolveSessionAgentName, parseInstalledAgentVersionQuery } from '../lib/session/selection.js';
 import { buildSessionDescription } from '../lib/session/presentation.js';
 import { buildResumeCommand, resumeSpawnInvocation } from '../lib/session/resume-command.js';
-import type { RunMeta } from '../lib/scheduling/routines.js';
 import { needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import type { ActiveSession } from '../lib/session/active.js';
 
 
 describe('session harness name resolution', () => {
@@ -18,162 +15,6 @@ describe('session harness name resolution', () => {
   });
 });
 
-describe('session picker JSON contract', () => {
-  it('joins durable and cached live state into one recovery-ready row', () => {
-    const session = {
-      id: 'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb', shortId: 'aaaaaaaa', agent: 'codex',
-      timestamp: '2026-08-10T00:00:00.000Z', lastActivity: '2026-08-10T00:01:00.000Z',
-      filePath: '/sessions/a.jsonl', cwd: '/repo',
-    } satisfies SessionMeta;
-    const live = {
-      context: 'terminal', kind: 'codex', sessionId: session.id, status: 'idle',
-      machine: 'box-a', pid: 42, cwd: '/repo', lastActivityMs: 123,
-    } satisfies ActiveSession;
-    expect(serializeSessionPickerRows([session], [live], 'self')).toEqual([
-      expect.objectContaining({
-        id: session.id, state: 'idle', resumable: true, unwatched: true,
-        viewingIn: null, sourceDevice: 'box-a', lastActivityMs: 123, pid: 42,
-        recovery: { command: 'agents', args: ['sessions', 'resume', session.id, '--device', 'box-a'], cwd: '/repo' },
-      }),
-    ]);
-  });
-});
-describe('routine drilldown — run history + linked sessions (RUSH-2409)', () => {
-  const run = (over: Partial<RunMeta> & { runId: string; status: RunMeta['status'] }): RunMeta => ({
-    jobName: 'r', pid: null, startedAt: '2026-08-08T05:00:00.000Z', completedAt: null, exitCode: null,
-    ...over,
-  });
-  const sess = (over: Partial<SessionMeta> & { id: string }): SessionMeta => ({
-    shortId: over.id.slice(0, 8), agent: 'claude', timestamp: '2026-08-08T05:00:00.000Z',
-    filePath: '/tmp/s.jsonl', ...over,
-  });
-  const capture = (fn: () => void): string => {
-    const lines: string[] = [];
-    const orig = console.log;
-    console.log = (line = '') => { lines.push(String(line)); };
-    try { fn(); } finally { console.log = orig; }
-    // eslint-disable-next-line no-control-regex
-    return lines.join('\n').replace(/\[[0-9;]*m/g, '');
-  };
-
-  it('classifies execution kind from the run record, not the session', () => {
-    expect(executionKind(run({ runId: 'x', status: 'completed', agent: 'claude' }))).toBe('agent');
-    expect(executionKind(run({ runId: 'x', status: 'completed', workflow: 'wf' }))).toBe('workflow');
-    expect(executionKind(run({ runId: 'x', status: 'skipped', command: 'agents __daemon-tick x' }))).toBe('command');
-  });
-
-  it('renders a command-only routine as run history with no session synthesized', () => {
-    const drill: RoutineDrilldown = {
-      name: 'auto-dispatch',
-      runs: [
-        { meta: run({ runId: '2026-08-08T05-03-00-002Z', status: 'skipped', command: 'agents __daemon-tick auto-dispatch', triggerKind: 'schedule', skipReason: 'wrong_owner', duration: 0 }), sessions: [] },
-        { meta: run({ runId: '2026-08-08T05-00-00-002Z', status: 'completed', command: 'echo hi', triggerKind: 'schedule', duration: 1500, exitCode: 0 }), sessions: [] },
-      ],
-      orphanSessions: [],
-      runRecordCount: 2,
-      linkedSessionCount: 0,
-      isAgentRoutine: false,
-    };
-    const out = capture(() => printRoutineDrilldown(drill));
-    expect(out).toContain('auto-dispatch  2 run records · 0 linked sessions');
-    expect(out).toContain('Command routine — runs execute a shell command; no agent session is produced.');
-    expect(out).toContain('▸ 2026-08-08T05-03-00-002Z');
-    expect(out).toContain('skipped');
-    expect(out).toContain('wrong owner');
-    expect(out).toContain('command · local');
-    expect(out).toContain('completed');
-    expect(out).not.toContain('no agent session archived for this run');
-  });
-
-  it('links an indexed agent session to its run with token/cost/tool metadata', () => {
-    const linked = sess({
-      id: 'aaaa1111-2222-4333-8444-555566667777', agent: 'claude', version: '2.1.181',
-      account: 'dev@x.io', model: 'claude-opus-4-8', outputTokens: 42000, costUsd: 1.23,
-      durationMs: 720000, toolCallCount: 88, routineName: 'nightly', routineRunId: 'run-1',
-      topic: 'nightly review',
-    });
-    const drill: RoutineDrilldown = {
-      name: 'nightly',
-      runs: [{ meta: run({ runId: 'run-1', status: 'completed', agent: 'claude', version: '2.1.181', triggerKind: 'schedule', duration: 720000, exitCode: 0 }), sessions: [linked] }],
-      orphanSessions: [],
-      runRecordCount: 1,
-      linkedSessionCount: 1,
-      isAgentRoutine: true,
-    };
-    const out = capture(() => printRoutineDrilldown(drill));
-    expect(out).toContain('nightly  1 run record · 1 linked session');
-    expect(out).not.toContain('no agent session is produced');
-    expect(out).toContain('claude v2.1.181');
-    expect(out).toContain('dev@x.io');
-    expect(out).toContain('42K out');
-    expect(out).toContain('$1.23');
-    expect(out).toContain('88 tools');
-  });
-
-  it('shows the outcome for failed and blocked runs without a session, never a fake row', () => {
-    const drill: RoutineDrilldown = {
-      name: 'nightly',
-      runs: [
-        { meta: run({ runId: 'run-2', status: 'failed', agent: 'claude', triggerKind: 'schedule', exitCode: 1, errorMessage: 'auth_failed: login required', duration: 3000 }), sessions: [] },
-        { meta: run({ runId: 'run-3', status: 'blocked', agent: 'claude', triggerKind: 'schedule', readiness: { code: 'dead_auth', message: 'account signed out' } }), sessions: [] },
-      ],
-      orphanSessions: [],
-      runRecordCount: 2,
-      linkedSessionCount: 0,
-      isAgentRoutine: true,
-    };
-    const out = capture(() => printRoutineDrilldown(drill));
-    expect(out).toContain('failed');
-    expect(out).toContain('auth_failed: login required');
-    expect(out).toContain('blocked');
-    expect(out).toContain('dead_auth: account signed out');
-    expect(out).toContain('no agent session archived for this run');
-  });
-
-  it('surfaces sessions whose run record is on another host as orphans, counted honestly', () => {
-    const orphanSess = sess({ id: 'bbbb1111-2222-4333-8444-555566667777', routineName: 'nightly', routineRunId: 'remote-run', timestamp: '2026-08-08T04:00:00.000Z' });
-    const drill: RoutineDrilldown = {
-      name: 'nightly',
-      runs: [],
-      orphanSessions: [{ runId: 'remote-run', timestamp: '2026-08-08T04:00:00.000Z', sessions: [orphanSess] }],
-      runRecordCount: 0,
-      linkedSessionCount: 1,
-      isAgentRoutine: true,
-    };
-    const out = capture(() => printRoutineDrilldown(drill));
-    expect(out).toContain('nightly  0 run records · 1 linked session');
-    expect(out).toContain('Sessions with no local run record (run archived on another host):');
-    expect(out).toContain('▸ remote-run');
-  });
-
-  it('keeps the hidden team and unmanaged-session disclosures (every listing path says what it dropped)', () => {
-    const drill: RoutineDrilldown = {
-      name: 'nightly',
-      runs: [{ meta: run({ runId: 'run-1', status: 'completed', agent: 'claude', triggerKind: 'schedule', duration: 1000, exitCode: 0 }), sessions: [] }],
-      orphanSessions: [],
-      runRecordCount: 1,
-      linkedSessionCount: 0,
-      isAgentRoutine: true,
-    };
-    const out = capture(() => printRoutineDrilldown(drill, undefined, { hiddenCount: 2, hiddenUnmanaged: 1 }));
-    expect(out).toContain('2 team sessions hidden');
-    expect(out).toContain('1 session from your own unmanaged installs hidden');
-  });
-
-  it('labels a workflow routine as an agent routine, not a command routine', () => {
-    const drill: RoutineDrilldown = {
-      name: 'wf-routine',
-      runs: [{ meta: run({ runId: 'wf-1', status: 'completed', workflow: 'nightly-wf', triggerKind: 'schedule', duration: 5000, exitCode: 0 }), sessions: [] }],
-      orphanSessions: [],
-      runRecordCount: 1,
-      linkedSessionCount: 0,
-      isAgentRoutine: true,
-    };
-    const out = capture(() => printRoutineDrilldown(drill));
-    expect(out).not.toContain('no agent session is produced');
-    expect(out).toContain('workflow · ');
-  });
-});
 describe('positional installed agent version filters', () => {
   const installed = (agent: string) => agent === 'claude' ? ['2.1.181'] : ['0.146.0'];
 
@@ -490,18 +331,4 @@ describe('RUSH-2203 definitive-match fleet resolve', () => {
     });
   });
 
-  describe('fleetNotFoundMessage', () => {
-    it('reports the sweep result and never tells the user to pass --device', () => {
-      const lines = fleetNotFoundMessage(FULL, 5, ['zion', 'box']).join('\n');
-      expect(lines).toContain('5 devices searched');
-      expect(lines).toContain('Unreachable (not searched): zion, box');
-      expect(lines).not.toContain('--device');
-    });
-
-    it('handles a fleet with no reachable peers', () => {
-      const lines = fleetNotFoundMessage(FULL, 0, []).join('\n');
-      expect(lines).toContain('No other reachable devices to search.');
-      expect(lines).not.toContain('--device');
-    });
-  });
 });

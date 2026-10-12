@@ -90,5 +90,3 @@ export function runSessions(argv: string[]): Promise<number> {
 export function _resetSessionsClientForTest(): void {
   cachedBin = undefined;
 }
-
-export const SESSIONS_INSTALL_HINT = INSTALL_HINT;

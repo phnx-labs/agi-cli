@@ -190,7 +190,7 @@ describe('resolveAnswerRoute', () => {
     });
     expect(r.kind).toBe('refuse');
     expect(r.reason).toMatch(/no addressable terminal/i);
-    expect(r.reason).toContain('agents sessions resume');
+    expect(r.reason).toContain('agents run auto --resume');
     expect(r.reason).toContain('tmux');
   });
 });

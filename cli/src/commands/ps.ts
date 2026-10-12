@@ -152,7 +152,8 @@ function registerPeerResolveCommand(ps: Command): void {
     .option('-p, --project <name>')
     .option('--json')
     .option('--local')
-    .action(async (selector: string | undefined, opts: { launchId?: string; agent?: string; project?: string; json?: boolean }) => {
+    .action(async (selector: string | undefined, _options: unknown, invoked: Command) => {
+      const opts = invoked.optsWithGlobals() as { launchId?: string; agent?: string; project?: string; json?: boolean };
       if (!opts.json) {
         console.error(chalk.red('ps resolve requires --json.'));
         process.exit(1);
@@ -179,7 +180,7 @@ function registerPeerResolveCommand(ps: Command): void {
     });
 }
 
-export function registerSessionPreviewCommand(parent: Command): void {
+function registerSessionPreviewCommand(parent: Command): void {
   const previewCmd = parent
     .command('preview')
     .argument('<id>', 'Full session ID or displayed 8-character short ID')

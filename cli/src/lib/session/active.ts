@@ -112,7 +112,7 @@ export function filterCachedUnattributed(
 
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
-export type BackfillMeta = Pick<SessionMeta,
+type BackfillMeta = Pick<SessionMeta,
   'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
 >;

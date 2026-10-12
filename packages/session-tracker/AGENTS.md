@@ -12,7 +12,7 @@ There are **two unrelated "session" surfaces** in this repo — do not conflate:
 | | This package | `cli/src/lib/session/` |
 |---|---|---|
 | Role | **Writes** live-session state | **Reads** agent transcripts |
-| Trigger | `SessionStart` hook (`hook.sh`) | `agents sessions` command |
+| Trigger | `SessionStart` hook (`hook.sh`) | the session indexer, `agents ps`, and resume (people read transcripts with the standalone `sessions` CLI) |
 | Data | `~/.agents/.cache/terminals/sessions/<pid>.json` | `~/.claude/projects/*.jsonl`, Codex rollouts, … |
 | `SessionState` type | `{session_id, agent, cwd, pid, terminal_id, launch_id, ts, method}` | different type (`activity`, `pr`, `worktree`, `ticket`, …) |
 | Consumer | VS Code ext (agi-ext `src/core/liveSession.ts`) | the CLI itself |

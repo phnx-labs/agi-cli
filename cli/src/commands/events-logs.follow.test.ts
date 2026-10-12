@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { resolveSessionsBin, runSessions, _resetSessionsClientForTest } from '../lib/sessions-client.js';
-import { cliEntry, describeLive, runAgents, tsxLoaderUrl, writeClaudeSession, writeUpdateCache } from './sessions.test-fixture.js';
+import { cliEntry, describeLive, indexSessions, tsxLoaderUrl, writeClaudeSession, writeUpdateCache } from './sessions.test-fixture.js';
 
 const temps: string[] = [];
 const savedHome = process.env.HOME;
@@ -34,7 +34,7 @@ function indexedClaudeSession(): { home: string; cwd: string; id: string; transc
   const id = '5a5a5a5a-5a5a-45a5-85a5-5a5a5a5a5a5a';
   const projectKey = cwd.replace(/[/.]/g, '-');
   writeClaudeSession(home, projectKey, id, cwd, 'follow me', '2026-10-08T10:00:00.000Z');
-  const indexed = runAgents(['sessions', '--all', '--json', '--no-interactive'], cwd, home);
+  const indexed = indexSessions(cwd, home);
   expect(indexed.status, indexed.stderr).toBe(0);
   return { home, cwd, id, transcript: path.join(home, '.claude', 'projects', projectKey, `${id}.jsonl`) };
 }

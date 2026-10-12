@@ -324,7 +324,7 @@ describe('peerHopCloseNotice — TTY hop leaves the session id (RUSH-3227)', () 
     const s = peerHopCloseNotice({ tty: true, sessionId: SID }, 'yosemite-m2', 0);
     expect(s).toContain('Connection to yosemite-m2 closed.');
     expect(s).toContain(`Session ${SID}`);
-    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).toContain(`agents run auto --resume ${SID}`);
   });
 
   it('tty + sessionId on a 255 drop says dropped', () => {

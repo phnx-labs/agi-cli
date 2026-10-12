@@ -28,9 +28,9 @@ afterAll(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-describe('agents sessions stats (real CLI parse)', () => {
+describe('agents insights resources flags (real CLI parse)', () => {
   it('emits the versioned stats envelope on --json even though the parent owns --json', () => {
-    const res = run(['sessions', 'stats', '--json']);
+    const res = run(['insights', 'resources', '--json']);
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { schemaVersion: number; kind: string; ranked: unknown[] };
     expect(parsed.schemaVersion).toBe(2);
@@ -39,26 +39,26 @@ describe('agents sessions stats (real CLI parse)', () => {
   });
 
   it('carries --kind through to the filters (a parent-unknown flag on the child)', () => {
-    const res = run(['sessions', 'stats', '--kind', 'skill', '--json']);
+    const res = run(['insights', 'resources', '--kind', 'skill', '--json']);
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { filters: { kind: string | null } };
     expect(parsed.filters.kind).toBe('skill');
   });
 
   it('fails loud on an invalid --kind instead of silently ignoring it', () => {
-    const res = run(['sessions', 'stats', '--kind', 'bogus']);
+    const res = run(['insights', 'resources', '--kind', 'bogus']);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain('--kind must be one of');
   });
 
   it('fails loud on a negative --top', () => {
-    const res = run(['sessions', 'stats', '--top', '-3']);
+    const res = run(['insights', 'resources', '--top', '-3']);
     expect(res.status).toBe(1);
     expect(res.stderr).toContain('--top must be');
   });
 
   it('exposes the resources backfill with its own versioned envelope', () => {
-    const res = run(['sessions', 'backfill', 'resources', '--json']);
+    const res = run(['daemon', 'index', 'backfill', 'resources', '--json']);
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { schemaVersion: number; kind: string; updated: number };
     expect(parsed.schemaVersion).toBe(1);

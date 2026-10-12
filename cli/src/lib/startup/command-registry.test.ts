@@ -20,7 +20,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     expect(missing).toEqual([]);
   });
 
-  it('includes the lazily-registered groups (sessions/teams/cloud/…)', () => {
+  it('includes the lazily-registered groups (teams/cloud)', () => {
     for (const name of LAZY_COMMAND_NAMES) {
       expect(isKnownTopLevelCommand(name)).toBe(true);
     }
@@ -84,7 +84,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     expect(names.length).toBeGreaterThan(50);
     expect(names).toContain('ssh');
     expect(names).toContain('repos');
-    expect(names).toContain('computer');
+    expect(names).toContain('ps');
     expect(names).toContain('send');
   });
 });

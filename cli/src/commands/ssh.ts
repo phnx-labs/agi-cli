@@ -54,7 +54,7 @@ import {
   buildSshInvocation,
   deviceIdentityArgs,
   fleetDialTarget,
-  isAgentsBrowserDrive,
+  isBrowserDrive,
   markFleetRemote,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
@@ -412,7 +412,7 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
 
 export function leasedBoxRemoteCmd(cmd: string[]): string[] {
 
-  return isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
+  return isBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
 }
 
 async function mustGetDevice(name: string): Promise<DeviceProfile> {
