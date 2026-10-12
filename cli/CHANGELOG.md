@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.23.21
+
+- **`agents projects prs` reads open PRs in one GraphQL query per repository or owner.**
+  The project read and the all-orgs read behind AGI Menu's GitHub tab used to read each
+  open PR three more times (`pulls/{n}`, check-runs, status), one `gh` process per call.
+  Each page of 100 PRs now carries the head, merge state and check rollup for 2 GraphQL
+  points. Measured on one Mac with 1.23.19: a 101-PR project read took 43.8 s, 20.7
+  CPU-seconds and 304 `gh` processes; the all-orgs read of 201 PRs took 76.6 s, 32.0
+  CPU-seconds and 527 processes. The JSON fields and the newest-first order are
+  unchanged. One tradeoff: if the shared GraphQL budget is exhausted, a repository's
+  list fails (`error`, `partial`) instead of showing PRs without CI. Source: `cli/src/lib/github/project-prs.ts`,
+  `cli/src/lib/github/open-prs.ts`.
+
+- **AGI Menu 1.18.1.** The menubar floor moves to 1.18.1: Home's pull requests and the GitHub tab draw their last list at once after a relaunch, the menu-bar badge is redrawn only when it changes, and the snapshot poll runs every 15 minutes while the menu is closed. Source: `cli/src/lib/helper-versions.ts`.
+
 ## 1.23.20
 
 - **Balanced and available rotation never pick an API-key account (owner decision 2026-10-12).**
