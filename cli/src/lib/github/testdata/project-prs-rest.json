@@ -3,11 +3,9 @@
   "routes": {
     "repos/acme/mono/branches/main": "d0d0d0d\n",
 
-    "graphql": [
-      { "number": 1, "mergeable": "CONFLICTING", "mergeStateStatus": "DIRTY" },
-      { "number": 2, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN" },
-      { "number": 3, "mergeable": "UNKNOWN", "mergeStateStatus": "UNKNOWN" }
-    ],
+    "repos/acme/mono/pulls/1": [{ "number": 1, "mergeable": false, "mergeableState": "dirty" }],
+    "repos/acme/mono/pulls/2": [{ "number": 2, "mergeable": true, "mergeableState": "clean" }],
+    "repos/acme/mono/pulls/3": [{ "number": 3, "mergeable": null, "mergeableState": "unknown" }],
 
     "repos/acme/mono/commits/o1/check-runs": [
       { "name": "test", "status": "COMPLETED", "conclusion": "FAILURE", "link": "" },

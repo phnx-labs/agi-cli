@@ -168,47 +168,23 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
-  const mergeStateRead = (pages: string[]) => (args: string[]) => {
-    const pair = (flag: string, value: string) => args.some((a, i) => a === flag && args[i + 1] === value);
-    const query = args.find((a) => a.startsWith('query=')) ?? '';
-    expect(args).toContain('--paginate');
-    expect(pair('--cache', '60s')).toBe(true);
-    expect(pair('-f', 'owner=acme')).toBe(true);
-    expect(pair('-f', 'name=mono')).toBe(true);
-    expect(query).toContain('$endCursor: String');
-    expect(query).toContain('after: $endCursor');
-    expect(query).toContain('pageInfo { hasNextPage endCursor }');
-    return pages.join('');
-  };
-
-  it('carries mergeable and mergeableState from one merge-state read per repo, not one per PR', async () => {
-    const { gh, asked } = recordedGh({ ...soloRoutes(), graphql: mergeStateRead([REST.graphql as string]) });
+  it('carries mergeable and mergeableState from each open PR\'s cached REST read, never GraphQL', async () => {
+    const { gh, asked } = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
+    expect(repo.ciError).toBeNull();
     expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
       [1, false, 'dirty'],
       [2, true, 'clean'],
       [3, null, 'unknown'],
     ]);
-    expect(asked.filter((e) => e === 'graphql')).toHaveLength(1);
-    expect(asked.filter((e) => /^repos\/acme\/mono\/pulls\/[123]$/.test(e))).toEqual([]);
+    expect(asked.filter((e) => /^repos\/acme\/mono\/pulls\/[123]$/.test(e)).sort()).toEqual([1, 2, 3].map((n) => `repos/acme/mono/pulls/${n}`));
+    expect(asked.some((e) => e.includes('graphql'))).toBe(false);
   });
 
-  it('merges the rows of every page the paginated merge-state read prints', async () => {
-    const page1 = `${JSON.stringify({ number: 1, mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' })}\n`;
-    const page2 = `${JSON.stringify({ number: 2, mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' })}\n${JSON.stringify({ number: 3, mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' })}\n`;
-    const { gh } = recordedGh({ ...soloRoutes(), graphql: mergeStateRead([page1, page2]) });
+  it('keeps the list when one PR\'s merge-state read fails, naming the failure', async () => {
+    const { gh } = recordedGh({ ...soloRoutes(), 'repos/acme/mono/pulls/2': ghError('gh: Server Error (HTTP 502)\n') });
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
-    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([
-      [1, false, 'dirty'],
-      [2, true, 'behind'],
-      [3, true, 'clean'],
-    ]);
-  });
-
-  it('keeps the list when the merge-state read fails, naming the failure', async () => {
-    const { gh } = recordedGh({ ...soloRoutes(), graphql: ghError('gh: Server Error (HTTP 502)\n') });
-    const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
-    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([[1, null, null], [2, null, null], [3, null, null]]);
+    expect(repo.pullRequests.map((pr) => [pr.number, pr.mergeable, pr.mergeableState])).toEqual([[1, false, 'dirty'], [2, null, null], [3, null, 'unknown']]);
     expect(repo.ciError).toContain('502');
   });
 
@@ -235,7 +211,7 @@ describe('CI at a glance and recently merged PRs', () => {
       'repos/acme/mono/commits/o1/check-runs',
       'repos/acme/mono/commits/o3/check-runs',
     ]);
-    expect(warm.asked.filter((e) => /pulls\/\d+$/.test(e))).toEqual([]);
+    expect(warm.asked.filter((e) => /pulls\/(10|13|15)$/.test(e))).toEqual([]);
     expect(repo.pullRequests.map((pr) => pr.ciState)).toEqual(['FAILURE', 'SUCCESS', null]);
     expect(repo.recentlyMerged.map((pr) => [pr.number, pr.mergedBy, pr.ciState])).toEqual([
       [13, 'hubot', 'FAILURE'], [10, null, 'SUCCESS'], [15, 'hubot', 'SUCCESS'],
