@@ -2445,6 +2445,10 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       return usageNoRecentUsageInfo();
     }
     const now = new Date();
+    const unavailable = match.exhaustedAt
+      && now.getTime() - match.exhaustedAt.getTime() < OUT_OF_CREDITS_REPROBE_MS
+      ? { reason: 'out_of_credits' as const, notedAt: match.exhaustedAt }
+      : undefined;
     const windows = match.windows.filter((window) =>
       isCachedUsageWindowFresh(window, match.capturedAt, now)
     );
@@ -2465,6 +2469,7 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         staleWindows: staleWindows.length > 0 ? staleWindows : undefined,
         plan: match.subscriptionTier,
         refreshHint,
+        unavailable,
       },
       error: null,
     };
@@ -2687,11 +2692,13 @@ interface GrokBillingMatch {
   subscriptionTier?: string | null;
   windows: UsageWindow[];
   identity: GrokAuthIdentity | null;
+  exhaustedAt?: Date | null;
 }
 
 async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch | null> {
   return new Promise((resolve) => {
     let latest: GrokBillingMatch | null = null;
+    let exhaustedAt: Date | null = null;
     const stream = fs.createReadStream(filePath, { encoding: 'utf-8' });
     const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
 
@@ -2702,6 +2709,10 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
         const ctx = parsed.ctx && typeof parsed.ctx === 'object' && !Array.isArray(parsed.ctx)
           ? parsed.ctx as Record<string, unknown>
           : null;
+        if (parsed.msg === 'shell.turn.inference_failed' && ctx?.status_code === 402) {
+          exhaustedAt = parseDateValue(parsed.ts);
+          return;
+        }
         if (parsed.msg === 'billing: fetched credits config' && ctx?.config) {
           const config = ctx.config as Record<string, unknown>;
           const windows: UsageWindow[] = [];
@@ -2727,13 +2738,21 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
             windows,
             identity: grokIdentityFromBillingPayload(parsed),
           };
+          exhaustedAt = null;
         }
       } catch {
       }
     });
 
-    rl.on('close', () => resolve(latest));
-    rl.on('error', () => resolve(latest));
+    const settle = (): void => {
+      if (exhaustedAt) {
+        resolve({ ...(latest ?? { capturedAt: exhaustedAt, windows: [], identity: null }), exhaustedAt });
+      } else {
+        resolve(latest);
+      }
+    };
+    rl.on('close', settle);
+    rl.on('error', settle);
   });
 }
 
