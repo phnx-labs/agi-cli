@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { buildFleetStatePayload } from '../accounting/usage-sync.js';
-import { probeFleetStats, headroom } from '../devices/health.js';
+import { probeFleetStats, headroom, type DeviceStats } from '../devices/health.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
 import {
@@ -37,16 +37,20 @@ export function clearPlacementSignalCache(): void {
   cache.clear();
 }
 
+interface ReadinessInfo {
+  /** The host ran the ready probe and replied: proof it is reachable, whatever the stats probe saw. */
+  answered: boolean;
+  installed: boolean | undefined;
+  signedIn: boolean | undefined;
+  pickerEligible: boolean | undefined;
+}
+
 function probeRemoteReadiness(
   device: DeviceProfile,
   agent: string,
   usagePayload: string,
-): Promise<{
-  installed: boolean | undefined;
-  signedIn: boolean | undefined;
-  pickerEligible: boolean | undefined;
-}> {
-  const unknown = { installed: undefined, signedIn: undefined, pickerEligible: undefined };
+): Promise<ReadinessInfo> {
+  const unknown: ReadinessInfo = { answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined };
   let args: string[];
   let env: Record<string, string>;
   try {
@@ -64,7 +68,7 @@ function probeRemoteReadiness(
     });
     let stdout = '';
     let settled = false;
-    const finish = (value: typeof unknown | { installed: boolean; signedIn: boolean | undefined; pickerEligible: boolean | undefined }): void => {
+    const finish = (value: ReadinessInfo): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -82,16 +86,36 @@ function probeRemoteReadiness(
       if (code !== 0 || !stdout) return finish(unknown);
       const probe = parseReadyProbe(stdout);
       if (!probe.reachable) return finish(unknown);
-      if (!probe.version) return finish({ installed: false, signedIn: false, pickerEligible: false });
+      if (!probe.version) return finish({ answered: true, installed: false, signedIn: false, pickerEligible: false });
       const installed = viewHasAgent(probe.view, agent);
       const eligibility = installed
         ? viewAgentAccountEligibility(probe.view, agent)
         : { signedIn: false, pickerEligible: false };
-      finish({ installed, ...eligibility });
+      finish({ answered: true, installed, ...eligibility });
     });
     child.stdin.on('error', () => {  });
     child.stdin.end(usagePayload);
   });
+}
+
+/** The stats probe has a short budget (2.5 s on a direct path), so a local
+ * stall can time it out on every host at once. A host that answered the ready
+ * probe is reachable regardless; only its load stays unknown. */
+export function mergePlacementSignal(
+  stats: DeviceStats | undefined,
+  readiness: ReadinessInfo | undefined,
+): DevicePlacementSignal {
+  const reachable = readiness?.answered === true ? true : stats?.reachable;
+  return {
+    reachable,
+    timedOut: reachable === true ? undefined : stats?.timedOut,
+    headroom: stats ? headroom(stats) : undefined,
+    loadPercent: stats?.loadPercent,
+    memPercent: stats?.memPercent,
+    installed: readiness?.installed,
+    signedIn: readiness?.signedIn,
+    pickerEligible: readiness?.pickerEligible,
+  };
 }
 
 export async function probePoolSignals(
@@ -123,24 +147,20 @@ export async function probePoolSignals(
   const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
   const usagePayload = JSON.stringify(buildFleetStatePayload({ usageOnly: true }));
 
-  type InstalledInfo = {
-    installed: boolean | undefined;
-    signedIn: boolean | undefined;
-    pickerEligible: boolean | undefined;
-  };
-  const installed = new Map<string, InstalledInfo>(agent
+  const installed = new Map<string, ReadinessInfo>(agent
     ? await Promise.all(
-      profiles.map(async (d): Promise<readonly [string, InstalledInfo]> => {
+      profiles.map(async (d): Promise<readonly [string, ReadinessInfo]> => {
         const isSelf = normalizeHost(d.name) === self;
         if (isSelf) {
           const inst = checkCliAvailable(agent)[0];
-          if (!inst) return [d.name, { installed: false, signedIn: false, pickerEligible: false }];
+          if (!inst) return [d.name, { answered: true, installed: false, signedIn: false, pickerEligible: false }];
           const candidates = await collectRunCandidates(agent).catch(() => null);
           if (!candidates) {
-            return [d.name, { installed: true, signedIn: undefined, pickerEligible: undefined }];
+            return [d.name, { answered: true, installed: true, signedIn: undefined, pickerEligible: undefined }];
           }
           const readiness = candidates.map((candidate) => readinessFromCandidate(candidate));
           return [d.name, {
+            answered: true,
             installed: true,
             signedIn: readiness.some((candidate) => candidate.ready),
             pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
@@ -158,16 +178,7 @@ export async function probePoolSignals(
     const s = d ? stats.get(d.name) : undefined;
     const inst = d ? installed.get(d.name) : undefined;
     if (!s && !inst) continue;
-    signals.set(name, {
-      reachable: s?.reachable,
-      timedOut: s?.timedOut,
-      headroom: s ? headroom(s) : undefined,
-      loadPercent: s?.loadPercent,
-      memPercent: s?.memPercent,
-      installed: inst?.installed,
-      signedIn: inst?.signedIn,
-      pickerEligible: inst?.pickerEligible,
-    });
+    signals.set(name, mergePlacementSignal(s, inst));
   }
 
   cache.set(key, { at: now, signals });

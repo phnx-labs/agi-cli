@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { mergePlacementSignal } from './teams/placement-probe.js';
 import {
   affinityWeights,
   sampleWeighted,
@@ -187,6 +188,20 @@ describe('resolveDeviceAuto', () => {
     const base = { localMachine: 'local', eligibleHosts: ['idle', 'busy-preferred'], probe } as const;
     expect((await resolveDeviceAuto('codex', { ...base })).host).toBe('idle');
     expect((await resolveDeviceAuto('codex', { ...base, preferred: new Set(['busy-preferred']) })).host).toBe('busy-preferred');
+  });
+
+  it('places on a signed-in host whose stats probe timed out but whose ready probe answered', async () => {
+    const stalled = { reachable: false, timedOut: true, fetchedAt: 0 };
+    const ready = { answered: true, installed: true, signedIn: true, pickerEligible: true };
+    const plan = await resolveDeviceAuto('claude', {
+      localMachine: 'local',
+      eligibleHosts: ['m1', 'm6'],
+      probe: async () => new Map([
+        ['m1', mergePlacementSignal({ host: 'm1', ...stalled }, ready)],
+        ['m6', mergePlacementSignal({ host: 'm6', ...stalled }, ready)],
+      ]),
+    });
+    expect(['m1', 'm6']).toContain(plan.host);
   });
 
   it('fails loud when live probing cannot evaluate placement', async () => {
