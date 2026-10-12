@@ -61,6 +61,8 @@ describe('menubar snapshot', () => {
         'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'projects', 'linear', 'github', 'sessions', 'inbox'],
         'menubar.menu.hiddenTabs': ['secrets'],
         'menubar.menu.homeGoals': ['company'],
+        'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
+        'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
@@ -84,6 +86,8 @@ describe('menubar snapshot', () => {
         'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github'],
         'menubar.menu.hiddenTabs': ['inbox'],
         'menubar.menu.homeGoals': ['company', 'myDay'],
+        'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
+        'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
       });
     } finally {
