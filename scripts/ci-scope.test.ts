@@ -240,7 +240,7 @@ describe('selectImpact policy', () => {
 
   test('a sessions change carries the group budget, not the 85s default', () => {
     const plan = selectImpact({
-      files: ['cli/src/commands/sessions.ts'],
+      files: ['cli/src/lib/session/discover.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -293,7 +293,7 @@ describe('selectImpact policy', () => {
 
   test('the highest budget among matched groups wins', () => {
     const plan = selectImpact({
-      files: ['cli/src/commands/sessions.ts', 'packages/session-tracker/src/index.ts'],
+      files: ['cli/src/lib/session/discover.ts', 'packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
       related: false,
     });
