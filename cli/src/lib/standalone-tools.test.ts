@@ -14,7 +14,7 @@ describe('standalone tool floors', () => {
   it('pins the published releases R1 of PHNX-4227 depends on', () => {
     expect(pinnedSpec('sessions')).toBe('@phnx-labs/sessions-cli@0.6.0');
     expect(pinnedSpec('browser')).toBe('@phnx-labs/browser-cli@0.1.16');
-    expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.3.3');
+    expect(pinnedSpec('secrets')).toBe('@phnx-labs/secrets-cli@0.4.0');
     expect(pinnedSpec('computer')).toBe('@phnx-labs/computer-cli@0.1.7');
   });
 

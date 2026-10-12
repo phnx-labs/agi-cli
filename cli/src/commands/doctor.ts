@@ -60,6 +60,7 @@ import { auditWindowsSshEnrollment, diagnoseWindowsSshFailure } from '../lib/dev
 import {
   scanUserRcFilesSync,
   masterPassphraseInEnvSync,
+  isSecretsClientError,
   isSecretsTransportError,
 } from '../lib/secrets-client.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
@@ -87,20 +88,14 @@ interface DoctorOptions {
 }
 
 
-function scanUserRcFiles(): ReturnType<typeof scanUserRcFilesSync> {
-  try {
-    return scanUserRcFilesSync();
-  } catch (error) {
-    if (isSecretsTransportError(error)) return [];
-    throw error;
-  }
-}
+type SecretsSignals = Pick<LocalFindingInputs, 'rcSecrets' | 'masterPassphraseInEnv' | 'secretsEngineIncompatible'>;
 
-function masterPassphraseInEnv(): boolean {
+function readSecretsSignals(): SecretsSignals {
   try {
-    return masterPassphraseInEnvSync();
+    return { rcSecrets: scanUserRcFilesSync(), masterPassphraseInEnv: masterPassphraseInEnvSync() };
   } catch (error) {
-    if (isSecretsTransportError(error)) return false;
+    if (isSecretsClientError(error, 'ENGINE_INCOMPATIBLE')) return { secretsEngineIncompatible: true };
+    if (isSecretsTransportError(error)) return {};
     throw error;
   }
 }
@@ -194,7 +189,7 @@ interface RemoteDoctorPayload {
  * file and line. Run `agents doctor` on that box for the specifics — the
  * message says so.
  */
-const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'auth-bundle-wrong-backend', 'ssh-key-enrollment'] as const;
+const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'auth-bundle-wrong-backend', 'secrets-engine-incompatible', 'ssh-key-enrollment'] as const;
 type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
 
 const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
@@ -204,6 +199,7 @@ const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
     + ' — run `agents doctor` there for detail',
   'auth-bundle-wrong-backend': "reserved secrets bundle 'auth' exists but is not file-backed"
     + ' — run `agents doctor` there to recreate it',
+  'secrets-engine-incompatible': 'this box\'s `secrets` engine predates the 0.4.0 contract, so every secrets read fails',
   'ssh-key-enrollment': 'Windows OpenSSH key enrollment is invalid'
     + ' — run `agents doctor` on this box for the effective path or ACL failure',
 };
@@ -465,8 +461,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         cliMissing: localCliMissing,
         duplicateHooks: inspectDuplicateVersionHooks(cwd),
         hostClis: toHostCliInput(listCliStatus(cwd)),
-        rcSecrets: scanUserRcFiles(),
-        masterPassphraseInEnv: masterPassphraseInEnv(),
+        ...readSecretsSignals(),
         authBundleWrongBackend: !inspectReservedAuthBundle().ok,
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
@@ -1385,8 +1380,7 @@ export function registerDoctorCommand(program: Command): void {
           cliMissing,
           duplicateHooks,
           hostClis: toHostCliInput(hostClis),
-          rcSecrets: scanUserRcFiles(),
-          masterPassphraseInEnv: masterPassphraseInEnv(),
+          ...readSecretsSignals(),
           authBundleWrongBackend: !inspectReservedAuthBundle().ok,
           execPolicy: process.platform === 'win32'
             ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }

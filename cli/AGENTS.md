@@ -946,7 +946,7 @@ gives each device its warnings plus a compact accounts/versions line (every
 installed version + its account, provable ✓ / ✗). Single-machine `agents doctor`
 collapses to the CRITICAL section plus one `▸ <machine>` block. Severity:
 **critical** is `logged-out` (provable), `missing-hook`, `missing-plugin`,
-`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `ssh-key-enrollment` and `owner-not-signed-in` (no Phoenix
+`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `ssh-key-enrollment`, `secrets-engine-incompatible` (the `secrets` engine predates 0.4.0; remediation `agents setup tools --tool secrets`) and `owner-not-signed-in` (no Phoenix
 session or worker device token, so this box cannot reach the owner; remediation `agents auth login`, PHNX-4267); **warning**
 is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,

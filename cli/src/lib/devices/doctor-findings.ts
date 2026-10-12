@@ -19,7 +19,7 @@
  *   CRITICAL — logged-out (provable) · missing-hook · missing-plugin ·
  *              unwired-hook (a hook on disk that settings.json never fires) ·
  *              hook-runtime-broken (a wired hook's generated shim wrapper is
- *              missing or unusable) · cli-missing · ssh-key-enrollment ·
+ *              missing or unusable) · cli-missing · ssh-key-enrollment · secrets-engine-incompatible ·
  *              owner-not-signed-in (no Phoenix session or worker device
  *              token, so this box cannot reach the owner).
  *   WARNING  — logout-unprovable (hedged) · missing-resource · content-drift ·
@@ -120,6 +120,7 @@ export const ALL_FINDING_KINDS = [
   'rc-secret-export',
   'env-secret-export',
   'auth-bundle-wrong-backend',
+  'secrets-engine-incompatible',
   'exec-policy',
   'ssh-key-enrollment',
   'stale-cli',
@@ -137,6 +138,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'hook-runtime-broken': 'critical',
   'cli-missing': 'critical',
   'owner-not-signed-in': 'critical',
+  'secrets-engine-incompatible': 'critical',
   'logout-unprovable': 'warning',
   'hook-runtime-visibility-unavailable': 'warning',
   'missing-resource': 'warning',
@@ -250,6 +252,8 @@ export function remediationFor(finding: DoctorFinding): string {
       return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
     case 'auth-bundle-wrong-backend':
       return 'secrets delete auth --yes && secrets create auth --backend file';
+    case 'secrets-engine-incompatible':
+      return 'agents setup tools --tool secrets';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'ssh-key-enrollment':
@@ -311,6 +315,7 @@ export interface LocalFindingInputs {
   rcSecrets?: RcSecretFinding[];
   masterPassphraseInEnv?: boolean;
   authBundleWrongBackend?: boolean;
+  secretsEngineIncompatible?: boolean;
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
   windowsSshEnrollment?: WindowsSshEnrollmentAudit | null;
   isolatedVersions?: string[];
@@ -482,6 +487,14 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
 
   const authFinding = authBundleWrongBackendFinding(device, input.authBundleWrongBackend ?? false);
   if (authFinding) out.push(authFinding);
+
+  if (input.secretsEngineIncompatible) {
+    out.push(finding({
+      severity: FINDING_SEVERITY['secrets-engine-incompatible'], kind: 'secrets-engine-incompatible', device,
+      message: 'the `secrets` engine on PATH (or SECRETS_BIN) predates the 0.4.0 contract this agents-cli needs, '
+        + 'so every secrets read fails with ENGINE_INCOMPATIBLE',
+    }));
+  }
 
   const policyFinding = execPolicyFinding(device, input.execPolicy);
   if (policyFinding) out.push(policyFinding);

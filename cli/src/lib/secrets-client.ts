@@ -1,8 +1,12 @@
+import * as path from 'node:path';
 import {
+  configureSecretsClient,
   secretsRequest,
   secretsRequestSync,
+  _resetSecretsClientForTest as resetPublishedClient,
   type SecretsContext,
 } from '@phnx-labs/secrets-cli/client';
+import { getLogsDir } from './state.js';
 import type {
   SecretsBundle,
   SecretsBackend,
@@ -34,10 +38,19 @@ export {
   secretsRequestSync,
   readAndResolveBundleEnv,
   readAndResolveBundleEnvSync,
-  _resetSecretsClientForTest,
   _setSyncServeTimeoutForTest,
   type SecretsContext,
 } from '@phnx-labs/secrets-cli/client';
+
+function routeEngineStderr(): void {
+  configureSecretsClient({ stderr: path.join(getLogsDir(), 'secrets-serve.log') });
+}
+routeEngineStderr();
+
+export function _resetSecretsClientForTest(): void {
+  resetPublishedClient();
+  routeEngineStderr();
+}
 
 const SERVICE_PREFIX = 'agents-cli';
 const SECRETS_ITEM_PREFIX = `${SERVICE_PREFIX}.secrets.`;

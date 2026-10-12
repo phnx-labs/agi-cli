@@ -596,6 +596,13 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
     expect(out[0].remediation).toContain('secrets create auth --backend file');
   });
 
+  it('forwards secrets-engine-incompatible — a fleet box whose engine predates 0.4.0', () => {
+    const out = asRemoteSecretFindings([{ ...good, kind: 'secrets-engine-incompatible' }], 'm8');
+    expect(out.map((f) => [f.kind, f.severity, f.remediation])).toEqual([
+      ['secrets-engine-incompatible', 'critical', 'agents setup tools --tool secrets'],
+    ]);
+  });
+
   it('drops kinds the aggregator recomputes, so nothing is reported twice', () => {
     const noisy = [
       { ...good, kind: 'logged-out' },
