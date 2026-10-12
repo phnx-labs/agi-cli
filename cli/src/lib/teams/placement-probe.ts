@@ -38,7 +38,6 @@ export function clearPlacementSignalCache(): void {
 }
 
 interface ReadinessInfo {
-  /** The host ran the ready probe and replied: proof it is reachable, whatever the stats probe saw. */
   answered: boolean;
   installed: boolean | undefined;
   signedIn: boolean | undefined;
@@ -98,9 +97,6 @@ function probeRemoteReadiness(
   });
 }
 
-/** The stats probe has a short budget (2.5 s on a direct path), so a local
- * stall can time it out on every host at once. A host that answered the ready
- * probe is reachable regardless; only its load stays unknown. */
 export function mergePlacementSignal(
   stats: DeviceStats | undefined,
   readiness: ReadinessInfo | undefined,
