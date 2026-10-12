@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as published from '@phnx-labs/secrets-cli/client';
 import {
   bundleBackend,
@@ -27,6 +29,7 @@ import {
   isSecretsClientError,
   isSecretsTransportError,
   _resetSecretsClientForTest,
+  invocation,
   PROTOCOL_VERSION,
 } from './secrets-client.js';
 import type { SecretsBundle } from './secrets-types.js';
@@ -46,7 +49,7 @@ describe('the transport is the published client, not a copy', () => {
     expect(readAndResolveBundleEnvSync).toBe(published.readAndResolveBundleEnvSync);
     expect(buildServeEnv).toBe(published.buildServeEnv);
     expect(isSecretsClientError).toBe(published.isSecretsClientError);
-    expect(PROTOCOL_VERSION).toBe(1);
+    expect(PROTOCOL_VERSION).toBe(2);
   });
 
   it('passes an explicit root through, leaves an unset one unset, and keeps the passphrase alias', () => {
@@ -216,4 +219,56 @@ describe.skipIf(process.platform === 'win32')('agents-cli wrappers against the r
     expect(deleteBundleSync(after)).toBe(true);
     expect(listBundlesSync()).toEqual([]);
   }, 90_000);
+});
+
+describe.skipIf(process.platform === 'win32')('one agents-cli process talking to the real engine', () => {
+  it('spawns one engine per request and sends its stderr to secrets-serve.log, never the terminal', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-secrets-engine-'));
+    try {
+      const tally = path.join(dir, 'engine-spawns');
+      const logs = path.join(dir, 'logs');
+      const engine = invocation(REAL_BIN);
+      const wrapper = path.join(dir, 'secrets');
+      fs.writeFileSync(
+        wrapper,
+        `#!/bin/sh\necho "engine-stderr-probe $$" >&2\necho $$ >> '${tally}'\nexec ${[engine.command, ...engine.prefix].map((a) => `'${a}'`).join(' ')} "$@"\n`,
+        { mode: 0o755 },
+      );
+      const client = fileURLToPath(new URL('./secrets-client.ts', import.meta.url));
+      const script = path.join(dir, 'consumer.ts');
+      fs.writeFileSync(script, [
+        `import { writeBundleWithItemsSync, readAndResolveBundleEnvSync, readAndResolveBundleEnv, secretsKeychainItem } from ${JSON.stringify(client)};`,
+        `writeBundleWithItemsSync({ name: 'probe', backend: 'file', vars: { TOKEN: 'keychain:TOKEN' } }, new Map([[secretsKeychainItem('probe', 'TOKEN'), 'engine-value']]));`,
+        `const sync = readAndResolveBundleEnvSync('probe').env.TOKEN;`,
+        `const async_ = (await readAndResolveBundleEnv('probe')).env.TOKEN;`,
+        `console.log(JSON.stringify({ sync, async: async_ }));`,
+      ].join('\n'));
+      const home = path.join(dir, 'home');
+      fs.mkdirSync(home);
+      const run = spawnSync('bun', [script], {
+        encoding: 'utf8',
+        timeout: 90_000,
+        env: {
+          PATH: process.env.PATH,
+          HOME: home,
+          AGENTS_REAL_HOME: home,
+          AGENTS_LOGS_DIR: logs,
+          SECRETS_BIN: wrapper,
+          SECRETS_HOME: path.join(home, 'store'),
+          SECRETS_PASSPHRASE: 'agents-engine-stderr-test',
+          SECRETS_NO_AGENT: '1',
+          SECRETS_NO_USAGE_TRACK: '1',
+        },
+      });
+      expect(run.status, run.stderr).toBe(0);
+      expect(JSON.parse(run.stdout.trim())).toEqual({ sync: 'engine-value', async: 'engine-value' });
+      expect(run.stderr).not.toContain('engine-stderr-probe');
+      expect(fs.readFileSync(tally, 'utf8').trim().split('\n')).toHaveLength(3);
+      const log = path.join(logs, 'secrets-serve.log');
+      expect(fs.readFileSync(log, 'utf8').match(/engine-stderr-probe/g)).toHaveLength(3);
+      expect(fs.statSync(log).mode & 0o777).toBe(0o600);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

@@ -10,9 +10,16 @@ loud with install guidance rather than falling back to anything in-repo:
 
 ```
 agents setup tools --tool secrets
-# or: npm i -g @phnx-labs/secrets-cli@0.3.3
+# or: npm i -g @phnx-labs/secrets-cli@0.4.0
 # or: agents setup secrets
 ```
+
+agents-cli needs the `secrets` engine at 0.4.0 or newer, on every machine that
+runs it, fleet workers included. An older engine fails every secrets read with
+`ENGINE_INCOMPATIBLE` (the message names the engine path and the upgrade
+command), and `agents doctor` reports it as the critical
+`secrets-engine-incompatible` finding with `agents setup tools --tool secrets` as
+the fix.
 
 Use the standalone `secrets <verb>` directly (for example `secrets exec <bundle> -- <cmd>`, or `secrets list --host <alias|user@host>` for another box). `agents secrets` was removed with no alias or forwarder (PHNX-4227): running it exits 1 with `error: 'agents secrets' was removed; use the standalone 'secrets' CLI (secrets --help).` The macOS broker is `secrets _agent-run`, not `agents daemon` — see [`secrets-agent-process-model.md`](secrets-agent-process-model.md). `agents setup secrets` is the onboarding entry point: it brings the standalone up to the pinned floor through the same `ensureToolPins` path as `agents setup tools` (an explicit `SECRETS_BIN` below the floor fails with the version it read instead of installing) and then hands off to the standalone's own `secrets migrate`.
 

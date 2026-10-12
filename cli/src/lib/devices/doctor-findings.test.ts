@@ -63,6 +63,15 @@ describe('severity rubric', () => {
     expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'auth-bundle-wrong-backend')).toBe(false);
   });
 
+  it('an engine older than the 0.4.0 contract is CRITICAL and names the setup command that upgrades it', () => {
+    const f = buildLocalFindings(localInput({ secretsEngineIncompatible: true }))
+      .find((x) => x.kind === 'secrets-engine-incompatible');
+    expect(f?.severity).toBe('critical');
+    expect(f?.message).toContain('0.4.0');
+    expect(f?.remediation).toBe('agents setup tools --tool secrets');
+    expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'secrets-engine-incompatible')).toBe(false);
+  });
+
   it('a binary shadow is a WARNING and names the shadowing install', () => {
     const findings = buildLocalFindings(localInput({
       binaryShadows: [
@@ -616,6 +625,7 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
         hostClis: { statuses: [{ name: 'mq', installed: false }], errors: [{ file: 'f', reason: 'r' }] },
         rcSecrets: [{ file: '.zshrc', line: 1, name: 'X_TOKEN', isMasterPassphrase: false }],
         execPolicy: { platform: 'win32', policy: 'Restricted' },
+        secretsEngineIncompatible: true,
         duplicateHooks: [{
           agent: 'claude', name: 'h', kind: 'drift',
           authoritative: { agent: 'claude', version: '2', name: 'h', path: '/p', hash: 'x', active: true },

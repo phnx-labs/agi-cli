@@ -198,7 +198,8 @@ drift.
 
 **CRITICAL** — needs you now: `logged-out`, `missing-hook`, `missing-plugin`,
 `unwired-hook`, `hook-runtime-broken`, `cli-missing`, `owner-not-signed-in`,
-`ssh-key-enrollment`.
+`ssh-key-enrollment`, `secrets-engine-incompatible` (the `secrets` engine predates the
+0.4.0 contract; fix with `agents setup tools --tool secrets`).
 
 **WARNING** — worth fixing, not urgent: `logout-unprovable`,
 `hook-runtime-visibility-unavailable`, `missing-resource`, `content-drift`,
