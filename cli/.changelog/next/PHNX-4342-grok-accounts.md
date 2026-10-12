@@ -3,7 +3,7 @@
   account now shows `out of credits` for one hour, and rotation and `--device auto` skip
   it instead of choosing it again. Before this, Grok usage came only from the last
   `billing: fetched credits config` log line, which could be days old, so an exhausted
-  account still read as ready. A credits fetch logged after the 402 clears it sooner.
+  account still read as ready. Only that balance message counts; another 402 does not.
   Source: `cli/src/lib/accounting/usage.ts`.
 - **A Grok, Kimi or Muse version with no login of its own reads as signed out.** The
   launcher points these harnesses at their version home (`GROK_HOME`, `KIMI_CODE_HOME`,
