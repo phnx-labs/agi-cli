@@ -1,6 +1,6 @@
 /**
  * Resource inventory — the single chokepoint for "what does this agent@version
- * have" (RUSH-2238, parent RUSH-2236; spec: openspec/specs/resource-inventory).
+ * have" (RUSH-2238, parent RUSH-2236).
  *
  * One API answers four orthogonal questions per (agent, version, kind):
  *

@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in agi-cli, please report it
+If you discover a security vulnerability in agents-cli, please report it
 responsibly via GitHub Security Advisories:
 
 **https://github.com/phnx-labs/agi-cli/security/advisories/new**
@@ -22,12 +22,12 @@ We will acknowledge receipt within 48 hours and aim to release a fix within
 
 ## Scope
 
-agi-cli runs locally and manages agent CLI binaries, config files, and credentials on your machine. Security-sensitive areas include:
+agents-cli runs locally and manages agent CLI binaries, config files, and credentials on your machine. Security-sensitive areas include:
 
-- **Keychain integration** (`src/lib/secrets.ts`) -- stores API keys in the macOS Keychain
-- **Shim scripts** (`src/lib/installations/shims.ts`) -- generated shell scripts that route agent commands
-- **Cloud dispatch** (`src/lib/cloud/`) -- sends prompts to remote providers via authenticated APIs
-- **PTY server** (`src/lib/pty-server.ts`) -- Unix socket server for terminal session management
+- **Keychain integration** (`cli/src/lib/secrets/`) -- stores API keys in the macOS Keychain
+- **Shim scripts** (`cli/src/lib/installations/shims.ts`) -- generated shell scripts that route agent commands
+- **Cloud dispatch** (`cli/src/lib/cloud/`) -- sends prompts to remote providers via authenticated APIs
+- **PTY server** (`cli/src/lib/pty-server.ts`) -- Unix socket server for terminal session management
 
 ## Supported Versions
 

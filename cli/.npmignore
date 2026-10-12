@@ -15,7 +15,6 @@ scripts/rebuild-sqlite.sh
 **/__tests__/**
 tests/
 bench/
-demo/
 docs/
 website/
 packages/

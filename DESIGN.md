@@ -24,7 +24,7 @@ colors:
 
   # Terminal (ANSI, via chalk) — semantic names, not literal hex; the renderer
   # maps them to the user's terminal theme. Hexes below are how the brand renders
-  # those roles when it controls the pixels (demo/src/Terminal.tsx).
+  # those roles when it controls the pixels (assets/demo/src/Terminal.tsx).
   term-success: "green"       # renders lime
   term-error: "red"           # #f87171
   term-warning: "yellow"      # #facc15
@@ -123,11 +123,11 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 
 ![agi-cli terminal — a representative session showing each semantic color role in context](assets/design/terminal.png)
 
-*Representative render (JetBrains Mono; role hexes from `demo/src` — lime success, cyan names, gray hints, red/yellow status). Actual colors resolve to the user's terminal theme.*
+*Representative render (JetBrains Mono; role hexes from `assets/demo/src` — lime success, cyan names, gray hints, red/yellow status). Actual colors resolve to the user's terminal theme.*
 
 ## Typography
 
-**Web:** the live landing is **monospace-dominant** — a **JetBrains Mono** wordmark sits over a system **`ui-monospace`** stack (`SFMono-Regular, "SF Mono", Menlo, Consolas`) that carries body, code, and UI alike. There's almost no sans on the page; the terminal look *is* the type. The brand spec and promo demo (`demo/src/index.css` `@font-face`) additionally pair JetBrains Mono (code) with **Inter** (prose) for richer, non-terminal contexts — but the shipped site stays mono.
+**Web:** the live landing is **monospace-dominant** — a **JetBrains Mono** wordmark sits over a system **`ui-monospace`** stack (`SFMono-Regular, "SF Mono", Menlo, Consolas`) that carries body, code, and UI alike. There's almost no sans on the page; the terminal look *is* the type. The brand spec and promo demo (`assets/demo/src/index.css` `@font-face`) additionally pair JetBrains Mono (code) with **Inter** (prose) for richer, non-terminal contexts — but the shipped site stays mono.
 
 **Terminal:** typography is the user's terminal font; the CLI controls only weight (`bold`), dimming (`dim`), and layout. Hierarchy is created with **column alignment** (`.padEnd()` fixed-width columns) and `bold` headers, not type size — a monospace grid is the only typographic tool a terminal has, so lean on it.
 

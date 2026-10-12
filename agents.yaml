@@ -1,5 +1,0 @@
-# Project agent-version pins for this repo. Empty on purpose: use each machine's
-# installed default. A stale pin here (this file previously pinned a broken,
-# npm-unrecoverable codex 0.116.0) forces every `agents run codex` in the repo to
-# fall back / self-heal on each launch. Pin a version here only for a real reason.
-agents: {}

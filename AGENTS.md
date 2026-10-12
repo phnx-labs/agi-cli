@@ -57,7 +57,7 @@ packages/
   session-tracker/  @agents/session-tracker — SessionStart hook that WRITES live-session state
   agi-cli/          @phnx-labs/agi-cli — DEPRECATED alias; re-exports the canonical @phnx-labs/agents-cli
   swarmify-mirror/  legacy npm-redirect stub (@companion/agents-cli → @phnx-labs/agents-cli)
-assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in any tarball)
+assets/ website/   Brand media, launch-demo source, landing assets (repo-root, not shipped in any tarball)
 ```
 
 | Component | What it is | Read |
@@ -428,7 +428,7 @@ never be shared.
 
 ## Assets & voice
 
-Only if you touch `assets/`, `demo/`, or `website/`. Visual language is terminal-coded —
+Only if you touch `assets/` or `website/`. Visual language is terminal-coded —
 `#0a0a0a` bg, `#a3e635` lime accent, JetBrains Mono for the wordmark + code, Inter for
 prose. Voice is direct-developer: verb + artifact, no marketing claims — closer to a
 `man` page than a landing pitch. (AGI EXT keeps its own `swarmify` publish identity,
