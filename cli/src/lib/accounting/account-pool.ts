@@ -24,10 +24,11 @@ interface RegistryAccountInput {
 export function registryPoolCandidates(
   records: RegistryAccountRecord[],
   agent: AgentId,
+  includeKeyed = false,
 ): RegistryAccountInput[] {
   const out: RegistryAccountInput[] = [];
   for (const r of records) {
-    if (r.auth !== 'setup-token') continue;
+    if (r.auth !== 'setup-token' && !includeKeyed) continue;
     if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
     out.push({
       id: r.id,

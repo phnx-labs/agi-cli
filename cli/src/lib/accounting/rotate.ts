@@ -488,7 +488,7 @@ export function formatNoHealthyAccountError(
         return `${c.version} (${reason})`;
       }).join(', ');
   const resetSummary = formatResetSummary(earliestResetAcross(excluded, nowMs));
-  return `agents: no healthy ${agent} account under strategy '${strategy}' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Use --strategy pinned to force the default.`;
+  return `agents: no healthy ${agent} account under strategy '${strategy}' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Use --strategy pinned to force the default, or --account <name> for an API-key account (never picked automatically).`;
 }
 
 function snapshotAgeMinutes(candidate: RotateCandidate, nowMs: number): number | null {

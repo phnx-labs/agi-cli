@@ -23,12 +23,12 @@ export interface RunCandidateInputs {
   runVersion: string | undefined;
 }
 
-export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInputs): RotateCandidate[] {
+export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInputs, includeKeyed = false): RotateCandidate[] {
   const { native, records, runVersion } = inputs;
   if (!runVersion) return native;
 
   const seen = new Set(native.filter((c) => c.accountKey).map((c) => c.accountKey as string));
-  const extra: RotateCandidate[] = registryPoolCandidates(records, agent)
+  const extra: RotateCandidate[] = registryPoolCandidates(records, agent, includeKeyed)
     .filter((r) => !seen.has(r.accountKey))
     .map((r) => ({
       agent,
@@ -53,8 +53,8 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
   return [...native, ...extra];
 }
 
-export async function collectRunCandidatesForRun(agent: AgentId): Promise<RotateCandidate[]> {
+export async function collectRunCandidatesForRun(agent: AgentId, includeKeyed = false): Promise<RotateCandidate[]> {
   const native = await collectRunCandidates(agent);
   const runVersion = getGlobalDefault(agent) ?? listInstalledVersions(agent)[0];
-  return foldRegistryCandidates(agent, { native, records: localRegistryRecords(), runVersion });
+  return foldRegistryCandidates(agent, { native, records: localRegistryRecords(), runVersion }, includeKeyed);
 }

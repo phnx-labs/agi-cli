@@ -431,7 +431,7 @@ export function assertRecoverableTranscript(session: SessionMeta): void {
 
 export async function resolveSessionRecovery(
   session: SessionMeta,
-  collect: (agent: AgentId) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
+  collect: (agent: AgentId, includeKeyed?: boolean) => Promise<RotateCandidate[]> = collectRunCandidatesForRun,
   options: SessionRecoverySelection = {},
 ): Promise<SessionRecoveryTarget> {
   const agent = runnableSessionAgent(session);
@@ -440,7 +440,7 @@ export async function resolveSessionRecovery(
   assertRecoverableTranscript(session);
   const installation = resolveManagedInstallation(agent);
   if (!installation) throw new SessionRecoveryError(`No managed ${agent} installation is available. Install it with: agents add ${agent}`);
-  return resolveSessionRecoveryFromCandidates(session, await collect(agent), undefined, undefined, {
+  return resolveSessionRecoveryFromCandidates(session, await collect(agent, Boolean(options.account?.trim())), undefined, undefined, {
     ...options, executableVersion: installation.label,
   });
 }
