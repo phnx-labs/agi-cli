@@ -34,10 +34,10 @@ function inputs(over: Partial<RunCandidateInputs> = {}): RunCandidateInputs {
 }
 
 describe('foldRegistryCandidates', () => {
-  it('appends provider accounts as candidates carrying providerAccount + the run version', () => {
+  it('appends setup-token accounts as candidates carrying providerAccount + the run version, never an api-key one', () => {
     const out = foldRegistryCandidates('claude', inputs());
     const registry = out.filter((c) => c.providerAccount);
-    expect(registry.map((c) => c.providerAccount)).toEqual(['claude-setup', 'or-key']);
+    expect(registry.map((c) => c.providerAccount)).toEqual(['claude-setup']);
     for (const c of registry) {
       expect(c.version).toBe('2.1.226');
       expect(c.signedIn).toBe(true);
@@ -49,13 +49,13 @@ describe('foldRegistryCandidates', () => {
     const native = [nativeCandidate({})];
     const out = foldRegistryCandidates('claude', inputs({ native }));
     expect(out[0]).toBe(native[0]);
-    expect(out.length).toBe(1 + 2);
+    expect(out.length).toBe(1 + 1);
   });
 
   it('skips a registry account already covered by a native login (by accountKey)', () => {
-    const native = [nativeCandidate({ accountKey: 'claude:name=or-key', accountLabel: 'or-key' })];
+    const native = [nativeCandidate({ accountKey: 'claude:name=claude-setup', accountLabel: 'claude-setup' })];
     const out = foldRegistryCandidates('claude', inputs({ native }));
-    expect(out.filter((c) => c.providerAccount).map((c) => c.providerAccount)).toEqual(['claude-setup']);
+    expect(out.filter((c) => c.providerAccount)).toEqual([]);
   });
 
   it('returns the native list unchanged when no version is installed to run in', () => {
@@ -68,9 +68,9 @@ describe('foldRegistryCandidates', () => {
     expect(out.filter((c) => c.providerAccount)).toEqual([]);
   });
 
-  it('routes each provider account only to a harness its provider can authenticate', () => {
-    expect(foldRegistryCandidates('codex', inputs()).filter((c) => c.providerAccount).map((c) => c.providerAccount)).toEqual(['or-key']);
-    expect(foldRegistryCandidates('cursor', inputs()).filter((c) => c.providerAccount).map((c) => c.providerAccount)).toEqual(['cursor-key']);
+  it('adds no api-key account to any harness: openrouter for codex and a cursor key are left to --account', () => {
+    expect(foldRegistryCandidates('codex', inputs()).filter((c) => c.providerAccount)).toEqual([]);
+    expect(foldRegistryCandidates('cursor', inputs()).filter((c) => c.providerAccount)).toEqual([]);
   });
 
   it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {

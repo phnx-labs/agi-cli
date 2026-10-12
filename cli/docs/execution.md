@@ -33,8 +33,12 @@ the daemon tick); else a leftover recorded home label; else identity match
 across installed version homes; else fail loud, naming
 `agents accounts add` / `agents accounts login`. Slots are created by
 `agents accounts add <harness> [name]` on a headed device. Balanced/available
-rotation enumerates those slots (plus leftover homes) and never launches a
-slot whose verdict is outside `{live, unverified}`. Harnesses that isolate by
+rotation enumerates those slots (plus leftover homes) and the provider accounts
+whose credential is a subscription setup-token, and never launches a slot whose
+verdict is outside `{live, unverified}`. An api-key or bearer-token provider
+account (OpenRouter, an Anthropic or OpenAI API key, a gateway) bills per token,
+so rotation never picks it: it runs only when named with `--account`, a binding
+or `accounts default`. Harnesses that isolate by
 adopting `~/.<config>` (no slotEnv / no config-dir env) hold one active slot
 per device — `accounts default` repoints the symlink; a run of a non-default
 account fails loud, and after HOME resolution a default whose adopted symlink
