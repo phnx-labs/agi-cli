@@ -219,6 +219,21 @@ export function runAgents(args: string[], cwd: string, home: string, envOverride
   });
 }
 
+// The daemon tick's incremental scan, the only writer of the index on a peer.
+export function indexSessions(cwd: string, home: string) {
+  const script = [
+    "const { scanSessionsIncremental } = await import('./src/lib/session/discover.ts');",
+    "const { closeDB } = await import('./src/lib/session/db.ts');",
+    'await scanSessionsIncremental();',
+    'closeDB();',
+  ].join(' ');
+  return spawnSync(process.execPath, ['--import', tsxLoaderUrl, '--input-type=module', '--eval', script], {
+    cwd: repoRoot,
+    env: { ...process.env, HOME: home, USERPROFILE: home, PWD: cwd },
+    encoding: 'utf-8',
+  });
+}
+
 export function outputOf(result: { stdout: string; stderr: string }): string {
   return `${result.stdout}${result.stderr}`;
 }

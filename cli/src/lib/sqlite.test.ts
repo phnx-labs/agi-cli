@@ -48,7 +48,7 @@ describe('sqlite shim named-parameter binds', () => {
     db.close();
   });
 
-  it('indexes a scanned session when `agents sessions` runs under bun', () => {
+  it('indexes a scanned session when the daemon scan runs under bun', () => {
     const home = path.join(dir, 'home');
     const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
     const projectDir = path.join(home, '.claude', 'projects', '-tmp-demo');
@@ -68,12 +68,16 @@ describe('sqlite shim named-parameter binds', () => {
       }),
     ].join('\n') + '\n');
 
-    const out = execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'sessions', '--all', '--local', '--json'], {
+    execFileSync('bun', ['--eval', [
+      "const { scanSessionsIncremental } = await import('./src/lib/session/discover.ts');",
+      "const { closeDB } = await import('./src/lib/session/db.ts');",
+      'await scanSessionsIncremental();',
+      'closeDB();',
+    ].join(' ')], {
       cwd: process.cwd(),
       env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_REAL_HOME: home },
       stdio: ['ignore', 'pipe', 'inherit'],
-    }).toString('utf-8');
-    expect(JSON.parse(out).map((s: { id: string }) => s.id)).toContain(sessionId);
+    });
 
     const db = new Database(path.join(home, '.agents', '.history', 'sessions', 'sessions.db'));
     expect(db.prepare('SELECT id, short_id FROM sessions').all()).toEqual([

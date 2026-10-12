@@ -17,9 +17,9 @@ function runSandbox(env: Record<string, string | undefined>): {
   const shims = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-shims-'));
   const callLog = path.join(shims, 'calls.log');
   fs.writeFileSync(
-    path.join(shims, 'agents'),
+    path.join(shims, 'secrets'),
     `#!/bin/sh
-echo "agents $*" >> "${callLog}"
+echo "secrets $*" >> "${callLog}"
 case "\${FAKE_AGENTS_MODE:-ok}" in
   no-bundles) exit 1 ;;
   *) exit 0 ;;
@@ -27,7 +27,7 @@ esac
 `,
   );
   fs.writeFileSync(path.join(shims, 'crabbox'), `#!/bin/sh\nexit 1\n`);
-  fs.chmodSync(path.join(shims, 'agents'), 0o755);
+  fs.chmodSync(path.join(shims, 'secrets'), 0o755);
   fs.chmodSync(path.join(shims, 'crabbox'), 0o755);
   try {
     const r = spawnSync('bash', [SANDBOX_SH_PATH, '--', 'true'], {
@@ -62,9 +62,9 @@ describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
     expect(SANDBOX_SH).toContain('secrets exec');
   });
 
-  it('re-enters itself under a chained `agents secrets exec` when tokens are absent', () => {
+  it('re-enters itself under a chained `secrets exec` when tokens are absent', () => {
     const { calls } = runSandbox({ FAKE_AGENTS_MODE: 'ok' });
-    expect(calls.some((c) => c.startsWith('agents secrets exec hetzner.com -- true'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('secrets exec hetzner.com -- true'))).toBe(true);
     const chain = calls.find((c) => c.includes('secrets exec hetzner.com --') && c.includes('sandbox.sh'));
     expect(chain).toBeDefined();
   });
@@ -80,8 +80,8 @@ describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
 
   it('bundles load independently: HCLOUD_TOKEN pre-set still resolves the github.com creds', () => {
     const { calls } = runSandbox({ HCLOUD_TOKEN: 'ci-token', FAKE_AGENTS_MODE: 'ok' });
-    expect(calls.some((c) => c.startsWith('agents secrets exec github.com -- true'))).toBe(true);
-    expect(calls.some((c) => c.startsWith('agents secrets exec hetzner.com'))).toBe(false);
+    expect(calls.some((c) => c.startsWith('secrets exec github.com -- true'))).toBe(true);
+    expect(calls.some((c) => c.startsWith('secrets exec hetzner.com'))).toBe(false);
   });
 
   it('skips unreadable bundles instead of dying (the old per-bundle || true tolerance)', () => {

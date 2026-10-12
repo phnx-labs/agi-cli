@@ -79,8 +79,8 @@ Four rules govern a good nudge:
 - **Split the ask.** Drive the reversible, goal-advancing part; surface only the genuinely
   disruptive part — don't stall the whole task on one risky sub-step.
 - **Point at the tool it forgot.** If a tool resolves the blocker, name it —
-  `agents computer` (drive the local Mac), `agents ssh <mac> "agents computer …"` (drive a
-  Mac from elsewhere), `agents browser` — instead of asking the human.
+  `computer` (drive the local Mac), `agents ssh <mac> "computer …"` (drive a
+  Mac from elsewhere), `browser` — instead of asking the human.
 
 The rules that ban over-asking are already loaded in every agent's context and ignored
 anyway (the model's deference reflex overrides explicit instruction). The watchdog is the
@@ -126,7 +126,7 @@ capped account. The tick routes it to the **rotate** path instead:
    extension's prewarm configs) is injected as raw bytes into the resolved rail, then
    `agents run auto --interactive --session-id <uuid>` is typed into the **same tab**.
 4. **Replay.** When the new session's TUI is live, the tick injects the resume replay:
-   "Resume previous work by loading session \<old-id\>. Run `agents sessions <old-id>` …".
+   "Resume previous work by loading session \<old-id\>. Run `sessions <old-id>` …".
    Readiness is a transcript for the new session id (primary — a claude pick honors
    `--session-id`), with a **correlated** fallback for non-claude picks: a fresh active
    session counts only when it started after the rotate began AND shares the old

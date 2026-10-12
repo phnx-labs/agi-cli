@@ -1508,7 +1508,7 @@ export function parseAtTime(atTime: string): { schedule: string; runOnce: boolea
   return null;
 }
 
-export function listJobsWithRuns(): string[] {
+function listJobsWithRuns(): string[] {
   const runsDir = getRunsDir();
   if (!fs.existsSync(runsDir)) return [];
   return fs.readdirSync(runsDir, { withFileTypes: true })

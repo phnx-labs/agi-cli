@@ -16,9 +16,9 @@ describe('levenshtein', () => {
 
 describe('closestTopLevelCommand', () => {
   it('auto-correct candidates for known typos use the full known-name set', () => {
-    const { closest, minDist } = closestTopLevelCommand('session', KNOWN_TOP_LEVEL_COMMANDS);
+    const { closest, minDist } = closestTopLevelCommand('devics', KNOWN_TOP_LEVEL_COMMANDS);
     expect(minDist).toBe(1);
-    expect(closest).toBe('sessions');
+    expect(closest).toBe('devices');
   });
 
   it('finds doctor for docto', () => {
@@ -40,9 +40,9 @@ describe('closestTopLevelCommand', () => {
   });
 
   it('suggests within distance 3 for near-misses that are not auto-corrected', () => {
-    const { closest, minDist } = closestTopLevelCommand('sessin', KNOWN_TOP_LEVEL_COMMANDS);
+    const { closest, minDist } = closestTopLevelCommand('devcs', KNOWN_TOP_LEVEL_COMMANDS);
     expect(minDist).toBeGreaterThan(1);
     expect(minDist).toBeLessThanOrEqual(3);
-    expect(closest).toBe('sessions');
+    expect(closest).toBe('devices');
   });
 });

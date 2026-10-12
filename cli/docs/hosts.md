@@ -498,7 +498,7 @@ agents run <agent> ["<task>"] --device <device>
 > wrapped interactive host run has a known session id (Claude, or a
 > `--resume`d run) drops (ssh reports its connection-layer code, 255), the local CLI
 > **re-attaches the live remote pane automatically** — it drives the host's own
-> `agents sessions focus <id> --local` over SSH, which JOINS the live pane when it
+> `agents ps focus <id> --local` over SSH, which JOINS the live pane when it
 > survived and RESUMES the session in place when the pane is already gone (so a
 > reattach landing after the pane died recovers the agent instead of dead-ending at
 > a bare shell — RUSH-2085), with bounded exponential backoff (2s→30s, up to 6
@@ -516,7 +516,7 @@ agents run <agent> ["<task>"] --device <device>
 > Use it after the auto-loop above gave up on a sustained outage, or when a VS Code
 > terminal tab closed with the dead ssh client. With no id it opens a picker.
 >
-> The remote `agents sessions focus --local` invocation the reattach
+> The remote `agents ps focus --local` invocation the reattach
 > drives is wrapped so that whatever exit code it decides on, a 255 is remapped to
 > 254 before this process sees it — so a remote-side path that happened to exit
 > 255 for its own reasons would never be mistaken for the link dropping again.
@@ -631,7 +631,7 @@ The overlay is read through `readMeta` (`Meta.hosts`, plus each device's own
 
 Resolution for an address goes through **one** resolver,
 [`matchHost`](../src/lib/hosts/registry.ts) (RUSH-1967), shared by every caller —
-`run --device`, the `sessions --device` fan-out, and `agents ssh` alike, so a token
+`run --device`, the `agents ps -D` fan-out, and `agents ssh` alike, so a token
 can never dial two different boxes depending on which subcommand typed it. It
 merges three directories **per-field**, it does not let one shadow another:
 
@@ -824,7 +824,7 @@ mechanism that **already exists** — there is no new "sync engine":
 | **`~/.agents` config** (commands, skills, hooks, memory) | The DotAgents user repo is git-backed — the box runs `agents repo pull user` (or `git pull`). One-time/idempotent bootstrap, **not** a per-dispatch push. | `agents repo pull user` on the box (not run by `ensureHostReady`) |
 | **Working codebase** | Phase 1: committed branch → `git fetch` + checkout on the box (per-repo, caller's `--remote-cwd`/`--branch`). Phase 2: uncommitted working tree → `rsync` over SSH (the differentiator). | per-repo git; rsync (Phase 2) |
 | **Secrets** | Persistent boxes self-auth once via the standalone `secrets` CLI (keychain). Other boxes get the bundle pushed on demand into their own store. | `secrets export <bundle> --host <target>` (`--remote-backend file` for a headless box) |
-| **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | `sessions --device <box>`; `agents ps migrate` for the rare "make this transcript present" case |
+| **Sessions / `.history`** | **Not bulk-copied.** Recall is exposed as a *remote command*, not a file sync (below). | the standalone `sessions --host <box>`; `agents ps migrate` for the rare "make this transcript present" case |
 
 ### `ensureHostReady(name)` — the Phase 1 readiness precondition
 
@@ -871,7 +871,7 @@ The killer detail: you almost never want another machine's `.history` *on disk* 
 you want to *query* it. Recall is a remote call over SSH:
 
 ```
-sessions --device <box> "<topic>"   # searches the session index ON the box, returns hits
+sessions --host <box> "<topic>"   # the standalone searches the session index ON the box, returns hits
 ```
 
 The agent on box A searches box B's history without ever copying it — the same
@@ -976,7 +976,7 @@ tracked in a local task store, not the cloud store (§6).
   clean, deterministic, machine-readable `--json` on `devices list` and `run --device`.
 - **Naming** — originally `agents hosts` (list/check/add/remove) + `agents run --on <host>`;
   now `agents devices` + `agents run --device <host>`.
-  (The singular `agents computer` macOS-accessibility command is unrelated, stays.)
+  (The standalone `computer` desktop-automation CLI is unrelated.)
 - **Provider model** — keep named-SSH dispatch as its own clean path; fold *tracked*
   host runs into the existing cloud store as a `host` provider so `agents cloud
   list/status/logs` see them (§6). No big `CloudProvider → AgentHostProvider`
@@ -1023,7 +1023,7 @@ Resolved decisions.
 - **Phase 1.5 (fast-follows, behind the seam)**: the `rush` provider (account-keyed
   `computers` registry + presence + relay-exec, opt-in when `rush login` exists),
   the `tailscale` provider (presence/reachability without an account), and recall-as-
-  RPC (`agents hosts sessions <name>`, shipped as `sessions --device <name>`).
+  RPC (`agents hosts sessions <name>`, shipped as `agents sessions --device <name>` and now the standalone `sessions --host <name>`).
 - **Phase 2**: the `crabbox` provider (lease → register → run → idle-release) and
   `--resume … --on` handoff (branch + working-tree rsync + transcript sync + resume)
   + attach/relay mode on the existing daemon.
@@ -1044,7 +1044,6 @@ Resolved decisions.
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
 | Config bootstrap on host | `agents repo pull user` (git-backed) |
 | Secret push (on demand) | the standalone `secrets` CLI: `secrets export <bundle> --host <target>`; target validation is `SSH_TARGET_RE`/`assertValidSshTarget` (`src/lib/ssh-exec.ts`) |
-| Selective transcript replication | `src/lib/session/sync/agents.ts` (per-agent mirror layout, per-session not whole tree) |
 
 ## Prior art studied
 

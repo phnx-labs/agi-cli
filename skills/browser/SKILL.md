@@ -2,7 +2,7 @@
 name: browser
 description: "Drive a browser via CDP — navigate, click, type, screenshot. Profiles persist login state across sessions, so agents log in once and stay authenticated. Triggers on: 'automate a website', 'browser automation', 'click', 'screenshot', 'scrape', 'log in', 'fill form'."
 argument-hint: "[profiles|start|refs|click|type|screenshot|done]"
-allowed-tools: Bash(agents browser*), Bash(browser*)
+allowed-tools: Bash(browser*), Bash(secrets*)
 user-invocable: true
 ---
 
@@ -10,7 +10,7 @@ user-invocable: true
 
 Control a real browser via CDP. Profiles persist login state, so agents log in once and stay authenticated. Screenshots auto-resize to save tokens.
 
-`browser` is shorthand for `agents browser` — use the short form.
+`browser` is the standalone `@phnx-labs/browser-cli` (`agents setup browser` installs it). `agents browser` was removed; call `browser` directly.
 
 ## Task binding
 
@@ -101,8 +101,8 @@ the profile's bundle under the `<SERVICE>_USERNAME` / `<SERVICE>_PASSWORD` conve
 
 ```bash
 browser profiles create acme --browser comet --secrets acme-login
-agents secrets add acme-login GITHUB_USERNAME
-agents secrets add acme-login GITHUB_PASSWORD
+secrets add acme-login GITHUB_USERNAME
+secrets add acme-login GITHUB_PASSWORD
 
 # Log in — the agent drives the form and handles 2FA/selectors adaptively:
 export AGENTS_BROWSER_TASK=$(browser start --profile acme --url https://github.com/login)
@@ -115,8 +115,10 @@ browser screenshot                                        # inspect: 2FA? captch
 
 If a 2FA/OTP or "unusual activity" checkpoint appears, the agent screenshots it and asks
 the human (or reads the OTP from a connected mailbox) — the CLI never auto-solves it.
-For scripts that genuinely need the raw value, `agents secrets get <bundle> <KEY>` prints
-one value (audited) — but prefer `type --secret` so nothing lands in the transcript.
+For a script that genuinely needs the raw value, run it under
+`secrets exec <bundle> -- <command>` so the value reaches only that process (the old
+`secrets get <bundle> <KEY>` form is removed). Prefer `type --secret` so nothing lands
+in the transcript.
 
 Note: `--secrets` also injects the bundle as env vars into the browser *process* at
 launch (useful for extensions/CDP tooling that read env) — that is separate from web
@@ -158,7 +160,7 @@ stable tab id you can re-target:
 
 ```bash
 # The user picks their default once; agents do not pass --profile.
-agents browser use work
+browser use work
 
 # bind a task on the user's default browser profile
 export AGENTS_BROWSER_TASK=$(browser start)
@@ -191,7 +193,7 @@ only: **Chrome, Comet, Chromium, Brave, Edge**. Safari and Firefox are not suppo
 `Browser.getVersion` (so a connection appears to succeed) but exposes **zero** CDP page
 targets via every discovery method, and it **crashes** the moment a new tab is requested
 (`Target.createTarget`). `browser` therefore refuses to drive an Arc profile with a clear
-error instead of crashing the user's Arc window — `agents browser profiles seed` still
+error instead of crashing the user's Arc window — `browser profiles seed` still
 creates an `arc-local` profile for completeness, but pick a drivable browser to actually
 automate:
 

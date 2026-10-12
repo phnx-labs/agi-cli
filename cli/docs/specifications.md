@@ -50,8 +50,8 @@ guarantee, the reference for the mechanism.
 
 ## Contents
 
-- [Sessions](#sessions) — `agents sessions`: discovery, parsing, preview, metadata, lifecycle, export/import
-- [Secrets](#secrets) — `agents secrets`: storage & materialization boundaries, sharing, no-noise
+- [Sessions](#sessions) — discovery, the index, live identity (`agents ps`), lifecycle and resume; the transcript read surface is the standalone `sessions` CLI's
+- [Secrets](#secrets) — `agents run --secrets` and the standalone `secrets` CLI: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
 - [Routine execution & readiness](#routine-execution--readiness) — `agents routines`: context resolution on the target, readiness/pause, single-fire, run history
@@ -70,7 +70,7 @@ row its surface sits in.
 
 | Coverage | Surfaces | What that means |
 |---|---|---|
-| **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
+| **Specified here** | sessions (index, `ps`, resume), secrets (`run --secrets`, reserved stores), `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `doctor`, `daemon` | One requirement reaches them, no command contract does. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `feed`, `send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
@@ -99,7 +99,7 @@ one of the other rows rather than leaving it unlisted.
 
 ## Sessions
 
-This is the **contract** for `agents sessions`: what a human, an agent, or a
+This is the **contract** for agents-cli's session layer: what a human, an agent, or a
 downstream tool is entitled to rely on, stated as testable requirements — not a
 how-to (that is [sessions.md](sessions.md)). It exists because features
 have regressed by quietly deviating from an unwritten contract (a new harness
@@ -112,11 +112,24 @@ Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 `file:line` that implements it, under `cli/src/` unless noted. Behavioral
 scenarios are Given/When/Then so they map 1:1 to tests.
 
+**Ownership after PHNX-4227.** `agents sessions` was removed with no alias. agents-cli
+still owns discovery and the index writer, live identity and the roster (`agents ps`,
+`agents ps watch --json`, `agents ps preview`), lifecycle verbs (`agents ps
+stop|focus|detach|migrate`), resume (`agents run auto --resume <id>`), fork
+(`agents fork`), and the fleet peer protocol. The transcript read surface (list, search,
+`<id> --markdown`/`--json`, `--include tools`, `trace` as text, `tail`, bookmarks,
+export/import, render, share) is the standalone `sessions` CLI
+([phnx-labs/sessions-cli](https://github.com/phnx-labs/sessions-cli)). A requirement
+whose subject is that read surface is marked **Moved to the standalone `sessions` CLI**;
+it records the contract the standalone inherited, and its citations point at the
+standalone or at the agents-cli code that still feeds it (the index). A citation to a
+deleted agents-cli file is a bug in this document.
+
 ---
 
 ### 1. Purpose & scope
 
-`agents sessions` is the unified read layer over agent conversation transcripts:
+The session layer is the unified read layer over agent conversation transcripts:
 it **discovers and parses sessions from every session-capable harness**, indexes
 them, **renders a preview by default**, exposes rich per-session **metadata**
 (including where a session started), and makes all of it available **locally,
@@ -197,9 +210,9 @@ SSH access (§7); rendering sessions that no harness produced.
   row MUST NOT render a blank preview cell.
   - `agents ps` (`--active`) rows satisfy this: `formatActiveRowDescription(s)` falls back to `'-'`
     (`commands/ps-roster.ts:239-246`).
-  - overview / tree rows satisfy this: `[restingTodo, topicBase].filter(Boolean).join(' · ') || '-'`
-    (`commands/sessions.ts:1660-1662`).
-  - picker / `sessions preview <id>` satisfy this: fallback at every branch
+  - overview / tree rows (the standalone `sessions` listing since PHNX-4227) satisfy this:
+    `[restingTodo, topicBase].filter(Boolean).join(' · ') || '-'`.
+  - picker / `agents ps preview <id>` satisfy this: fallback at every branch
     (`commands/sessions-picker.ts:354-424,517-557`).
 
   Status: `[Intended]` — two renderers do not yet meet it (`--flat` and the
@@ -211,8 +224,7 @@ SSH access (§7); rendering sessions that no harness produced.
   (`sessions-cli/src/lib/session/digest.ts:1-9`). No preview path may make a network/LLM call or
   block on async I/O.
 
-- **SES-9a (MUST).** `ps preview <id-or-prefix>` (and its retiring alias
-  `sessions preview`) MUST resolve ID-shaped
+- **SES-9a (MUST).** `agents ps preview <id-or-prefix>` MUST resolve ID-shaped
   selectors through the SQLite ID index across the selected fleet. A full UUID
   MAY return on its first exact **locally-definitive** hit — one this box can
   actually answer for, meaning a transcript on this disk or a genuine non-self
@@ -251,7 +263,7 @@ SSH access (§7); rendering sessions that no harness produced.
   added a LOCAL-only gate ahead of any fleet call: a live tmux alias, or a bare
   8-hex naming exactly one live LOCAL pane, attaches with zero SSH
   (`lib/session/local-tmux-attach.ts`, `attachLocalLiveSelector`) before
-  `agents ps focus` (and the legacy `agents sessions resume`) ever reach this
+  `agents ps focus` and `agents run auto --resume <id>` ever reach this
   resolver.
 - **SES-9b (MUST).** An ID-shaped selector that misses the local transcript index
   but names a session the LOCAL live registry (`getActiveSessions`, the source
@@ -262,8 +274,8 @@ SSH access (§7); rendering sessions that no harness produced.
   (`computeLocalMetadataMatches`, `lib/session/selection.ts`). The synthesized row
   parses no transcript and renders nothing; when the transcript is on disk its
   path rides across so the downstream preview renders the real digest, else the
-  header plus a live note. The peer answering a fan-out (`--resolve-safe-v1`,
-  NO_FANOUT) uses the same union, so a running session resolves cross-device too.
+  header plus a live note. The peer answering a fan-out (the hidden
+  `agents ps resolve <selector> --json --local`, `commands/ps.ts`) uses the same union, so a running session resolves cross-device too.
   A genuine miss (no indexed row and no live row) still fails closed, and a
   degraded live-registry read yields no candidates rather than throwing.
   Status: landed (RUSH-2682).
@@ -290,8 +302,8 @@ SSH access (§7); rendering sessions that no harness produced.
   render of someone else's conversation.
   Status: landed (RUSH-2691).
 - **SES-9c (SHOULD).** A session started on a machine SHOULD reach that machine's
-  transcript index within seconds, not on the next unrelated `agents sessions*`
-  invocation. The daemon incrementally scans this host's transcript dirs into the
+  transcript index within seconds, not on the next unrelated session command
+  (`agents ps`, a resume, or a standalone `sessions` read). The daemon incrementally scans this host's transcript dirs into the
   local index on a bounded timer (`runSessionIndexWarmTick`,
   `SESSION_INDEX_WARM_TICK_MS`), single-flight with foreground scans via the DB
   scan claim. That tick MUST run the scan itself (`scanSessionsIncremental`) and
@@ -332,8 +344,8 @@ SSH access (§7); rendering sessions that no harness produced.
     live pid (`lib/session/active.ts:1773-1795`). It is a field of
     `ActiveSession` (`lib/session/active.ts:337`), **not** of `SessionMeta` —
     which declares no `provenance` property at all — so on the archived listing
-    path (`agents sessions --json`, not `agents ps --json`, served from `discoverSessions`
-    via `serializeSessionPickerRows` + `serializeSessionsJson`, `commands/sessions.ts:435-460,1446`) the key is
+    path (the standalone `sessions --json`, not `agents ps --json`; agents-cli's own
+    `SessionMeta` serializer is `serializeSessionsJson`, `lib/session/active.ts:244`) the key is
     **absent from the JSON object entirely**. A consumer MUST test for the key's
     presence, not for `null`.
   - `context` — the launch context (`terminal`|`teams`|`cloud`|`headless`)
@@ -410,15 +422,15 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/discover.ts`) because its cheap scan otherwise reads only
   `summary.json`. OpenClaw is out of scope — its rows are live channel/cron
   entries, not user-prompt transcripts. It MUST be emitted on the
-  `sessions --json` list and ride `ActiveSession` onto the `sessions watch --json`
-  / `feed watch --json` streams (backfilled from the index by
+  standalone `sessions --json` list and ride `ActiveSession` onto the `agents ps watch --json`
+  / `agents feed watch --json` streams (backfilled from the index by
   `backfillActiveRowsFromMeta`, `lib/session/active.ts`), and is deliberately NOT
   part of the minimal `--resolve` safe-metadata set (SES-IF-2a).
   Tests: `sessions-cli/src/lib/session/prompt.test.ts`, `lib/session/discover.first-user-message.test.ts`,
   `lib/session/__tests__/db.test.ts`, `lib/session/discover.test.ts`,
   `lib/session/remote/watch.test.ts`, `commands/sessions.serialize.test.ts`.
 - **SES-14c (MUST).** A session row's HEADLINE — `ActiveSession.title` on the
-  live/watch path, the bold title on every `agents sessions` render — MUST be a
+  live/watch path, the bold title on every `sessions` render — MUST be a
   user-anchored name resolved by this ladder, best first: an explicit `/rename`
   or harness `label`; else `SessionMeta.generatedTitle`; else the first-prompt
   `topic`. It MUST NOT be the agent's most recent transcript line
@@ -464,7 +476,7 @@ SSH access (§7); rendering sessions that no harness produced.
   ranked by `deriveImportantMessage` — a pending `question`, then a `needs_you`
   block (plan review / permission / input-required), then the current `activity`.
   It is folded on beside `title` in `foldRecap` and rides the SAME feed (the row
-  spread carries it onto `sessions watch --json`, and `watchFleetSessions` forwards it on a peer's rows), so a client
+  spread carries it onto `agents ps watch --json`, and `watchFleetSessions` forwards it on a peer's rows), so a client
   renders a bold title over a dim secondary line without a second query; the `agents ps`
   roster render surfaces the `question` / `needs_you` line and leaves plain
   `activity` to the existing preview.
@@ -582,8 +594,8 @@ SSH access (§7); rendering sessions that no harness produced.
   Status: `[Drift]` — `lib/tmux/orphan-reap.ts:264` and `lib/tmux/session.ts:341`
   still use tab-separated formats.
   Consumers that read `ActiveStatus` MUST handle `orphaned`/`crashed` rather than
-  falling through to a stale `activity` — the waiting filter (`agents ps --status waiting`,
-  `agents sessions --waiting`) reads the never-rewritten activity via `isAwaitingUser`
+  falling through to a stale `activity` — the waiting filter (`agents ps --status waiting`)
+  reads the never-rewritten activity via `isAwaitingUser`
   (`commands/ps-roster.ts:170`), and the roster tally carries a bucket per status (test `active.hostlink.test.ts`).
 - **SES-18b (MUST).** A bookmark MUST be stored outside `sessions.db`
   (`~/.agents/.history/bookmarks.json`, keyed by session id;
@@ -591,20 +603,18 @@ SSH access (§7); rendering sessions that no harness produced.
   bookmark is not derivable from a transcript. A malformed or absent store MUST
   degrade to "nothing is bookmarked", never throw into the listing path (test
   `bookmarks.test.ts`). Bookmarks are per-machine: the store is NOT carried in
-  an export bundle or the import mirror (`lib/session/sync/agents.ts` defines
-  the `.history/backups/` layout those write into), and any doc claiming
+  an export bundle or the import mirror (sessions-cli `src/lib/session/sync/agents.ts`
+  defines the `.history/backups/` layout those write into), and any doc claiming
   otherwise is drift.
 - **SES-18c (MUST).** Each user-visible live state MUST be directly filterable:
   `agents ps --status <state>` accepts `working`, `idle`, `waiting`, `orphaned`,
-  `crashed`, `closed`, `abandoned`, `queued`, and `unknown`, and the legacy
-  `agents sessions` group keeps one flag per state. These filters MUST imply the live
+  `crashed`, `closed`, `abandoned`, `queued`, and `unknown` (the per-state flags of the
+  removed `agents sessions` group have no replacement beyond `--status`). These filters MUST imply the live
   scan, MUST compose as a union, and MUST use the same predicates as the rendered
   status (`requestedLiveStatuses` / `matchesLiveStatus`,
-  `commands/ps-roster.ts:708-726`; test `commands/sessions.cli-live.test.ts`). `orphan` is the
-  human-facing spelling (`--orphan`, `--status orphan`) and `orphaned` remains its accepted alias. The live
-  scan MUST fan out to registered online devices unless `--local` is present;
-  `--all` MUST remain the historical directory/time widening flag, not a device
-  switch.
+  `commands/ps-roster.ts:708-726`; test `commands/ps.status-flags.test.ts`). `orphan` is the
+  human-facing spelling (`--status orphan`, `commands/ps.ts:47`) and `orphaned` remains its accepted alias. The live
+  scan MUST fan out to registered online devices unless `--local` is present.
 - **SES-19 (MUST).** Detach/attach presence MUST be **derived, never asserted**:
   the record only says "this session was detached"; `background` vs `parked` is
   decided live from the recorded pid + start-time fingerprint
@@ -617,7 +627,7 @@ SSH access (§7); rendering sessions that no harness produced.
   (`effectiveMode` / `ensureTargetReady`, `commands/sessions-migrate.ts:231-270`).
 - **SES-21 (MUST).** `fork` MUST resolve the source session **across the fleet**
   (the same resolver `preview` uses — `lib/session/selection.ts` `resolveSessionMetadataValue`,
-  reached here via `sessions preview <id> --json`), then launch a **new same-harness
+  reached here via `agents ps preview <id> --json`, `commands/fork.ts:23`), then launch a **new same-harness
   session seeded with a recap** of the source (`agents run <harness> "<recap>" -i
   --strategy balanced`), leaving the original untouched. The recap is built from the
   source's preview digest (`buildForkRecap`, `lib/session/fork.ts`). Because the seed
@@ -638,49 +648,42 @@ SSH access (§7); rendering sessions that no harness produced.
 - **SES-41 (MUST).** A direct lifecycle selector (full session id, unique id
   prefix, full `ag-<agent>-<8hex>` tmux alias, or unique alias prefix/suffix of at
   least six characters) MUST resolve to one canonical harness-native session id
-  across the fleet. `agents ps focus <selector>` and `agents sessions resume <selector>`
+  across the fleet. `agents ps focus <selector>` and `agents run auto --resume <selector>`
   MUST re-read live state after resolution: an alive tmux pane is attached, while
   `pane_dead=1`, `pidAlive=false`, `closed`, or `crashed` MUST take the native
   resume path on the owning device. Alias ambiguity MUST fail closed. Bare
-  `agents sessions resume` remains the multi-select history picker
+  `agents run auto --resume` remains the multi-select history picker
   (`commands/focus.ts`; `commands/sessions-resume.ts`;
   `lib/session/actor-sidecar.ts`; `lib/session/active.ts`).
 
 #### 3.5 Remote & export/import
 
-- **SES-22 (MUST).** `--device` MUST answer from the peer's **own** index over
-  hardened SSH; transcripts stay on the origin machine and there is no identity layer
-  beyond SSH access (`lib/session/remote/remote.ts:1-11`). A read query naming exactly
-  one device is delegated to the standalone `sessions … --host ssh://<target>`, which
-  runs the peer's own `sessions` (`index.ts:107-142`, `planDeviceHostRead` in
-  `lib/sessions-client.ts`); every other `--device` invocation runs the peer's own
-  `agents sessions`. A recursion guard (`AGENTS_SESSIONS_LOCAL=1`,
-  `lib/session/remote-active.ts:5`, set by `buildRemoteCommand`) MUST prevent re-fan-out and MUST also suppress the interactive
-  browser, so a peer answering a fan-out can never open a TUI
-  (`commands/sessions.ts` `isBareBrowserListing`).
-  - **Streaming vs. merging.** A **non-interactive** invocation (`--json`, piped
-    stdout, `--no-interactive`, a positional query, a render/filter flag,
-    `--cloud`, or more than one host) MUST stream the peer's stdout back verbatim,
-    under a per-host banner when more than one host is queried. A **bare interactive** one-host listing instead folds
-    the peer's `--json` rows into the local merged browser (`gatherRemoteList`),
-    which renders and selects locally. Both keep transcripts on the origin.
-  - **The `all`/`fleet` sentinel MUST reach the fleet on a historical query too
-    (PHNX-2673).** `--device all` / `--device fleet` (and the `--devices` alias)
-    is not a device name — it means "sweep every registered online peer." On
-    `--active` and the interactive listing this is already the default, so the
-    sentinel resolves to an empty host set. On the **historical `--json`** listing,
-    which stays local-only by default (a deterministic slice for scripts), the
-    empty host set MUST NOT silently drop the request: the sentinel MUST trigger
-    the same `gatherRemoteList` peer sweep (whole-index per peer), merged
-    machine-first into the local rows (`commands/sessions.ts`, guarded on the
-    remembered sentinel; test `commands/sessions.fleet-json.test.ts`). A bare
-    `--json` with no `--device` MUST stay local-only, and `--local` MUST still pin
-    to this machine.
+- **SES-22 (MUST).** A fleet question MUST be answered from the peer's **own**
+  state over hardened SSH; transcripts stay on the origin machine and there is no
+  identity layer beyond SSH access. agents-cli asks a peer only through the `--local`
+  peer argv (`agents ps --local --json`, `agents ps watch --json --local`,
+  `agents ps preview <id> --local --json`, the hidden `agents ps resolve <selector>
+  --json --local`, `agents daemon index backfill tools --json --local`), built by
+  `remoteAgentsJsonCommand` (`lib/remote-agents-json.ts:74`) and `remoteListCommand`
+  (`lib/session/remote/remote-list.ts:27`). A recursion guard
+  (`AGENTS_SESSIONS_LOCAL=1`, `NO_FANOUT_ENV` in `lib/session/remote-active.ts:5`)
+  MUST prevent re-fan-out and MUST also suppress the interactive browser, so a peer
+  answering a fan-out can never open a TUI (`commands/ps-roster.ts:667,684`). A peer
+  on a release older than PHNX-4227 answers these with an unknown-command error,
+  which reads as unreachable; there is no fallback to the removed `agents sessions`
+  spellings.
+  **Moved to the standalone `sessions` CLI (PHNX-4227):** transcript reads against
+  another box (`sessions <query> --host <target>`) and the historical `--json`
+  listing's `--device all`/`fleet` sweep (formerly PHNX-2673) are the standalone's;
+  agents-cli has no `--device` transcript read. The picker's history pool still asks
+  each peer's standalone `sessions --all --json --local` (`commands/sessions-browser.ts:223`).
 - **SES-23 (MUST).** Remote fan-out MUST degrade, never throw or blank: an
-  unreachable host (ssh 255) falls back to offline cache, a slow host is killed
+  unreachable host (ssh 255) is skipped with a stderr note, a slow host is killed
   to `[]`, and overall `process.exitCode=1` signals partial failure
-  (`lib/session/remote/remote.ts:79-84,140-175,206-234`; `lib/remote-agents-json.ts:86-120,172-186`; test
-  `lib/session/remote/remote.test.ts:115-175,223-247`).
+  (`gatherRemoteAgentsJson`, `lib/remote-agents-json.ts`, which names each skipped
+  peer on stderr; `gatherRemoteList`, `lib/session/remote/remote-list.ts:146`). The
+  offline-cache replay for an unreachable host's transcript listing left with the
+  standalone `sessions` (PHNX-4227).
   - **In the browser**, where the full-screen repaint hides the fan-out's stderr
     note and there is no exit code to read, the unreachable peers MUST be surfaced
     as data instead — `RemoteListResult.unreachable`, rendered in the browser
@@ -691,7 +694,7 @@ SSH access (§7); rendering sessions that no harness produced.
     than passing an empty list to `gatherRemoteList`, which reads `[]` as "no hosts
     given" and sweeps every online device.
 - **SES-23a (MUST).** A `--device` scope on the live roster (`agents ps -D`,
-  `agents sessions --active --device`) names **where the
+  `agents ps --device`) names **where the
   session runs**, not which box reported it. Every returned row MUST satisfy
   `machine ∈ scope` (`filterActiveSessionsByHostScope`,
   `commands/ps-roster.ts:396`), applied inside the single gather (`gatherActiveSessions`,
@@ -717,16 +720,17 @@ SSH access (§7); rendering sessions that no harness produced.
     the live-registry bridge used by full-UUID `preview <id>` without making a
     genuinely local unindexed live row remote. A synced mirror whose `filePath`
     exists MUST still preview locally even when `machine` names the owner.
-    `buildPreview`, direct `preview <id>`, and the in-process `sessions <id>` render
-    (`--markdown`/`--include`/`--exclude`/`--first`/`--last`) MUST all use this
-    predicate, so they fetch/hop to the peer rather than render "full transcript
-    not indexed here". An unreachable owner MUST remain a loud `no-target` error.
+    `buildPreview`, direct `agents ps preview <id>` (`commands/ps.ts:311`), and the
+    picker's transcript view (`commands/sessions-picker.ts:1090`, which reads a peer's
+    transcript with the standalone `sessions <id> --markdown --host ssh://<peer>`) MUST
+    all use this predicate, so they fetch/hop to the peer rather than render "full
+    transcript not indexed here". An unreachable owner MUST remain a loud `no-target` error.
   - **A launcher shim MUST NOT claim the transcript (PHNX-3890).** The rules above
     need a correct `machine`, and the dispatcher's own row is where it goes wrong:
     a box that LAUNCHED a session running on a peer holds a live registry row with
     no transcript on disk and a `machine` that defaulted to itself
     (`active.machine ?? self`, `lib/session/live-metadata.ts`;
-    `machine || localMachine`, `commands/sessions.ts`). `foldExecutionMachine`
+    `machine || localMachine`, `lib/session/selection.ts:86`). `foldExecutionMachine`
     cannot correct it — there is no local index row to fold from — so two
     independent paths MUST recover the true execution host:
     (a) the live bridge reconciles a self-attributed transcript-less row against
@@ -779,52 +783,61 @@ SSH access (§7); rendering sessions that no harness produced.
     on its empty-file index row (`registerHostSession`) rather than re-deriving
     it from the transcript path — `machineForSessionFile('')` falls back to THIS
     box, which re-attributed the dispatcher's own pool row to itself and split it
-    from the executing peer's fan-out row, so `sessions <id>` read as
+    from the executing peer's fan-out row, so an id lookup read as
     "ambiguous (2 sessions)" for a live offloaded run (RUSH-2486 / criterion 2 of
     RUSH-2479). The path derivation still owns live-home files and synced
     mirrors, whose recorded machine already equals it.
+
+**Moved to the standalone `sessions` CLI (PHNX-4227):** SES-24 through SES-27a and
+SES-50/SES-51 govern `sessions export` / `sessions import`, which agents-cli no longer
+implements. Their code is sessions-cli's `src/commands/sessions-bundle.ts`
+(`runExport`, `runImport`) and `src/lib/session/sync/`. agents-cli keeps the managed
+Worker template (`lib/session/sync/worker-template.ts`, the storage-boundary half of
+SES-51 and all of SES-52), the `r2.backups` bundle convention
+(`lib/session/sync/config.ts`), and the operator provisioning
+`agents setup session-backup` (`commands/setup-session-backup.ts`).
+
 - **SES-24 (MUST).** `sessions export --encrypt` MUST seal each
   transcript body client-side with AES-256-GCM (fresh IV) before it leaves the
   machine, and `sessions import` MUST decrypt before writing it to the
   mirror — the bundle only ever carries ciphertext when encryption is on
-  (`lib/session/sync/transcript-crypto.ts:67-80,108-134`;
-  `lib/session/bundle.ts:71-74,181,215`).
+  (sessions-cli `src/lib/session/sync/transcript-crypto.ts`,
+  `src/lib/session/bundle.ts`).
 - **SES-25 (MUST).** For a local `--encrypt` bundle, the export encryption key
   MUST be the shared `R2_SYNC_ENC_KEY` from the `r2.backups` bundle when that
   bundle is configured (so any machine holding it can decrypt), else an
   ephemeral key MUST be minted and printed once and MUST NOT be persisted
-  anywhere (`commands/sessions-export.ts:resolveExportKey`). The BYO backup
+  anywhere (sessions-cli `src/commands/sessions-bundle.ts:resolveExportKey`). The BYO backup
   target MUST seal with that shared key when it is set; without it the objects
   are stored without client-side encryption and the command MUST warn on stderr
-  (`commands/sessions-export.ts:resolveR2BackupKey`).
+  (sessions-cli `src/lib/session/sync/backup.ts:backupEncryptKey`).
   `sessions import` MUST accept either the bundle key or an explicit
   `--decrypt <key>` for an ephemeral one
-  (`commands/sessions-import.ts:resolveDecryptKey`). The MANAGED backup target
+  (sessions-cli `src/commands/sessions-bundle.ts:resolveDecryptKey`). The MANAGED backup target
   (SES-50) does NOT take this path: its key is the mandatory per-account escrowed
   DEK of SES-51, never an ephemeral or absent key.
 - **SES-26 (MUST).** Peer-controlled paths in a bundle MUST be
   containment-checked so a crafted `relKey`/machine name cannot escape the
-  mirror root via `../` (`lib/session/sync/agents.ts:149,170-178`, shared by export
+  mirror root via `../` (sessions-cli `src/lib/session/sync/agents.ts`, shared by export
   and the mirror-placement path).
 - **SES-27 (MUST).** The `R2_SYNC_ENC_KEY` / R2 credentials used by export and
   import MUST come only from the `r2.backups` keychain bundle, never env/disk
-  (`lib/session/sync/config.ts:12,28-29`).
+  (`lib/session/sync/config.ts`, the bundle convention agents-cli and the standalone share).
 - **SES-27a (MUST).** The optional off-box backup target
   (`sessions export --to-r2` / `sessions import --from-r2`, RUSH-2437) MUST be a
   pure on-demand backup — it MUST NOT revive the retired CRDT/background sync and
   MUST NOT run on a daemon cycle. On the BYO path it MUST fail loud (clear error,
   non-zero exit) when the `r2.backups` bundle is absent or locked, never a silent
-  no-op (`commands/sessions-export.ts:r2ExportGateError`,
-  `commands/sessions-import.ts:r2ImportGateError`); the MANAGED path (SES-50)
+  no-op (sessions-cli `src/lib/session/sync/backup.ts:openBackupStore`); the MANAGED path (SES-50)
   requires no `r2.backups` bundle at all. Each session file MUST be stored as its
   own object under the shared key layout
   (`sessions/<machine>/<agent>/<sessionId>.jsonl`, or `.../<sessionId>/<relKey>`
-  for dir-shaped agents) via `objectKey` (`lib/session/sync/agents.ts:objectKey`).
+  for dir-shaped agents) via `objectKey` (sessions-cli `src/lib/session/sync/agents.ts:objectKey`).
   The managed transport MUST prepend the verified `<userId>/` segment INSIDE its
-  client (`lib/session/sync/net-client.ts`), so the BYO object layout is byte-for-
+  client (sessions-cli `src/lib/session/sync/net-client.ts`), so the BYO object layout is byte-for-
   byte unchanged. Restore MUST route through the same placement/decrypt path as a
-  local bundle (`commands/sessions-import.ts:pullFromR2` →
-  `planImport`/`writeImport`).
+  local bundle (sessions-cli `src/lib/session/sync/backup.ts:pullBackup` →
+  `runImport`).
 - **SES-50 (MUST).** The off-box backup target MUST be MANAGED-FIRST. A caller
   signed in to Phoenix (`readSession() != null`) with no explicit BYO override
   MUST resolve to the managed store (`sessions.agents-cli.sh`, per-user namespace
@@ -833,8 +846,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `AGENTS_SESSIONS_BACKEND=byo`, or a DI write token flips to BYO. The decision
   MUST go through the ONE shared policy (`selectStorageBackendKind`), resolved once so a
   logout cannot flip the principal mid-preflight
-  (`lib/session/sync/backend.ts:resolveSessionsBackend`;
-  `lib/session/sync/backend.test.ts`).
+  (sessions-cli `src/lib/session/sync/backend.ts:resolveSessionsBackend`).
 - **SES-51 (MUST).** A MANAGED backup MUST NEVER upload plaintext. The command
   MUST resolve a non-null 32-byte per-account DEK and seal every transcript body
   per SES-24 before upload. The DEK MUST be minted once, cached locally at
@@ -845,8 +857,7 @@ SSH access (§7); rendering sessions that no harness produced.
   authoritative: a present-but-corrupt or wrong-owner escrow MUST fail loud (never
   be replaced, which would orphan prior backups), and concurrent first-use devices
   MUST converge on one immutable escrow key
-  (`lib/session/sync/managed-key.ts:resolveManagedBackupKey`;
-  `lib/session/sync/managed-key.test.ts`). Trust boundary, stated honestly:
+  (sessions-cli `src/lib/session/sync/managed-key.ts:resolveManagedBackupKey`). Trust boundary, stated honestly:
   managed backup is confidential vs a raw R2/Cloudflare bucket read (ciphertext at
   rest, SES-24 holds) but NOT zero-knowledge vs Phoenix (the DEK is escrowed on
   Phoenix-operated infrastructure, so the operator CAN recover it); `--byo` is the
@@ -856,8 +867,8 @@ SSH access (§7); rendering sessions that no harness produced.
   record body is an AES-256-GCM transcript envelope) MUST be rejected with 422, so
   an older/buggy client cannot land readable plaintext; and a MANAGED restore MUST
   fail loud on any non-encrypted object rather than importing it
-  (`lib/session/sync/worker-template.ts:isEncryptedManagedBundle`;
-  `commands/sessions-import.ts`).
+  (`lib/session/sync/worker-template.ts:isEncryptedManagedBundle`; the restore half is
+  sessions-cli `src/commands/sessions-bundle.ts:runImport`).
 - **SES-52 (MUST).** The managed sessions Worker MUST authenticate EVERY route
   (PUT/GET/LIST/DELETE) with a Phoenix bearer, verified at
   `${PHOENIX_ID_BASE}/api/v1/auth/me`, and MUST enforce `segments[0] === verified
@@ -987,7 +998,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `FEED_PUBLISH_HOOK_SCRIPT`; tests `lib/feed/attention.truth.test.ts`,
   `lib/feed/attention.test.ts`, `lib/session/active.livesignals.test.ts`).
 
-- **SES-41 (MUST).** `agents sessions watch --json` MUST emit newline-delimited,
+- **SES-41 (MUST).** `agents ps watch --json` MUST emit newline-delimited,
   versioned envelopes carrying `streamId`, a strictly increasing `sequence`, and
   `capturedAt`. Version 1 defines `reset`, `upsert`, `remove`, `scope`, and
   `heartbeat`. A row's `rowKey` MUST be stable within its device
@@ -1130,12 +1141,12 @@ SSH access (§7); rendering sessions that no harness produced.
   the owner no longer reports live state. Raw `--local` observations remain the
   coordinator input; this adds no gather, polling or daemon service.
 
-- **SES-44 (MUST).** A one-shot `agents sessions ... --json` listing that
-  agents-cli answers in-process (one not handed to the standalone `sessions` bin,
-  `lib/sessions-client.ts:isReadQuery`) is distinct from the incremental stream, but MUST expose the same picker-facing lifecycle,
-  device, viewing, and recovery metadata in each durable row. Consumers MUST NOT
-  need a second live-session join (`commands/sessions.ts:435-458,1416-1447`;
-  `commands/sessions.test.ts:19-37`).
+- **SES-44 (MUST). Moved to the standalone `sessions` CLI (PHNX-4227).** A one-shot
+  `sessions ... --json` listing is distinct from the incremental stream, but MUST expose
+  the same picker-facing lifecycle, device, viewing, and recovery metadata in each
+  durable row, so consumers need no second live-session join. agents-cli no longer
+  answers any listing in-process; its one-shot live listing is `agents ps --json`
+  (SES-IF-2).
 
 #### 3.7 Index / DB
 
@@ -1162,9 +1173,9 @@ SSH access (§7); rendering sessions that no harness produced.
   renderable, not dropped (RUSH-2436). `querySessions` and `topSessionsByCost`
   MUST keep such a row, flagged `archived` (persisted `sessions.archived_at`,
   schema v38, stamped once on the first confirmation the scanned file is gone);
-  agents' in-process id read (`findSessionsById`, reached by `agents sessions <id> --markdown`;
-  a bare id read forwards to the standalone `sessions`) MUST resolve it, and the
-  render + picker-preview paths MUST serve its user turns from the DB
+  agents-cli's id resolution (`findSessionsById`, `lib/session/db.ts`, behind
+  `agents ps preview`, `agents trace` and resume) and the standalone `sessions <id>` read
+  MUST resolve it, and the render + picker-preview paths MUST serve its user turns from the DB
   (`readSessionContent` / `readArchivedSessionPreview`) rather than falling back to
   a metadata-only note. A file-gone row with **no** cached content is a phantom (a
   stale/moved `file_path`) and MUST stay suppressed. Merely listing a file-gone
@@ -1180,9 +1191,9 @@ SSH access (§7); rendering sessions that no harness produced.
   from transcript content and rewrite `file_path` on the same row, so no such
   duplicate arises (Status: `[Landed]`; the content-vs-phantom discriminator is
   content presence, not supersession detection — SES-GAP-9).
-- **SES-48 (MUST).** A keyword content query (`filterSessionsByQuery`, `searchContentIndex`:
-  agents' in-process path, taken when the query carries a flag the standalone forward does
-  not cover, such as `--markdown`; a plain `sessions "tmux pane"` read runs in the standalone CLI) MUST return every FTS5 hit
+- **SES-48 (MUST).** A keyword content query (`filterSessionsByQuery`, `searchContentIndex`
+  in `lib/session/selection.ts`, used by agents-cli's pickers, `agents trace` and
+  `agents ps focus`; a `sessions "tmux pane"` read is the standalone CLI's) MUST return every FTS5 hit
   whose `sessions` row still exists, not only hits that already sit in the
   in-memory listing pool. The pool is a page of the index (cwd-scoped,
   default-capped at 50) and is a minority of indexed transcripts, so
@@ -1190,13 +1201,12 @@ SSH access (§7); rendering sessions that no harness produced.
   matched (PHNX-2767). Hits the pool missed MUST be hydrated from the index and
   unioned into the result. Explicit `--project` / `--agent` / `--routine`
   flags MUST still exclude a hydrated hit that fails them — those are filters,
-  not a page of the index, and the union MUST NOT undo them (otherwise
-  `sessions --project foo "phrase" --markdown` reports a multi-match ambiguity
-  against a session the user already scoped out). An id-shaped query MUST still
+  not a page of the index, and the union MUST NOT undo them (otherwise a
+  `--project foo "phrase"` query reports a multi-match ambiguity against a session
+  the user already scoped out). An id-shaped query MUST still
   resolve by id only (SES-9a) and MUST NOT fall through to this content path.
-  (`lib/session/discover.ts` `searchContentIndex`; `lib/session/selection.ts`
-  `filterSessionsByQuery`/`scopedContentIndex`; tests
-  `discover.search-content.test.ts`, `commands/sessions.render.test.ts`).
+  (`lib/session/selection.ts` `searchContentIndex`/`filterSessionsByQuery`/`scopedContentIndex`;
+  test `discover.search-content.test.ts`).
 - **SES-49 (MUST).** `session_text` MUST index the agent's own answer text
   (`assistant` column), not only the user's prompt text (`content`), so a
   content query matches a phrase that appears only in what the agent said.
@@ -1249,16 +1259,13 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/discover.ts:80-133,2758-2759,3035-3092,3146-3169,3224-3233`;
   `lib/session/discover.ts:3308-3309,3526-3562,3597-3621,3675-3684`;
   `lib/session/db.ts:2127-2161,2171-2194`; `lib/session/tool-index.ts:61-69,147-255,295`).
-- **SES-33 (MUST).** Tool-call queries (repeated distinct-call clauses, their
-  bounds, `--count`, and cross-host reads) are the standalone `sessions` CLI's
-  contract (PHNX-4227); it reads the index agents writes under SES-34 and SES-37.
-  A tool-search shape of `agents sessions --include tools` (no session id, a
-  search query instead of an id, or a `--query` clause) MUST exit 2, write
-  nothing to stdout, and name `sessions --include tools`, so no caller or older
-  peer parses a session listing as a tool envelope. A single-session read,
-  `agents sessions <id> --include tools [--json|--markdown]`, MUST keep rendering
-  that session's tool events like any other role filter (`commands/sessions.ts:1133-1140`;
-  `commands/sessions.cli-tools.test.ts`).
+- **SES-33 (MUST). Moved to the standalone `sessions` CLI (PHNX-4227).** Tool-call
+  queries (repeated distinct-call clauses, their bounds, `--count`, and cross-host
+  reads) and single-session tool reads (`sessions <id> --include tools
+  [--json|--markdown]`) are the standalone `sessions` CLI's contract; it reads the
+  index agents-cli writes under SES-34 and SES-37. The former agents-cli rule that a
+  tool-search shape of `agents sessions --include tools` exit 2 and name the
+  standalone went with the removed group.
 - **SES-34 (MUST).** Schema v29's session-id-keyed `tool_scan_ledger` MUST be independent of the
   normal session ledgers. Migration MUST clear only the derived tool ledger and
   MUST NOT clear `scan_ledger` or `dir_ledger`. Historical parsing MUST run only
@@ -1377,9 +1384,9 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/recovery.ts`; `commands/exec.ts`; `lib/session/actor-sidecar.ts`;
   tests `lib/session/recovery.test.ts`, `commands/resume.test.ts`).
 - **SES-39a (MUST).** Bare `agents run <harness> --resume` and
-  `agents sessions resume --agent <harness>` MUST open the same interactive history
+  `agents run auto --resume --agent <harness>` MUST open the same interactive history
   picker. `run <harness>#<account> --resume` adds the same account filter as
-  `agents sessions resume --agent <harness> --account <account>`. Session titles,
+  `agents run auto --resume --agent <harness> --account <account>`. Session titles,
   descriptions and conversation previews MUST remain available before selection.
   Concrete identities bypass selection. A selected row MUST preserve explicit
   run arguments, native passthrough arguments, recorded mode/model/cwd and
@@ -1389,15 +1396,19 @@ SSH access (§7); rendering sessions that no harness produced.
   concrete-id and picker forms of `run --resume` MUST route through SES-39's one
   origin-device recovery decision, preferring the origin device. When that origin
   device is genuinely unreachable, single-session resume MAY fall back to a
-  clearly-announced, explicitly chosen local `/continue` replay from the synced mirror
-  (`resumeLocalFallbackSource` rewrites `machine` to self); it MUST NOT do so
+  clearly-announced, explicitly chosen local `/continue` replay from the synced mirror;
+  it MUST NOT do so
   silently, and MUST NOT fall back while the origin is reachable (RUSH-2022). A
   host-dispatched session row MUST persist the dispatch host as `machine`.
   Cross-device resume MUST route before reading the detach record or stopping
   its headless PID, because both are local to the origin
-  (`lib/hosts/session-index.ts`; `commands/resume.ts`; `lib/session/detached.ts`;
-  `commands/exec.ts`; tests `lib/hosts/session-index.test.ts`,
-  `lib/session/detached.test.ts`).
+  (`lib/hosts/session-index.ts`; `sessionRecoveryPeer` in `lib/session/recovery.ts`,
+  applied in `commands/exec.ts`; `lib/session/detached.ts`; tests
+  `lib/hosts/session-index.test.ts`, `lib/session/detached.test.ts`).
+  Status: the local-replay MAY is unverified since PHNX-4227. Its helper
+  (`resumeLocalFallbackSource`, which rewrote `machine` to self) was deleted with
+  `commands/resume.ts`, and the `agents run --resume <id>` path in `commands/exec.ts`
+  routes to the origin peer without an equivalent fallback.
 - **SES-43 (MUST, RUSH-2336).** Every bare-active surface — the CLI's grouped
   table and `--json` (`renderActiveSessions`), the interactive browser's
   `--active` filter (`applyFilters`), `focus`'s attach gate
@@ -1442,28 +1453,34 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 4.1 Command surface
 
-The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resume`, `detach`,
-`stop`, `inject`, `export`, `render`, `share`, `trace`, `import`, `migrate`/`relocate`,
-`migrations`, `backfill tools`/`backfill resources`/`backfill titles`, `fork`, `bookmark`,
-`stats`, `insights`, `optimize`, `watch`, `backup-setup`) with flags is the reference in
-[sessions.md](sessions.md); this spec governs the guarantees behind it. Plain reads
-(`[query]`, `<id>`, `--json`) forward to the standalone `sessions` CLI, which also owns
-`tail` and tool-call search (PHNX-4227).
+`agents sessions` was removed in PHNX-4227. The agents-cli session surface is
+`agents ps` (`stop`, `focus`, `detach`, `migrate`, `migrations`, `preview`, `watch`, and
+the hidden peer verb `resolve`), `agents run <agent> --resume [id]`, `agents send
+--channel session`, `agents fork`, `agents trace`, `agents insights` (`resources`, `cost`),
+`agents daemon index` (`roots`, `optimize`, `backfill tools|resources|titles`), and
+`agents setup session-backup`; [sessions.md](sessions.md) is the reference. The read
+surface (`sessions [query]`, `<id>`, `--json`, `--resolve`, `preview`, `tail`, `trace`,
+`timeline`, `artifacts`, `bookmark`, `render`, `share`, `export`, `import`, tool-call
+search) is the standalone `sessions` CLI's. This spec governs the guarantees behind both;
+requirements about the standalone's surface are marked as moved.
 
 #### 4.2 Machine-readable output (STABLE — agents depend on these)
 
-- **SES-IF-1 (MUST).** `sessions --json` (listing) MUST emit a JSON **array** of
-  `SessionMeta` (`serializeSessionsJson`, `lib/session/active.ts:227-233`, called at `commands/sessions.ts:1446`);
+- **SES-IF-1 (MUST). Moved to the standalone `sessions` CLI (PHNX-4227).**
+  `sessions --json` (listing) MUST emit a JSON **array** of `SessionMeta`;
   `sessions <id> --json` MUST emit `{ session, events }` (a bare event array is
-  the pre-1.20.51 shape — consumers read `output.events`). The fleet browser itself shells peers
-  with `sessions --all --json --limit <n>` (default 500; `commands/sessions-browser.ts:56,263`),
-  so the array shape is load-bearing across the fleet.
-- **SES-IF-2 (MUST).** `agents ps --json` (and its legacy spelling `agents sessions --active --json`,
-  the same `runLiveRoster`) MUST emit `ActiveSession[]` with
-  `ticketId`/`project`/`prLink` always present as keys (test
-  `sessions.serialize.test.ts:68-90`); `inject --json` and
-  `agents ps migrations --json` emit their documented shapes.
-- **SES-IF-2a (MUST).** `sessions --resolve <selector> --json` MUST resolve a full
+  the pre-1.20.51 shape — consumers read `output.events`). agents-cli depends on it:
+  the picker's history pool shells each peer's standalone `sessions --all --json --local
+  --limit <n>` (`commands/sessions-browser.ts:223`), so the array shape is load-bearing
+  across the fleet.
+- **SES-IF-2 (MUST).** `agents ps --json` (`runLiveRoster`, `commands/ps-roster.ts`)
+  MUST emit `ActiveSession[]` with `ticketId`/`project`/`prLink` always present as keys
+  (test `commands/sessions.serialize.test.ts`); `agents ps migrations --json` emits its
+  documented shape.
+- **SES-IF-2a (MUST).** The shared fleet selector resolver (`resolveSessionMetadata`,
+  `lib/session/selection.ts`, behind `agents ps preview|focus`, `agents run --resume`,
+  `agents trace` and `agents fork`; the standalone's user-facing spelling is
+  `sessions --resolve <selector> --json`) MUST resolve a full
   id, unique id prefix, or keyword query from indexed `SessionMeta` rows without
   parsing or rendering transcript events. It MUST search the online fleet unless
   `--local` is set; `--agent` and `--project` MUST narrow every peer. Exactly one
@@ -1474,8 +1491,10 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   the same full id MUST count as one logical session. A missing selector or more
   than one logical match or an empty selector MUST emit no JSON, list the
   failure/ambiguity on stderr, and exit 1; ambiguity MUST include every matching
-  full id and machine. Fleet peers MUST receive the versioned `--resolve-safe-v1`
-  protocol so an older unsafe peer rejects before serializing a row. An incomplete
+  full id and machine. Fleet peers MUST be asked with the hidden
+  `agents ps resolve <selector> --json --local` (`metadataResolveForwardedArgs`), which
+  refuses to run outside a fan-out (`NO_FANOUT_ENV`, `commands/ps.ts`) and which a peer
+  older than PHNX-4227 rejects as an unknown command before serializing a row. An incomplete
   peer sweep (including malformed successful output, device-registry failure, or an
   older peer rejecting that protocol) MUST emit no JSON, MUST NOT decide
   unique/no-match from partial rows, and MUST warn with the failed source(s) on
@@ -1486,9 +1505,9 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   a label still MUST NOT be decided from partial rows
   (`lib/session/selection.ts` `serializeResolvedSessionsJson`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
-  `metadataResolveForwardedArgs`; the `commands/sessions.ts` `resolveSessionMetadata`
-  wrapper; tests
-  `commands/sessions.resolve.test.ts`, `commands/sessions.resolve-errors.test.ts`,
+  `metadataResolveForwardedArgs`, `resolveSessionMetadata`; the peer reply in
+  `commands/ps.ts` `resolve`; tests `commands/ps-resolve.test.ts`,
+  `commands/ps-resolve.ssh-peer.test.ts`, `commands/ps-resolve.offline-peer.test.ts`,
   `lib/session/remote/remote-list.test.ts`).
 
   *Amended 2026-08-10 (RUSH-2492).* This requirement previously mandated exit 2
@@ -1496,7 +1515,7 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   was malformed, protocol-incompatible, or unreachable — even when the session in
   question lived on a perfectly reachable device. `attach`/`focus`/`resume`/`run
   --resume` hit the same abort through the shared resolver. It now degrades to a
-  warning and exit 1, matching `sessions --resolve`'s existing not-found exit
+  warning and exit 1, matching the resolver's existing not-found exit
   code, so a genuinely offline or misbehaving peer no longer blocks resolving a
   session that IS reachable.
 - **SES-IF-2b (MUST).** A positional query that exactly names an installed
@@ -1504,20 +1523,20 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   `--agent <agent@version>`. An uninstalled, unknown, or malformed pair MUST
   remain ordinary free text. `--agent <agent> --version <version>` MUST be
   equivalent to `--agent <agent@version>`; `--version` without `--agent` MUST
-  fail loudly (`commands/sessions.ts` `parseInstalledAgentVersionQuery`,
-  `applyVersionFilters`; tests `commands/sessions.test.ts`,
-  `commands/sessions.cli-list.test.ts`).
-- **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
-  `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
-  per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
-  bundle files are written `0600` (`lib/session/bundle.ts:8-9,63-87,129-133,135-150`).
+  fail loudly. Since PHNX-4227 the `--agent`/`--version` flag pair is the standalone
+  `sessions` CLI's; agents-cli keeps the positional-query parse in its shared resolver
+  (`parseInstalledAgentVersionQuery`, `lib/session/selection.ts`).
+- **SES-IF-3 (MUST). Moved to the standalone `sessions` CLI (PHNX-4227).** The
+  export **bundle format** is NDJSON, `kind` `agents-session-bundle`, `version` 1; parse
+  MUST reject a wrong kind/version; per-record `hash`/`size` are always over
+  **plaintext** for byte-exact dedup; bundle files are written `0600` (sessions-cli
+  `src/lib/session/bundle.ts`).
 - **SES-IF-4 (MUST).** `SessionEvent.type` is a **closed union** of the 12 documented
   types (`sessions-cli/src/lib/session/types.ts:64`); a parser MUST NOT introduce another.
 - **SES-IF-4a (resolved).** The tool-search and `tool-program-count` envelopes
-  are the standalone `sessions` CLI's interface; `agents sessions --include tools`
-  refuses per SES-33.
-- **SES-IF-4b (MUST).** `insights resources --json` and its older spelling
-  `sessions stats --json` MUST run the same action and emit its own versioned
+  are the standalone `sessions` CLI's interface (SES-33).
+- **SES-IF-4b (MUST).** `agents insights resources --json` (formerly
+  `agents sessions stats --json`, removed in PHNX-4227) MUST emit its own versioned
   `sessions-stats` envelope (`{ schemaVersion, kind: 'sessions-stats', filters,
   signal, coverage, totals, order, ranked[], zeroInvoked[] }`), never the
   `SessionMeta[]` list or `{ session, events }` detail shape. `ranked` is the
@@ -1545,9 +1564,9 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   stays the ABSOLUTE count of sessions with ≥1 explicit invocation — the
   backfill hint keys on `sessionsScanned/sessionsIndexed`, never on
   `sessionsWithUsage`, which is sparse by nature and would nag forever (PHNX-2301).
-  Both parents also own `--agent` (`sessions` as one value, `insights` as a
-  repeatable list defaulting to `[]`); the rollup MUST read an empty list as no
-  filter and one value as that agent wherever it is written, and MUST exit 1 on
+  The verb takes one `-a, --agent` value and its `insights` parent a repeatable list
+  defaulting to `[]`; the rollup MUST read an empty list as no
+  filter and one value as that agent wherever it is written (`resolveStatsAgent`), and MUST exit 1 on
   two different agents rather than filter on their union. The window is all time
   unless `--since` narrows it; the default 30-day window of bare `insights` does
   not apply.
@@ -1557,15 +1576,16 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
   a transcript already current at `RESOURCE_INDEX_VERSION`
   (`commands/sessions-stats.ts`; `commands/sessions-backfill.ts`;
   `lib/session/db.ts` `queryResourceUsageStats`/`backfillResourceUsage`).
-- **SES-IF-4c (MUST).** `agents insights` and its `agents sessions insights` spelling MUST invoke
-  the same implementation. The default report MUST be deterministic and offline,
+- **SES-IF-4c (MUST).** `agents insights` (formerly also spelled
+  `agents sessions insights`, removed in PHNX-4227) owns the behavioural report. The default report MUST be deterministic and offline,
   MUST include friction, corrections, automatable repeats, harness split, and ranked
   evidence-backed actions, and MUST NOT emit raw transcript text or full local paths.
   `--agent` MUST be repeatable. `--narrative` MAY call a coach only with aggregate
   report data (`commands/insights.ts`; `sessions-cli/src/lib/session/insights.ts`).
-- **SES-IF-4d (MUST).** `agents trace` and its `agents sessions trace` spelling MUST invoke
-  the same implementation (`commands/sessions-trace.ts` `configureTraceCommand`), and
-  `--json` MUST emit its own versioned envelope
+- **SES-IF-4d (MUST).** `agents trace` (`commands/sessions-trace.ts`
+  `configureTraceCommand`; the former `agents sessions trace` spelling was removed in
+  PHNX-4227, and plain-text traces are the standalone `sessions trace <id>`) MUST
+  produce the trajectory, and `--json` MUST emit its own versioned envelope
   (`{ schemaVersion, kind: 'sessions-trace', layout: 'single' | 'compare' | 'lineage', sessions:
   SessionTrajectory[], diff?, lineage? }`), never the `SessionMeta[]` list or the `{ session,
   events }` render detail shape. A `SessionTrajectory` MUST carry `spanMs`, `steps[]`,
@@ -1605,8 +1625,7 @@ The `agents sessions` command surface (bare `sessions [query]`, `preview`, `resu
 - **SES-IF-5 (MUST).** Machine-readable output (`--json`, `--markdown`, bundle
   NDJSON) goes to **stdout**; human/diagnostic/skip notes go to
   **stderr**, so piping a session is never polluted.
-- **SES-IF-6 (MUST).** Exit codes are a contract: `agents ps --status waiting` (legacy
-  `agents sessions --waiting`) sets exit **1** to signal matching (waiting-on-you) sessions exist
+- **SES-IF-6 (MUST).** Exit codes are a contract: `agents ps --status waiting` sets exit **1** to signal matching (waiting-on-you) sessions exist
   (`commands/ps-roster.ts:642,676`); remote
   partial-failure sets exit **1** without throwing (SES-23).
 
@@ -1626,21 +1645,22 @@ normative — a change that widens/narrows a cell is a spec change.
 | cwd of a live process | `lsof` | `readlink /proc/<pid>/cwd`; unreadable means unknown, never the error text | pid-registry only (no `lsof`) |
 | Codex home relocation (SUN_LEN socket) | yes (`lib/codex-home.ts:40-46,76-83`) | n/a | n/a |
 | Foreign-absolute-cwd drive rebase | n/a | n/a | **prohibited** (SES-6) |
-| Remote shell for `--device` | `bash -lc` | `bash -lc` | PowerShell (`lib/session/remote/remote.ts:65-74`) |
+| Remote shell for a peer question | `bash -lc` | `bash -lc` | PowerShell (`remoteAgentsJsonCommand`, `lib/remote-agents-json.ts:74`; `remoteListCommand`, `lib/session/remote/remote-list.ts:27`) |
 
 - **SES-CROSS-1 (MUST).** All three desktop platforms MUST be supported for discovery,
-  parsing, listing, and `--device`. Windows-specific gaps (no provenance, no
+  parsing, the live roster, and its `-D` fan-out. Windows-specific gaps (no provenance, no
   start-time reuse guard) are documented deviations, not silent behavior.
 
 ---
 
 ### 6. Compatibility & stability guarantees
 
-- **SES-COMPAT-1 (MUST).** The `--json` listing array shape and `<id> --json`
-  `{ session, events }` shape MUST NOT change incompatibly without a version note;
-  additive fields are allowed (SES-IF-1).
+- **SES-COMPAT-1 (MUST). Moved to the standalone `sessions` CLI (PHNX-4227).** The
+  `--json` listing array shape and `<id> --json` `{ session, events }` shape MUST NOT
+  change incompatibly without a version note; additive fields are allowed (SES-IF-1).
 - **SES-COMPAT-2 (MUST).** `SessionEvent.type` (the 12-value union) and the export
-  bundle `kind`/`version` MUST remain backward-compatible; a bundle producer that
+  bundle `kind`/`version` (the bundle is the standalone `sessions` CLI's since PHNX-4227)
+  MUST remain backward-compatible; a bundle producer that
   bumps `version` MUST keep the parser rejecting unknown versions loudly (SES-IF-3/SES-IF-4).
 - **SES-COMPAT-3 (MUST).** Schema migrations MUST be forward-only and lossless
   (SES-29), and a CLI that opens a DB written by a newer CLI MUST fail safe
@@ -1648,15 +1668,13 @@ normative — a change that widens/narrows a cell is a spec change.
 
   Status: `[Intended]` — no `currentVersion > SCHEMA_VERSION` guard exists yet,
   so the fail-safe half is unenforced; the shortfall is SES-GAP-8.
-- **SES-COMPAT-4 (MUST).** On the streaming path, `--device` forwards every other flag
-  verbatim to the peer's same-version binary; the SSH target MUST stay validated
-  against `SSH_TARGET_RE` to block argv-flag smuggling
-  (`lib/ssh-exec.ts:10-17`, asserted in `lib/session/remote/remote.ts:181`). The interactive
-  one-host browser (SES-22) is the documented exception: it rebuilds each peer's argv from its
-  own filter state, `sessions --all --json --limit <n>` plus `--since`/`--until`/`--project`/
-  `--routine`/`--skill`/`--plugin`/`--unmanaged`/`--sort`/`--teams` (and `--agent` when fixed or
-  version-pinned), so `--no-live` and any other flag do not reach the peer there
-  (`commands/sessions-browser.ts` `remotePoolArgs`).
+- **SES-COMPAT-4 (MUST).** Every peer question (SES-22) MUST validate the SSH target
+  against `SSH_TARGET_RE` to block argv-flag smuggling (`lib/ssh-exec.ts:10-17`,
+  asserted in `lib/remote-agents-json.ts:128`). The picker's history pool rebuilds each
+  peer's argv from its own filter state, the standalone `sessions --all --json --local
+  --limit <n>` plus `--since`/`--until`/`--project`/`--routine`/`--skill`/`--plugin`/
+  `--sort`/`--teams` (and `--agent` when fixed or version-pinned), so no other flag
+  reaches the peer (`commands/sessions-browser.ts:222` `remotePoolArgs`).
 
 ---
 
@@ -1669,15 +1687,13 @@ normative — a change that widens/narrows a cell is a spec change.
 
 **Known gaps (implemented-vs-intended drift to fix, not to hide):**
 - **SES-GAP-9c.** SES-9c's bounded wait is taken by the id cold-miss repair
-  (`commands/sessions.ts:1002-1007` via `discoverSessions({ waitForScan })`, and
-  `computeLocalMetadataMatches` `:2905-2914`) and by `hydrateSessionTranscript`
-  (`lib/session/discover.ts:336`); the latter two fail loud on a `false` return. `richMetaById`
+  (`computeLocalMetadataMatches`, `lib/session/selection.ts:495`) and by
+  `hydrateSessionTranscript` (`lib/session/discover.ts`); both fail loud on a `false` return. `richMetaById`
   (`commands/focus.ts` ~`:727`) is an id repair by its own docstring and does not
   take it, so an `agents ps focus <id>` that collides with the daemon's scan reads the
   pre-scan snapshot, misses, and falls back to a row carrying no `version` — a
   non-version-pinned resume. `openFocusTabs` (`commands/focus.ts` ~`:635`) is the
-  same class. The selector paths in `renderOneSession` /
-  `renderArtifactsGlobal` do not take it either. Widening the wait to those sites
+  same class. Widening the wait to those sites
   is **not** a drop-in: they are not gated on a miss, so the cost would be
   unconditional, and `WAIT_FOR_SCAN_TIMEOUT_MS` (2s, `session/discover.ts`) is
   below a measured real scan hold (~3s on a 1.07 GB index), so a collision can pay
@@ -1685,7 +1701,7 @@ normative — a change that widens/narrows a cell is a spec change.
   `discoverSessions` discards `waitForScanToSettle`'s `false` (`lib/session/discover.ts:280-282`). Closing this means gating
   on an actual miss AND either raising the bound past a realistic scan or acting
   on that `false`. Raised by the RUSH-2691 review.
-- **SES-GAP-1.** `flatSessionRow` (`--flat`) and the picker's `formatPickerLabel`
+- **SES-GAP-1.** `flatSessionRow` (the flat table, `printSessionTable`) and the picker's `formatPickerLabel`
   both feed `renderTopicCell` (`lib/session/presentation.ts:490`, `:752` →
   `:572`) without the `'-'` fallback the other renderers use, so a session with
   no live preview, no tag, and an empty `topic` renders a **blank** cell —
@@ -1703,9 +1719,10 @@ normative — a change that widens/narrows a cell is a spec change.
   `sessions.model`, filled by the harness indexers whose files record one, and a history
   watch row falls back to it when the timeline pass never folded the session,
   PHNX-4330.)
-- **SES-GAP-4.** `opencode` has a reserved `SYNC_AGENTS` slot but SQLite→JSONL export
-  is **not implemented** (`lib/session/sync/agents.ts:107-113`) — opencode
-  sessions are not included in `agents sessions export` today.
+- **SES-GAP-4. Moved to the standalone `sessions` CLI (PHNX-4227).** `opencode` has a
+  reserved `SYNC_AGENTS` slot but SQLite→JSONL export is **not implemented** (sessions-cli
+  `src/lib/session/sync/agents.ts`), so opencode sessions are not included in
+  `sessions export` today.
 - **SES-GAP-5.** `dedupeBySession` runs only over local sources, never across the
   local↔remote seam; a session surfacing both locally and via a peer's self-report
   is not provably collapsed and is untested
@@ -1774,7 +1791,7 @@ normative — a change that widens/narrows a cell is a spec change.
 
 **GWT-1 — Codex transcript discovered with correct harness + metadata.**
 Given a Codex JSONL at `~/.codex/sessions/**` with a `session_meta` line and
-per-turn `turn_context` lines; When `agents sessions` runs; Then it appears with
+per-turn `turn_context` lines; When the index scans it; Then it appears with
 `agent='codex'`, cwd/gitBranch from `session_meta`, `model` from `session_meta`
 falling back to `turn_context`, and `tokenCount` from the last cumulative snapshot
 priced once (`discover.ts:3353-3370,3392-3398`, `discover.ts:3401-3426`).
@@ -1802,11 +1819,11 @@ Then the preview shows `Plan 6/8: <in-progress step>` with a `●` glyph
 `✓N/M · <item>`, `commands/sessions-picker.ts:47-53`.)
 
 **GWT-6 — Idle session falls back to first-prompt topic; never blank (except the
-`--flat` gap).**
-Given a non-live indexed session with no live preview; When rendered via
-the overview / `--tree`; Then the cell is `topic`, or `'-'` if topic is
-absent (`commands/sessions.ts:1662,1754`); **but** via `--flat` with a
-noise-only first prompt the cell is blank today — the SES-GAP-1 violation.
+flat-row gap).**
+Given a non-live indexed session with no live preview; When rendered in a list row;
+Then the cell is `topic`, or `'-'` if topic is absent (`buildSessionDescription`,
+`lib/session/presentation.ts`); **but** via `flatSessionRow` with a noise-only first
+prompt the cell is blank today — the SES-GAP-1 violation.
 
 **GWT-7 — "Where it started" spans three axes.**
 Given a live SSH-launched session with a pid; When metadata is enriched; Then
@@ -1815,22 +1832,24 @@ from `/proc/<pid>/environ`, and `context` gives the launch context — no single
 `origin` field carries all three (`active.ts:1773-1795`; `provenance.ts:90-119,146-151`;
 `active.ts:1309`).
 
-**GWT-8 — An encrypted export round-trips on another machine.**
+**GWT-8 — An encrypted export round-trips on another machine (standalone `sessions`
+CLI since PHNX-4227).**
 Given a machine with `R2_SYNC_ENC_KEY` set in its `r2.backups` bundle; When it
-runs `agents sessions export --encrypt -o b.bundle`; Then every record body is
+runs `sessions export --encrypt -o b.bundle`; Then every record body is
 an AES-256-GCM envelope, and a peer holding the same `r2.backups` bundle can
-`agents sessions import b.bundle` and decrypt without passing `--decrypt`
-(`sessions-export.ts:439-451`; `bundle.ts:71-74`; `transcript-crypto.ts:67-80`).
+`sessions import b.bundle` and decrypt without passing `--decrypt`
+(sessions-cli `src/commands/sessions-bundle.ts` `runExport`/`runImport`,
+`src/lib/session/bundle.ts`, `src/lib/session/sync/transcript-crypto.ts`).
 A peer without that bundle must pass the printed ephemeral key explicitly
-(`sessions-import.ts:144-145,303-322`).
+(`resolveDecryptKey`).
 
 **GWT-9 — Remote fan-out degrades, never blanks.**
 Given 3 fleet hosts, one unreachable (ssh 255) and one slow past budget; When
 `agents ps` fans out; Then reachable hosts return and the unreachable and slow hosts are
 skipped to `[]` with a stderr note — no throw, no empty result (`lib/remote-agents-json.ts:89-121,171-207`).
-When the same hosts are read through the streaming `agents sessions -D <a> -D <b> -D <c>` path,
-the unreachable host replays its offline cache and overall `process.exitCode=1`
-(`lib/session/remote/remote.ts:140-146,176-235`; `lib/session/remote/remote-list.ts:82-122`).
+When the picker's history pool asks the same hosts (`gatherRemoteList`,
+`lib/session/remote/remote-list.ts:146`), the unreachable host is listed in
+`RemoteListResult.unreachable` and named in the browser header.
 
 **GWT-10 — Old DB auto-migrates without data loss.**
 Given a v9 `sessions.db` with a `name` column and rows; When `getDB()` opens it;
@@ -1839,11 +1858,11 @@ survives searchable (`db.migrate-v10.test.ts:70-84`; `db.migrate-v14.test.ts:91-
 
 **GWT-11 — The standalone CLI searches what agents indexed.**
 Given agents indexed a session where a `git merge` call ran and a later `gh` call
-returned `CONFLICT`; When `sessions --include tools` runs two `--query` clauses
-naming those facts; Then it returns that session with both calls,
-`agents sessions --include tools --query …` exits 2 pointing at it, and
-`agents sessions <id> --include tools --json` still returns that session's two
-tool calls as `{ session, events }` (`commands/sessions.cli-tools.test.ts`).
+returned `CONFLICT`; When the standalone `sessions --include tools` runs two
+`--query` clauses naming those facts; Then it returns that session with both calls,
+and `sessions <id> --include tools --json` returns that session's two tool calls as
+`{ session, events }`. The test lives with the standalone (sessions-cli); agents-cli's
+half is the index writer (`lib/session/tool-index.test.ts`).
 
 **GWT-12 — The index survives an unavailable transcript.**
 Given a transcript was indexed and its source is then moved offline; Then the
@@ -1884,16 +1903,15 @@ covering the query tokens (`lib/session/discover.search-content.test.ts`).
 **GWT-19 — Content-search union does not undo `--project` / `--agent`.**
 Given two indexed transcripts whose bodies both match `scoped search`, one in
 project `agents-cli` and one in another project; When
-`filterSessionsByQuery` / `sessions --project agents-cli "scoped search"`
-runs; Then only the `agents-cli` session is in the result. The same holds for
-`--agent` (`lib/session/discover.search-content.test.ts`;
-`commands/sessions.render.test.ts`).
+`filterSessionsByQuery` runs with project `agents-cli`; Then only the `agents-cli`
+session is in the result. The same holds for `--agent`
+(`lib/session/discover.search-content.test.ts`).
 
 **GWT-20 — A phrase the agent said, but the user never typed, is findable.**
 Given a Claude transcript whose only user turn is "why did the deploy fail"
 and whose assistant reply contains "grombulator flux capacitor overheated";
-When `sessions "grombulator flux capacitor overheated"` runs (or
-`ftsSearch` is called directly); Then the session is returned — before SES-49
+When a content query for "grombulator flux capacitor overheated" runs (the standalone
+`sessions "<phrase>"`, or `ftsSearch` called directly); Then the session is returned — before SES-49
 landed this returned zero hits despite the phrase being on disk
 (`lib/session/discover.assistant-content.test.ts`).
 
@@ -1983,7 +2001,7 @@ process client (`cli/src/lib/secrets-client.ts`, documented in
   pack` + `tar tzf` of the produced tarball (`scripts/packed-tarball.test.ts`).
   The PATH lookup MUST NOT resolve to a `secrets` inside agents-cli's own shims
   dir (`findInPath`, `lib/agent-spec/agents.ts`, skips it): the pre-extraction command shim there `exec`s
-  `agents secrets`, so taking it re-enters the passthrough without bound.
+  `secrets`, so taking it re-enters the passthrough without bound.
   Verified in `secrets-client.test.ts` (shim first on PATH, standalone after);
   the self-heal shim pass removes that legacy shim outright
   (`pruneOrphanedCommandShim`, `shims.drift.test.ts`).
@@ -2043,14 +2061,14 @@ engine.
   prompt (e.g. Touch ID) on its own. agents-cli enforces this by always
   passing `agentOnly: true` on the run/exec injection path
   (`commands/exec.ts`, `lib/exec.ts`, `lib/browser/chrome.ts`) — the standalone resolves broker-only in that mode
-  and fails loud (naming `agents secrets unlock <bundle>`) rather than
+  and fails loud (naming `secrets unlock <bundle>`) rather than
   prompting. **Given** an agent launch **When** it resolves a `hold`/`always`
   bundle the broker does not already hold **Then** the resolution throws
   instead of prompting, and the caller surfaces that as a clear error, never a
   hang.
 - **SEC-17 (SHOULD).** `agents doctor` SHOULD warn (name + line only, never
   the value) when a credential-shaped var is exported from a shell rc file,
-  and point the user at `agents secrets`. The scan itself is the standalone's
+  and point the user at `secrets`. The scan itself is the standalone's
   `rc-hygiene.*` op family, reached through `scanUserRcFiles`/
   `masterPassphraseInEnv` (`secrets-client.ts`); the `rc-secret-export`
   finding (`lib/devices/doctor-findings.ts`) is what the user sees.
@@ -2607,7 +2625,7 @@ schema (`--json` passes through each agent's native stream format).
   original prompt; a genuine handoff to a different agent/version MUST
   rewrite it via `buildFallbackPrompt` — `/continue <id>` when the next
   agent is claude with a known prior session id, else an explicit
-  retry-with-context note pointing at `agents sessions <id>`
+  retry-with-context note pointing at `sessions <id>`
   (`buildFallbackPrompt`, `lib/exec.ts:1796-1822`; same-host test `lib/exec.ts:1857-1861`).
 - **EXEC-27 (MUST).** Workflow tool/MCP scoping (`--tools`/`--mcp-config`/
   `--strict-mcp-config`) is enforced on claude only; `runWithFallback` MUST
@@ -2770,7 +2788,7 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   `pickReconnectTarget` (`lib/hosts/reconnect.ts`), which falls back to
   the launcher-minted `AGENT_LAUNCH_ID` — known before the connection
   existed — and the peer resolves it locally via
-  `agents sessions focus --launch-id <id> --local`. *Given* a non-Claude
+  `agents ps focus --launch-id <id> --local`. *Given* a non-Claude
   harness whose real session id is coined remotely; *When* the link drops
   before `resolveRemoteSessionId` can read it back; *Then* the run still
   reconnects. Before this, only Claude (handed `--session-id` up front)
@@ -2782,9 +2800,9 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   Auto-reconnect (exit 255 that the loop will retry) MUST NOT print it — the
   user is not at a shell yet. A clean detach, an agent exit, a drop that is
   not reconnecting — including `--raw` (no tmux, so no reconnect) — 
-  `agents sessions focus` remote tmux attach, and `runOnPeer` TTY hops MUST. *Given* a remote TUI whose SSH ControlMaster closes; *When*
+  `agents ps focus` remote tmux attach, and `runOnPeer` TTY hops MUST. *Given* a remote TUI whose SSH ControlMaster closes; *When*
   the local client exits; *Then* the shell shows `Session <uuid>` and
-  `agents sessions resume <uuid>` under OpenSSH's `Shared connection … closed.`
+  `agents run auto --resume <uuid>` under OpenSSH's `Shared connection … closed.`
   line, not a bare prompt (RUSH-3227).
 - **EXEC-56 (MUST).** When an interactive `--device` run whose real session id
   is known before the TTY is taken (Claude's forced id, or a resume) starts,
@@ -2793,7 +2811,7 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   *while* the connection exists, not only after it dies. A launch id MUST
   NOT be printed as a session id. *Given* `agents run claude --device yosemite-m2`;
   *When* the SSH stream is about to start; *Then* stderr shows
-  `Session <uuid> on yosemite-m2` and `agents sessions resume <uuid>`
+  `Session <uuid> on yosemite-m2` and `agents run auto --resume <uuid>`
   (RUSH-3227 plan B).
 - **EXEC-43 (MUST).** A persisted tmux `SessionMeta.cmd`
   (`buildTmuxAgentCommand`) MUST redact env VALUES (`<redacted>`), and the live launched
@@ -3878,7 +3896,7 @@ not the watchdog's.
   concrete next step (the specific action, a forgotten tool, or the sensible default). A
   generic "use your judgment and finish" with no concrete step MUST NOT be emitted.
 - **WD-12 (SHOULD).** When the blocker is resolvable by a tool the agent already has
-  (`agents computer`, `agents browser`, `agents ssh <mac> "agents computer …"`), the nudge
+  (`computer`, `browser`, `agents ssh <mac> "computer …"`), the nudge
   SHOULD name that tool rather than escalating to the human.
 - **WD-13 (MAY).** A user playbook at `~/.agents/playbooks/watchdog.md` MAY be appended as
   House Rules to tune the nudge/skip line per fleet (`composePromptWithPlaybook`).
@@ -3889,7 +3907,7 @@ not the watchdog's.
   resolved by the single canonical `resolveInjectTargetForSession`
   (`lib/terminal/resolve.ts`, precedence `tmux > iterm > vscodium`) and injected by
   `injectIntoTerminal` (`lib/terminal/inject.ts`).
-- **WD-15 (MUST).** `agents send --channel session` (and the legacy `agents sessions inject`)
+- **WD-15 (MUST).** `agents send --channel session` (and the legacy `agents send --channel session`)
   MUST resolve targets through the same
   `resolveInjectTargetForSession` as the watchdog, so the manual unblock path and the
   watchdog agree on which sessions are addressable (no duplicate weaker resolver).

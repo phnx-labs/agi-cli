@@ -7,6 +7,6 @@
   for the `ps` hops, and 1.22.123 or newer for the backfill hop.
   An older peer is not detected or worked around: its roster and backfill rows
   read as unreachable, and a stop or detach prints the peer's own unknown-command
-  error. The `sessions` spellings still work on this machine. Source:
+  error. Source:
   `cli/src/commands/sessions-stop.ts`, `cli/src/commands/detach.ts`,
   `cli/src/lib/session/remote-active.ts`, `cli/src/commands/sessions-backfill.ts`.

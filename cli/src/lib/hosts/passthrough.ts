@@ -21,7 +21,6 @@ import {
 import { flagValue, hasHostRoutingFlag, ROUTING_OPTION_SPECS } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
-import { markFleetRemote } from '../devices/connect.js';
 import {
   fanOutDevices,
   planFleetTargets,
@@ -361,9 +360,7 @@ export async function runFleetPassthrough(
     async (target) => {
       const cmd = ['agents', ...forwarded];
       const isSelf = target.device.name.toLowerCase() === self.toLowerCase() || isSelfHost(target.device.name);
-      const remoteCmd =
-        !isSelf && command === 'browser' ? markFleetRemote(cmd, target.device) : cmd;
-      const res = isSelf ? localRunner(cmd) : runner(target.device, remoteCmd);
+      const res = isSelf ? localRunner(cmd) : runner(target.device, cmd);
       if (res.code !== 0) {
         const detail = (res.stderr || res.stdout || 'unreachable').trim().slice(0, 200);
         throw new Error(detail || 'unreachable');
@@ -530,34 +527,6 @@ export async function maybeRunOnHost(
     target,
   });
   return true;
-}
-
-export async function maybeRunStandaloneOnHost(
-  command: string,
-  opts?: FleetPassthroughOptions,
-): Promise<boolean> {
-  const rawArgs = process.argv.slice(2);
-  if (!hasHostRoutingFlag(rawArgs)) return false;
-
-  if (OWN_HOST_COMMANDS.has(command)) {
-    const helpOrVersion = rawArgs.some(
-      (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
-    );
-    if (helpOrVersion) {
-      process.argv = [process.argv[0], process.argv[1], ...stripRoutingFlags(rawArgs, STRIP_SPECS)];
-    }
-    return false;
-  }
-
-  const helpOrVersion = rawArgs.some(
-    (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
-  );
-  if (!helpOrVersion && (await maybeRunOnHost(command, [command, ...rawArgs], opts))) {
-    return true;
-  }
-
-  process.argv = [process.argv[0], process.argv[1], ...stripRoutingFlags(rawArgs, STRIP_SPECS)];
-  return false;
 }
 
 export function streamAgentsOnHost(

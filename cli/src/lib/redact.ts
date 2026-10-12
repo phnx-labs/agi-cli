@@ -119,9 +119,3 @@ export function knownSecretValuesFromEnv(env: NodeJS.ProcessEnv = process.env): 
   }
   return out;
 }
-
-const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-
-export function redactEmails(text: string): string {
-  return text.replace(EMAIL_RE, '[EMAIL]');
-}

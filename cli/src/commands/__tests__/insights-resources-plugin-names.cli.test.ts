@@ -14,7 +14,7 @@ interface StatsJson { ranked: StatsRow[]; zeroInvoked: StatsRow[] }
 
 let home: string;
 
-function stats(args: string[] = ['sessions', 'stats', '--json', '--top', '0']): StatsJson {
+function stats(args: string[] = ['insights', 'resources', '--json', '--top', '0']): StatsJson {
   const res = spawnSync(process.execPath, [tsxBin, cliEntry, ...args], {
     cwd: home,
     env: { ...process.env, HOME: home, NODE_NO_WARNINGS: '1', AGENTS_SESSIONS_DB: '' },
@@ -37,7 +37,7 @@ afterAll(() => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-describe('agents sessions stats — ranked and zero-invoked agree on plugin resource names', () => {
+describe('agents insights resources — ranked and zero-invoked agree on plugin resource names', () => {
   it('records a bare plugin skill and a slash-typed skill under the inventory identity', () => {
     const out = stats();
     const ranked = out.ranked.map(r => ({ kind: r.kind, name: r.name, plugin: r.plugin, sessions: r.sessions, invocations: r.invocations }));
@@ -49,16 +49,13 @@ describe('agents sessions stats — ranked and zero-invoked agree on plugin reso
   });
 });
 
-describe('agents insights resources — same report as sessions stats', () => {
-  it.each([
-    [['--top', '0']],
-    [['--agent', 'claude', '--top', '0']],
-    [['--plugin', 'create', '--bottom']],
-  ])('matches sessions stats for %j', (args) => {
-    expect(stats(['insights', 'resources', ...args, '--json'])).toEqual(stats(['sessions', 'stats', ...args, '--json']));
+describe('agents insights resources — one report wherever the filters are written', () => {
+  it('matches with --agent written before the subcommand, where insights collects it as a list', () => {
+    expect(stats(['insights', '--agent', 'claude', 'resources', '--json'])).toEqual(stats(['insights', 'resources', '--agent', 'claude', '--json']));
   });
 
-  it('matches with --agent written before the subcommand, where insights collects it as a list', () => {
-    expect(stats(['insights', '--agent', 'claude', 'resources', '--json'])).toEqual(stats(['sessions', 'stats', '--agent', 'claude', '--json']));
+  it('narrows to one plugin with --plugin', () => {
+    const out = stats(['insights', 'resources', '--plugin', 'create', '--top', '0', '--json']);
+    expect(out.ranked.map(r => r.name)).toEqual(['create:image']);
   });
 });

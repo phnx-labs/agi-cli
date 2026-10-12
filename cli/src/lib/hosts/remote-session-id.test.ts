@@ -16,11 +16,11 @@ describe('remote launch resolution protocol', () => {
     fs.writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, session_id: 'execution-session', ts: Date.now() / 1000 }));
     const registryPath = path.join(getTerminalsDir(), 'by-pid', `${pid}.json`);
     const before = fs.readFileSync(registryPath, 'utf8');
-    const result = runAgents(['sessions', '--resolve-launch-id', 'exact-launch', '--json', '--local'], process.cwd(), home);
+    const result = runAgents(['ps', 'resolve', '--launch-id', 'exact-launch', '--json', '--local'], process.cwd(), home);
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual({ launchId: 'exact-launch', sessionId: 'execution-session' });
     expect(fs.readFileSync(registryPath, 'utf8')).toBe(before);
-    const absent = runAgents(['sessions', '--resolve-launch-id', 'different-launch', '--json', '--local'], process.cwd(), home);
+    const absent = runAgents(['ps', 'resolve', '--launch-id', 'different-launch', '--json', '--local'], process.cwd(), home);
     expect(absent.status, absent.stderr).toBe(0);
     expect(JSON.parse(absent.stdout)).toEqual({ launchId: 'different-launch', sessionId: null });
   });

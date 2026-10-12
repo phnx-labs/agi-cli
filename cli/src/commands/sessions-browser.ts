@@ -89,10 +89,20 @@ function distinct(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => !!v))].sort();
 }
 
+// A live view is reproduced by `agents ps`, a history view by the standalone `sessions` CLI.
 export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
+  if (f.running || f.statuses.length > 0) {
+    const live = ['agents', 'ps'];
+    if (f.statuses.length > 0) live.push('--status', f.statuses.join(','));
+    if (f.device) live.push('-D', f.device);
+    if (f.bookmarks) live.push('--bookmarks');
+    if (f.routine) {
+      live.push('--routine');
+      if (typeof f.routine === 'string') live.push(f.routine);
+    }
+    return live;
+  }
   const a = ['sessions'];
-  if (f.statuses.length === 0 && f.running) a.push('--active');
-  for (const status of f.statuses) a.push(`--${status === 'orphaned' ? 'orphan' : status}`);
   if (f.teams) a.push('--teams');
   if (f.bookmarks) a.push('--bookmarks');
   if (f.agent) a.push('-a', f.agent);
@@ -108,7 +118,6 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   }
   if (f.skill) a.push('--skill', f.skill);
   if (f.plugin) a.push('--plugin', f.plugin);
-  if (f.unmanaged) a.push('--unmanaged');
   if (f.sort !== 'timestamp') a.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
   if (f.limit !== 500) a.push('--limit', String(f.limit));
   const q = query.trim();
@@ -516,7 +525,7 @@ export async function runSessionBrowser(
         return { flash: on ? `★ bookmarked ${active.shortId}` : `☆ unbookmarked ${active.shortId}`, reload: true };
       }
       if (name === 'y' || name === 'Y') {
-        const cmd = 'ag ' + browserFilterToArgv(f, query).join(' ');
+        const cmd = browserFilterToArgv(f, query).join(' ');
         const ok = copyToClipboard(cmd);
         return ok ? `copied: ${cmd}` : cmd;
       }

@@ -13,10 +13,12 @@ function runResolveSessionMetadata(
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-rush2492-'));
   try {
     const runner = [
-      "const { resolveSessionMetadata } = await import('./src/commands/sessions.ts');",
+      "const { resolveSessionMetadataValue } = await import('./src/lib/session/selection.ts');",
       `const fanout = ${JSON.stringify(fanout)};`,
-      'const deps = { gatherRemoteList: async () => fanout };',
-      `await resolveSessionMetadata(${JSON.stringify(selector)}, {}, deps);`,
+      'let forwarded;',
+      'const deps = { gatherRemoteList: async (args) => { forwarded = args; return fanout; } };',
+      `const outcome = await resolveSessionMetadataValue(${JSON.stringify(selector)}, {}, deps);`,
+      'process.stdout.write(JSON.stringify({ outcome, forwarded }));',
     ].join(' ');
     const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', runner], {
       cwd: repoRoot,
@@ -42,27 +44,23 @@ describe('RUSH-2492 offline-peer session resolution (real call site)', () => {
     filePath: '/sessions/claude.jsonl',
   };
 
-  it('resolves a session on a reachable peer (prints it, exit 0) even while another device is offline', () => {
+  it('resolves a session on a reachable peer even while another device is offline, asking peers with ps resolve', () => {
     const { status, stdout, stderr } = runResolveSessionMetadata('71f4b54c', {
       sessions: [onReachablePeer],
       unreachable: ['mac-mini'],
     });
     expect(status, stderr).toBe(0);
-    const printed = JSON.parse(stdout);
-    expect(printed).toHaveLength(1);
-    expect(printed[0].id).toBe(id);
-    expect(stderr).not.toContain('did not answer');
+    const { outcome, forwarded } = JSON.parse(stdout);
+    expect(outcome).toMatchObject({ kind: 'resolved', session: { id, machine: 'yosemite-s1' } });
+    expect(forwarded).toEqual(['ps', 'resolve', '71f4b54c', '--json', '--local']);
   });
 
-  it('degrades a genuinely-partial outcome to a warning + not-found at exit 1, never the old exit-2 abort', () => {
+  it('reports a genuinely-partial outcome naming the offline device instead of a not-found', () => {
     const { status, stdout, stderr } = runResolveSessionMetadata('deadbeef', {
       sessions: [],
       unreachable: ['mac-mini'],
     });
-    expect(status).toBe(1);
-    expect(stdout).toBe('');
-    expect(stderr).toContain('Warning: 1 device(s) unreachable, not checked: mac-mini');
-    expect(stderr).toContain('No session matching "deadbeef" on any reachable device (1 unreachable, not checked).');
-    expect(stderr).not.toContain('Partial session resolution');
+    expect(status, stderr).toBe(0);
+    expect(JSON.parse(stdout).outcome).toEqual({ kind: 'partial', failedPeers: ['mac-mini'] });
   });
 });

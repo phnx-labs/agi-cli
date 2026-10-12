@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isAgentsBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
 import { decodeRenderedPowershell } from '../hosts/remote-cmd.test-fixture.js';
 
@@ -244,43 +244,33 @@ describe('buildSshInvocation', () => {
   });
 });
 
-describe('isAgentsBrowserDrive', () => {
-  it('matches agents/ag browser argv and the quoted single-string form', () => {
-    expect(isAgentsBrowserDrive(['agents', 'browser', 'navigate', '--url', 'https://example.com'])).toBe(true);
-    expect(isAgentsBrowserDrive(['ag', 'browser', 'screenshot'])).toBe(true);
-    expect(isAgentsBrowserDrive(['agents browser navigate --url https://example.com'])).toBe(true);
-  });
-
+describe('isBrowserDrive', () => {
   it('matches the standalone browser binary (cli/package.json bin.browser)', () => {
-    expect(isAgentsBrowserDrive(['browser', 'navigate', '--url', 'https://evil.example'])).toBe(true);
-    expect(isAgentsBrowserDrive(['browser navigate --url https://evil.example'])).toBe(true);
-    expect(isAgentsBrowserDrive(['browser', 'screenshot'])).toBe(true);
+    expect(isBrowserDrive(['browser', 'navigate', '--url', 'https://evil.example'])).toBe(true);
+    expect(isBrowserDrive(['browser navigate --url https://evil.example'])).toBe(true);
+    expect(isBrowserDrive(['browser', 'screenshot'])).toBe(true);
   });
 
   it('does not match non-browser commands or an already-prefixed argv', () => {
-    expect(isAgentsBrowserDrive([])).toBe(false);
-    expect(isAgentsBrowserDrive(['uptime'])).toBe(false);
-    expect(isAgentsBrowserDrive(['agents', 'sessions', 'list'])).toBe(false);
-    expect(isAgentsBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'agents', 'browser', 'start'])).toBe(false);
-    expect(isAgentsBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'browser', 'start'])).toBe(false);
+    expect(isBrowserDrive([])).toBe(false);
+    expect(isBrowserDrive(['uptime'])).toBe(false);
+    expect(isBrowserDrive(['agents', 'ps'])).toBe(false);
+    expect(isBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'agents', 'browser', 'start'])).toBe(false);
+    expect(isBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'browser', 'start'])).toBe(false);
   });
 });
 
 describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () => {
-  it('stamps AGENTS_FLEET_REMOTE on an agents browser drive so the far-side gate can fire', () => {
+  it('stamps AGENTS_FLEET_REMOTE on a browser drive so the far-side gate can fire', () => {
     const { args, env } = buildSshInvocation(
       dev({ name: 'peer', user: 'me', auth: { method: 'key' } }),
-      ['agents', 'browser', 'navigate', '--url', 'https://example.com'],
+      ['browser', 'navigate', '--url', 'https://example.com'],
       '/shim',
     );
     expect(args[args.length - 1]).toMatch(
-      /^env AGENTS_FLEET_REMOTE=1 .*agents browser navigate --url https:\/\/example\.com$/,
+      /^env AGENTS_FLEET_REMOTE=1 .*browser navigate --url https:\/\/example\.com$/,
     );
     expect(env.AGENTS_FLEET_REMOTE).toBeUndefined();
-
-    const remote = args[args.length - 1] as string;
-    const stamped = remote.match(/^env AGENTS_FLEET_REMOTE=(\S+) /);
-    expect(stamped?.[1]).toBe('1');
   });
 
   it('without the marker the far side is not a fleet-remote drive', () => {
@@ -291,16 +281,6 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     );
     expect(args[args.length - 1]).toBe('uptime');
     expect(args[args.length - 1]).not.toContain('AGENTS_FLEET_REMOTE');
-  });
-
-  it('marks the ag alias and the quoted single-string form', () => {
-    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
-    expect(buildSshInvocation(posix, ['ag', 'browser', 'screenshot'], '/shim').args.at(-1)).toMatch(
-      /^env AGENTS_FLEET_REMOTE=1 .*ag browser screenshot$/,
-    );
-    expect(
-      buildSshInvocation(posix, ['agents browser navigate --url https://example.com'], '/shim').args.at(-1),
-    ).toMatch(/^env AGENTS_FLEET_REMOTE=1 .*agents browser navigate --url https:\/\/example\.com$/);
   });
 
   it('marks the standalone browser binary so agents ssh box browser … is gated too', () => {
@@ -321,10 +301,10 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     expect(stamped?.[1]).toBe('1');
   });
 
-  it('does not mark agents sessions or an interactive login', () => {
+  it('does not mark another agents command or an interactive login', () => {
     const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
-    expect(buildSshInvocation(posix, ['agents', 'sessions', 'list'], '/shim').args.at(-1)).toBe(
-      'agents sessions list',
+    expect(buildSshInvocation(posix, ['agents', 'ps', '--json'], '/shim').args.at(-1)).toBe(
+      'agents ps --json',
     );
     const interactive = buildSshInvocation(posix, [], '/shim');
     expect(interactive.args.at(-1)).toBe('me@peer.ts.net');
@@ -340,11 +320,11 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
         user: 'me',
         auth: { method: 'key' },
       }),
-      ['agents', 'browser', 'screenshot'],
+      ['browser', 'screenshot'],
       '/shim',
     );
     expect(decodePowerShell(args[args.length - 1] as string)).toMatch(
-      /^\$env:AGENTS_FLEET_REMOTE='1'; .*agents browser screenshot$/,
+      /^\$env:AGENTS_FLEET_REMOTE='1'; .*browser screenshot$/,
     );
   });
 

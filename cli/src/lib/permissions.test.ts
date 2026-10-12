@@ -415,7 +415,7 @@ describe('computer permission hints', () => {
     const hint = formatComputerPermissionGrantHint('Microsoft.WindowsNotepad');
 
     expect(hint).toContain('Computer(Microsoft.WindowsNotepad)');
-    expect(hint).toContain('agents computer reload');
+    expect(hint).toContain('`computer reload`');
     expect(hint).toContain('type-text');
     expect(hint).toContain('key');
     expect(COMPUTER_APP_GATED_VERBS).toContain('type-text');
@@ -693,7 +693,7 @@ describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
   const SAFE_COMMANDS = [
     "ssh yosemite-m5 'ls -la'",
     'scp report.html yosemite-m5:/tmp/report.html',
-    "agents ssh yosemite-m5 'agents sessions'",
+    "agents ssh yosemite-m5 'agents ps'",
     'scp yosemite-m5:/tmp/plan.html /tmp/plan.html && open /tmp/plan.html',
     'git -C ~/.agents status',
   ];

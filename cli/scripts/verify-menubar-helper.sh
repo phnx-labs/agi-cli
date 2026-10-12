@@ -65,7 +65,7 @@ if command -v xcrun >/dev/null 2>&1; then
     echo "menubar helper is not notarized/stapled: $APP" >&2
     echo "Re-stage the published bundle (scripts/stage-menubar-helper.sh); if the published" >&2
     echo "release itself is unstapled, cut a new one from phnx-labs/agi-menu:" >&2
-    echo "  agents secrets exec apple.com -- scripts/release.sh <x.y.z>   (in agi-menu)" >&2
+    echo "  secrets exec apple.com -- scripts/release.sh <x.y.z>   (in agi-menu)" >&2
     exit 1
   fi
 else

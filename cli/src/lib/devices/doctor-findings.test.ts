@@ -59,7 +59,7 @@ describe('severity rubric', () => {
     expect(f?.device).toBe('boxA');
     expect(f?.message).toContain("reserved secrets bundle 'auth'");
     expect(f?.message).toContain('not file-backed');
-    expect(f?.remediation).toBe('agents secrets delete auth --yes && agents secrets create auth --backend file');
+    expect(f?.remediation).toBe('secrets delete auth --yes && secrets create auth --backend file');
     expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'auth-bundle-wrong-backend')).toBe(false);
   });
 
@@ -448,7 +448,7 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     expect(rc[0].severity).toBe('warning');
     expect(rc[0].message).toContain('3 credential-shaped exports in shell rc files');
     expect(rc[0].message).toContain('.zshrc:12 OPENAI_API_KEY');
-    expect(rc[0].remediation).toBe('agents secrets add once per export (3), then delete each rc line');
+    expect(rc[0].remediation).toBe('secrets add once per export (3), then delete each rc line');
   });
 
   it('the file-store master key gets its own row — a different fix from the rest', () => {
@@ -461,7 +461,7 @@ describe('rc-hygiene + exec-policy findings (restored from the pre-RUSH-2069 adv
     const rc = findings.filter((f) => f.kind === 'rc-secret-export');
     expect(rc).toHaveLength(2);
     expect(rc[0].remediation).toContain('~/.agents/.secrets-key/passphrase');
-    expect(rc[1].remediation).toBe('agents secrets add, then delete the rc line');
+    expect(rc[1].remediation).toBe('secrets add, then delete the rc line');
   });
 
   it('no rc exports → no finding', () => {

@@ -43,7 +43,7 @@ describe('describeInstallationActivity', () => {
     const line = activeCheck.formatInUseDeferral('Claude@2.1.219', activity);
     expect(line).toContain('pid 2173999');
     expect(line).not.toContain('??');
-    expect(line).toContain('agents sessions stop');
+    expect(line).toContain('agents ps stop');
     expect(line).not.toContain('retry after its sessions finish');
   });
 

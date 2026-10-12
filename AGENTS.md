@@ -65,7 +65,7 @@ assets/       Brand + launch demo (under assets/demo/) (repo-root, not shipped i
 | [`cli`](cli) | The CLI — version mgmt, config sync, session index + live roster, teams, cloud, fleet; fronts the standalone `sessions`, `browser`, `secrets`, and `computer` CLIs | [AGENTS.md](cli/AGENTS.md) · [README.md](README.md) (the root README is the package README) |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
 | [phnx-labs/agi-menu](https://github.com/phnx-labs/agi-menu) | AGI Menu, the macOS menu-bar helper (own repo) — published as `MenubarHelper.app.zip` on this repo's `menubar/v<x.y.z>` tag, installed and healed by the CLI on macOS (`menubar.enabled`) | that repo's AGENTS.md · [cli/docs/menubar.md](cli/docs/menubar.md) (the contract) |
-| `@phnx-labs/computer-cli` | The standalone `computer` engine (own repo) — the helper daemons, the RPC, and the autonomous loop behind `agents computer`. agents-cli is a thin consumer of it (PHNX-4075) | [cli/docs/computer.md](cli/docs/computer.md) (the contract) |
+| `@phnx-labs/computer-cli` | The standalone `computer` engine (own repo) — the helper daemons, the RPC, and the autonomous loop behind `computer`. agents-cli only installs it (`agents setup computer`); `agents computer` was removed (PHNX-4075, PHNX-4227) | [cli/docs/computer.md](cli/docs/computer.md) (the contract) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
 | [`packages/agi-cli`](packages/agi-cli) | Deprecated alias — re-exports the canonical CLI | [README.md](packages/agi-cli/README.md) |
 | [`packages/swarmify-mirror`](packages/swarmify-mirror) | Deprecated npm-redirect stub | [README.md](packages/swarmify-mirror/README.md) |
@@ -97,8 +97,8 @@ and [`architecture.md`](cli/docs/architecture.md).
   [`cli/src/lib/exec.ts`](cli/src/lib/exec.ts), entered via `agents run`. Each
   agent version runs in an isolated **version home** (`HOME` swapped before exec) so
   configs never bleed between versions.
-- **Real-world tool surfaces.** The standalone `browser` CLI (web) and `agents computer`
-  (native desktop, an adapter over the standalone `computer` CLI) are the essential tools that
+- **Real-world tool surfaces.** The standalone `browser` CLI (web) and `computer` CLI
+  (native desktop) are the essential tools that
   let an agent act on real UIs — the difference between talking about a task and doing it.
 - **Sessions.** Two things wear the name: a durable **transcript** (on disk, indexed in
   `sessions.db`, read by the standalone `sessions` CLI) and an ephemeral **live identity**
@@ -113,7 +113,7 @@ and [`architecture.md`](cli/docs/architecture.md).
 - **One engine, many consumers.** `cli` owns the state — the session index, the
   pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. AGI EXT
   ([phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext))
-  is a **consumer**: the VS Code UI layer projects `agents sessions watch --json` and
+  is a **consumer**: the VS Code UI layer projects `agents ps watch --json` and
   invokes the owning CLI nouns for one-shot reads and actions. It holds presentation
   state, not duplicate session/device/team/ticket/watchdog mechanisms. Fix a mechanism
   in the CLI and every consumer benefits.
@@ -498,7 +498,7 @@ the exception.
   in docs that the change has made stale. Exempt: pure internal refactors, test-only
   changes, self-evident renames.
 - **Core command groups stay in sync with fleet guidance.** A change to a core
-  group such as `sessions`, `devices`, `teams`, `run`, `secrets`, or `browser`
+  group such as `ps`, `devices`, `teams`, `run`, `feed`, or `send`
   MUST audit the hooks, skills, commands, and rules in the companion
   `phnx-labs/.agents` repo (formerly `.agents-system`) that invoke or teach that
   group. Land the

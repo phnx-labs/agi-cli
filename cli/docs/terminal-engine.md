@@ -3,8 +3,8 @@
 
 Open an *interactive* command — as a **tab** or a **split pane** — in iTerm,
 Ghostty, or tmux, on this machine or a remote host over SSH. Lives in
-[`src/lib/terminal/`](../src/lib/terminal/); the first caller is
-`agents sessions resume`.
+[`src/lib/terminal/`](../src/lib/terminal/); the first caller is the batch
+resume picker behind a bare `agents run <agent> --resume`.
 
 ## Interactive surfaces vs. cloud providers
 
@@ -74,7 +74,7 @@ user actually installed still wins the available-backend fallback.
 Registering it changes the two existing consumers of the registry, not just
 `--terminal`: on a Mac with none of iTerm / Ghostty / VSCodium installed,
 `agents ps focus` ([`focus.ts`](../src/commands/focus.ts)) and
-`agents sessions resume` ([`sessions-resume.ts`](../src/commands/sessions-resume.ts))
+the batch resume picker ([`sessions-resume.ts`](../src/commands/sessions-resume.ts))
 used to have no backend and resumed in the current process — they now open a
 Terminal.app tab. `resume`'s picker also gains a Terminal row.
 
@@ -222,13 +222,23 @@ await openSurfaces(items, {
 });
 ```
 
-### `agents sessions resume`
+### The batch resume picker (`agents run <agent> --resume`)
+
+A bare `--resume` (no id) opens a multi-select history picker and opens each
+selected session through this engine (`sessionsResumeAction`,
+[`sessions-resume.ts`](../src/commands/sessions-resume.ts)). `agents run auto --resume`
+lists every harness.
 
 | Flag | Effect |
 |---|---|
-| `--iterm` / `--ghostty` / `--tmux` / `--vscodium` / `--terminal-app` | Force a backend (else auto-detect / prompt). `--terminal-app` is spelled apart from `run --terminal`, which means "open in a terminal", not "use Terminal.app". |
-| `--device <alias>` | Open on the selected sessions' origin host over SSH (defaults to `tmux`); a different host is refused. |
-| `--splits` | Pack two sessions side by side per tab (default is one tab per session). |
+| `--device <alias>` | Open on the selected sessions' origin host over SSH, in `tmux`; a session from a different host is refused. |
+| `--all` / `--teams` / `--since <time>` / `-n, --limit <n>` | Widen or narrow the picker's history (default: this directory, last 30 days, 200 rows). |
+
+The backend is detected or picked: with one available backend the picker uses it,
+otherwise it asks "Resume N sessions where?". The `--iterm` / `--ghostty` /
+`--tmux` / `--vscodium` / `--terminal-app` / `--splits` flags belonged to the removed
+`agents sessions resume` (PHNX-4227) and are not `agents run` flags; sessions open one
+per tab.
 
 Every selected harness goes through the shared session-recovery command. Native
 resume uses the installed harness with the conversation’s account on its origin
@@ -272,8 +282,8 @@ codium --open-url 'vscodium://swarmify.swarm-ext/spawn?p=<base64url(JSON)>'
 - **A session that already has a tab is focused, not duplicated.** The extension
   finds its live tab for `sessionId`, focuses it and acks `focused-existing`; the
   CLI prints `Already open → focused tab "…" in window "…"`. Before
-  opening, `sessions resume --vscodium` also says when the session still has a live
-  process on its host (host + pid).
+  opening a resumed session in VSCodium, the batch resume picker also says when the
+  session still has a live process on its host (host + pid).
 - **The tab opens straight into the agent.** The command a tab runs carries
   `--quiet`: agents' own lines go to a per-launch log
   (`~/.agents/.cache/logs/launches/`, owner-only, pruned after 14 days), and only a

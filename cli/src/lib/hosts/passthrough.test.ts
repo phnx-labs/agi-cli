@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs, renderForwardDecision, OWN_HOST_COMMANDS } from './passthrough.js';
+import { flagValue, maybeRunOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs, renderForwardDecision, OWN_HOST_COMMANDS } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -127,8 +127,8 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     process.exitCode = 0;
   });
 
-  it('falls through for OWN_HOST commands (secrets owns its --device)', async () => {
-    expect(await maybeRunOnHost('secrets', ['secrets', 'list', '--device', 'mac'])).toBe(false);
+  it('falls through for OWN_HOST commands (ps owns its --device)', async () => {
+    expect(await maybeRunOnHost('ps', ['ps', '--device', 'mac'])).toBe(false);
   });
 
   it('leaves `events logs --device` to the run-log viewer, which scopes runs by device', async () => {
@@ -203,17 +203,9 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     }
   });
 
-  it('falls through for OWN_HOST multi-host aggregators (sessions/feed handle --device themselves)', async () => {
+  it('falls through for OWN_HOST multi-host aggregators (feed handles --device itself)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(await maybeRunOnHost('sessions', ['sessions', '--active', '--device', 'a'])).toBe(false);
     expect(await maybeRunOnHost('feed', ['feed', '--device', 'a', '--json'])).toBe(false);
-    expect(process.exitCode ?? 0).toBe(0);
-  });
-
-  it('falls through for browser — --device is bound at start, not routed here', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(await maybeRunOnHost('browser', ['browser', 'start', '--device', 'zion'])).toBe(false);
-    expect(await maybeRunOnHost('browser', ['browser', 'screenshot', '--device', 'zion'])).toBe(false);
     expect(process.exitCode ?? 0).toBe(0);
   });
 
@@ -502,73 +494,8 @@ describe('runFleetPassthrough — direct unit tests', () => {
     expect(output).toContain('mac-mini');
     expect(output).toContain('1 not written');
   });
-
-  it('marks a remote fan-out target with AGENTS_FLEET_REMOTE, but never the self target', async () => {
-    console.log = () => {};
-    const registry = fakeRegistry([fakeDevice('zion', 'macos'), fakeDevice('mac-mini', 'macos')]);
-    const remoteCmds: string[][] = [];
-    const selfCmds: string[][] = [];
-    const runner = (_d: DeviceProfile, cmd: string[]) => {
-      remoteCmds.push(cmd);
-      return { code: 0, stdout: '{}', stderr: '' };
-    };
-    const localRunner = (cmd: string[]) => {
-      selfCmds.push(cmd);
-      return { code: 0, stdout: '{}', stderr: '' };
-    };
-
-    await runFleetPassthrough('browser', ['browser', 'start', '--device', 'all'], {}, {
-      self: 'zion',
-      loadDevices: async () => registry,
-      runner,
-      localRunner,
-    });
-
-    expect(remoteCmds).toHaveLength(1);
-    expect(remoteCmds[0].slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
-    expect(remoteCmds[0].slice(-4)).toEqual(['agents', 'browser', 'start', '--json']);
-    expect(selfCmds).toHaveLength(1);
-    expect(selfCmds[0][0]).toBe('agents');
-    expect(selfCmds[0]).not.toContain('AGENTS_FLEET_REMOTE=1');
-  });
 });
 
-describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-2214 / T3)', () => {
-  const originalArgv = process.argv.slice();
-
-  afterEach(() => {
-    delete process.env.AGENTS_SYNC_MACHINE_ID;
-    process.argv = originalArgv.slice();
-    process.exitCode = 0;
-  });
-
-  it('leaves argv untouched and runs locally when no routing flag is present', async () => {
-    process.argv = ['node', 'browser', 'screenshot', '--json'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
-    expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--json']);
-  });
-
-  it('leaves --device on argv for start so the command can bind the task', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'browser', 'start', '--device', 'zion'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
-    expect(process.argv).toEqual(['node', 'browser', 'start', '--device', 'zion']);
-  });
-
-  it('leaves --device on argv for a page verb so the command can reject it', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'browser', 'screenshot', '--device', 'zion'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
-    expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--device', 'zion']);
-  });
-
-  it('keeps --help local but strips the routing flags so commander parses', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'browser', '--device', 'otherbox', '--help'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
-    expect(process.argv).toEqual(['node', 'browser', '--help']);
-  });
-});
 
 describe('sync fan-out roster surfaces a refused write', () => {
   async function syncRoster(payload: unknown): Promise<string> {
@@ -624,13 +551,7 @@ describe('sync fan-out roster surfaces a refused write', () => {
   });
 });
 
-describe('OWN_HOST_COMMANDS keeps computer/browser/secrets local', () => {
-  it('lists computer, browser and secrets so their own --device handling runs', () => {
-    expect(OWN_HOST_COMMANDS.has('computer')).toBe(true);
-    expect(OWN_HOST_COMMANDS.has('browser')).toBe(true);
-    expect(OWN_HOST_COMMANDS.has('secrets')).toBe(true);
-  });
-
+describe('OWN_HOST_COMMANDS', () => {
   it('does NOT list view — `agents view --device <name>` still SSHes the whole command, not a --host rewrite', () => {
     expect(OWN_HOST_COMMANDS.has('view')).toBe(false);
   });

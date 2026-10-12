@@ -14,11 +14,11 @@ export function registerCommandGroups(parent: Command, groups: readonly CommandG
 export const FRONT_DOOR_COMMAND_GROUPS: readonly CommandGroup[] = [
   {
     title: 'Quick start',
-    names: ['setup', 'view', 'run', 'sessions'],
+    names: ['setup', 'view', 'run'],
   },
   {
     title: 'Most-used',
-    names: ['teams', 'browser', 'secrets', 'devices', 'accounts', 'add'],
+    names: ['teams', 'devices', 'accounts', 'add'],
   },
 ];
 
@@ -180,16 +180,7 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
   return output.join('\n');
 }
 
-const FORWARDS_HELP = new WeakSet<Command>();
-
-export function forwardsHelp(cmd: Command): Command {
-  cmd.helpOption(false);
-  FORWARDS_HELP.add(cmd);
-  return cmd;
-}
-
 function applyHelpConventionsRecursive(cmd: Command): void {
-  if (FORWARDS_HELP.has(cmd)) return;
   cmd
     .helpOption('-h, --help', 'Show help')
     .addHelpCommand(false)

@@ -102,28 +102,6 @@ async function runInsights(args: string[]): Promise<string> {
   return chunks.join('\n');
 }
 
-async function runNestedInsights(args: string[]): Promise<string> {
-  const { Command } = await import('commander');
-  const { registerSessionsInsightsCommand } = await import('./insights.js');
-  const program = new Command();
-  program.exitOverride();
-  const sessions = program.command('sessions')
-    .option('--json')
-    .option('--since <time>')
-    .option('--agent <id>');
-  registerSessionsInsightsCommand(sessions);
-
-  const chunks: string[] = [];
-  const origLog = console.log;
-  console.log = (...a: unknown[]) => { chunks.push(a.map(String).join(' ')); };
-  try {
-    await program.parseAsync(['node', 'agents', 'sessions', 'insights', ...args]);
-  } finally {
-    console.log = origLog;
-  }
-  return chunks.join('\n');
-}
-
 describe('agents insights', () => {
   it('splits the report by the account that produced each session', async () => {
     const payload = JSON.parse(await runInsights(['--json', '--since', 'all']));
@@ -181,8 +159,8 @@ describe('agents insights', () => {
     expect(both.window.since).toBe('30d');
   });
 
-  it('nests under sessions, inherits overlapping parent flags, and emits actions', async () => {
-    const payload = JSON.parse(await runNestedInsights(['--json', '--since', 'all', '--agent', 'claude']));
+  it('filters by --agent and emits actions', async () => {
+    const payload = JSON.parse(await runInsights(['--json', '--since', 'all', '--agent', 'claude']));
     expect(payload.window.since).toBeNull();
     expect(payload.harnesses).toEqual([{ name: 'claude', count: 3 }]);
     expect(payload.actions).toBeInstanceOf(Array);

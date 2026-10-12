@@ -103,7 +103,7 @@ function targetLabel(target: ReconnectTarget): string {
 
 export function recoveryHint(target: ReconnectTarget, host: string): string {
   if (target.kind === 'session') {
-    return `  Session ${target.id}\n  Resume:  agents ps focus ${target.id}\n`;
+    return `  Session ${target.id}\n  Resume:  agents run auto --resume ${target.id}\n`;
   }
   return `  Launch ${target.id}\n  agents ssh ${host} 'agents ps focus --launch-id ${target.id} --local'\n`
     + `  or pick it:  agents ps\n`;

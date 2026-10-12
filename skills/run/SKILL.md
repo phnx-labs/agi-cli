@@ -212,7 +212,7 @@ agents devices ps          # list dispatched runs
 agents devices stop <id>   # terminate a hung/detached run (alias: kill)
 agents events logs --device gpu-box   # pick a host-dispatch run
 agents events logs <id> -f        # follow a host-task log
-agents sessions <id>             # session transcript
+sessions <id>             # session transcript
 ```
 
 Run options follow a strict forwarding contract on `--device` runs — nothing
@@ -224,7 +224,7 @@ silently drops at the SSH boundary:
   <passthrough>`.
 - **Rejected loud** (exit non-zero before dispatch): `--secrets/--secrets-keys/
   --allow-expired` (Keychain values never cross SSH implicitly — provision with
-  `agents secrets export --device` instead), bare `--resume` (the picker can't
+  `secrets export <bundle> --host <box>` instead), bare `--resume` (the picker can't
   cross a detached dispatch — pass a concrete id),
   `--resume-checkpoint`.
 - **Local-only** (consumed by the dispatching side): `--quiet --no-follow

@@ -12,7 +12,7 @@ export interface CloudTranscriptsOptions extends TranscriptRenderOptions {
 
 const DEFAULT_LIMIT = '50';
 
-export async function runCloudTranscripts(query: string | undefined, options: CloudTranscriptsOptions): Promise<void> {
+async function runCloudTranscripts(query: string | undefined, options: CloudTranscriptsOptions): Promise<void> {
   const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
   const { buildFilterOptions, printSessionTable, resolveViewMode, renderSession } = await import('../lib/session/presentation.js');
 
@@ -111,7 +111,7 @@ export function registerCloudTranscriptsCommand(cloud: Command): void {
     notes: `
       - Reads Rush Cloud runs through your \`rush login\` session (~/.rush/user.yaml). A failed login or an unmatched or ambiguous selector exits 1; it never falls back to local sessions.
       - Every render fetches the run's transcript again and rewrites its copy under the agents cache.
-      - Same output as \`sessions --cloud\`. \`agents cloud list/status/logs\` cover the run jobs, not their transcripts.
+      - \`agents cloud list/status/logs\` cover the run jobs, not their transcripts.
     `,
   });
 }

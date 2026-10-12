@@ -1,6 +1,5 @@
 
 import { describe, it, expect } from 'vitest';
-import { hasNoBrowserDisqualifyingFlags } from '../sessions.js';
 import { filterActiveSessionsByHostScope } from '../ps-roster.js';
 import { shouldIncludeLocal, remoteHostsToDial } from '../../lib/session/remote-list.js';
 import type { ActiveSession } from '../../lib/session/active.js';
@@ -53,27 +52,6 @@ describe('remoteHostsToDial', () => {
   it('returns [] when the only named host is self (caller then skips the fan-out)', () => {
     expect(remoteHostsToDial(['zion'], self)).toEqual([]);
     expect(remoteHostsToDial(['zion.tail1a85a1.ts.net'], self)).toEqual([]);
-  });
-});
-
-describe('hasNoBrowserDisqualifyingFlags (bare interactive --host routing)', () => {
-  it('allows a bare --host listing (no query, no flags) into the browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, undefined)).toBe(true);
-  });
-
-  it('keeps the raw stream for a --host search (a query the picker path owns)', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'] } as any, 'auth bug')).toBe(false);
-  });
-
-  it('keeps the raw stream when a render/filter flag is set', () => {
-    for (const flags of [{ flat: true }, { tree: true }, { markdown: true }, { until: '2d' }, { project: 'x' }, { sort: 'cost' }, { artifacts: true }, { skill: 'design' }, { plugin: 'rush' }]) {
-      expect(hasNoBrowserDisqualifyingFlags({ host: ['yosemite-s0'], ...flags } as any, undefined)).toBe(false);
-    }
-  });
-
-  it('#12: --skill/--plugin must not silently fall through to the unfiltered browser', () => {
-    expect(hasNoBrowserDisqualifyingFlags({ skill: 'design' } as any, undefined)).toBe(false);
-    expect(hasNoBrowserDisqualifyingFlags({ plugin: 'rush' } as any, undefined)).toBe(false);
   });
 });
 

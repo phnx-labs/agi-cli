@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { detectDevBuild } from './lib/startup/dev-build.js';
-import { configureRootCommand, normalizeResumeDeviceArgs } from './lib/startup/root-command.js';
+import { configureRootCommand } from './lib/startup/root-command.js';
 import { bootMark } from './lib/boot-profile.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -714,8 +714,7 @@ program.on('command:*', (operands) => {
   process.exit(1);
 });
 
-const passedArgs = normalizeResumeDeviceArgs(process.argv.slice(2));
-process.argv.splice(2, process.argv.length - 2, ...passedArgs);
+const passedArgs = process.argv.slice(2);
 const requestedCommandIndex = commandTokenIndex(passedArgs);
 const requestedCommand = requestedCommandIndex === undefined ? undefined : passedArgs[requestedCommandIndex];
 const removedGroupMessage = requestedCommand === undefined

@@ -79,13 +79,12 @@ describe('agents daemon index (real CLI parse, disposable HOME)', () => {
     expect(fs.existsSync(getSessionsDbPath())).toBe(false);
   });
 
-  it('prints the same roots as `sessions --roots`, including routine archives', () => {
+  it('prints the transcript roots, including routine archives', () => {
     const roots = json<Array<{ agent: string; dirs: string[] }>>(['daemon', 'index', 'roots']);
     expect(roots).toEqual([
       { agent: 'claude', dirs: [routineDir] },
       { agent: 'codex', dirs: [path.join(home, '.codex', 'sessions')] },
     ]);
-    expect(json(['sessions', '--roots', '--json'])).toEqual(roots);
   });
 
   it('backfills tools under the agent/unmanaged filters and reruns as a no-op', () => {

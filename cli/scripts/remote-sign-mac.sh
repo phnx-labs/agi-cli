@@ -60,7 +60,7 @@ trap 'rm -f "$BUILD_SCRIPT"' EXIT
 bun install --frozen-lockfile
 echo "== menu-bar helper: stage the published menubar/v<floor> release =="
 bash scripts/stage-menubar-helper.sh
-agents secrets exec apple.com -- bash -c '
+secrets exec apple.com -- bash -c '
   set -euo pipefail
   echo "== standalone agents binary: bun build + codesign + notarize =="
   scripts/sign-cli-binary.sh

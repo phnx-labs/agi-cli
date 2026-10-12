@@ -6,7 +6,6 @@ import {
   buildTraceEnvelope,
   buildCompareTraceEnvelope,
   buildLineageTraceEnvelope,
-  registerSessionsTraceCommand,
   registerTraceCommand,
   renderSessionSteps,
   SESSIONS_TRACE_SCHEMA_VERSION,
@@ -153,23 +152,15 @@ describe('command registration', () => {
     return cmd.options.map((o) => o.long ?? o.short ?? '');
   }
 
-  it('registers the canonical `sessions trace` with the audience/rendering flags', () => {
-    const sessions = new Command('sessions');
-    registerSessionsTraceCommand(sessions);
-    const trace = sessions.commands.find((c) => c.name() === 'trace');
+  it('registers `agents trace` with the audience/rendering flags', () => {
+    const program = new Command('agents');
+    registerTraceCommand(program);
+    const trace = program.commands.find((c) => c.name() === 'trace');
     expect(trace).toBeTruthy();
     const opts = optionNames(trace!);
     for (const flag of ['--html', '--text', '--json', '--output', '--no-open', '--errors-only', '--steps', '--no-redact', '--compare', '--tree']) {
       expect(opts).toContain(flag);
     }
-  });
-
-  it('registers the top-level `agents trace` alias with the same shape', () => {
-    const program = new Command('agents');
-    registerTraceCommand(program);
-    const trace = program.commands.find((c) => c.name() === 'trace');
-    expect(trace).toBeTruthy();
-    expect(optionNames(trace!)).toContain('--json');
   });
 });
 

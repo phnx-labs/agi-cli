@@ -8,20 +8,19 @@ import { spawnSync } from 'child_process';
 
 describe('launch classification', () => {
   it('names the session a launch resumes and which commands end in an agent', () => {
-    expect(launchSessionId(['sessions', 'resume', 'abc', '--quiet'])).toBe('abc');
     expect(launchSessionId(['run', 'claude', '--resume', 'abc', '--quiet'])).toBe('abc');
-    expect(launchSessionId(['sessions', '--json'])).toBeUndefined();
+    expect(launchSessionId(['ps', 'focus', 'abc'])).toBe('abc');
+    expect(launchSessionId(['focus', 'abc'])).toBe('abc');
+    expect(launchSessionId(['ps', '--json'])).toBeUndefined();
     expect(launchesAgent(['run', 'claude', '--resume', 'abc'])).toBe(true);
-    expect(launchesAgent(['sessions', 'resume', 'abc'])).toBe(true);
-    expect(launchesAgent(['sessions', '--json'])).toBe(false);
+    expect(launchesAgent(['ps', '--json'])).toBe(false);
     expect(launchesAgent(['focus', 'abc'])).toBe(true);
     expect(launchesAgent(['ps', 'focus'])).toBe(true);
-    expect(launchesAgent(['sessions', 'resume'])).toBe(true);
-    expect(launchesAgent(['sessions', 'stop', 'abc', '--local'])).toBe(false);
+    expect(launchesAgent(['ps', 'stop', 'abc', '--local'])).toBe(false);
   });
 
   it('takes the cause from the last lines, without colour codes', () => {
-    expect(failureCause('noise\n\x1b[31mNo session matching "x".\x1b[39m\n  Try: agents sessions\n')).toBe('No session matching "x".');
+    expect(failureCause('noise\n\x1b[31mNo session matching "x".\x1b[39m\n  Try: agents ps\n')).toBe('No session matching "x".');
     expect(failureCause('')).toContain('without saying why');
   });
 });
@@ -38,8 +37,8 @@ describe.skipIf(process.platform === 'win32')('a quiet launch through the real C
     const nodeOnly = path.join(home, 'node-only');
     fs.mkdirSync(nodeOnly);
     fs.symlinkSync(process.execPath, path.join(nodeOnly, 'node'));
-    const res = runAgents(['sessions', 'resume', id, '--quiet', '--local'], repoRoot, home, {
-      PATH: nodeOnly, AGENTS_NO_AUTOPULL: '1', NODE_OPTIONS: `--import ${tsxLoaderUrl}`, AGENTS_CLI_DISABLE_AUTO_UPDATE: '',
+    const res = runAgents(['run', 'auto', '--resume', id, '--quiet'], repoRoot, home, {
+      AGENTS_SESSIONS_LOCAL: '1', PATH: nodeOnly, AGENTS_NO_AUTOPULL: '1', NODE_OPTIONS: `--import ${tsxLoaderUrl}`, AGENTS_CLI_DISABLE_AUTO_UPDATE: '',
     });
 
     expect(res.status).not.toBe(0);
@@ -70,7 +69,7 @@ describe.skipIf(process.platform === 'win32')('quiet launches report only their 
 
   it('a command that launches no agent keeps its own stderr on a peer hop and records no launch failure', () => {
     const { home, env } = cliHome();
-    const res = runAgents(['sessions', 'stop', 'deadbeef', '--local'], repoRoot, home, env);
+    const res = runAgents(['ps', 'stop', 'deadbeef', '--local'], repoRoot, home, env);
     expect(res.stderr).not.toContain('The agent did not start');
     expect(res.stderr.length).toBeGreaterThan(0);
     expect(fs.existsSync(path.join(home, '.agents', '.cache', 'logs', 'launches'))).toBe(false);

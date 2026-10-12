@@ -15,8 +15,8 @@ box() { ssh -i "$BOX_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKe
 
 hcloud_token() {
   if [ -n "${HCLOUD_TOKEN:-}" ]; then echo "$HCLOUD_TOKEN"; return; fi
-  if command -v agents >/dev/null && agents secrets exec hetzner.com -- bash -c 'echo -n "$HCLOUD_TOKEN"' 2>/dev/null | grep -q .; then
-    agents secrets exec hetzner.com -- bash -c 'echo -n "$HCLOUD_TOKEN"' 2>/dev/null; return
+  if command -v secrets >/dev/null && secrets exec hetzner.com -- bash -c 'echo -n "$HCLOUD_TOKEN"' 2>/dev/null | grep -q .; then
+    secrets exec hetzner.com -- bash -c 'echo -n "$HCLOUD_TOKEN"' 2>/dev/null; return
   fi
   cat "$HOME/.config/infra-ci/hcloud-token" 2>/dev/null
 }

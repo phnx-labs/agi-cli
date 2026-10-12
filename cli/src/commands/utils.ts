@@ -51,17 +51,6 @@ export function resolveSurface(cmd: Command): Surface {
   };
 }
 
-export function normalizeSingleDeviceOption(value: string | string[] | undefined, commandLabel: string): string | undefined {
-
-  const list = value == null ? [] : Array.isArray(value) ? value : [value];
-  const hosts = list.map((v) => String(v).trim()).filter((v) => v.length > 0);
-  if (hosts.length === 0) return undefined;
-  if (hosts.length > 1) {
-    throw new Error(`${commandLabel} targets a single device, but --device named ${hosts.length}: ${hosts.join(', ')}.`);
-  }
-  return hosts[0];
-}
-
 export function requireInteractiveSelection(action: string, alternatives: string[]): never {
   console.error(chalk.red(`${action} requires an interactive terminal.`));
   if (alternatives.length > 0) {

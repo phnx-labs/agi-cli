@@ -1,305 +1,79 @@
 <!-- guide -->
-# Browser
+# Browser: agents-cli and the standalone `browser` CLI
 
-Drive real browsers from AI agents — the same Chrome, Brave, Edge, Chromium,
-Comet, Firefox, or Arc you use by hand, with their profiles and cookies.
+Driving real browsers (Chrome, Brave, Edge, Chromium, Comet, Firefox, Arc over
+CDP, WebDriver BiDi, or Apple Events) is the standalone
+[`@phnx-labs/browser-cli`](https://github.com/phnx-labs/browser-cli) package. Its
+drivers, IPC service, profile store, task history, capture ledger, verbs, and
+flags all live there, and so does its user guide:
+[browser-cli `docs/browser.md`](https://github.com/phnx-labs/browser-cli/blob/main/docs/browser.md),
+with the consumer seam in
+[`docs/integration.md`](https://github.com/phnx-labs/browser-cli/blob/main/docs/integration.md).
+Agents and people call `browser <verb>` directly.
 
-## Overview
+This page is the contract between the two packages: what agents-cli still does
+for `browser`, and what it stopped doing.
 
-`browser` gives agents a real browser over the Chrome DevTools Protocol
-(Chromium family), WebDriver BiDi (Firefox), or Apple Events (Arc) — with your
-existing cookies, fingerprint, and IP. There is no Playwright subprocess, no
-automation flags, no relay extension. Sites that block Puppeteer and Playwright
-let it through because there is nothing to detect. It can also drive a browser on
-another machine over SSH with `--device`.
+## What agents-cli still does
 
-For native desktop apps with no web interface, use
-[`agents computer`](computer.md).
+| Concern | Where |
+|---|---|
+| `agents setup browser`: installs the standalone CLI when it is missing, runs `browser profiles seed` (one machine-local profile per installed browser) and then `browser use` to pick this machine's default. Non-interactively it only recognizes an already-configured default and never mints one on a headless box | `src/commands/setup-browser.ts` |
+| `agents setup preferences` runs the same `profiles seed` and `use` steps, only in an interactive terminal, with the standalone installed and no `browser.profile` set yet | `src/commands/setup-preferences.ts` |
+| Opening a page for a person to read (an HTML artifact, a dashboard): `browser show <url> --profile <viewer>` when `browser.viewer` (else `browser.profile`) names a profile and the standalone is installed, otherwise the OS default handler | `showUrl` / `resolveViewer` in `src/lib/open-url.ts` |
+| Locating the binary: `$BROWSER_BIN`, else the first `browser` on `PATH` that is the standalone package. A missing binary fails with `npm i -g @phnx-labs/browser-cli`; there is no bundled fallback engine | `resolveBrowserBin` in `src/lib/browser-client.ts` |
+| The fd-3 context on every spawn agents-cli makes (below) | `src/lib/browser/context.ts` |
+| The `browser.*` config keys (below) | `src/lib/device-config.ts` |
+| Feed tool rows: the feed reads `browser sessions --tasks --json --no-interactive` and links each task to an agent session in this machine's index | `readStandaloneBrowserRows` in `src/lib/feed/tool-activity.ts` |
 
-**The engine is a separate CLI.** Since PHNX-4101 the CDP/BiDi/Arc drivers, the
-browser IPC service, the chrome-data/profile store, and the network-capture
-pipeline all live in the standalone `browser` CLI. `agents browser` is a thin
-consumer of it:
+agents-cli runs `browser` itself only for those setup steps, the viewer open,
+and the feed read. Every other invocation is the standalone called directly,
+which gets no context from agents-cli.
 
-```bash
-npm i -g @phnx-labs/browser-cli    # the engine — required
-agents setup browser               # installs it, seeds profiles, picks a default
-```
+### The fd-3 context
 
-Without it, every verb fails loud with that install line. There is deliberately
-**no fallback engine** bundled in agents-cli — a fallback would re-couple two
-release trains the split exists to separate.
-
-## Architecture
-
-agents-cli contributes what only the fleet CLI can know; the engine does the
-driving. The two meet over one extra file descriptor (fd 3) on one spawn.
-
-```
-agent process
-     │
-     │  agents browser <verb> [--device <name>]
-     ▼
-  agents-cli  (commands/browser.ts)
-     │         · --device     → fleet resolution (an SSH target, on fd 3)   (lib/browser/context.ts)
-     │         · remote-control consent (this machine's browser.remote-control)
-     │         · actor/session identity                                     (lib/browser/context.ts)
-     │
-     │  spawn, env + stdio 0/1/2 INHERITED
-     │    fd 3  BROWSER_CONTEXT_FD  →  one JSON context object, then EOF
-     ▼
-  browser  (@phnx-labs/browser-cli)
-     │
-     │  its own IPC service  ~/.agents/.cache/helpers/browser/browser.sock
-     │  CDP / BiDi / Arc     (local, or over an SSH tunnel it opens for --device)
-     ▼
-  browser process  (Chrome / Brave / Edge / Chromium / Comet / Firefox / Arc)
-     └── Profile A  chrome-data/A/  →  Task swift-crab-a1b2
-     └── Profile B  chrome-data/B/  →  Task bold-phoenix-c3d4
-```
-
-agents-cli opens no events pipe (PHNX-4227): the engine records every action in
-its own task history, and `BROWSER_EVENTS_FD` stays unset. The engine keeps that history in
-`~/.agents/.history/browser/history.db` and adopts those legacy rows itself, so
-the history agents-cli shows is the engine's: `browser sessions` is the engine's
-own picker (`agents browser sessions` forwards to it), and the feed's browser rows come from
-`browser sessions --tasks --json`. A finished task with no capture still has a
-row, and it keeps its session link, start time, capture counts and source
-machine after the live task is gone. agents-cli adds only the session link: it
-looks the recorded session or launch id up in its own session index.
-
-### What lives where
-
-| Concern | Owner | Why |
-|---|---|---|
-| CDP / BiDi / Arc drivers, the IPC service, the task index | the engine | It is the automation; it releases on its own cadence |
-| Profile declarations, chrome-data, capture ledger | the engine | It keeps every on-disk path the old subsystem used |
-| Browser detection + profile creation (`profiles seed`/`create`) | the engine | It resolves installed browsers itself |
-| The abandoned-task reaper (`browser prune`) | the engine | It runs its own 5-minute reap |
-| `--device` name → an SSH target (bound once at `start`) | agents-cli | It owns the devices registry, tailnet addressing, and ssh identity |
-| Remote-control consent policy | agents-cli (the flag) / the engine (enforcement) | agents-cli reads `browser.remote-control`; the engine enforces it |
-| Cross-machine session history, the feed | agents-cli | It owns `sessions.db` and the feed |
-| Per-verb flags and their `--help` | the engine | One surface, not a drifting copy |
-
-### The context (fd 3)
-
-One JSON object, written and closed immediately, so the engine reads to EOF and
-proceeds. `version: 1` is what the engine matches on; fields added later are
-optional so an older engine keeps working.
+When agents-cli spawns `browser`, it sets `BROWSER_CONTEXT_FD=3`, writes one
+JSON object to fd 3, and closes it. stdio and the environment are inherited
+unchanged. The object:
 
 | Field | Meaning |
 |---|---|
-| `target` | The resolved `--device` target: `alias`, `host` (`user@host`), `user`, `hostname`, `platform`, `sshArgs`. Absent for a local invocation (and for `--device local`) |
-| `session` | `actor`, `sessionId`, `launchId` — who is acting |
-| `remoteControl` | `{ allowed: boolean }` — whether THIS machine consents to being driven by a peer, from `browser.remote-control` (default off) |
+| `version` | `1`. The engine matches on it; a later field must be optional so an older engine keeps working |
+| `session` | `actor`, `sessionId`, `launchId`: who is acting. `sessionId` comes from the harness's own session variable (`CODEX_THREAD_ID`, `CLAUDE_CODE_SESSION_ID`, …) |
+| `remoteControl` | `{ allowed: boolean }`: whether this machine consents to being driven by a fleet peer, from `browser.remote-control` |
 
-**That is the whole object.** Everything else the engine needs it already has:
-the CDP/BiDi endpoint, the IPC socket, the chrome-data store, and the profile
-declarations all live on disk at the paths below, which the engine reads
-directly. `--device <alias>` is forwarded on the engine's argv verbatim; the
-engine matches the alias against `context.target`, then `~/.ssh/config` — it has
-no fleet registry of its own. The device is bound once at `start`; page verbs run
-against the task's bound device, so `--device` is only valid there.
+`buildBrowserContext` can also carry a `target` (a resolved device), but none of
+the spawns above pass a device, so in practice it is absent.
 
-## Profiles and endpoints
+### Config keys
 
-A **profile** names a browser, where it runs, and how to reach it. Profiles are
-machine-local and stored under `~/.agents/devices/<machine>/agents.yaml`, which
-both `agents browser` and the standalone `browser` read and write — a
-`browser use <name>` typed at either surface agrees. `agents browser profiles`
-forwards to the engine:
+These are registered `agents config` keys, so `agents config get/set` validates
+them. They are stored in the device file (`~/.agents/devices/<machine>/agents.yaml`)
+or, for `browser.device`, the central `agents.yaml`, and the standalone reads the
+same stored keys.
 
-```bash
-browser profiles create work --browser chromium   # local Chromium
-browser profiles seed                              # one profile per installed browser
-browser profiles list
-browser use work                                   # this machine's default
-```
+| Key | Scope | Meaning |
+|---|---|---|
+| `browser.profile` | device | The profile `browser start` uses without `--profile` (set by `browser use`) |
+| `browser.viewer` | device | Where this machine shows a person a page: a profile name, or `os`. Unset follows `browser.profile` |
+| `browser.device` | user | The fleet browser hub: the device whose browser drive verbs target by default |
+| `browser.remote-control` | device | Whether other fleet machines may drive this machine's browser. Default `false`; machine-local, never shared with peers. `browser remote-control on` turns it on |
+| `browser.task-idle-minutes` | device | Minutes a task may sit with no action before the abandoned-task reaper closes it (default 30, `0` disables idle reaping) |
 
-Each profile resolves to an endpoint the engine drives:
+## What agents-cli no longer does (PHNX-4227)
 
-- `cdp://127.0.0.1:9222` — a Chromium-family browser over the DevTools Protocol.
-- `firefox-bidi://127.0.0.1:9674` — Firefox over WebDriver BiDi.
-- `ssh://user@box?port=9222` — a browser on a remote host reached over SSH.
-
-## Sessions and captures
-
-`browser sessions` groups a profile's captures (screenshots, PDFs, recordings,
-downloads under `~/.agents/.cache/browser/<profile>/sessions/<task>/`) by task,
-newest first; `agents browser sessions` forwards to it. Its flags
-(`browser sessions --help`): `--profile <name>`, `--open [selector]`, `--tasks`,
-`--search <text>`, `--since`/`--until`, `--limit <n>`, `--json` and
-`--no-interactive`. On a TTY it opens the engine's interactive task browser;
-`enter` browses a task's captures. `agents sessions --browser` was removed
-(PHNX-4227); run `browser sessions` instead.
-
-The feed stream (`agents feed watch --json`) reads `browser sessions --tasks
---json` and adds the one thing the engine cannot know — the agent session behind
-a task. A row is **linked** when its session id (or launch id) resolves in this
-machine's session index, **unresolved** when it carries an id nothing here
-indexes, and **unlinked** when it carries none.
-
-## Remote-control consent
-
-Another fleet machine may drive THIS machine's browser only after its owner opts
-in:
-
-```bash
-browser remote-control on     # device-local, never synced; default off
-```
-
-agents-cli reads that flag into the fd-3 context (`remoteControl.allowed`); the
-engine enforces it. `browser remote-control` (and `agents browser remote-control`,
-which forwards to it) reads and writes the same `browser.remote-control` config key.
-
-## Remote browsers (`--device`)
-
-Bind a task to a browser on another machine at `start`:
-
-```bash
-browser start --device box --profile work
-browser navigate https://example.com     # runs against the bound device
-browser screenshot -o shot.png
-browser done
-```
-
-The engine opens the SSH tunnel and drives the remote browser over it. Called
-directly, `browser` resolves the alias from `~/.ssh/config` (fleet devices are
-there once `agents devices render --write` has written its include). Through
-`agents browser start --device <name>`, agents-cli first resolves the name
-against the fleet (registry, ssh identity, platform) and hands the target on
-fd 3. `--device local` forces this machine. Because
-the device is bound at `start`, page verbs reject `--device` — they run against
-the task's bound device.
-
-## Setup
-
-### 0. Install the engine
-
-```bash
-npm i -g @phnx-labs/browser-cli
-```
-
-Required once per machine. Every `agents browser` verb runs through it.
-
-### 1. Seed a profile and pick a default
-
-```bash
-agents setup browser
-```
-
-Interactively, the wizard installs the engine if missing, runs
-`browser profiles seed` (a machine-local profile per installed browser), and
-opens `browser use` to set this machine's default. Non-interactively it only
-recognizes an already-configured default — it never mints one on a headless box
-(a headless box gets its browser from the fleet hub, `browser.device`).
-
-### 2. Finish the first-run + sign in
-
-```bash
-browser start --profile <name>   # complete the browser first-run, sign in to sites
-browser profiles doctor <name>   # confirm it is ready
-```
-
-## Command reference
-
-Verbs are grouped the way `agents browser --help` groups them. Every
-`agents browser` verb forwards to the engine; **per-verb flags are the engine's**,
-so ask it directly with `browser <verb> --help`.
-
-### Session lifecycle
-
-| Command | Description |
-|---------|-------------|
-| `use` | Pick the profile `start` uses when no `--profile` is passed |
-| `start` | Start a browser task — `--profile`/`--url`/`--record`/`--title`, and `--device <name>` to bind a remote box |
-| `done` | Complete a task and close its tabs |
-| `status` | Show browser service state and running tasks |
-| `prune` | Close tabs for abandoned tasks (the reaper the engine runs, on demand) |
-
-### Drive the page
-
-| Command | Description |
-|---------|-------------|
-| `navigate` | Navigate the current tab to a URL |
-| `tabs` / `tab` | List tabs; `tab add`/`tab focus`/`tab close` |
-| `screenshot` | Capture a screenshot (auto-saved per task) |
-| `evaluate` | Evaluate JavaScript in the current tab |
-| `click` / `type` / `press` / `hover` / `scroll` | Interact with the page |
-| `wait` | Wait for a condition |
-| `upload` | Upload file(s) — hidden inputs, drag-drop, OS chooser interception |
-| `set` / `devices` | `set viewport`/`set device`; list emulation presets |
-| `show` | Open a URL for a human to read (goes to `browser.viewer`; binds no task) |
-
-### Capture evidence
-
-| Command | Description |
-|---------|-------------|
-| `console` / `errors` | Read console logs / page errors |
-| `requests` | Read captured network requests; `--format har` emits HAR 1.2 |
-| `responsebody` | Wait for and read a response body by URL pattern |
-| `record` | `record start` / `record stop` a video of the page |
-| `pdf` | Export the current tab as PDF via CDP |
-| `logs` | Read merged app + CLI logs for a task |
-| `download` / `waitdownload` | Set the download directory; wait for a download |
-
-### History and discovery
-
-| Command | Description |
-|---------|-------------|
-| `sessions` | Browse captures grouped by task (the engine's own picker — see above) |
-| `history` | Recent browser task history |
-| `refs` | DOM refs for interactive elements |
-
-### Other
-
-| Command | Description |
-|---------|-------------|
-| `profiles` | Manage profiles (`create`/`list`/`edit`/`rename`/`show`/`remove`/`use`/`seed`/`claim`/`logins`/`prune`/`doctor`) |
-| `remote-control` | Allow or deny other fleet machines driving this machine's browser |
-| `stop` | Stop a task; `--profile` detaches a profile; `--service` stops the IPC service |
-| `ps` / `tasks` | List tracked browser processes / all browser tasks |
-| `stream` | Keep one process + IPC socket open; NDJSON requests on stdin, responses on stdout |
-
-## On-disk layout
-
-browser-cli keeps every path the in-repo subsystem used:
-
-| Path | Meaning |
-|---|---|
-| `~/.agents/.cache/helpers/browser/browser.sock` | IPC socket |
-| `~/.agents/.cache/browser/<profile>@<device>/` | runtime chrome-data / pids |
-| `~/.agents/.history/browser-profiles/` | durable user-data dirs (logins survive) |
-| `~/.agents/.history/browser/history.db` | native task history (SQLite, WAL), behind `browser sessions` |
-| `~/.agents/devices/<machine>/agents.yaml` `browser:` | machine-local profiles |
-| `~/.agents/.cache/browser/actions/YYYY-MM-DD.jsonl` | local action ledger |
-
-## Recipes
-
-### Install engine + a profile, then drive a page
-
-```bash
-npm i -g @phnx-labs/browser-cli
-browser profiles create work --browser chromium
-browser use work
-
-browser start --profile work
-browser navigate https://example.com
-browser screenshot -o /tmp/shot.png
-browser done
-```
-
-### Drive a remote box over the fleet
-
-```bash
-browser start --device box --profile work
-browser navigate https://example.com
-browser screenshot -o /tmp/remote.png
-browser done
-```
+- **`agents browser` is gone**, with no alias or forwarder. Running it exits 1
+  with `error: 'agents browser' was removed; use the standalone 'browser' CLI (browser --help).`
+- **No fleet `--device` resolution for drive verbs.** The standalone binds a
+  device at `browser start --device <alias>` and resolves the alias itself
+  (fleet devices become ssh aliases once `agents devices render --write` has
+  written `~/.ssh/config.d/agents` and `~/.ssh/config` includes it).
+- **No events pipe.** The engine records every action in its own task history
+  (`~/.agents/.history/browser/history.db`); agents-cli writes no browser
+  history of its own.
+- **No `sessions --browser`.** Use `browser sessions`.
 
 ## See also
 
-- [docs/computer.md](computer.md) — drive native desktop apps; part of the automation triad
-- [docs/concepts.md](concepts.md) — DotAgents repos, resource resolution model
-- `@phnx-labs/browser-cli` — the engine; `browser --help` and `browser <verb> --help` for the full surface
+- [computer.md](computer.md): the same contract for the standalone `computer` CLI
+- [concepts.md](concepts.md): DotAgents repos and resource resolution

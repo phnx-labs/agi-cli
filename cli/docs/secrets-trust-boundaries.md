@@ -112,7 +112,7 @@ non-interactive escape hatch left: the old `--plaintext` flag that allowed a
 piped/non-TTY reveal is gone. And the bundle-key form, `secrets get
 <bundle> <KEY>`, is removed unconditionally — it always refuses and names
 `secrets exec <bundle> -- printenv <KEY>` instead. `export`'s old
-shell-eval mode (`eval "$(agents secrets export <bundle> --plaintext)"`) is
+shell-eval mode (`eval "$(secrets export <bundle> --plaintext)"`) is
 removed the same way: `export` without a destination flag (`--host` /
 `--to-1password` / `--to-file`) refuses and names `secrets exec` / `view
 --reveal`.
@@ -138,7 +138,7 @@ nobody types this form by hand.
 | `secrets list` / `view <b>` | masked (`••••`) | No (masked) | No |
 | `secrets view <b> --reveal` | **stdout** (human terminal only; refuses in an agent session) | **No** — refuses | **No** — refuses |
 | `secrets get <item>` | **stdout** (ungated scripting primitive for a raw non-bundle item; a bundle secret's item refuses in an agent session) | Yes, if the agent runs it | Yes |
-| `agents secrets export <b> --plaintext` (shell-eval mode) | *removed* (RUSH-2774) | n/a | n/a |
+| `secrets export <b> --plaintext` (shell-eval mode) | *removed* (RUSH-2774) | n/a | n/a |
 | `secrets get <bundle> <KEY>` (bundle-key form) | *removed* (RUSH-2774) | n/a | n/a |
 
 **Rule of thumb for agent-driven flows:** use `exec` / `--secrets`. `view

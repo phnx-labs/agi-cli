@@ -79,7 +79,7 @@ export interface TranscriptRenderOptions {
   last?: string;
 }
 
-export function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
+function metaSignals(s: SessionMeta): Parameters<typeof signalBadges>[0] {
   return {
     pr: s.prUrl ? { url: s.prUrl, number: s.prNumber } : undefined,
     worktree: s.worktreeSlug ? { path: s.cwd ?? '', slug: s.worktreeSlug } : undefined,
@@ -109,7 +109,7 @@ export function buildFilterOptions(options: TranscriptRenderOptions): FilterOpti
   return opts;
 }
 
-export function hasAnyFilter(opts: FilterOptions): boolean {
+function hasAnyFilter(opts: FilterOptions): boolean {
   return !!(opts.include?.length || opts.exclude?.length || opts.first !== undefined || opts.last !== undefined);
 }
 
@@ -369,7 +369,7 @@ export function shortCwd(cwd?: string): string {
 
 export const LIVE_STATUS_W = 8;
 
-export function liveStatusCell(live: ActiveSession | undefined): { cell: string; width: number } {
+function liveStatusCell(live: ActiveSession | undefined): { cell: string; width: number } {
   const word = liveStatusWord(live);
   if (!word || !live) return { cell: '', width: 0 };
   return { cell: statusColor(live.status)(padToWidth(word, LIVE_STATUS_W)), width: LIVE_STATUS_W };
@@ -511,7 +511,7 @@ export function flatSessionRow(
   );
 }
 
-export function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
+function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);

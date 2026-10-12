@@ -164,12 +164,12 @@ else
 fi
 
 # Ordinary CLI attestations never sign; signing is confined to the explicit helper path.
-if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
+if [[ "$WITH_HELPERS" == true && "$(uname)" == "Darwin" ]] && command -v secrets >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary..."
   # shellcheck source=scripts/headless-sign-context.sh
   . scripts/headless-sign-context.sh
-  agents secrets exec apple.com -- scripts/sign-cli-binary.sh \
+  secrets exec apple.com -- scripts/sign-cli-binary.sh \
     || die "CLI binary sign/notarize failed"
 else
   gray "Not a macOS signing box -- nothing to do: the tarball ships no helper bundle."
@@ -267,7 +267,7 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     [[ -x scripts/stage-menubar-helper.sh ]] \
       || die "helper menubar input changed but scripts/stage-menubar-helper.sh is missing from this tree -- cannot record the published helper"
     info="$(scripts/stage-menubar-helper.sh --fetch-only --json --download-dir "$WT/.mb-helper-dl")" \
-      || die "helper menubar input changed and the published release could not be fetched/verified (see above) -- publish the helper from phnx-labs/agi-menu ('agents secrets exec apple.com -- scripts/release.sh <x.y.z>' there), point the menubar floor in src/lib/helper-versions.ts at it, then re-run this producer"
+      || die "helper menubar input changed and the published release could not be fetched/verified (see above) -- publish the helper from phnx-labs/agi-menu ('secrets exec apple.com -- scripts/release.sh <x.y.z>' there), point the menubar floor in src/lib/helper-versions.ts at it, then re-run this producer"
     floor="$(jq -r .floor <<<"$info")"
     tag="$(jq -r .tag <<<"$info")"
     zip="$(jq -r .zip <<<"$info")"

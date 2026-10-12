@@ -17,12 +17,12 @@ One clip per feature doc. Storyboard is "show the command, show the result." No 
 | Slot file | Doc page | Storyboard |
 |---|---|---|
 | `profiles.mp4` | [`docs/profiles.md`](../../docs/profiles.md) | `agents profiles presets` → `agents profiles add kimi` (keychain prompt) → `agents run kimi "haiku about pinning"` |
-| `secrets.mp4` | [`docs/secrets.md`](../../docs/secrets.md) | `agents secrets create openai` → `agents secrets add openai OPENAI_API_KEY` → `agents secrets exec openai env \| grep OPENAI` |
+| `secrets.mp4` | [`docs/secrets.md`](../../docs/secrets.md) | `secrets create openai` → `secrets add openai OPENAI_API_KEY` → `secrets exec openai env \| grep OPENAI` |
 | `teams.mp4` | [`docs/teams.md`](../../docs/teams.md) | `agents teams create demo` → two `teams add` → `teams start --watch` (DAG wave visible) |
 | `cloud.mp4` | [`docs/cloud.md`](../../docs/cloud.md) | `agents cloud run "rename X→Y" --provider rush` → SSE stream tail |
-| `browser.mp4` | [`docs/browser.md`](../../docs/browser.md) | `agents browser profiles create gmail` → `agents browser start gmail` → `agents browser screenshot` (open JPG) |
+| `browser.mp4` | [`docs/browser.md`](../../docs/browser.md) | `browser profiles create gmail` → `browser start gmail` → `browser screenshot` (open JPG) |
 | `pty.mp4` | [`docs/pty.md`](../../docs/pty.md) | `agents pty start py` → `agents pty exec py "import this"` → `agents pty read py` |
-| `computer.mp4` | [`docs/computer.md`](../../docs/computer.md) | `agents computer screenshot` → `agents computer click "Send"` |
+| `computer.mp4` | [`docs/computer.md`](../../docs/computer.md) | `computer screenshot` → `computer click "Send"` |
 | `plugins.mp4` | [`docs/plugins.md`](../../docs/plugins.md) | `agents plugins install <github-url>` → exec-surface consent → `agents plugins list` |
 | `workflows.mp4` | [`docs/workflows.md`](../../docs/workflows.md) | `agents workflows list` → `agents workflows view <name>` (WORKFLOW.md) |
 | `subagents.mp4` | [`docs/subagents.md`](../../docs/subagents.md) | `agents subagents list` → `agents subagents view <name>` (frontmatter + tools) |

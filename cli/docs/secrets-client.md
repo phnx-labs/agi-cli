@@ -14,10 +14,9 @@ install guidance rather than falling back to anything in-repo.
 > policy that used to live in the engine tree — reserved per-harness stores,
 > resource-profile scoping, `bundle@host` fleet-alias resolution, spawn-env
 > hardening, the reserved-`auth` fleet sync — now lives in
-> `cli/src/lib/reserved-stores.ts` and `cli/src/lib/secrets-policy.ts`. `agents
-> secrets <anything>` is a thin exec passthrough
-> (`commands/secrets-passthrough.ts`); the old in-repo command registrar and
-> its command files are gone too.
+> `cli/src/lib/reserved-stores.ts` and `cli/src/lib/secrets-policy.ts`. The `agents
+> secrets` group, including its exec passthrough, was removed in PHNX-4227;
+> people and agents call the standalone `secrets` directly.
 
 ## The seam
 
@@ -78,7 +77,7 @@ answer.
 
 | Variable | Who sets it | Meaning |
 |---|---|---|
-| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (`findInPath`): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets` and sits first on PATH, so taking it would make `agents secrets` re-enter itself without bound (the self-heal shim pass also removes that legacy shim outright). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
+| `SECRETS_BIN` | operator/tests (optional) | Path to the `secrets` executable. Absent ⇒ resolved from PATH, **skipping agents-cli's own shims dir** (`findInPath`): the pre-extraction `~/.agents/.cache/shims/secrets` shim `exec`s `agents secrets`, which no longer exists, so taking it would fail instead of reaching the standalone (the shim pass also prunes that legacy shim, `LEGACY_SHIMS_ALWAYS_PRUNED` in `lib/installations/shims.ts`). A `.js`/`.mjs`/`.cjs` value is run through this process's Node; an installed shim/binary is spawned directly. |
 | `SECRETS_HOME` | **this client** | The standalone's state root. Defaults to the user agents dir (`~/.agents`, `getUserAgentsDir()`) so the user's existing stores are adopted **in place** — no copy, no re-encryption (MIG-1). An explicit value in the environment wins (test isolation, power users), matching the standalone's own precedence. |
 | `SECRETS_PASSPHRASE` | **this client** (bridged) | The file-store encryption key the standalone reads. The extraction renamed every `AGENTS_SECRETS_*` knob to `SECRETS_*`, so `buildServeEnv` forwards a caller env still carrying the old `AGENTS_SECRETS_PASSPHRASE` (the name agents-cli's own engine reads) onto `SECRETS_PASSPHRASE` for the child — otherwise the standalone can't decrypt the very file store agents-cli wrote and would silently provision a fresh machine-local key (MIG-1: never silently choose another key after a decryption miss). An explicit `SECRETS_PASSPHRASE` already in the env wins; the bridge only fills the rename gap. |
 
@@ -147,10 +146,9 @@ forward + convert the call site", not a blocked drop-in.
 `invocation(bin)` (exported alongside `resolveSecretsBin`) is the one non-op
 export: it resolves how to spawn the binary (through this process's Node for a
 `.js` entrypoint, or directly for an installed shim), for a caller that needs
-to run a standalone verb this client doesn't wrap as an op — the `agents
-secrets` passthrough (`commands/secrets-passthrough.ts`, execs any subcommand
-verbatim) and `agents setup secrets` (installs the pinned standalone if missing,
-then hands off to `secrets migrate`) both use it.
+to run a standalone verb this client doesn't wrap as an op. `agents setup
+secrets` (installs the pinned standalone if missing, then hands off to
+`secrets migrate`, `commands/setup-secrets.ts`) is that caller.
 
 The wrapper types are imported `type`-only from `cli/src/lib/secrets-types.ts` —
 a pure re-declaration of the standalone's wire types with no runtime code, so

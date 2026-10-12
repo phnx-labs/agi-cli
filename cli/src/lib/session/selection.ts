@@ -23,7 +23,7 @@ import { AGENTS, resolveAgentName } from '../agents.js';
 import { fuzzyMatch, FUZZY_PRESETS } from '../fuzzy.js';
 import { listInstalledVersions, resolveVersionAliasLoose } from '../installations/versions.js';
 
-export interface SessionFilterOptions {
+interface SessionFilterOptions {
   agent?: string;
   version?: string;
   sessionVersion?: string;
@@ -313,7 +313,7 @@ export function applyScopeFilters(
   return filtered;
 }
 
-export function scopedContentIndex(
+function scopedContentIndex(
   sessions: SessionMeta[],
   query: string,
   scope?: SessionSearchScope,
@@ -327,7 +327,7 @@ export function scopedContentIndex(
   return kept;
 }
 
-export interface FleetResolveDeps {
+interface FleetResolveDeps {
   gatherRemoteList: typeof gatherRemoteList;
   runOnPeer: typeof runOnPeer;
 }
@@ -337,7 +337,7 @@ interface FleetHit {
   session: SessionMeta;
 }
 
-export interface FleetSessionCandidate {
+interface FleetSessionCandidate {
   id: string;
   hits: FleetHit[];
 }
@@ -466,7 +466,7 @@ export function preferOwnerAttribution(
     isLocallyDefinitiveMatch(session, self) || !answeredByPeer.has(session.id.toLowerCase()));
 }
 
-export type LiveMetadataDeps = {
+type LiveMetadataDeps = {
   loadActive?: typeof loadLocalActiveSessions;
   loadFleetActive?: () => ActiveSession[];
 };

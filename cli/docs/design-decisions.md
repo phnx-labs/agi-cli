@@ -15,7 +15,7 @@ how-to guides in this directory were deleted by an over-aggressive docs sweep on
 
 | Decision | What it rules out | Where it lives |
 |---|---|---|
-| `-D, --device <name>` is the one routing flag for running a command on another machine | Renaming it to `--host`, or adding `--host` as an alias. `--host` is rejected on purpose (`cli/src/lib/hosts/option.test.ts`); the standalone engines take `--host`, and `agents` rewrites `--device` to it at that boundary | `cli/src/lib/hosts/option.ts`, `cli/src/commands/secrets-passthrough.ts`, `cli/src/lib/computer-client.ts` |
+| `-D, --device <name>` is the one routing flag for running a command on another machine | Renaming it to `--host`, or adding `--host` as an alias. `--host` is rejected on purpose (`cli/src/lib/hosts/option.test.ts`); the standalone engines take `--host` | `cli/src/lib/hosts/option.ts` |
 | `agents feed` stays a first-class group: `feed watch --json` is the operator stream AGI EXT and AGI Menu consume, and `feed post`/`answer` are how agents reach the owner | Folding it into `sessions`, or deleting it as "UI plumbing" | `cli/AGENTS.md` §feed, `cli/src/lib/feed/` |
 | Noun-then-verb command shape, `--json` on every data command, and `examples` in help for non-trivial commands | Flattening verbs to the top level or trimming help to save lines | root `AGENTS.md` §CLI surface conventions |
 | `update` stays available but hidden while version pinning is phased out | Deleting it because it is unadvertised | `cli/docs/surface-census.md` (2026-09-06) |
@@ -37,12 +37,14 @@ Do not reintroduce these, and do not "restore" them as a cleanup.
 | Installing `gemini` | `antigravity` | `cli/AGENTS.md` §Supported harnesses |
 | `agents route` / `routes` and the `routers` resource kind | none; nothing read a router | owner decision 2026-10-11, PHNX-4227 |
 | `agents registry`, `packages` (incl. `packages materialize`), `search`, `install`, and the schema-v3 agent-package materializer | `agents plugins add`, `skills add`, `mcp add` (bare `mcp add <name>` still looks the server up in the MCP registry) | owner decision 2026-10-11, PHNX-4227 |
-| `agents tmux` | `agents focus`, `agents sessions resume`, `agents send --channel session`; raw `tmux -S <socket>` for anything else | owner decision 2026-10-11, PHNX-4227 |
+| `agents tmux` | `agents ps focus`, `agents run auto --resume`, `agents send --channel session`; raw `tmux -S <socket>` for anything else | owner decision 2026-10-11, PHNX-4227 |
 | `agents message`, `mailboxes` (`mailbox`) | `agents send --channel mailbox` or `--channel session`; `agents cloud message` for a cloud task | owner decision 2026-10-11, PHNX-4227 |
 | `agents traces` and the run-exit / feed / owner-send trace auto-sync (`--no-trace-sync`, `AGENTS_NO_TRACE_SYNC`) | none | owner decision 2026-10-11, PHNX-4227 |
 | `agents webhooks serve`, `daemon webhooks`, `daemon funnel`, the `webhook-receiver` daemon service and webhook handlers (`~/.agents/webhooks/*.yml`) | `agents routines webhook --source <github\|linear> --event <e>` fires trigger routines from a payload | owner decision 2026-10-11, PHNX-4227 |
 | `agents logs` | `agents events logs` (run-log viewer); `events audit`, `events stats`, `events rotate` | owner decision 2026-10-11, PHNX-4227 |
 | `agents trash` | `agents prune trash list\|restore\|empty` | owner decision 2026-10-11, PHNX-4227 |
+| `agents browser`, `agents computer`, `agents secrets`, `agents sessions`, with no alias, passthrough or forwarder; each exits 1 naming its replacement | the standalone `browser`, `computer`, `secrets`, `sessions` CLIs; agents-owned `sessions` verbs moved to `agents ps` (`stop`, `focus`, `detach`, `migrate`, `migrations`, `preview`, `watch`), `agents run auto --resume`, `agents send --channel session`, `agents fork`, `agents daemon index`, `agents insights resources`, `agents setup session-backup` | owner decision 2026-10-12, PHNX-4227, `removedToolGroupMessage` |
+| `devices.<name>.computer.host` and `agents computer --device` fleet resolution | `computer --host <address>` | owner decision 2026-10-12, PHNX-4227 |
 | `agents menubar setup`, `enable`, `status`, `doctor`, and the `menubar.disabled` sentinel | automatic install on any `agents` run; `agents doctor` (`menubar` findings); `agents config set menubar.enabled <bool>`. `menubar` is hidden and keeps only `snapshot`, `update`, `restart`, `disable` for AGI Menu | owner decision 2026-10-11, PHNX-4227 |
 
 ## Decided, not yet removed

@@ -198,16 +198,6 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
 });
 
 describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => {
-  it('stamps AGENTS_FLEET_REMOTE on agents/ag browser drives', () => {
-    const a = leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
-    expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
-    expect(a.slice(-5)).toEqual(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
-
-    const b = leasedBoxRemoteCmd(['ag', 'browser', 'screenshot']);
-    expect(b.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
-    expect(b.slice(-3)).toEqual(['ag', 'browser', 'screenshot']);
-  });
-
   it('stamps the standalone browser binary (the P0 hole the registered-device path also closed)', () => {
     const a = leasedBoxRemoteCmd(['browser', 'navigate', '--url', 'https://evil.example']);
     expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
@@ -220,7 +210,7 @@ describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => 
 
   it('leaves non-browser commands unmarked', () => {
     expect(leasedBoxRemoteCmd(['uptime'])).toEqual(['uptime']);
-    expect(leasedBoxRemoteCmd(['agents', 'sessions', 'list'])).toEqual(['agents', 'sessions', 'list']);
+    expect(leasedBoxRemoteCmd(['agents', 'ps'])).toEqual(['agents', 'ps']);
     expect(leasedBoxRemoteCmd([])).toEqual([]);
   });
 });

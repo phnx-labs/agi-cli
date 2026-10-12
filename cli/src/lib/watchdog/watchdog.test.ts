@@ -262,8 +262,8 @@ describe('WATCHDOG_SYSTEM_PROMPT — idle-vs-unfinished judgment', () => {
     expect(p).toMatch(/already reached|already decided/i);
     expect(p).toMatch(/restate the goal/i);
     expect(p).toMatch(/concrete next step/i);
-    expect(p).toMatch(/agents computer/);
-    expect(p).toMatch(/agents browser/);
+    expect(p).toMatch(/"computer" to drive the Mac/);
+    expect(p).toMatch(/"browser" for the web/);
     expect(p).toMatch(/split the ask/i);
   });
 });

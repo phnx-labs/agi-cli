@@ -110,15 +110,12 @@ searchable and resumable from any other. Resume is machine-aware: it hops to the
 device that owns the live harness state for you.
 
 ```bash
-# Find the session (searches Claude, Codex, Gemini, OpenCode transcripts across the fleet)
-agents sessions "auth middleware"
+# Find the session (the standalone sessions CLI; add --host <box> to search another machine)
+sessions "auth middleware"
 
 # Resume by id or short prefix — from ANY machine; it routes to the owning device
-agents sessions resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897
-agents sessions resume 019fd114 "now wire up the tests"
-
-# Force where it re-opens
-agents sessions resume 019fd114 --device zion
+agents run auto --resume 019fd0c8-b3e9-77a2-a1a4-444698c4d897
+agents run auto --resume 019fd114 "now wire up the tests"
 ```
 
 `agents run auto --device auto "task"` picks the least-loaded worker in your fleet
@@ -157,8 +154,8 @@ releases.
 |---|---|
 | See installed agents + usage | `agents view` |
 | Register an MCP server for every harness at once | `agents mcp add` |
-| Drive a real browser (fill forms, screenshot) | `agents browser` |
-| Store credentials, inject into runs | `agents secrets` |
+| Drive a real browser (fill forms, screenshot) | `browser` (standalone CLI; `agents setup browser` installs it) |
+| Store credentials, inject into runs | `secrets` (standalone CLI) + `agents run --secrets <bundle>` |
 | Schedule recurring agent jobs | `agents routines` |
 | Sync skills/commands/rules across the fleet | `agents sync` |
 

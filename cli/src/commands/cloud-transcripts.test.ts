@@ -19,9 +19,8 @@ function run(args: string[]) {
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
-function bothSpellings(extra: string[], selector?: string) {
-  const sel = selector ? [selector] : [];
-  return [run(['cloud', 'transcripts', ...sel, ...extra]), run(['sessions', ...sel, '--cloud', ...extra])];
+function transcripts(extra: string[], selector?: string) {
+  return run(['cloud', 'transcripts', ...(selector ? [selector] : []), ...extra]);
 }
 
 beforeAll(() => {
@@ -40,13 +39,12 @@ afterAll(() => {
 });
 
 describe('agents cloud transcripts (real CLI)', () => {
-  it('exits 1 without a Rush login and never falls back to local sessions, like sessions --cloud', () => {
+  it('exits 1 without a Rush login and never falls back to local sessions', () => {
     for (const selector of [undefined, '44444444']) {
-      for (const res of bothSpellings(['--json'], selector)) {
-        expect(res.status).toBe(1);
-        expect(res.stderr).toContain('Failed to list cloud sessions: Not logged in to Rush');
-        expect(res.stdout).toBe('');
-      }
+      const res = transcripts(['--json'], selector);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain('Failed to list cloud sessions: Not logged in to Rush');
+      expect(res.stdout).toBe('');
     }
   });
 
@@ -54,19 +52,17 @@ describe('agents cloud transcripts (real CLI)', () => {
     fs.mkdirSync(path.join(home, '.rush'), { recursive: true });
     fs.writeFileSync(path.join(home, '.rush', 'user.yaml'), 'session:\n  access_token: synthetic\n  expires_at: 1000\n');
     try {
-      for (const res of bothSpellings(['--json'])) {
-        expect(res.status).toBe(1);
-        expect(res.stderr).toContain('Rush session expired at 1970-01-01T00:00:01.000Z');
-      }
+      const res = transcripts(['--json']);
+      expect(res.status).toBe(1);
+      expect(res.stderr).toContain('Rush session expired at 1970-01-01T00:00:01.000Z');
     } finally {
       fs.rmSync(path.join(home, '.rush'), { recursive: true, force: true });
     }
   });
 
   it('rejects conflicting turn filters before contacting the service', () => {
-    for (const res of bothSpellings(['--first', '1', '--last', '1'])) {
-      expect(res.status).toBe(1);
-      expect(res.stderr).toContain('--first and --last are mutually exclusive');
-    }
+    const res = transcripts(['--first', '1', '--last', '1']);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toContain('--first and --last are mutually exclusive');
   });
 });

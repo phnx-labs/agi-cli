@@ -112,8 +112,8 @@ describe('maybeRunOnHost — no routing flag (warm graph)', () => {
 });
 
 describe('maybeRunOnHost — routing flag present, side-effect-free returns', () => {
-  bench('agents sessions --device box (own-host early return)', async () => {
-    await maybeRunOnHost('sessions', ['sessions', '--device', 'box']);
+  bench('agents ps --device box (own-host early return)', async () => {
+    await maybeRunOnHost('ps', ['ps', '--device', 'box']);
   });
 
   bench('agents sessoins --device box (unknown-command return)', async () => {

@@ -11,10 +11,6 @@ import type { AgentId } from '../types.js';
 import { sessionAgentSupportsResume, sessionRecoveryRunArgs } from './recovery.js';
 import { sessionOwnerDevice } from './resume-owner.js';
 
-export function buildCanonicalResumeCommand(sessionId: string): string[] {
-  return ['agents', 'sessions', 'resume', sessionId];
-}
-
 export async function resumeSessionInPlace(session: SessionMeta): Promise<void> {
   const owner = sessionOwnerDevice(session);
   if (owner) {

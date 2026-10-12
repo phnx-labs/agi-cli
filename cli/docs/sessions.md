@@ -15,6 +15,14 @@ live-process state, summaries, and UI streams are derived views that can be rebu
 > The CLI still owns the writer/indexer (SQLite, tool index, timelines), the live pid
 > registry, and the discovery/sync/remote code under `cli/src/lib/session/`.
 
+> **Who reads transcripts (PHNX-4227).** `agents sessions` was removed with no alias.
+> Listing, search, reading, `tail`, `trace` as text, export, import, render, share, and
+> bookmarks are the standalone `sessions` CLI (`sessions --help`). agents-cli keeps the
+> index writer, live identity (`agents ps`), resume and recovery, and the fleet peer
+> protocol described below. A moved verb typed under the old group exits 1 with one line
+> naming its new home, for example `agents sessions stop` → `agents ps stop`
+> (`removedToolGroupMessage` in `src/lib/startup/command-registry.ts`).
+
 ```mermaid
 flowchart LR
   H1[Claude transcript] --> D[Discovery and parsers]
@@ -32,23 +40,24 @@ flowchart LR
 ## Live roster: `agents ps`
 
 `agents ps` lists the sessions running right now on this machine and every reachable
-device. It is the home of the verbs
-that act on a running process: `ps stop`, `ps focus`, `ps detach` and `ps migrate`,
-plus `ps migrations` for the migration ledger (the `agents sessions` spellings run the same code). Typing into a running agent is
-`agents send --channel session --to <id>` (or `--pane <%id> [--socket <path>]` for a
-known tmux pane, with `--no-enter` and `--combined` covering every `agents sessions inject`
-mode); resuming an ended one is
-`agents run auto --resume <id>` (auto resumes in the session's own harness). Both moves are step A5 of PHNX-4227; the `sessions`
-group itself leaves agents-cli in a later release.
+device. It is the home of the verbs that act on a session: `ps stop`, `ps focus`,
+`ps detach`, `ps migrate`, `ps migrations` (the migration ledger), `ps preview <id>`
+(the detail card), and `ps watch --json` (the session-only NDJSON stream; the operator
+stream is `agents feed watch --json`). Typing into a running agent is
+`agents send --channel session --to <id> --text <text>` (or `--pane <%id> [--socket <path>]`
+for a known tmux pane, with `--no-enter` and `--combined`). Resuming an ended one is
+`agents run auto --resume <id>` (auto resumes in the session's own harness), or
+`agents run <agent> --resume` with no id for the picker. Forking a session into a new
+sibling is `agents fork <session>`.
 
 | Flag | Effect |
 |---|---|
-| `--json` | One row per live session (the `sessions --active --json` shape) |
+| `--json` | One row per live session |
 | `--local` | This machine only; no SSH fan-out |
 | `-D, --device <name...>` | Only these devices. Peers answer `agents ps --local --json`, so each peer needs agents 1.22.121 or newer |
 | `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
-| `--bookmarks` | Only bookmarked sessions (`sessions --active --bookmarks`) |
-| `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag (`sessions --active --routine`) |
+| `--bookmarks` | Only bookmarked sessions (bookmark one with `sessions bookmark <id>`) |
+| `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag |
 | `--no-interactive` | Print instead of opening the picker on a TTY |
 
 On a TTY with no `--status`, `ps` opens the session picker seeded running-only; `r`
@@ -140,51 +149,41 @@ running what, and the read follows it. A session that is readable locally never
 takes a needless hop, and an owner that cannot be reached is an error rather than an
 empty local card.
 
-A read query — list, search, or id lookup — execs the `sessions` binary from the
-`@phnx-labs/sessions-cli` dependency this CLI installs. No second global install
-is required. A non-empty `$SESSIONS_BIN` pins a different binary. An empty
-`$SESSIONS_BIN` ignores the dependency and uses a `sessions` on `PATH`. With
-none of those resolving, the read fails with an error naming the install; there
-is no in-process read (PHNX-4227). Two flag families on that
-path are version-gated so an older standalone can never mis-read them as search
-tokens:
-the 0.2.0 metadata filters/sort (`--project`/`--since`/`--until`/`--sort`, the
-`@version` suffix, the harness shorthands) forward only when the installed
-`sessions` is ≥ 0.2.0, and the point-to-one remote read `agents sessions <query>
---host <target>` (SSH to ONE box, run `sessions … --local`, stream JSON back)
-forwards only when it is ≥ 0.2.1 — its own, higher floor. Below a floor, or with no
-standalone new enough, that query stays on the in-repo engine (which
-implements the same filters and resolves `--device` against the fleet); nothing
-mis-routes or crashes. `--host` targets one box directly.
+Transcript reads are the standalone `sessions` CLI. agents-cli execs its bin only for
+its own surfaces: `agents events logs -f <id>` runs `sessions tail <id>`, and the
+session picker opens a peer's transcript with `sessions <id> --markdown --host
+ssh://<peer>`. The bin is resolved by `resolveSessionsBin` (`src/lib/sessions-client.ts`):
+a non-empty `$SESSIONS_BIN` wins, otherwise the `@phnx-labs/sessions-cli` dependency this
+CLI installs, otherwise a `sessions` on `PATH` (an empty `$SESSIONS_BIN` skips the
+dependency). With none resolving, the command fails with an error naming
+`npm i -g @phnx-labs/sessions-cli`; there is no in-process read.
 
-A **read** `agents sessions <query> --device <name>` that names EXACTLY ONE device
-(no explicit `--host`) also takes this path when the local `sessions` is ≥ 0.2.1:
-the device is resolved to its SSH target and the query is forwarded as `sessions
-<read args> --host ssh://<target>` — the standalone owns the remote hop, replacing
-the in-repo peer fan-out for that read (the same collapse `secrets`/`computer`
-made). `--host` is point-to-one, so **only a single-device read collapses**; a
-**multi-device** query — `--device box mac-mini`, `--device box --device mac-mini`,
-or a fan-out sentinel `--device all`/`fleet` — stays on the in-repo `--device`
-fan-out, which parses commander's variadic `--device` correctly and merges the
-peers. It is safe because the peer may not have the standalone yet: if the remote
-`sessions` is not on the peer's PATH the SSH `bash -lc` exits **127**
-(command-not-found), and the read **falls through to the in-repo `--device`
-fan-out** so it still succeeds — a capability gate keyed on that one signal, a
-migration bridge until the fleet is uniformly on 0.2.1, after which the in-repo read
-fan-out can be removed (a PHNX-4012 follow-up). Everything else (e.g. 255
-unreachable) is a real error and propagates. Below the 0.2.1 host floor a `--device` read stays on the in-repo engine exactly
-as before. Only reads route this way: a lifecycle `--device` (resume / watch / inject /
-focus / …) keeps its in-repo / `runOnPeer` behavior, and an explicit `--host`
-always wins over `--device`.
+Remote reads are the standalone's too: `sessions <query> --host <target>` reads one
+box's index over SSH. agents-cli no longer resolves a `--device` name for a read.
 
-Tool-call search is the standalone CLI's: `sessions --include tools --query
-'program:git input:merge' [--count] [--host <target>] --json` reads the tool
-index agents writes (`agents sessions backfill tools` fills it for historical
-transcripts). A tool search through `agents sessions --include tools` (no session id, or a `--query`
-clause) exits 2 and names that command; reading one session's tool calls,
-`agents sessions <id> --include tools [--json|--markdown]`, still renders as before.
-Following a live transcript is `sessions tail <id>` (`agents events logs -f <id>` runs
-it for a session).
+Tool-call search is `sessions --include tools --query 'program:git input:merge'
+[--count] [--host <target>] --json`. It reads the tool index agents-cli writes, and
+`agents daemon index backfill tools` fills that index for historical transcripts.
+
+### Peer protocol
+
+Fleet features that need another box's live or indexed state ask that box's agents-cli
+over SSH with `--local`, so the peer answers from its own state without fanning out again:
+
+| Question | Peer argv |
+|---|---|
+| Live roster | `agents ps --local --json` |
+| Live session stream | `agents ps watch --json --local` |
+| Detail card | `agents ps preview <id> --local --json` |
+| Stop or detach a session | `agents ps stop <id> --local`, `agents ps detach <id> --local` |
+| Selector resolution (hidden) | `agents ps resolve <selector> --json --local` |
+| Launch-id lookup (hidden) | `agents ps resolve --launch-id <id> --json --local` |
+| Tool-index backfill | `agents daemon index backfill tools --json --local` |
+| History pool for the picker | the peer's standalone `sessions --all --json --local …` |
+
+A peer on a release older than PHNX-4227 answers the `agents ps` and `agents daemon
+index` forms with an unknown-command error, which the caller reads as unreachable. There
+is no fallback to the old `agents sessions` spellings.
 
 ## Off-box backup
 
@@ -221,12 +220,12 @@ shared restore key across the user's devices, and the existing
 `sessions/<machine>/<agent>/<session>` object layout is unchanged.
 
 The managed endpoint itself (`sessions.agents-cli.sh` — the Worker + R2 bucket) is
-provisioned once, by an operator, with `agents sessions backup-setup` (Cloudflare
-credentials from the `cloudflare` secrets bundle, e.g. `secrets exec
-cloudflare -- agents sessions backup-setup`). It is idempotent — re-running
-redeploys the current Worker template in place. This is NOT a per-user step: a
-signed-in user backs up with zero setup; `backup-setup` is only how the first-party
-endpoint is deployed. The BYO path never touches it.
+provisioned once, by an operator, with `agents setup session-backup` (it was
+`agents sessions backup-setup`; Cloudflare credentials come from the `cloudflare`
+secrets bundle, e.g. `secrets exec cloudflare -- agents setup session-backup`). It is
+idempotent: re-running redeploys the current Worker template in place. This is not a
+per-user step. A signed-in user backs up with zero setup, and the BYO path never
+touches the endpoint.
 
 ## Derived capabilities
 
@@ -248,7 +247,7 @@ endpoint is deployed. The BYO path never touches it.
   and skipping harness-injected scaffolding. It is distinct from `topic` (a
   one-line distillation), `label` / an agent title, and the live row's cleaned
   `userPromptClean`, and it is emitted on `sessions --json` and on the
-  `agents sessions watch --json` / `agents feed watch --json` streams. Grok
+  `agents ps watch --json` / `agents feed watch --json` streams. Grok
   recovers it via a bounded prefix read of `chat_history.jsonl` so the cheap
   summary-only scan does not open the full log. Its sibling **`lastUserMessage`**
   (schema v48) carries the LATEST genuine turn, which is the operative request of
@@ -278,7 +277,7 @@ endpoint is deployed. The BYO path never touches it.
   `generatedTitle` → the first-prompt `topic` — implemented once in
   `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
   `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,
-  the picker, `agents sessions watch --json`, and AGI EXT can never disagree about a
+  the picker, `agents ps watch --json`, and AGI EXT can never disagree about a
   session's name. `generatedTitle` is a short, descriptive **action + object
   headline** ("Triage the AGI board", not just "Triage") produced by the daemon's
   `session-title` service through a swappable `SessionTitleProvider` — the shipped
@@ -315,7 +314,7 @@ attached directly to public work.
 
 ### Remote stream ownership
 
-Fleet `agents sessions watch --json` and `agents feed watch --json` publish one row per exact
+Fleet `agents ps watch --json` and `agents feed watch --json` publish one row per exact
 session id, harness and execution device. `sourceDevice` and `machine` identify
 the execution owner. The worker's state and preview win over the origin launcher,
 even when that launcher is newer or has more fields. Observer-local terminal ids,
