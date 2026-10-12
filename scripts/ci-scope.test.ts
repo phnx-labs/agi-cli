@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  CLI_FULL_MIN_SELECTED_TESTS,
   IMPACT_BUDGET_SEC,
   type ImpactPlan,
   canReuseProof,
@@ -1019,5 +1020,37 @@ Error: Worker exited unexpectedly
  Test Files  863 passed | 6 skipped (870)
       Tests  12206 passed | 112 skipped (12318)
 `)).toBe(false);
+  });
+});
+
+describe('a whole-suite selection runs as cli-full', () => {
+  function wideManifest(testCount: number) {
+    return {
+      policy_version: 'test',
+      areas: [],
+      testless: [],
+      groups: [{
+        id: 'wide',
+        when: ['cli/src/wide/**'],
+        tests: Array.from({ length: testCount }, (_, i) => `cli/src/wide/t${i}.test.ts`),
+        budget_sec: 420,
+        budget_min_selected_cli_tests: 250,
+      }],
+    };
+  }
+
+  test(`${CLI_FULL_MIN_SELECTED_TESTS} selected CLI tests escalate to cli-full, one fewer stays selected under the sized budget`, () => {
+    const at = selectImpact({ files: ['cli/src/wide/a.ts'], repoRoot: REPO, related: false, manifest: wideManifest(CLI_FULL_MIN_SELECTED_TESTS) });
+    expect(at.suite).toBe('cli-full');
+    const below = selectImpact({ files: ['cli/src/wide/a.ts'], repoRoot: REPO, related: false, manifest: wideManifest(CLI_FULL_MIN_SELECTED_TESTS - 1) });
+    expect(below.suite).toBe('selected');
+    expect(below.budget_sec).toBe(420);
+  });
+
+  test('the escalation threshold sits above every sized group budget, so those budgets still apply', () => {
+    for (const group of MANIFEST.groups) {
+      if (group.budget_min_selected_cli_tests === undefined) continue;
+      expect(group.budget_min_selected_cli_tests).toBeLessThan(CLI_FULL_MIN_SELECTED_TESTS);
+    }
   });
 });

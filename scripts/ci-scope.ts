@@ -6,6 +6,9 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 
 export const POLICY_VERSION = 'impact-v1';
 export const IMPACT_BUDGET_SEC = 85;
+// A change that selects this many CLI test files is a whole-suite change: it runs
+// as cli-full (1200 s) instead of overrunning a group budget sized for a narrow one.
+export const CLI_FULL_MIN_SELECTED_TESTS = 300;
 
 export interface CiScope {
   cli: boolean;
@@ -595,6 +598,7 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([file, reason]) => ({ file, reason }));
   const selectedCliTests = tests.filter(({ file }) => file.startsWith('cli/') && file.endsWith('.test.ts')).length;
+  if (selectedCliTests >= CLI_FULL_MIN_SELECTED_TESTS) suite = 'cli-full';
   for (const group of budgetGroups) {
     if (selectedCliTests < (group.budget_min_selected_cli_tests ?? 0)) continue;
     budgetSec = Math.max(budgetSec, group.budget_sec!, IMPACT_BUDGET_SEC);
