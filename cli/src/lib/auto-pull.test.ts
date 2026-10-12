@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import {
+  tryAcquireSyncLock,
   readRepoBehindMarkers,
   shouldSkipDetachedSync,
   markDetachedSyncComplete,
@@ -167,4 +169,33 @@ describe('shouldSkipDetachedSync / markDetachedSyncComplete (RUSH-2324)', () => 
     markDetachedSyncComplete(nested);
     expect(fs.existsSync(lastSyncStampPath(nested))).toBe(true);
   });
+});
+
+describe('tryAcquireSyncLock', () => {
+  it('a fresh lock is held, a stale one is reclaimed', () => {
+    expect(tryAcquireSyncLock('user', fetchDir)).toBe(true);
+    expect(tryAcquireSyncLock('user', fetchDir)).toBe(false);
+    const staleSec = (Date.now() - SYNC_LOCK_TTL_MS - 1_000) / 1000;
+    fs.utimesSync(lockFilePath('user', fetchDir), staleSec, staleSec);
+    expect(tryAcquireSyncLock('user', fetchDir)).toBe(true);
+  });
+
+  it('racing processes never both acquire the same lock', async () => {
+    const racers = 6;
+    const aliases = 400;
+    const worker = path.join(import.meta.dirname, 'testdata', 'auto-pull-lock-racer.ts');
+    const startAt = Date.now() + 3_000;
+    const results = await Promise.all(Array.from({ length: racers }, () => new Promise<string[]>((resolve, reject) => {
+      const child = spawn(process.execPath, ['--import', 'tsx', worker, fetchDir, String(startAt), String(aliases)], { stdio: 'pipe' });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+      child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+      child.on('error', reject);
+      child.on('exit', (code) => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(stderr || `racer exited ${code}`)));
+    })));
+    const won = results.flat();
+    expect(won.length - new Set(won).size).toBe(0);
+    expect(new Set(won).size).toBe(aliases);
+  }, 30_000);
 });

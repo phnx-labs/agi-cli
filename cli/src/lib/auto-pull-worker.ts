@@ -13,6 +13,7 @@ import {
   lockFilePath,
   statusFilePath,
   markDetachedSyncComplete,
+  tryAcquireSyncLock,
   SYNC_LOCK_TTL_MS,
   type FetchStatusMarker,
 } from './auto-pull.js';
@@ -36,18 +37,7 @@ function ensureFetchDir(): string {
 
 function tryAcquireLock(alias: string): boolean {
   ensureFetchDir();
-  const lock = lockFilePath(alias);
-  try {
-    const stat = fs.statSync(lock);
-    if (Date.now() - stat.mtimeMs < SYNC_LOCK_TTL_MS) return false;
-  } catch {
-  }
-  try {
-    fs.writeFileSync(lock, String(process.pid));
-    return true;
-  } catch {
-    return false;
-  }
+  return tryAcquireSyncLock(alias);
 }
 
 function touchLock(alias: string): void {

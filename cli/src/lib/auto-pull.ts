@@ -16,6 +16,32 @@ export function lockFilePath(alias: string, fetchDir?: string): string {
   return path.join(fetchDir ?? fetchStateDir(), `${alias}.lock`);
 }
 
+export function tryAcquireSyncLock(alias: string, fetchDir?: string): boolean {
+  const lock = lockFilePath(alias, fetchDir);
+  const created = createLockExclusive(lock);
+  if (created !== 'exists') return created;
+  return reclaimStaleLock(lock) && createLockExclusive(lock) === true;
+}
+
+function createLockExclusive(lock: string): boolean | 'exists' {
+  try {
+    fs.writeFileSync(lock, String(process.pid), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EEXIST' ? 'exists' : false;
+  }
+}
+
+function reclaimStaleLock(lock: string): boolean {
+  try {
+    if (Date.now() - fs.statSync(lock).mtimeMs < SYNC_LOCK_TTL_MS) return false;
+    fs.unlinkSync(lock);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+}
+
 export function statusFilePath(alias: string, fetchDir?: string): string {
   return path.join(fetchDir ?? fetchStateDir(), `${alias}.status.json`);
 }
