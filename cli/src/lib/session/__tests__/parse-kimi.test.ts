@@ -83,6 +83,19 @@ describe('readKimiMeta message + token counting', () => {
     expect(result!.meta.messageCount).toBe(2);
   });
 
+  test('records the latest llm.request model, including a turn interrupted before usage.record', () => {
+    const jsonl = [
+      { type: 'context.append_message', message: { role: 'user', content: [{ type: 'text', text: 'Q1' }] }, time: 1 },
+      { type: 'llm.request', provider: 'openai', model: 'kimi-for-coding', modelAlias: 'kimi-code/kimi-for-coding', time: 2 },
+      { type: 'usage.record', model: 'kimi-code/kimi-for-coding', usage: { inputOther: 10, output: 5 }, time: 3 },
+      { type: 'llm.request', provider: 'openai', model: 'k3', modelAlias: 'kimi-code/k3', time: 4 },
+      { type: 'turn.step.interrupted', time: 5 },
+    ].map(o => JSON.stringify(o)).join('\n');
+
+    const statePath = makeKimiSession(jsonl);
+    expect(readKimiMeta(statePath)!.meta.model).toBe('kimi-code/k3');
+  });
+
   test('messageCount is 0 when wire.jsonl is absent', () => {
     const statePath = makeKimiStateNoTimestamps();
     const result = readKimiMeta(statePath);

@@ -36,6 +36,23 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
     expect(state!.awaitingReason).toBe('question');
   });
 
+  it('a live grok turn longer than the event window still reports its model', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-livesignals-'));
+    tmp.push(dir);
+    const file = path.join(dir, 'chat_history.jsonl');
+    const lines: object[] = [
+      { type: 'user', content: [{ type: 'text', text: 'Audit every workflow file' }] },
+      { type: 'assistant', content: 'Reading them one by one.', tool_calls: [], model_id: 'grok-4.7-build' },
+    ];
+    for (let i = 0; i < 60; i++) {
+      lines.push({ type: 'assistant', content: '', tool_calls: [{ id: `c${i}`, name: 'read_file', arguments: `{"path":"w${i}.yml"}` }] });
+      lines.push({ type: 'tool_result', tool_call_id: `c${i}`, content: 'jobs: {}', is_error: false });
+    }
+    fs.writeFileSync(file, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+    const { state } = computeLiveSignals('grok', file, dir, true);
+    expect(state!.model).toBe('grok-4.7-build');
+  });
+
   it('a live droid transcript yields working', () => {
     const file = freshCopy('droid-working.jsonl', 'droid-working.jsonl');
     const { state } = computeLiveSignals('droid', file, path.dirname(file), true);

@@ -724,7 +724,13 @@ function parseTailEventsForKind(agent: SessionAgentId, sessionFile: string): Ses
   } catch {
     return [];
   }
-  return events.length > LIVE_STATE_MAX_EVENTS ? events.slice(-LIVE_STATE_MAX_EVENTS) : events;
+  if (events.length <= LIVE_STATE_MAX_EVENTS) return events;
+  const cut = events.length - LIVE_STATE_MAX_EVENTS;
+  // Parsers record the model once per change, so a long turn pushes it out of
+  // the window; carry the latest one in from the already-parsed prefix.
+  let modelAt = events.length - 1;
+  while (modelAt >= 0 && !(events[modelAt]!.type === 'init' && events[modelAt]!.model)) modelAt--;
+  return modelAt >= 0 && modelAt < cut ? [events[modelAt]!, ...events.slice(cut)] : events.slice(cut);
 }
 
 const LIVE_TAIL_CACHE_MAX = 512;
