@@ -1,0 +1,1 @@
+- **AGI Menu 1.18.1.** The menubar floor moves to 1.18.1: Home's pull requests and the GitHub tab draw their last list at once after a relaunch, the menu-bar badge is redrawn only when it changes, and the snapshot poll runs every 15 minutes while the menu is closed. Source: `cli/src/lib/helper-versions.ts`.
