@@ -9,6 +9,12 @@ describe('isMissingBinarySignature (gutted-install detector)', () => {
     expect(isMissingBinarySignature(blob)).toBe(true);
   });
 
+  it('flags the codex 0.162 wrapper whose platform package npm skipped', () => {
+    const blob = 'Error: Missing optional dependency @openai/codex-linux-x64. '
+      + 'Reinstall Codex: npm install -g @openai/codex@latest';
+    expect(isMissingBinarySignature(blob)).toBe(true);
+  });
+
   it('flags the other missing-file phrasings', () => {
     expect(isMissingBinarySignature('bash: codex: command not found')).toBe(true);
     expect(isMissingBinarySignature('dyld: no such file or directory')).toBe(true);

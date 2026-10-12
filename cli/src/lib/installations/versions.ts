@@ -1592,7 +1592,7 @@ export async function getInstalledVersion(agent: AgentId, version: string): Prom
 }
 
 export function isMissingBinarySignature(output: string): boolean {
-  return /\bENOENT\b|no such file|cannot find|command not found|is not recognized|native binary not installed|postinstall did not run|optional dependency was not downloaded/i.test(output);
+  return /\bENOENT\b|no such file|cannot find|command not found|is not recognized|native binary not installed|postinstall did not run|optional dependency was not downloaded|missing optional dependency/i.test(output);
 }
 
 export function probeSpawnSpec(binary: string, isWin: boolean): { command: string; args: string[]; shell: boolean } {
@@ -1627,8 +1627,9 @@ export async function verifyBinaryLaunches(
   } catch (err: any) {
     const blob = `${err?.code ?? ''} ${err?.stdout ?? ''} ${err?.stderr ?? ''} ${err?.message ?? ''}`;
     if (err?.code === 'ENOENT' || isMissingBinarySignature(blob)) {
-      const detail = String(err?.stderr || err?.message || '')
-        .split('\n').map((s: string) => s.trim()).filter(Boolean)[0];
+      const lines = String(err?.stderr || err?.message || '')
+        .split('\n').map((s: string) => s.trim()).filter(Boolean);
+      const detail = lines.find((line) => isMissingBinarySignature(line)) ?? lines[0];
       return { ok: false, detail: detail || 'native binary missing (ENOENT)' };
     }
     return { ok: true };

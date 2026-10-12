@@ -65,6 +65,16 @@ describe('formatNoHealthyDeviceError separates a timeout from an outage (PHNX-36
     expect(msg).toContain('ghost (no probe signal)');
   });
 
+  it('names a ready probe that timed out instead of claiming no account', () => {
+    const msg = formatNoHealthyDeviceError(['m5', 'm2'], new Map([
+      ['m5', { reachable: true, headroom: 'light', timedOut: true }],
+      ['m2', { reachable: true, headroom: 'light' }],
+    ]), 'grok');
+    expect(msg).toContain('m5 (readiness probe timed out), m2 (readiness probe did not answer)');
+    expect(msg).not.toContain('no ready harness account');
+    expect(msg).toContain('1 of 2 probes exceeded the probe budget');
+  });
+
   it('counts a partial timeout rather than claiming the whole pool timed out', () => {
     const msg = formatNoHealthyDeviceError(['m1', 'm2'], new Map([
       ['m1', { reachable: false, timedOut: true }],

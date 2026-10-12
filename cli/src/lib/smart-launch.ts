@@ -99,7 +99,10 @@ export function formatNoHealthyDeviceError(
   const excluded = pool.map((key) => {
     const signal = signals.get(key);
     let reason: string;
-    if (signal?.reachable === true) {
+    if (signal?.reachable === true && signal.headroom !== 'loaded' && signal.installed === undefined) {
+      if (signal.timedOut) timedOutCount++;
+      reason = signal.timedOut ? 'readiness probe timed out' : 'readiness probe did not answer';
+    } else if (signal?.reachable === true) {
       reason = signal.headroom === 'loaded'
         ? 'overloaded'
         : signal.installed !== true || signal.signedIn !== true
