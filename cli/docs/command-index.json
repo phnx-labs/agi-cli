@@ -10537,13 +10537,13 @@
           "name": "preview",
           "path": "ps preview",
           "aliases": [],
-          "description": "Show one rich session card without rendering the full transcript",
+          "description": "Show rich session cards without rendering the full transcripts",
           "args": [
             {
               "name": "id",
               "required": true,
-              "variadic": false,
-              "description": "Full session ID or displayed 8-character short ID"
+              "variadic": true,
+              "description": "Full session IDs or displayed 8-character short IDs"
             }
           ],
           "options": [
@@ -10624,8 +10624,8 @@
               "negate": false
             }
           ],
-          "examples": "# Preview by the 8-character ID shown in agents ps\nagents ps preview 407b8dd5\n\n# A full UUID resolves on the first device that owns it\nagents ps preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n# Stay on this machine or restrict the authoritative lookup to one peer\nagents ps preview 407b8dd5 --local\nagents ps preview 407b8dd5 --device zion\n\n# Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch\nagents ps preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh",
-          "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n- Short IDs wait for every selected device so ambiguity is never hidden.\n- Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.\n- A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's \"cache\" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.\n- Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device.",
+          "examples": "# Preview by the 8-character ID shown in agents ps\nagents ps preview 407b8dd5\n\n# A full UUID resolves on the first device that owns it\nagents ps preview c70ecdea-6210-4039-9845-246a3a7a9942\n\n# Stay on this machine or restrict the authoritative lookup to one peer\nagents ps preview 407b8dd5 --local\nagents ps preview 407b8dd5 --device zion\n\n# Full ID + one --device: durable-cached fast path (PHNX-3999); force a fresh fetch\nagents ps preview c70ecdea-6210-4039-9845-246a3a7a9942 --device zion --json --refresh\n\n# Several cards in one call: a JSON array in argument order\nagents ps preview 407b8dd5 c70ecdea --json",
+          "notes": "- Full UUIDs are globally unique and may stop the fleet lookup at the first exact hit.\n- Short IDs wait for every selected device so ambiguity is never hidden.\n- Active status is refreshed through the bounded live-state TTL; transcript-derived details use the durable session index.\n- A full UUID with exactly one --device and --json is served from a local durable cache (~45s fresh window); the JSON envelope's \"cache\" field reports fresh/stale/offline state. --refresh forces one bounded re-fetch.\n- With several IDs, --json prints one array in argument order; each element is the single-ID envelope plus \"query\", and an ID that does not resolve is an element with \"error\" set. The exit code is 1 only when no ID resolved.\n- Put -D after the verb: 'ps -D box preview <id>' reads 'preview' as a device.",
           "subcommands": []
         },
         {

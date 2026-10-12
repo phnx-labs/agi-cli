@@ -39,7 +39,7 @@ async function captured(run: () => Promise<void>): Promise<string> {
   return lines.join('\n');
 }
 
-describe('sessions preview with several ids (PHNX-4326)', () => {
+describe('ps preview with several ids (PHNX-4326)', () => {
   const a = seed('aaaa1111-2222-4333-8444-555555555555', 'first reply');
   const b = seed('bbbb1111-2222-4333-8444-555555555555', 'second reply');
   const missing = 'cccc1111-2222-4333-8444-555555555555';
