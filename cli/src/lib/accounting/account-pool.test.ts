@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
 
-describe('registryPoolCandidates — harness capability filter', () => {
+describe('registryPoolCandidates — subscription credentials the harness can use', () => {
   const records: RegistryAccountRecord[] = [
     { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: true },
     { name: 'openai-key', provider: 'openai', auth: 'api-key', secretPresent: true },
@@ -9,21 +9,21 @@ describe('registryPoolCandidates — harness capability filter', () => {
     { name: 'or-key', provider: 'openrouter', auth: 'api-key', secretPresent: true },
   ];
 
-  it('claude pool includes anthropic + openrouter (both can auth claude), excludes openai/cursor', () => {
-    expect(registryPoolCandidates(records, 'claude').map((c) => c.name)).toEqual(['claude-setup', 'or-key']);
+  it('claude pool takes the anthropic setup-token only: an openrouter key is never picked automatically', () => {
+    expect(registryPoolCandidates(records, 'claude').map((c) => c.name)).toEqual(['claude-setup']);
   });
 
-  it('codex pool includes openai + openrouter, excludes anthropic setup-token + cursor', () => {
-    expect(registryPoolCandidates(records, 'codex').map((c) => c.name)).toEqual(['openai-key', 'or-key']);
-  });
-
-  it('cursor pool includes only the cursor key', () => {
-    expect(registryPoolCandidates(records, 'cursor').map((c) => c.name)).toEqual(['cursor-key']);
-  });
-
-  it('grok pool includes only an xai key', () => {
-    const withXai = [...records, { name: 'grok-key', provider: 'xai', auth: 'api-key' as const, secretPresent: true }];
-    expect(registryPoolCandidates(withXai, 'grok').map((c) => c.name)).toEqual(['grok-key']);
+  it('per-token accounts never join any pool: api-key and bearer-token records are left to --account', () => {
+    const keyed: RegistryAccountRecord[] = [
+      ...records,
+      { name: 'anthropic-key', provider: 'anthropic', auth: 'api-key', secretPresent: true },
+      { name: 'gateway', provider: 'litellm', auth: 'bearer-token', secretPresent: true },
+      { name: 'grok-key', provider: 'xai', auth: 'api-key', secretPresent: true },
+    ];
+    for (const agent of ['claude', 'codex', 'cursor', 'grok', 'opencode'] as const) {
+      expect(registryPoolCandidates(keyed, agent).every((c) => c.auth === 'setup-token')).toBe(true);
+    }
+    expect(registryPoolCandidates(keyed, 'codex')).toEqual([]);
   });
 
   it('carries secretPresent through unchanged — false is not upgraded to true', () => {
@@ -38,10 +38,8 @@ describe('registryPoolCandidates — harness capability filter', () => {
     expect(c.auth).toBe('setup-token');
   });
 
-  it('keeps (agent, account) distinct — same account name under two harnesses gets different keys', () => {
-    const rec: RegistryAccountRecord[] = [{ name: 'or', provider: 'openrouter', auth: 'api-key', secretPresent: true }];
-    const claudeKey = registryPoolCandidates(rec, 'claude')[0].accountKey;
-    const codexKey = registryPoolCandidates(rec, 'codex')[0].accountKey;
-    expect(claudeKey).not.toBe(codexKey);
+  it('tags the key with the harness, so the same name under two harnesses never collides', () => {
+    const rec: RegistryAccountRecord[] = [{ name: 'shared', provider: 'anthropic', auth: 'setup-token', secretPresent: true }];
+    expect(registryPoolCandidates(rec, 'claude')[0].accountKey).toBe('claude:name=shared');
   });
 });

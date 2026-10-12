@@ -27,7 +27,10 @@ export function registryPoolCandidates(
 ): RegistryAccountInput[] {
   const out: RegistryAccountInput[] = [];
   for (const r of records) {
-
+    // Only a subscription credential (a setup-token) joins the automatic pool. An api-key or bearer-token account
+    // bills per token (OpenRouter, an Anthropic or OpenAI API key, a gateway), so balanced or available rotation never
+    // picks one; it runs only when named (`--account`, a binding or `accounts default`). Owner decision 2026-10-12.
+    if (r.auth !== 'setup-token') continue;
     if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
     out.push({
       id: r.id,
