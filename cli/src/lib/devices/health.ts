@@ -217,7 +217,6 @@ export function headroom(stats: DeviceStats | undefined): Headroom {
   return 'loaded';
 }
 
-// Resolves the operator profile first so the snippet family and budget match the profile buildSshInvocation dials.
 export function buildProbeInvocation(
   device: DeviceProfile,
   askpassShimPath: string,

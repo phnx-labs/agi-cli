@@ -306,11 +306,6 @@ describe('probeDeviceStats reports a timeout apart from unreachable (PHNX-3682)'
 });
 
 describe('buildProbeInvocation follows the operator platform, not the discovered shell', () => {
-  // Real config read path: temp HOME + a per-device doc, fresh modules per test
-  // (state.ts captures HOME at import time). A Windows-discovered box whose
-  // sshd lands in WSL is configured `platform: linux`; the probe must then dial
-  // the POSIX snippet on the POSIX budget — the PowerShell snippet fed to a
-  // bash login shell yields empty stdout and a permanently "offline" row.
   let TMP = '';
   let savedHome: string | undefined;
 
@@ -325,7 +320,7 @@ describe('buildProbeInvocation follows the operator platform, not the discovered
     process.env.HOME = savedHome;
     delete process.env.AGENTS_SYNC_MACHINE_ID;
     delete process.env.AGENTS_DEVICES_DIR;
-    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+    fs.rmSync(TMP, { recursive: true, force: true });
   });
 
   async function fresh() {
@@ -360,7 +355,6 @@ describe('buildProbeInvocation follows the operator platform, not the discovered
     expect(inv.budgetMs).toBe(h.RELAYED_PROBE_TIMEOUT_MS);
     expect(inv.args.at(-1)).toContain(h.PROBE_SNIPPET);
     expect(inv.args.at(-1)).not.toContain('powershell -NoProfile');
-    // The dial target follows the same resolved profile.
     expect(inv.args).toContain('caleb@jupiter.example.ts.net');
   });
 });

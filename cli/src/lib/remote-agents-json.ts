@@ -153,8 +153,6 @@ export async function gatherRemoteAgentsJson<T>(
     for (const device of Object.values(devices)) {
       if (!isDialableDevice(device)) continue;
       if (normalizeHost(device.name) === self) continue;
-      // The operator config (`platform`) decides the remote shell family, exactly
-      // as sshTargetFor dials it — never the registry's discovered platform.
       const platform = resolveDeviceProfile(device).platform;
       if (!['windows', 'linux', 'macos'].includes(platform)) continue;
       try {

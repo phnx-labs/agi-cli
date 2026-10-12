@@ -428,8 +428,6 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
   try { devices = await loadDevices(); }
   catch { await local; return; }
   const self = machineId();
-  // Resolved profiles: the operator config (`platform`) decides the remote shell
-  // family, exactly as streamFromPeer dials it — never the discovered platform.
   const peers = Object.values(devices).map(resolveDeviceProfile).filter((device) =>
     isDialableDevice(device)
     && normalizeHost(device.name) !== self
