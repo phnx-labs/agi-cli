@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
 
 import { Command } from 'commander';
 import {
@@ -20,8 +21,12 @@ import {
   shouldAttachLocalTmuxAliasBeforeFleet,
   dedupeSessionsByLogicalId,
   focusResolvedSession,
+  resumeInTab,
 } from './focus.js';
 import { refuseFallback } from './go.js';
+import { ackFailure } from '../lib/terminal/engine.js';
+import { machineId } from '../lib/session/sync/config.js';
+import { readDetachRecord, writeDetachRecord } from '../lib/session/detached.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import type { SurfaceItem, LaunchResult } from '../lib/terminal/index.js';
@@ -454,5 +459,130 @@ describe('dedupeSessionsByLogicalId — synced copies are ONE session (SES-IF-2a
     const other = { ...base, id: '87e2bc83-aaaa-4bbb-8ccc-dddddddddddd', machine: 'zion', filePath: '/s/b.jsonl' } as SessionMeta;
     const here = { ...base, id, machine: 'yosemite-s0', filePath: '/s/a.jsonl' } as SessionMeta;
     expect(dedupeSessionsByLogicalId([here, other], 'yosemite-s0')).toHaveLength(2);
+  });
+});
+
+describe('resumeInTab — a live headless run is stopped before its tab opens (PHNX-4344)', () => {
+  const vscodium = { backend: 'vscodium-agent', source: 'active-session', host: 'codium' } as const;
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  type Opened = { items: SurfaceItem[]; backend: string; headlessAlive?: boolean };
+
+  function opener(pid?: number, result: Partial<LaunchResult> = { ok: true }) {
+    const opened: Opened[] = [];
+    const open = async (items: SurfaceItem[], opts: { backend: string }): Promise<LaunchResult[]> => {
+      opened.push({ items, backend: opts.backend, headlessAlive: pid === undefined ? undefined : alive(pid) });
+      return items.map((it) => ({ request: { backend: opts.backend, layout: 'tab', cwd: it.cwd, command: it.command }, ...result })) as LaunchResult[];
+    };
+    return { opened, open: open as never };
+  }
+
+  function metaFor(id: string, cwd: string): SessionMeta {
+    return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp: new Date().toISOString(), filePath: '', cwd };
+  }
+
+  it('SIGTERMs the local headless process, clears its detach record, then opens one VSCodium tab', async () => {
+    const id = 'f0c05e11-4344-4000-8000-000000004344';
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'takeover-repo-'));
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    writeDetachRecord({ sessionId: id, agent: 'claude', cwd: repo, headlessPid: pid, headlessStartTime: null, detachedAtMs: Date.now() });
+    const { opened, open } = opener(pid);
+    try {
+      await resumeInTab(
+        { context: 'headless', kind: 'claude', sessionId: id, pid, pidAlive: true, status: 'running', machine: machineId(), cwd: repo },
+        undefined,
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, repo) },
+      );
+      expect(opened).toHaveLength(1);
+      expect(opened[0].headlessAlive).toBe(false);
+      expect(opened[0].backend).toBe('vscodium-agent');
+      expect(opened[0].items[0]).toMatchObject({ cwd: repo, project: repo, sessionId: id, agent: 'claude' });
+      expect(opened[0].items[0].command.join(' ')).toContain(`run auto --resume ${id} --interactive`);
+      expect(readDetachRecord(id)).toBeUndefined();
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      child.kill('SIGKILL');
+      fs.rmSync(repo, { recursive: true, force: true });
+      process.exitCode = undefined;
+    }
+  });
+
+  it('leaves a live interactive session running (only headless runs are stopped)', async () => {
+    const id = 'f0c05e11-4344-4000-8000-000000004345';
+    const child = spawn('sleep', ['300'], { stdio: 'ignore' });
+    const pid = child.pid!;
+    const { opened, open } = opener(pid);
+    try {
+      await resumeInTab(
+        { context: 'terminal', kind: 'claude', sessionId: id, pid, pidAlive: true, status: 'running', machine: machineId(), cwd: os.tmpdir() },
+        undefined,
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, os.tmpdir()) },
+      );
+      expect(opened[0].headlessAlive).toBe(true);
+    } finally {
+      child.kill('SIGKILL');
+      process.exitCode = undefined;
+    }
+  });
+
+  it('a GUI caller reopens a peer session in a LOCAL tab running the portable command, in the localized project folder', async () => {
+    const id = 'f0c05e11-4344-4000-8000-000000004346';
+    const home = process.env.HOME!;
+    const repo = path.join(home, 'src', 'github.com', 'me', 'agents');
+    fs.mkdirSync(repo, { recursive: true });
+    const { opened, open } = opener();
+    try {
+      await resumeInTab(
+        { context: 'terminal', kind: 'claude', sessionId: id, status: 'idle', machine: 'peer-box' },
+        'peer-box',
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, '/home/muqsit/src/github.com/me/agents/.agents/worktrees/fix') },
+      );
+      expect(opened).toHaveLength(1);
+      expect(opened[0].items[0].command).toEqual(['agents', 'run', 'auto', '--resume', id, '--interactive', '--quiet']);
+      expect(opened[0].items[0]).toMatchObject({ cwd: repo, project: repo });
+    } finally {
+      fs.rmSync(path.join(home, 'src'), { recursive: true, force: true });
+      process.exitCode = undefined;
+    }
+  });
+
+  it('refuses to open a second copy when the headless run\'s device cannot be reached to stop it', async () => {
+    const id = 'f0c05e11-4344-4000-8000-000000004347';
+    const { opened, open } = opener();
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.join(' ')); });
+    try {
+      await resumeInTab(
+        { context: 'headless', kind: 'claude', sessionId: id, pid: 4242, pidAlive: true, status: 'running', machine: 'unregistered-peer' },
+        'unregistered-peer',
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, '/tmp') },
+      );
+      expect(opened).toHaveLength(0);
+      expect(process.exitCode).toBe(1);
+      expect(errors.join('\n')).toMatch(/Can't reach unregistered-peer to stop the headless/);
+    } finally {
+      spy.mockRestore();
+      process.exitCode = undefined;
+    }
+  });
+
+  it('fails loud with the tab backend\'s reason when the tab is not confirmed', async () => {
+    const id = 'f0c05e11-4344-4000-8000-000000004348';
+    const reason = ackFailure(undefined, { backend: 'vscodium-agent', layout: 'tab', cwd: '/d', command: [], project: '/d' }, 15_000)!;
+    const { open } = opener(undefined, { ok: false, error: reason });
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => { errors.push(a.join(' ')); });
+    try {
+      await resumeInTab(
+        { context: 'terminal', kind: 'claude', sessionId: id, status: 'idle', machine: machineId(), cwd: os.tmpdir() },
+        undefined,
+        { open, choice: vscodium, interactive: false, meta: metaFor(id, os.tmpdir()) },
+      );
+      expect(process.exitCode).toBe(1);
+      expect(errors[0]).toContain(reason);
+    } finally {
+      spy.mockRestore();
+      process.exitCode = undefined;
+    }
   });
 });

@@ -8,6 +8,7 @@ export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project'
 
 export const MENUBAR_MENU_PROPERTIES = [
   'defaultProject',
+  'todoProject',
   'workingRowsShown',
   'showPreviews',
   'projectPriorityFilter',

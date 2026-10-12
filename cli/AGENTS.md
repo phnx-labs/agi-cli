@@ -1292,7 +1292,9 @@ The new command is a **facade over the existing YAML storage**
 [§Per-session summarizer](#per-session-summarizer-phnx-3939).
 
 `menubar.menu.*` (user-scope, central `agents.yaml`, syncs fleet-wide) are the
-**AGI Menu preferences** (PHNX-3999) — `defaultProject`, `workingRowsShown` (2/3/4),
+**AGI Menu preferences** (PHNX-3999) — `defaultProject`, `todoProject` (the project whose open
+Linear issues the menu lists as to-dos, `agents projects todo list --project <name>`; unset = your
+quick to-dos), `workingRowsShown` (2/3/4),
 `showPreviews`, `projectPriorityFilter` (all/urgent/high/medium),
 `hideCompletedMilestones`, `bannerWhenNeedsYou`, `includeOtherDeviceRequests`,
 `groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
@@ -1321,7 +1323,7 @@ starts hidden), and
 `prGroupMerged` (`none` | `type` | `day`; defaults `none` and `day`) group the PR board's
 open filters and its Merged filter. Three keys shape the GitHub tab (PHNX-4269):
 `githubHidden` (org/account logins or `owner/repo` slugs it leaves out; default `[]`),
-`githubDrafts` and `githubBots` (show drafts, show bot-opened PRs; both default
+`githubDrafts` (show drafts; default `true`) and `githubBots` (show bot-opened PRs; default
 `false`). Settings is never in
 either tab list: it is always shown. The five list keys are `string-list` keys stored
 as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
@@ -1334,7 +1336,7 @@ the list so the menu falls back to its own baked-in default (the defaults in
 `config-keys.ts`/`device-config.ts` match those). No credential ever lives here.
 `agents menubar snapshot --json` also emits a `menuPreferences` map (each
 `menubar.menu.*` and `menubar.statusbar.*` key → its effective value, i.e. the stored value or the registered
-default; `defaultProject` omitted when unset) so the menu consumes preferences from
+default; `defaultProject` and `todoProject` omitted when unset) so the menu consumes preferences from
 the snapshot it already polls rather than a second read path. That map is scalar-only:
 the list keys (`pinnedProjects`, `tabOrder`, `hiddenTabs`, `homeGoals`, `homeSections`, `artifactApps`, `githubHidden`) ride a separate
 `menuListPreferences` map, because a shipped menu decodes `menuPreferences` values as

@@ -1441,6 +1441,21 @@ SES-51 and all of SES-52), the `r2.backups` bundle convention
   (`resumeLocalFallbackSource`, which rewrote `machine` to self) was deleted with
   `commands/resume.ts`, and the `agents run --resume <id>` path in `commands/exec.ts`
   routes to the origin peer without an equivalent fallback.
+- **SES-40a (MUST, PHNX-4344).** `agents ps focus <id>` on a session that is
+  live and headless (`context: 'headless'`, process alive) MUST stop that process
+  before it opens the resumed tab, so the tab is the conversation's only writer:
+  locally with `stopInteractive` (SIGTERM, SIGKILL after 5 s), which also clears
+  the detach record, and on another device with `agents ps stop <id> --local`
+  there. When the owning device cannot be reached, focus MUST NOT open a tab and
+  MUST exit 1. The tab backend MUST come from `resolveLaunchBackend` over the live
+  roster's host samples, never from the first installed app. A caller with no
+  TTY (AGI Menu) focusing a session owned by another device MUST open a local tab
+  running the portable `agents run auto --resume <id> --interactive`, which routes
+  to the owner. A VSCodium tab whose spawn ack never arrives MUST exit 1 with a
+  reason that names the extension's URI prompt (`resumeInTab` in
+  `commands/focus.ts`, `ackFailure` in `lib/terminal/engine.ts`; tests
+  `commands/focus.test.ts`, `lib/terminal/preferred.test.ts`,
+  `lib/terminal/engine.test.ts`).
 - **SES-43 (MUST, RUSH-2336).** Every bare-active surface — the CLI's grouped
   table and `--json` (`renderActiveSessions`), the interactive browser's
   `--active` filter (`applyFilters`), `focus`'s attach gate

@@ -13,6 +13,7 @@ import {
   resolveProjectRef,
   resolveProjectDirs,
   localProjectFolder,
+  localizeHome,
 } from './project-root.js';
 import { writeProjectDef } from './projects.js';
 
@@ -224,5 +225,15 @@ describe('localProjectFolder — the local window folder for a session cwd', () 
     expect(localProjectFolder('/home/muqsit/src/github.com/me/missing', home)).toBeUndefined();
     expect(localProjectFolder('/home/muqsit', home)).toBeUndefined();
     expect(localProjectFolder(undefined, home)).toBeUndefined();
+  });
+});
+
+describe('localizeHome — a path from another box\'s home, named on this one', () => {
+  it('maps /home/<u> and /Users/<u> onto this home and keeps local and non-home paths', () => {
+    expect(localizeHome('/home/muqsit/src/x', '/Users/muqsit')).toBe('/Users/muqsit/src/x');
+    expect(localizeHome('/Users/someone', '/home/muqsit')).toBe('/home/muqsit');
+    expect(localizeHome('/Users/muqsit/src/x', '/Users/muqsit')).toBe('/Users/muqsit/src/x');
+    expect(localizeHome('/srv/data/x', '/Users/muqsit')).toBe('/srv/data/x');
+    expect(localizeHome('/home', '/Users/muqsit')).toBe('/home');
   });
 });

@@ -297,6 +297,24 @@ describe('confirmedProjectForCwd', () => {
   });
 });
 
+describe('confirmedProjectForCwd across homes (PHNX-4344)', () => {
+  it('matches a cwd recorded under another box\'s home against a registered ~/ root', () => {
+    writeProjectDef({ name: 'rush', root: '~/src/github.com/muqsitnawaz/agents' });
+    writeProjectDef({ name: 'other', root: '~/src/other' });
+    resetProjectDefsCache();
+    expect(confirmedProjectForCwd('/home/muqsit/src/github.com/muqsitnawaz/agents/x')).toBe('rush');
+    expect(confirmedProjectForCwd('/Users/someone/src/github.com/muqsitnawaz/agents')).toBe('rush');
+    expect(confirmedProjectForCwd(path.join(HOME, 'src/github.com/muqsitnawaz/agents/cli'))).toBe('rush');
+  });
+
+  it('leaves non-home absolute paths and unrelated foreign paths unmatched', () => {
+    writeProjectDef({ name: 'rush', root: '~/src/github.com/muqsitnawaz/agents' });
+    resetProjectDefsCache();
+    expect(confirmedProjectForCwd('/srv/src/github.com/muqsitnawaz/agents')).toBeUndefined();
+    expect(confirmedProjectForCwd('/home/muqsit/src/unrelated')).toBeUndefined();
+  });
+});
+
 describe('listProjectDefsCached', () => {
   it('picks up an IN-PLACE edit of a definition, not only an add or a remove', () => {
     resetProjectDefsCache();

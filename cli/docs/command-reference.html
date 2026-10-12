@@ -1591,13 +1591,21 @@ characters, a due date in the past, a description over 10,000
 characters. The description ends with &quot;Created from AGI Menu&quot;, which is how
 todo list finds it.</p></article>
 <article id="projects-todo-done" data-search="done projects todo done  mark one issue done in linear. id  --json machine-readable result -h, --help show help  "><div class="command-head"><h3><code>agents projects todo done &lt;id&gt;</code></h3></div><p>Mark one issue Done in Linear.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;id&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="projects-todo-list" data-search="list projects todo list  your open quick to-dos and anything assigned to you due today or overdue (at most 6). --json machine-readable result -h, --help show help agents projects todo list
-agents projects todo list --json one linear tasks read of your open issues. due ones come first (earliest due),
-then the newest quick to-dos. --json: { todos: [{ identifier, url, title,
-project, due, priority, state, createdat, quick }], total, error }."><div class="command-head"><h3><code>agents projects todo list</code></h3></div><p>Your open quick to-dos and anything assigned to you due today or overdue (at most 6).</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents projects todo list
-agents projects todo list --json</code></pre><h4>Notes</h4><p class="notes">One linear tasks read of your open issues. Due ones come first (earliest due),
-then the newest quick to-dos. --json: { todos: [{ identifier, url, title,
-project, due, priority, state, createdAt, quick }], total, error }.</p></article>
+<article id="projects-todo-list" data-search="list projects todo list  your open quick to-dos and anything assigned to you due today or overdue, or one project&#39;s open issues (at most 6). --project &lt;name&gt; list this project&#39;s open issues instead: an agents project or a linear project name --json machine-readable result -h, --help show help agents projects todo list
+agents projects todo list --json
+agents projects todo list --project rush --json one linear tasks read of your open issues. due ones come first (earliest due),
+then the newest quick to-dos. --project lists every open issue in that
+project instead (anyone&#39;s, any cycle), due ones first, then the newest.
+total is the full count; todos holds at most 6. --json: { todos:
+[{ identifier, url, title, project, due, priority, state, createdat, quick }],
+total, error }."><div class="command-head"><h3><code>agents projects todo list</code></h3></div><p>Your open quick to-dos and anything assigned to you due today or overdue, or one project&#39;s open issues (at most 6).</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--project &lt;name&gt;</code></td><td>List this project&#39;s open issues instead: an agents project or a Linear project name</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Machine-readable result</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>agents projects todo list
+agents projects todo list --json
+agents projects todo list --project rush --json</code></pre><h4>Notes</h4><p class="notes">One linear tasks read of your open issues. Due ones come first (earliest due),
+then the newest quick to-dos. --project lists every open issue in that
+project instead (anyone&#39;s, any cycle), due ones first, then the newest.
+total is the full count; todos holds at most 6. --json: { todos:
+[{ identifier, url, title, project, due, priority, state, createdAt, quick }],
+total, error }.</p></article>
 <article id="projects-todo-undo" data-search="undo projects todo undo  undo the last to-do action: reopen a done issue, or cancel a quick to-do created moments ago. id  --json machine-readable result -h, --help show help agents projects todo done phnx-4230
 agents projects todo undo phnx-4230     # back to todo a done issue goes back to todo. a quick to-do still open and created in the
 last 30 seconds is moved to the team&#39;s canceled state (linear has no issue

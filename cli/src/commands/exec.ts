@@ -489,7 +489,7 @@ async function handleTerminalHandoff(
   options: ExecCommandActionOptions,
   prompt: string | undefined,
 ): Promise<void> {
-  const { parseTerminalFlag, openRunInTerminal, toHostSamples, currentContext } = await import('../lib/terminal/index.js');
+  const { parseTerminalFlag, openRunInTerminal, liveHostSamples, currentContext } = await import('../lib/terminal/index.js');
 
   const parsed = parseTerminalFlag(options.terminal);
   if (parsed.error) {
@@ -532,12 +532,7 @@ async function handleTerminalHandoff(
 
   const cwd = await resolveRunCwd(options, { forRemote: false });
 
-  const { getActiveSessions } = await import('../lib/session/active.js');
-  let sessions: Awaited<ReturnType<typeof toHostSamples>> = [];
-  try {
-    sessions = await toHostSamples(await getActiveSessions());
-  } catch {
-  }
+  const sessions = await liveHostSamples();
 
   const result = await openRunInTerminal({
     argv: process.argv.slice(2),

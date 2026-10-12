@@ -327,7 +327,7 @@ agents projects status [nameOrPath]   Progress card for every project across the
 agents projects todo                  Quick to-dos in Linear: add one from a line of text, list yours, mark one done, undo.
 agents projects todo add <text...>    Create a to-do in Linear from one line: #project, today/tomorrow/mon..sun, ! (high) or !! (urgent).
 agents projects todo done <id>        Mark one issue Done in Linear.
-agents projects todo list             Your open quick to-dos and anything assigned to you due today or overdue (at most 6).
+agents projects todo list             Your open quick to-dos and anything assigned to you due today or overdue, or one project's open issues (at most 6).
 agents projects todo undo <id>        Undo the last to-do action: reopen a Done issue, or cancel a quick to-do created moments ago.
 ```
 

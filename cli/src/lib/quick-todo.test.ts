@@ -152,13 +152,38 @@ describe('listQuickTodos', () => {
     const { linear, asked } = recordedLinear({
       'tasks --assignee me --status open --cycle all --all --json': testdata('tasks-assigned-open.json'),
     });
-    const listed = await listQuickTodos(NOW, linear);
+    const listed = await listQuickTodos(NOW, {}, linear);
     expect(asked).toHaveLength(1);
     expect(listed.total).toBe(2);
     expect(listed.todos.map((t) => [t.identifier, t.due, t.quick])).toEqual([
       ['PHNX-9002', '2026-10-03', false],
       ['PHNX-4234', '2026-10-04', true],
     ]);
+  });
+
+  it('with a project, lists that Linear project\'s open issues: due first (earliest), then newest, capped (PHNX-4344)', async () => {
+    const rush = { name: 'rush', linear: { projectId: '00000000', name: 'Rush' } } as ProjectDef;
+    const { linear, asked } = recordedLinear({
+      'tasks --project Rush --status open --all --json': testdata('tasks-project-open.json'),
+    });
+    const listed = await listQuickTodos(NOW, { project: 'rush', defs: [rush] }, linear);
+    expect(asked).toEqual([['tasks', '--project', 'Rush', '--status', 'open', '--all', '--json']]);
+    expect(listed.total).toBe(8);
+    expect(listed.todos.map((t) => [t.identifier, t.due])).toEqual([
+      ['PHNX-9103', '2026-10-02'],
+      ['PHNX-9105', '2026-10-04'],
+      ['PHNX-9102', '2026-10-11'],
+      ['PHNX-9101', null],
+      ['PHNX-9108', null],
+      ['PHNX-9106', null],
+    ]);
+  });
+
+  it('refuses an agents project with no Linear binding before calling linear', async () => {
+    const { linear, asked } = recordedLinear({});
+    await expect(listQuickTodos(NOW, { project: 'loose', defs: [{ name: 'loose' } as ProjectDef] }, linear))
+      .rejects.toThrow(/has no Linear project/);
+    expect(asked).toEqual([]);
   });
 });
 

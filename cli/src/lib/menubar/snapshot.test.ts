@@ -55,7 +55,11 @@ describe('menubar snapshot', () => {
         'menubar.menu.showBrowserSessions': true,
         'menubar.menu.showComputerSessions': true,
         'menubar.menu.ticketGroup': 'none',
+        'menubar.menu.githubDrafts': true,
       });
+      expect(buildMenuPreferences()).not.toHaveProperty('menubar.menu.todoProject');
+      setConfigValue('menubar.menu.todoProject', 'Rush');
+      expect(buildMenuPreferences()['menubar.menu.todoProject']).toBe('Rush');
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
         'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox'],

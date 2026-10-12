@@ -407,6 +407,15 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'AGI Menu: the project name the menu opens focused on. Unset = no default project.',
   },
   {
+    name: 'menubar.menu.todoProject',
+    yamlKey: 'menubarMenuTodoProject',
+    scope: 'user',
+    type: 'string',
+    description:
+      'AGI Menu: the project whose open Linear issues the menu lists as to-dos and files new to-dos into ' +
+      '(`agents projects todo list|add --project <name>`). Unset = the default quick to-do list.',
+  },
+  {
     name: 'menubar.menu.workingRowsShown',
     yamlKey: 'menubarMenuWorkingRowsShown',
     scope: 'user',
@@ -698,8 +707,8 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'menubarMenuGithubDrafts',
     scope: 'user',
     type: 'bool',
-    defaultValue: false,
-    description: 'AGI Menu: show draft pull requests on the GitHub tab (default off).',
+    defaultValue: true,
+    description: 'AGI Menu: show draft pull requests on the GitHub tab (default on).',
   },
   {
     name: 'menubar.menu.githubBots',

@@ -9619,9 +9619,18 @@
               "name": "list",
               "path": "projects todo list",
               "aliases": [],
-              "description": "Your open quick to-dos and anything assigned to you due today or overdue (at most 6).",
+              "description": "Your open quick to-dos and anything assigned to you due today or overdue, or one project's open issues (at most 6).",
               "args": [],
               "options": [
+                {
+                  "flags": "--project <name>",
+                  "description": "List this project's open issues instead: an agents project or a Linear project name",
+                  "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
                 {
                   "flags": "--json",
                   "description": "Machine-readable result",
@@ -9642,8 +9651,8 @@
                   "negate": false
                 }
               ],
-              "examples": "agents projects todo list\nagents projects todo list --json",
-              "notes": "One linear tasks read of your open issues. Due ones come first (earliest due),\nthen the newest quick to-dos. --json: { todos: [{ identifier, url, title,\nproject, due, priority, state, createdAt, quick }], total, error }.",
+              "examples": "agents projects todo list\nagents projects todo list --json\nagents projects todo list --project rush --json",
+              "notes": "One linear tasks read of your open issues. Due ones come first (earliest due),\nthen the newest quick to-dos. --project lists every open issue in that\nproject instead (anyone's, any cycle), due ones first, then the newest.\ntotal is the full count; todos holds at most 6. --json: { todos:\n[{ identifier, url, title, project, due, priority, state, createdAt, quick }],\ntotal, error }.",
               "subcommands": []
             },
             {

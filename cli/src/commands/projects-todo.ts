@@ -83,12 +83,13 @@ export function registerProjectTodoCommands(projects: Command): void {
 
   const listCmd = todo
     .command('list')
-    .description(`Your open quick to-dos and anything assigned to you due today or overdue (at most ${TODO_LIST_LIMIT}).`)
+    .description(`Your open quick to-dos and anything assigned to you due today or overdue, or one project's open issues (at most ${TODO_LIST_LIMIT}).`)
+    .option('--project <name>', "List this project's open issues instead: an agents project or a Linear project name")
     .option('--json', 'Machine-readable result')
-    .action(async (opts: { json?: boolean }) => {
+    .action(async (opts: { project?: string; json?: boolean }) => {
       let listed: { todos: QuickTodo[]; total: number };
       try {
-        listed = await listQuickTodos(new Date());
+        listed = await listQuickTodos(new Date(), { project: opts.project, defs: listProjectDefs() });
       } catch (err) {
         const error = linearFailure(err);
         if (opts.json) console.log(JSON.stringify({ todos: [], total: 0, error }, null, 2));
@@ -99,7 +100,7 @@ export function registerProjectTodoCommands(projects: Command): void {
         console.log(JSON.stringify({ ...listed, error: null }, null, 2));
         return;
       }
-      if (listed.todos.length === 0) console.log('Nothing to do: no open quick to-dos, nothing due.');
+      if (listed.todos.length === 0) console.log(opts.project ? `Nothing open in ${opts.project}.` : 'Nothing to do: no open quick to-dos, nothing due.');
       for (const t of listed.todos) console.log(todoLine(t));
       if (listed.total > listed.todos.length) console.log(chalk.gray(`+${listed.total - listed.todos.length} more in Linear`));
     });
@@ -108,11 +109,15 @@ export function registerProjectTodoCommands(projects: Command): void {
     examples: `
       agents projects todo list
       agents projects todo list --json
+      agents projects todo list --project rush --json
     `,
     notes: `
       One linear tasks read of your open issues. Due ones come first (earliest due),
-      then the newest quick to-dos. --json: { todos: [{ identifier, url, title,
-      project, due, priority, state, createdAt, quick }], total, error }.
+      then the newest quick to-dos. --project lists every open issue in that
+      project instead (anyone's, any cycle), due ones first, then the newest.
+      total is the full count; todos holds at most ${TODO_LIST_LIMIT}. --json: { todos:
+      [{ identifier, url, title, project, due, priority, state, createdAt, quick }],
+      total, error }.
     `,
   });
 

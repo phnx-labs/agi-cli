@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as yaml from 'yaml';
 import { getProjectsDir } from './state.js';
 import { safeJoin } from './paths.js';
-import { toHomeRelative, expandLocalHome } from './project-root.js';
+import { toHomeRelative, expandLocalHome, localizeHome } from './project-root.js';
 import { resolveProjectKey } from './project-key.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 
@@ -366,7 +366,7 @@ function isUnder(child: string, parent: string): boolean {
 export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): string | undefined {
 
   if (!cwd) return undefined;
-  const abs = path.resolve(expandLocalHome(cwd));
+  const abs = path.resolve(localizeHome(expandLocalHome(cwd)));
   let best: string | undefined;
   let bestLen = -1;
   let weakBest: string | undefined;
