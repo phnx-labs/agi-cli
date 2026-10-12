@@ -1295,7 +1295,7 @@ neither engine has a fleet registry of its own — while `agents view --device
 `hideCompletedMilestones`, `bannerWhenNeedsYou`, `includeOtherDeviceRequests`,
 `groupBy` (none/project/agent/device), `thenBy` (none/project/agent/device),
 `projectScope` (cycle/all), `projectSort` (updated/priority/name),
-`ticketSort` (priority/updated/title), `showPullRequests`, `sessionUpdates` (the
+`ticketSort` (due/priority/updated/newest/oldest/title, default due), `ticketGroup`, `homeSections`, `sessionFilter`, `artifactApps`, `showPullRequests`, `sessionUpdates` (the
 Home session-updates section), `deviceSort` (name/role/load/memory/disk), and the
 **Headless runs** defaults — `headlessAgent` and `headlessFallbackAgent` (each a
 registered agent id, validated at write time, unset = the menu's own default and no

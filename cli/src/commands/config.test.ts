@@ -176,6 +176,31 @@ describe('config command', () => {
     expect(runAgents(home, ['config', 'get', 'menubar.statusbar.goalCountdown'])).toContain('(unset)');
   });
 
+  it('takes the round 5 Home, session and ticket preferences (PHNX-4326)', () => {
+    runAgents(home, ['config', 'set', 'menubar.menu.homeSections', 'artifacts,company,-today']);
+    runAgents(home, ['config', 'set', 'menubar.menu.sessionFilter', 'show=working,idle;which=tab;sort=idle;group=app']);
+    runAgents(home, ['config', 'set', 'menubar.menu.artifactApps', 'markdown=com.vscodium,image=com.apple.Preview']);
+    runAgents(home, ['config', 'set', 'menubar.menu.ticketSort', 'oldest']);
+    runAgents(home, ['config', 'set', 'menubar.menu.ticketGroup', 'due']);
+    const rows = JSON.parse(runAgents(home, ['config', 'list', '--json'])) as Array<{ key: string; value: unknown }>;
+    const value = (key: string) => rows.find((r) => r.key === key)?.value;
+    expect(value('menubar.menu.homeSections')).toEqual(['artifacts', 'company', '-today']);
+    expect(value('menubar.menu.sessionFilter')).toBe('show=working,idle;which=tab;sort=idle;group=app');
+    expect(value('menubar.menu.artifactApps')).toEqual(['markdown=com.vscodium', 'image=com.apple.Preview']);
+    expect(value('menubar.menu.ticketSort')).toBe('oldest');
+    expect(value('menubar.menu.ticketGroup')).toBe('due');
+
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeSections', 'company,inbox'])).toThrow(/"inbox" is not one of/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.homeSections', 'today,-today'])).toThrow(/twice/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.sessionFilter', 'show=working;mood=calm'])).toThrow(/"mood" is not one of/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.artifactApps', 'video=com.apple.QuickTimePlayerX'])).toThrow(/<kind>=<bundle id>/);
+    expect(() => runAgents(home, ['config', 'set', 'menubar.menu.ticketSort', 'random'])).toThrow();
+  });
+
+  it('defaults ticketSort to due date (PHNX-4326)', () => {
+    expect(runAgents(home, ['config', 'get', 'menubar.menu.ticketSort'])).toContain('due');
+  });
+
   it('rejects an out-of-set AGI Menu enum value', () => {
     expect(() =>
       runAgents(home, ['config', 'set', 'menubar.menu.groupBy', 'sideways']),

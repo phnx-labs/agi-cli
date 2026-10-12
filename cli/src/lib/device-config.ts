@@ -56,6 +56,10 @@ export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'projects', 'linear', '
 const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
+/** Home's sections in AGI Menu, in their default order (PHNX-4326 round 5). */
+export const MENUBAR_HOME_SECTIONS = ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'] as const;
+/** The artifact kinds AGI Menu picks an opening app for (`artifactApps` entries are `<kind>=<bundle id>`). */
+export const MENUBAR_ARTIFACT_KINDS = ['image', 'html', 'markdown'] as const;
 
 export function resolveMenubarTabOrder(stored: readonly string[]): string[] {
   const known = MENUBAR_TABS as readonly string[];
@@ -515,9 +519,11 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     yamlKey: 'menubarMenuTicketSort',
     scope: 'user',
     type: 'string',
-    defaultValue: 'priority',
-    description: 'AGI Menu: how tickets within a project are ordered — priority, updated, or title.',
-    validate: oneOf('menubar.menu.ticketSort', ['priority', 'updated', 'title']),
+    defaultValue: 'due',
+    description:
+      'AGI Menu: how tickets within a project are ordered — due (overdue first, then the soonest due, ' +
+      'undated by priority), priority, updated, newest, oldest, or title.',
+    validate: oneOf('menubar.menu.ticketSort', ['due', 'priority', 'updated', 'newest', 'oldest', 'title']),
   },
   {
     name: 'menubar.menu.showPullRequests',
@@ -739,9 +745,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'string',
     defaultValue: 'none',
     description:
-      'AGI Menu: how the Projects and Linear tabs group each project\'s tickets — none, status, assignee, ' +
-      'delegate, milestone, or priority. Replaces groupTicketsByMilestone for menus that know it.',
-    validate: oneOf('menubar.menu.ticketGroup', ['none', 'status', 'assignee', 'delegate', 'milestone', 'priority']),
+      'AGI Menu: how the Home and Linear tabs group each project\'s tickets — none, status, due (Overdue, ' +
+      'Due today, Due this week, Due later, No due date), assignee, delegate, milestone, or priority. ' +
+      'Replaces groupTicketsByMilestone for menus that know it.',
+    validate: oneOf('menubar.menu.ticketGroup', ['none', 'status', 'due', 'assignee', 'delegate', 'milestone', 'priority']),
   },
   {
     name: 'menubar.menu.prGroupOpen',
@@ -780,6 +787,56 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       if (bad !== undefined) return `menubar.menu.homeGoals: "${bad}" is not one of ${MENUBAR_HOME_GOALS.join(', ')}.`;
       const dup = levels.find((l, i) => levels.indexOf(l) !== i);
       return dup === undefined ? null : `menubar.menu.homeGoals lists "${dup}" twice.`;
+    },
+  },
+  {
+    name: 'menubar.menu.homeSections',
+    yamlKey: 'menubarMenuHomeSections',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [...MENUBAR_HOME_SECTIONS],
+    description:
+      `AGI Menu: Home's sections in order — each of ${MENUBAR_HOME_SECTIONS.join(', ')} at most once, ` +
+      'a leading "-" hiding one (-today). A section the list leaves out keeps its default place.',
+    validate: (v) => {
+      const ids = (v as string[]).map((s) => (s.startsWith('-') ? s.slice(1) : s));
+      const bad = ids.find((id) => !(MENUBAR_HOME_SECTIONS as readonly string[]).includes(id));
+      if (bad !== undefined) return `menubar.menu.homeSections: "${bad}" is not one of ${MENUBAR_HOME_SECTIONS.join(', ')}.`;
+      const dup = ids.find((id, i) => ids.indexOf(id) !== i);
+      return dup === undefined ? null : `menubar.menu.homeSections lists "${dup}" twice.`;
+    },
+  },
+  {
+    name: 'menubar.menu.sessionFilter',
+    yamlKey: 'menubarMenuSessionFilter',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'show=working,needs,idle;which=tab;sort=updated;group=status',
+    description:
+      'AGI Menu: the one filter Home\'s Open sessions and the Sessions tab share — ' +
+      '`show=<statuses>;which=<kinds>;sort=<updated|newest|idle|idletime|longest>;group=<status|app|project|device|none>`.',
+    validate: (v) => {
+      const parts = String(v).split(';').map((p) => p.split('=')[0].trim()).filter(Boolean);
+      const bad = parts.find((p) => !['show', 'which', 'sort', 'group'].includes(p));
+      return bad === undefined ? null : `menubar.menu.sessionFilter: "${bad}" is not one of show, which, sort, group.`;
+    },
+  },
+  {
+    name: 'menubar.menu.artifactApps',
+    yamlKey: 'menubarMenuArtifactApps',
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [],
+    description:
+      `AGI Menu: the app each artifact kind opens with, as <kind>=<bundle id> (${MENUBAR_ARTIFACT_KINDS.join(', ')}); ` +
+      'a kind not listed opens with the Mac\'s default app.',
+    validate: (v) => {
+      const entries = v as string[];
+      const bad = entries.find((e) => {
+        const [kind, id] = e.split('=');
+        return !(MENUBAR_ARTIFACT_KINDS as readonly string[]).includes(kind) || !id;
+      });
+      return bad === undefined ? null : `menubar.menu.artifactApps: "${bad}" is not <kind>=<bundle id> for ${MENUBAR_ARTIFACT_KINDS.join(', ')}.`;
     },
   },
   {
