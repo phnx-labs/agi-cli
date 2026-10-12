@@ -1719,6 +1719,19 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot?.unavailable?.reason).toBe('out_of_credits');
   });
 
+  it('ignores a 402 that is not a usage-balance refusal', async () => {
+    const logDir = path.join(home, '.grok', 'logs');
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.appendFileSync(path.join(logDir, 'unified.jsonl'), JSON.stringify({
+      ts: new Date(Date.now() - 60 * 1000).toISOString(),
+      msg: 'shell.turn.inference_failed',
+      ctx: { status_code: 402, message: 'API error (status 402 Payment Required): payment method declined' },
+    }) + '\n');
+
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot?.unavailable).toBeUndefined();
+  });
+
   it('re-probes an account whose 402 is older than the out-of-credits window', async () => {
     const now = Date.now();
     writeBalanceExhausted(now - 2 * HOUR);

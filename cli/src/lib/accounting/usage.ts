@@ -2709,8 +2709,12 @@ async function readLatestGrokBilling(filePath: string): Promise<GrokBillingMatch
         const ctx = parsed.ctx && typeof parsed.ctx === 'object' && !Array.isArray(parsed.ctx)
           ? parsed.ctx as Record<string, unknown>
           : null;
-        if (parsed.msg === 'shell.turn.inference_failed' && ctx?.status_code === 402) {
-          exhaustedAt = parseDateValue(parsed.ts);
+        if (
+          parsed.msg === 'shell.turn.inference_failed'
+          && ctx?.status_code === 402
+          && /balance exhausted/i.test(String(ctx.message ?? ''))
+        ) {
+          exhaustedAt = parseDateValue(parsed.ts) ?? exhaustedAt;
           return;
         }
         if (parsed.msg === 'billing: fetched credits config' && ctx?.config) {
