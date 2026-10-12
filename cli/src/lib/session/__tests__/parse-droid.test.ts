@@ -61,12 +61,13 @@ describe('parseDroid', () => {
     const p = writeTmp(jsonl);
     try {
       const events = parseDroid(p);
-      expect(events).toHaveLength(5);
+      expect(events).toHaveLength(6);
       expect(events[0]).toMatchObject({ type: 'message', agent: 'droid', role: 'user', content: 'How do I run the tests?' });
-      expect(events[1]).toMatchObject({ type: 'thinking', content: 'consider the options' });
-      expect(events[2]).toMatchObject({ type: 'message', role: 'assistant', content: 'Run bun test.' });
-      expect(events[3]).toMatchObject({ type: 'tool_use', tool: 'Bash', callId: 'tu1', command: 'bun test' });
-      expect(events[4]).toMatchObject({ type: 'tool_result', tool: 'Bash', callId: 'tu1', success: true, output: 'all green' });
+      expect(events[1]).toMatchObject({ type: 'init', model: 'claude-opus-4-8' });
+      expect(events[2]).toMatchObject({ type: 'thinking', content: 'consider the options' });
+      expect(events[3]).toMatchObject({ type: 'message', role: 'assistant', content: 'Run bun test.' });
+      expect(events[4]).toMatchObject({ type: 'tool_use', tool: 'Bash', callId: 'tu1', command: 'bun test' });
+      expect(events[5]).toMatchObject({ type: 'tool_result', tool: 'Bash', callId: 'tu1', success: true, output: 'all green' });
     } finally {
       fs.rmSync(path.dirname(p), { recursive: true, force: true });
     }
