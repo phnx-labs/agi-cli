@@ -560,9 +560,9 @@ agents lead status --json
 agents lead stop --project rush
 ```
 
-The Lead is one long-lived headless Claude per project that dispatches and manages agents through
-the CLIs (`agents ps|send|run|feed`, `sessions`, `artifacts list`, `linear`). It cannot edit files,
-and a stop runs only through a confirm token. A per-project host keeps it warm across callers, so a
+The Lead is one long-lived headless Claude per project that dispatches and manages agents. It runs
+with isolated settings and can only call fixed-shape `agents lead tool` commands (roster, dispatch,
+start, send, stop, linear, remember). It cannot edit files, and a stop runs only through a confirm token. A per-project host keeps it warm across callers, so a
 follow-up turn skips the harness boot. `--json` streams the NDJSON events the AGI EXT and bubble
 clients render. Reference: [cli/docs/lead.md](cli/docs/lead.md).
 

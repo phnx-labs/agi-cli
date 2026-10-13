@@ -9,6 +9,87 @@ import { statusFromFiles, type LeadStatus } from '../lib/lead/host.js';
 import { leadPaths, listLeadProjects } from '../lib/lead/paths.js';
 import { readHistory } from '../lib/lead/store.js';
 import type { LeadEvent } from '../lib/lead/events.js';
+import {
+  LINEAR_STATUSES, MAX_TASKS_LIMIT, leadToolContext, toolDispatch, toolLinearCreate, toolLinearTasks, toolLinearView,
+  toolRemember, toolRoster, toolSend, toolStart, toolStop,
+} from '../lib/lead/tools.js';
+
+function toolAction<A extends unknown[]>(fn: (...args: A) => Promise<string> | string): (...args: A) => Promise<void> {
+  return async (...args: A) => {
+    try {
+      const out = await fn(...args);
+      await writeStdoutFlushed(`${out}\n`);
+    } catch (err) {
+      process.stderr.write(`error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exitCode = 1;
+    }
+  };
+}
+
+export function registerLeadToolCommands(lead: Command): void {
+  const tool = lead
+    .command('tool')
+    .description('The fixed-shape commands a Lead may run (only inside a Lead; the harness allows nothing else)');
+  setHelpSections(tool, {
+    notes: `
+      - These run inside the Lead's Claude process, which sets AGENTS_LEAD_PROJECT. Each has one fixed shape:
+        no --mode, --secrets, --device, --lease, --cloud or pass-through arguments exist on any of them.
+      - stop never stops anything: it mints a confirm token the owner runs with agents lead confirm.
+    `,
+  });
+  const strict = (c: Command) => c.allowExcessArguments(false).allowUnknownOption(false);
+
+  strict(tool.command('roster'))
+    .description('List live sessions for this project (or --project) from the Lead host\'s live feed')
+    .option('--project <name>', 'Another project')
+    .action(toolAction(async (opts: { project?: string }) => toolRoster(leadToolContext(), opts.project)));
+
+  strict(tool.command('dispatch'))
+    .description('Move a ticket to In Progress, delegate it, and start the agent on it in edit mode')
+    .requiredOption('--ticket <id>', 'Ticket id, e.g. PHNX-4365')
+    .option('--agent <agent>', 'Agent to run', 'claude')
+    .action(toolAction(async (opts: { ticket: string; agent: string }) => toolDispatch(leadToolContext(), opts.ticket, opts.agent)));
+
+  strict(tool.command('start'))
+    .description('Start an agent in edit mode on a task with no ticket')
+    .requiredOption('--agent <agent>', 'Agent to run')
+    .argument('<task...>', 'The task (after --)')
+    .action(toolAction(async (task: string[], opts: { agent: string }) => toolStart(leadToolContext(), opts.agent, task.join(' '))));
+
+  strict(tool.command('send'))
+    .description('Type a message into a running session of this project (slash commands are refused)')
+    .requiredOption('--session <id>', 'Session id or 8+ character prefix')
+    .argument('<text...>', 'The message (after --)')
+    .action(toolAction(async (text: string[], opts: { session: string }) => toolSend(leadToolContext(), opts.session, text.join(' '))));
+
+  strict(tool.command('stop'))
+    .description('Ask the owner to confirm stopping a session; mints a confirm token, never stops anything')
+    .requiredOption('--session <id>', 'Session id or 8+ character prefix')
+    .action(toolAction(async (opts: { session: string }) => toolStop(leadToolContext(), opts.session)));
+
+  const linear = tool.command('linear').description('Read this project\'s Linear tickets, or create one');
+  strict(linear.command('tasks'))
+    .description('List tickets of this project')
+    .option('--status <status>', LINEAR_STATUSES.join('|'), 'open')
+    .option('--limit <n>', `1-${MAX_TASKS_LIMIT}`, '20')
+    .action(toolAction(async (opts: { status: string; limit: string }) =>
+      toolLinearTasks(leadToolContext(), opts.status, Number.parseInt(opts.limit, 10))));
+  strict(linear.command('view'))
+    .description('Show one ticket')
+    .argument('<id>', 'Ticket id')
+    .action(toolAction(async (id: string) => { leadToolContext(); return toolLinearView(id); }));
+  strict(linear.command('create'))
+    .description('Create a ticket in this project')
+    .requiredOption('--title <title>', 'Title')
+    .option('--description <text>', 'Description')
+    .action(toolAction(async (opts: { title: string; description?: string }) =>
+      toolLinearCreate(leadToolContext(), opts.title, opts.description)));
+
+  strict(tool.command('remember'))
+    .description('Save one short note to the Lead\'s memory.md')
+    .argument('<note...>', 'The note (after --)')
+    .action(toolAction(async (note: string[]) => toolRemember(leadToolContext(), note.join(' '))));
+}
 
 function printJsonLine(obj: unknown): void {
   process.stdout.write(`${JSON.stringify(obj)}\n`);
@@ -89,7 +170,7 @@ export function registerLeadCommand(program: Command): void {
     notes: `
       - One host process per project owns the Claude child and survives the caller exiting.
         Its files live in ~/.agents/lead/<project>/ (session.json, memory.md, history.ndjson, host.log).
-      - The Lead may only run agents ps|send|run|feed, sessions, artifacts list and linear. It cannot edit files.
+      - The Lead runs with isolated settings and may only run the fixed-shape agents lead tool commands.
       - Stops go through confirm tokens, which expire after 10 minutes.
       - The model is the lead.model setting (default sonnet): agents config set lead.model <model>.
     `,
@@ -188,6 +269,8 @@ export function registerLeadCommand(program: Command): void {
       }
       for (const s of statuses) console.log(renderStatus(s));
     });
+
+  registerLeadToolCommands(lead);
 
   lead
     .command('stop')

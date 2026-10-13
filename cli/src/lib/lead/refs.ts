@@ -3,7 +3,9 @@ import type { LeadRef, LeadTicketRef } from './events.js';
 import type { RosterRow } from './roster.js';
 
 export interface RefContext {
+  ticketPrefixes: ReadonlySet<string>;
   repo?: string;
+  knownPrs: ReadonlySet<number>;
   sessions: RosterRow[];
 }
 
@@ -11,7 +13,7 @@ const PR_URL_RE = /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
 const PR_NUM_RE = /(^|[^\w/&#])#(\d{1,6})\b/g;
 const UUID_RE = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/g;
 const SHORT_ID_RE = /\b[0-9a-f]{8}\b/g;
-const MIN_TITLE_LEN = 4;
+const MIN_TITLE_WORDS = 3;
 
 function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -26,7 +28,9 @@ export function extractRefs(text: string, ctx: RefContext): LeadRef[] {
     refs.push(ref);
   };
 
-  for (const id of linearIssueKeys(text)) add(`ticket:${id}`, { kind: 'ticket', id });
+  for (const id of linearIssueKeys(text)) {
+    if (ctx.ticketPrefixes.has(id.split('-')[0])) add(`ticket:${id}`, { kind: 'ticket', id });
+  }
 
   for (const m of text.matchAll(PR_URL_RE)) {
     const number = Number(m[2]);
@@ -35,6 +39,7 @@ export function extractRefs(text: string, ctx: RefContext): LeadRef[] {
   if (ctx.repo) {
     for (const m of text.matchAll(PR_NUM_RE)) {
       const number = Number(m[2]);
+      if (!ctx.knownPrs.has(number)) continue;
       add(`pr:${ctx.repo}#${number}`, { kind: 'pr', repo: ctx.repo, number, url: `https://github.com/${ctx.repo}/pull/${number}` });
     }
   }
@@ -55,7 +60,7 @@ export function extractRefs(text: string, ctx: RefContext): LeadRef[] {
     if (hits && hits.length === 1) add(`session:${hits[0].id}`, sessionRef(hits[0]));
   }
   const titled = ctx.sessions
-    .filter((s) => s.title.length >= MIN_TITLE_LEN)
+    .filter((s) => s.title.trim().split(/\s+/).length >= MIN_TITLE_WORDS)
     .sort((a, b) => b.title.length - a.title.length);
   for (const s of titled) {
     const re = new RegExp(`(^|[^\\w])${escapeRe(s.title)}(?=$|[^\\w])`);

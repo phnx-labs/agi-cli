@@ -6,11 +6,11 @@ import { randomBytes } from 'node:crypto';
 import { getCliLaunch } from '../cli-entry.js';
 import { loadProjectDef } from '../projects.js';
 import { ensureLeadDir, leadPaths, type LeadPaths } from './paths.js';
-import { LeadHost, type LeadRequest } from './host.js';
-import { agentsCliLaunch, leadModel, type Launch } from './harness.js';
+import { LeadHost, readHostRecord, type LeadRequest } from './host.js';
+import { agentsCliLaunch, cliVersion, leadModel, type Launch } from './harness.js';
 import { claimConfirm } from './confirm.js';
 import { summarize, type LeadEvent, type LeadRef } from './events.js';
-import { appendHistory } from './store.js';
+import { appendHistory, appendLog } from './store.js';
 
 export const HOST_START_TIMEOUT_MS = 15_000;
 const HOST_POLL_MS = 100;
@@ -33,14 +33,36 @@ export async function connectHost(project: string): Promise<net.Socket | null> {
   return connect(leadPaths(project));
 }
 
-export async function ensureHost(project: string): Promise<net.Socket> {
+async function waitForExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((r) => setTimeout(r, HOST_POLL_MS));
+  }
+  throw new Error(`The old Lead host (pid ${pid}) did not exit within ${timeoutMs / 1000}s.`);
+}
+
+export function hostNeedsRestart(record: { version: string; model: string } | null, want: { version: string; model: string }): boolean {
+  return record === null || record.version !== want.version || record.model !== want.model;
+}
+
+export async function ensureHost(project: string, want = { version: cliVersion(), model: leadModel() }): Promise<net.Socket> {
   const paths = ensureLeadDir(project);
   const existing = await connect(paths);
-  if (existing) return existing;
+  if (existing) {
+    const record = readHostRecord(paths);
+    if (!hostNeedsRestart(record, want)) return existing;
+    await sendRequest(existing, { op: 'stop' }, () => {});
+    if (record) await waitForExit(record.pid, HOST_START_TIMEOUT_MS);
+  }
   const launch = getCliLaunch(['__lead-host', project]);
-  const logFd = fs.openSync(paths.log, 'a');
-  const child = spawn(launch.command, launch.args, { detached: true, stdio: ['ignore', logFd, logFd] });
-  fs.closeSync(logFd);
+  const outFd = fs.openSync(paths.out, 'a');
+  const child = spawn(launch.command, launch.args, { detached: true, stdio: ['ignore', outFd, outFd] });
+  fs.closeSync(outFd);
   let exited: number | null = null;
   child.once('exit', (code) => { exited = code ?? -1; });
   child.unref();
@@ -51,7 +73,7 @@ export async function ensureHost(project: string): Promise<net.Socket> {
     if (exited !== null) {
       const raced = await connect(paths);
       if (raced) return raced;
-      throw new Error(`The Lead host for '${project}' exited with code ${exited} before listening; see ${paths.log}`);
+      throw new Error(`The Lead host for '${project}' exited with code ${exited} before listening; see ${paths.log} and ${paths.out}`);
     }
     await new Promise((r) => setTimeout(r, HOST_POLL_MS));
   }
@@ -74,12 +96,13 @@ export async function sendRequest(socket: net.Socket, req: LeadRequest, onLine: 
 export async function runLeadHost(project: string): Promise<number> {
   const def = requireProjectDef(project);
   const paths = ensureLeadDir(project);
-  const log = (line: string) => process.stdout.write(`${line}\n`);
+  const log = (line: string) => appendLog(paths, line);
   const host = new LeadHost({
     project,
     def,
     paths,
     model: leadModel(),
+    version: cliVersion(),
     harness: agentsCliLaunch,
     feed: agentsCliLaunch(['feed', 'watch', '--json']),
     log,

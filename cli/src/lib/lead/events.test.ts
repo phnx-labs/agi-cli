@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LeadTurnParser, contextUsageFromResult, shouldRotate, stopTarget, summarize, toolLabel, type ParsedItem } from './events.js';
+import { LeadTurnParser, contextUsageFromResult, isHeldCommand, shouldRotate, summarize, toolLabel, type ParsedItem } from './events.js';
 
 const events = (items: ParsedItem[]) => items.filter((i) => i.kind === 'event').map((i) => (i as { event: unknown }).event);
 
@@ -9,7 +9,7 @@ describe('LeadTurnParser', () => {
     const out: ParsedItem[] = [];
     out.push(...p.feed({ type: 'system', subtype: 'init', session_id: 's1' }, 0));
     out.push(...p.feed({ type: 'stream_event', event: { type: 'message_start' } }, 10));
-    out.push(...p.feed({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'agents ps --json | head -c 300', description: 'x' } }] } }, 100));
+    out.push(...p.feed({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'agents lead tool roster', description: 'x' } }] } }, 100));
     out.push(...p.feed({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok', is_error: false }] } }, 1340));
     out.push(...p.feed({ type: 'stream_event', event: { type: 'message_start' } }, 1400));
     out.push(...p.feed({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Two ' } } }, 1500));
@@ -20,8 +20,8 @@ describe('LeadTurnParser', () => {
     expect(events(out)).toEqual([
       { type: 'status', state: 'thinking' },
       { type: 'status', state: 'tool' },
-      { type: 'tool', id: 'toolu_1', label: 'agents ps', cmd: 'agents ps --json | head -c 300', state: 'run' },
-      { type: 'tool', id: 'toolu_1', label: 'agents ps', state: 'ok', secs: 1.24 },
+      { type: 'tool', id: 'toolu_1', label: 'roster', cmd: 'agents lead tool roster', state: 'run' },
+      { type: 'tool', id: 'toolu_1', label: 'roster', state: 'ok', secs: 1.24 },
       { type: 'status', state: 'thinking' },
       { type: 'status', state: 'answering' },
       { type: 'text', delta: 'Two ' },
@@ -36,27 +36,27 @@ describe('LeadTurnParser', () => {
     expect(events(out)).toEqual([{ type: 'status', state: 'answering' }, { type: 'text', delta: 'Hi.' }]);
   });
 
-  it('holds an agents ps stop call as a stop intent and drops its denied result', () => {
+  it('shows no tool row for the stop tool, whose confirm event comes from the host', () => {
     const p = new LeadTurnParser();
-    const a = p.feed({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't9', name: 'Bash', input: { command: 'agents ps stop 698dab45' } }] } }, 0);
-    expect(a).toEqual([{ kind: 'stop', intent: { toolId: 't9', sessionRef: '698dab45' } }]);
-    const u = p.feed({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't9', is_error: true, content: 'Permission to use Bash with command agents ps stop 698dab45 has been denied.' }] } }, 5);
+    const a = p.feed({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't9', name: 'Bash', input: { command: 'agents lead tool stop --session 698dab45' } }] } }, 0);
+    expect(a).toEqual([]);
+    const u = p.feed({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't9', is_error: false, content: 'Held.' }] } }, 5);
     expect(u).toEqual([]);
   });
 
   it('marks a failed tool and merges overlapping parallel tool time', () => {
     const p = new LeadTurnParser();
     p.feed({ type: 'assistant', message: { content: [
-      { type: 'tool_use', id: 'a', name: 'Bash', input: { command: 'linear tasks --json' } },
-      { type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'sessions --json' } },
+      { type: 'tool_use', id: 'a', name: 'Bash', input: { command: 'agents lead tool linear tasks' } },
+      { type: 'tool_use', id: 'b', name: 'Bash', input: { command: 'agents lead tool roster' } },
     ] } }, 0);
     const r = p.feed({ type: 'user', message: { content: [
       { type: 'tool_result', tool_use_id: 'a', is_error: true },
       { type: 'tool_result', tool_use_id: 'b', is_error: false },
     ] } }, 2000);
     expect(events(r)).toEqual([
-      { type: 'tool', id: 'a', label: 'linear tasks', state: 'fail', secs: 2 },
-      { type: 'tool', id: 'b', label: 'sessions', state: 'ok', secs: 2 },
+      { type: 'tool', id: 'a', label: 'linear', state: 'fail', secs: 2 },
+      { type: 'tool', id: 'b', label: 'roster', state: 'ok', secs: 2 },
     ]);
     expect(p.toolSeconds()).toBe(2);
   });
@@ -83,12 +83,12 @@ describe('rotation threshold', () => {
 });
 
 describe('labels and summaries', () => {
-  it('labels commands by their verb and finds stop targets', () => {
-    expect(toolLabel('AGENTS_X=1 agents run claude "x"')).toBe('agents run');
-    expect(toolLabel('linear update PHNX-1 --state Doing')).toBe('linear update');
-    expect(toolLabel('sessions --json')).toBe('sessions');
-    expect(stopTarget('agents ps stop 4b2f1a9c && echo done')).toBe('4b2f1a9c');
-    expect(stopTarget('agents ps --json')).toBeUndefined();
+  it('labels Lead tools by name and holds only the stop tool', () => {
+    expect(toolLabel('agents lead tool dispatch --ticket PHNX-1')).toBe('dispatch');
+    expect(toolLabel('cat /etc/hostname')).toBe('cat');
+    expect(isHeldCommand('agents lead tool stop --session 4b2f1a9c')).toBe(true);
+    expect(isHeldCommand('agents lead tool roster')).toBe(false);
+    expect(isHeldCommand('agents ps stop 4b2f1a9c')).toBe(false);
   });
 
   it('keeps the first sentence within 80 characters, without markdown', () => {

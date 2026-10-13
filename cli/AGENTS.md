@@ -123,7 +123,10 @@ warm headless Claude per project, owned by a detached host (`agents __lead-host 
 unix socket in `~/.agents/lead/<project>/`) that `ask` starts on demand. The host owns the
 stream-json child and one `feed watch --json` subscription for the per-turn state delta;
 the daemon does not host it (it stays on production code and restarts on self-update).
-Stops run only through `agents lead confirm <token>`. The NDJSON event shapes are a
+The Lead runs with isolated Claude settings, its own cwd and a minimal env, and may only call
+the fixed-shape `agents lead tool` commands; never widen that allow-list to raw `agents`,
+`linear` or shell prefixes (a compound command or a flag like `--mode skip` slips through
+them). Stops run only through `agents lead confirm <token>`. The NDJSON event shapes are a
 cross-repo contract with AGI EXT and the FastWispr bubble: change them only with both.
 Reference: [`docs/lead.md`](docs/lead.md).
 

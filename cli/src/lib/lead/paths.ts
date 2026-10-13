@@ -31,6 +31,11 @@ export interface LeadPaths {
   history: string;
   host: string;
   log: string;
+  out: string;
+  lock: string;
+  settings: string;
+  bin: string;
+  runs: string;
   socket: string;
   endpoint: string;
 }
@@ -49,6 +54,11 @@ export function leadPaths(project: string): LeadPaths {
     history: path.join(dir, 'history.ndjson'),
     host: path.join(dir, 'host.json'),
     log: path.join(dir, 'host.log'),
+    out: path.join(dir, 'host.out'),
+    lock: path.join(dir, 'host.lock'),
+    settings: path.join(dir, 'lead-settings.json'),
+    bin: path.join(dir, 'bin'),
+    runs: path.join(dir, 'runs'),
     socket,
     endpoint: ipcEndpoint(socket),
   };

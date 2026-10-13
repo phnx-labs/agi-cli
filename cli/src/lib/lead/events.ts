@@ -27,28 +27,26 @@ export interface TurnResult {
   sessionId?: string;
 }
 
-export interface StopIntent { toolId: string; sessionRef: string }
-
 export type ParsedItem =
   | { kind: 'event'; event: LeadEvent }
-  | { kind: 'stop'; intent: StopIntent }
   | { kind: 'init'; sessionId: string }
   | { kind: 'result'; result: TurnResult };
 
 export const ROTATE_AT_FRACTION = 0.6;
 
-const STOP_RE = /\bagents\s+ps\s+stop\s+([A-Za-z0-9][A-Za-z0-9-]*)/;
-const LABEL_TWO_WORD = new Set(['agents', 'linear', 'artifacts', 'gh', 'git']);
+const LEAD_TOOL_RE = /^\s*agents\s+lead\s+tool\s+([a-z]+)/;
+const HELD_TOOLS = new Set(['stop']);
 
 export function toolLabel(command: string): string {
-  const words = command.trim().split(/\s+/).filter((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w));
-  if (words.length === 0) return 'Bash';
-  if (LABEL_TWO_WORD.has(words[0]) && words[1] && !words[1].startsWith('-')) return `${words[0]} ${words[1]}`;
-  return words[0];
+  const lead = LEAD_TOOL_RE.exec(command);
+  if (lead) return lead[1];
+  const words = command.trim().split(/\s+/);
+  return words[0] || 'Bash';
 }
 
-export function stopTarget(command: string): string | undefined {
-  return STOP_RE.exec(command)?.[1];
+export function isHeldCommand(command: string): boolean {
+  const lead = LEAD_TOOL_RE.exec(command);
+  return lead !== null && HELD_TOOLS.has(lead[1]);
 }
 
 function round2(n: number): number {
@@ -186,10 +184,8 @@ export class LeadTurnParser {
       } else if (block.type === 'tool_use' && typeof block.id === 'string') {
         const input = (block.input ?? {}) as Record<string, unknown>;
         const cmd = typeof input.command === 'string' ? input.command : String(block.name ?? 'tool');
-        const target = block.name === 'Bash' ? stopTarget(cmd) : undefined;
-        if (target) {
+        if (block.name === 'Bash' && isHeldCommand(cmd)) {
           this.held.add(block.id);
-          out.push({ kind: 'stop', intent: { toolId: block.id, sessionRef: target } });
           continue;
         }
         const label = block.name === 'Bash' ? toolLabel(cmd) : String(block.name ?? 'tool');

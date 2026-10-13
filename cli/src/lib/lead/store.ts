@@ -69,8 +69,28 @@ export function writeMemory(paths: LeadPaths, text: string): void {
   atomicWriteFileSync(paths.memory, text.endsWith('\n') ? text : `${text}\n`);
 }
 
-export function appendHistory(paths: LeadPaths, turn: LeadHistoryTurn): void {
+export const HISTORY_MAX_BYTES = 5 * 1024 * 1024;
+export const LOG_MAX_BYTES = 2 * 1024 * 1024;
+
+export function rotateIfLarge(file: string, maxBytes: number): void {
+  let size: number;
+  try {
+    size = fs.statSync(file).size;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  if (size >= maxBytes) fs.renameSync(file, `${file}.1`);
+}
+
+export function appendHistory(paths: LeadPaths, turn: LeadHistoryTurn, maxBytes = HISTORY_MAX_BYTES): void {
+  rotateIfLarge(paths.history, maxBytes);
   fs.appendFileSync(paths.history, `${JSON.stringify(turn)}\n`);
+}
+
+export function appendLog(paths: LeadPaths, line: string, maxBytes = LOG_MAX_BYTES): void {
+  rotateIfLarge(paths.log, maxBytes);
+  fs.appendFileSync(paths.log, `${line}\n`);
 }
 
 export function readHistory(paths: LeadPaths, limit?: number): LeadHistoryTurn[] {
@@ -84,7 +104,11 @@ export function readHistory(paths: LeadPaths, limit?: number): LeadHistoryTurn[]
   const turns: LeadHistoryTurn[] = [];
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
-    turns.push(JSON.parse(line) as LeadHistoryTurn);
+    try {
+      turns.push(JSON.parse(line) as LeadHistoryTurn);
+    } catch {
+      continue;
+    }
   }
   return limit === undefined ? turns : turns.slice(-limit);
 }

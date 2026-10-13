@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_46 command groups · 344 commands._
+_46 command groups · 355 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -243,12 +243,23 @@ agents inspect <target>  Inspect one installed agent harness at one version (not
 ## lead: Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
 
 ```
-agents lead                  Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
-agents lead ask <text...>    Send one message to the project Lead and stream its reply
-agents lead confirm <token>  Run an action the Lead held for confirmation (a stop), by its token
-agents lead history          Print finished Lead turns for a project, oldest first
-agents lead status           Show whether each project Lead is warm, cold or stopped, with its session and context use
-agents lead stop             Stop a project Lead host and its Claude process (its session stays resumable)
+agents lead                          Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
+agents lead ask <text...>            Send one message to the project Lead and stream its reply
+agents lead confirm <token>          Run an action the Lead held for confirmation (a stop), by its token
+agents lead history                  Print finished Lead turns for a project, oldest first
+agents lead status                   Show whether each project Lead is warm, cold or stopped, with its session and context use
+agents lead stop                     Stop a project Lead host and its Claude process (its session stays resumable)
+agents lead tool                     The fixed-shape commands a Lead may run (only inside a Lead; the harness allows nothing else)
+agents lead tool dispatch            Move a ticket to In Progress, delegate it, and start the agent on it in edit mode
+agents lead tool linear              Read this project's Linear tickets, or create one
+agents lead tool linear create       Create a ticket in this project
+agents lead tool linear tasks        List tickets of this project
+agents lead tool linear view <id>    Show one ticket
+agents lead tool remember <note...>  Save one short note to the Lead's memory.md
+agents lead tool roster              List live sessions for this project (or --project) from the Lead host's live feed
+agents lead tool send <text...>      Type a message into a running session of this project (slash commands are refused)
+agents lead tool start <task...>     Start an agent in edit mode on a task with no ticket
+agents lead tool stop                Ask the owner to confirm stopping a session; mints a confirm token, never stops anything
 ```
 
 ## mcp: Connect agents to external tools via Model Context Protocol servers
