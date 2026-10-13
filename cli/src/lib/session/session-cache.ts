@@ -582,7 +582,6 @@ export async function loadFleetActiveSessions(
   } catch {
     self = undefined;
   }
-  // A peer's rows already carry the pending work its own daemon read; only this box's transcripts are readable here.
   if (self !== undefined) enrichLiveWork(live.sessions.filter((s) => sessionProcessIsLocal(s, self)), now);
   updateImmutableMemos(live.sessions, now);
   const snap = writeCache('fleet', live.sessions, {

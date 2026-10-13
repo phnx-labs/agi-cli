@@ -333,11 +333,8 @@ export interface ActiveSession {
   tokenCount?: number;
   durationMs?: number;
   subAgentCount?: number;
-  /** Work running right now (running subagents, background shells, armed monitors); absent when none. `subAgentCount` is cumulative. */
   pending?: import('./pending-work.js').SessionPendingWork;
-  /** Reasoning effort the latest turn ran at, when the transcript records it. */
   effort?: import('./pending-work.js').SessionEffort;
-  /** Claude fast mode, when the transcript records the turn's speed. */
   fast?: boolean;
   artifacts?: SessionArtifactRow[];
   planFile?: string;

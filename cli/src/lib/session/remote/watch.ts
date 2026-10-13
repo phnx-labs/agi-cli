@@ -84,7 +84,6 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
   };
 }
 
-// A peer resolves confirmedProject against its own definitions, which may still use a project's former name.
 export function withCanonicalProject<T extends { confirmedProject: string | null }>(row: T, defs: ProjectDef[] = listProjectDefsCached()): T {
   if (!row.confirmedProject) return row;
   const name = canonicalProjectName(row.confirmedProject, defs);

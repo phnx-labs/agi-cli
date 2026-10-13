@@ -1,12 +1,6 @@
 import * as fs from 'node:fs';
 import type { ActiveSession } from './active.js';
 
-/**
- * Work a session started that is still running right now: running subagents,
- * background shells, and armed monitors. `subAgentCount` is cumulative and says
- * nothing about liveness; `pending` is the liveness answer, so an `idle` row
- * with pending work is waiting on itself, not on the operator.
- */
 export interface PendingWorkItem {
   id: string;
   description: string;
@@ -40,9 +34,7 @@ interface PendingFold {
   ino: number;
   tasks: Map<string, BackgroundTask>;
   bashCalls: Map<string, { description: string; startedAtMs?: number }>;
-  /** TaskStop/KillShell calls awaiting their result: tool-use id -> the task they target. */
   stopCalls: Map<string, string>;
-  /** The newest assistant line seen, parsed once per read for effort/speed. */
   lastAssistant?: string;
   effort?: SessionEffort;
   fast?: boolean;
@@ -50,12 +42,6 @@ interface PendingFold {
 
 const folds = new Map<string, PendingFold>();
 
-/**
- * A cold fold (first read of a file in this process) reads at most this much of the
- * transcript's tail. A background task started further back than this is not seen
- * until the process that owns the fold restarts on a shorter file; the daemon keeps
- * the fold warm, so only a cold read is bounded. Measured: 64 MiB folds in ~0.3 s.
- */
 export const PENDING_COLD_TAIL_BYTES = 64 * 1024 * 1024;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MAX_PARTIAL_BYTES = 1024 * 1024;
@@ -101,7 +87,6 @@ function foldClaudeToolUses(fold: PendingFold, record: Record<string, unknown>):
       if (input.run_in_background === true) {
         fold.tasks.set(block.id, { kind: 'shell', toolUseId: block.id, description: description ?? 'Background command', ...(startedAtMs !== undefined ? { startedAtMs } : {}) });
       } else {
-        // Remembered so a call the harness backgrounds on its own (a long foreground run) still gets its description.
         fold.bashCalls.set(block.id, { description: description ?? 'Background command', ...(startedAtMs !== undefined ? { startedAtMs } : {}) });
         if (fold.bashCalls.size > MAX_BASH_CALLS) fold.bashCalls.delete(fold.bashCalls.keys().next().value!);
       }
@@ -113,7 +98,6 @@ function foldClaudeToolUses(fold: PendingFold, record: Record<string, unknown>):
         ...(input.persistent === true ? { persistent: true } : {}),
       });
     } else if (block.name === 'TaskStop' || block.name === 'KillShell') {
-      // The stop only counts once its result comes back without an error.
       const target = text(input.task_id) ?? text(input.shell_id);
       if (target) fold.stopCalls.set(block.id, target);
     }
@@ -152,7 +136,6 @@ function foldClaudeToolResults(fold: PendingFold, record: Record<string, unknown
 function foldNotifications(fold: PendingFold, line: string): void {
   for (const match of line.matchAll(NOTIFICATION_RE)) {
     const body = match[1];
-    // A monitor event carries no <status>; only a terminal status or an expiry notice ends a task.
     if (!tag(body, 'status') && !body.includes('Monitor expired')) continue;
     endTask(fold, tag(body, 'tool-use-id'));
     endTask(fold, tag(body, 'task-id'));
@@ -175,10 +158,6 @@ function parse(line: string): Record<string, unknown> | undefined {
   }
 }
 
-// Process boundaries. Claude writes a `cost-state` record when its process exits and
-// runs the SessionStart hook with `startup`/`resume` when a new one begins (not on
-// `clear`/`compact`, which keep the process). Background work dies with its process,
-// notified or not, so either boundary ends everything started before it.
 const PROCESS_START_RE = /"hookName":"SessionStart:(?:startup|resume)"/;
 
 function isProcessBoundary(line: string): boolean {
@@ -210,13 +189,11 @@ function foldCodexLine(fold: PendingFold, line: string): void {
   if (typeof effort === 'string' && EFFORTS.has(effort)) fold.effort = effort as SessionEffort;
 }
 
-/** Feed every complete line appended since the last read to `onLine`, chunk by chunk. False when the file cannot be opened. */
 function readAppended(file: string, fold: PendingFold, onLine: (line: string) => void): boolean {
   let fd: number;
   try { fd = fs.openSync(file, 'r'); } catch { return false; }
   try {
     const st = fs.fstatSync(fd);
-    // A cold start begins mid-file, so its first line is a fragment and is dropped.
     let skipFirst = false;
     if (st.ino !== fold.ino || st.size < fold.offset) {
       fold.ino = st.ino;
@@ -281,13 +258,6 @@ export interface SessionLiveWork {
   fast?: boolean;
 }
 
-/**
- * Read one session file (incrementally, across calls) for its pending work and
- * run settings. Subagents, background shells and monitors all die with the harness
- * process, so they count only while `pidAlive` is true, and only work started by the
- * CURRENT process counts: anything older than `processStartedAtMs` or the latest
- * SessionStart startup/resume marker belongs to a process that is gone.
- */
 export function readSessionLiveWork(
   row: Pick<ActiveSession, 'kind' | 'sessionFile' | 'pidAlive' | 'subagents' | 'processStartedAtMs'>,
   nowMs = Date.now(),
@@ -311,7 +281,6 @@ export function readSessionLiveWork(
   return out;
 }
 
-/** Stamp `pending`, `effort`, and `fast` on live rows. Each is absent when nothing is pending or the session does not say. */
 export function enrichLiveWork(rows: ActiveSession[], nowMs = Date.now()): void {
   for (const row of rows) {
     const work = readSessionLiveWork(row, nowMs);

@@ -44,7 +44,6 @@ function row(sessionFile: string, extra: Partial<ActiveSession> = {}): ActiveSes
 
 describe('pending work from a Claude transcript', () => {
   it('reports an idle session waiting on its own background shell while every subagent is done', () => {
-    // The 2026-10-13 case: status idle, seven subagents all finished, a background shell still polling.
     const done = Array.from({ length: 7 }, (_, i) => subagent(`a${i}`, 'done'));
     const work = readSessionLiveWork(row(copyFixture(), { subagents: done, subAgentCount: 7 }), AT(12));
     expect(work.pending?.subagents).toEqual([]);

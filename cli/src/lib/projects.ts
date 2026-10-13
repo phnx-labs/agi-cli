@@ -37,7 +37,6 @@ export interface ProjectIntegration {
 
 export interface ProjectDef {
   name: string;
-  /** Former names of this project. A session or peer row that resolves to one reads as `name`. */
   aliases?: string[];
   description?: string;
   root?: string;
@@ -200,7 +199,6 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
 
 const warnedAliases = new Set<string>();
 
-// stderr, once per message per process: a misconfigured alias must not break a read, and must not corrupt --json stdout.
 function warnIgnoredAliases(lines: string[]): void {
   for (const line of lines) {
     if (warnedAliases.has(line)) continue;
@@ -443,23 +441,12 @@ export function resetProjectDefsCache(): void {
 }
 
 interface AliasResolution {
-  /** lower-cased former name -> current project name */
   table: Map<string, string>;
-  /** one line per alias that was ignored, and why */
   ignored: string[];
 }
 
 const aliasMemo = new WeakMap<ProjectDef[], AliasResolution>();
 
-/**
- * Old project name -> current name, read from every definition's `aliases`, matched
- * case-insensitively. Never throws: this runs on every row read. An alias that cannot
- * be honoured is left out and reported in `ignored` (listProjectDefs warns once):
- * - it names another live project (two of those naming each other is a cycle);
- * - two definitions claim it.
- * With those rules an alias always maps straight to a live name, so no chain or loop
- * can form.
- */
 export function resolveProjectAliases(defs: ProjectDef[]): AliasResolution {
   const memo = aliasMemo.get(defs);
   if (memo) return memo;
@@ -493,7 +480,6 @@ export function projectAliasTable(defs: ProjectDef[]): Map<string, string> {
   return resolveProjectAliases(defs).table;
 }
 
-/** The current name for a project name that may be a former one. Unknown names pass through. */
 export function canonicalProjectName(name: string, defs: ProjectDef[] = listProjectDefsCached()): string {
   return projectAliasTable(defs).get(name.toLowerCase()) ?? name;
 }
