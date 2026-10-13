@@ -29,6 +29,10 @@ export function registryAccountServesHarness(
   return (record.auth === 'setup-token' || includeKeyed) && providerAuthenticatesHarness(record.provider, record.auth, agent);
 }
 
+export function providerAccountUsageKey(agent: AgentId, name: string): string {
+  return `${agent}:name=${name}`;
+}
+
 export function registryPoolCandidates(
   records: RegistryAccountRecord[],
   agent: AgentId,
@@ -39,7 +43,7 @@ export function registryPoolCandidates(
     if (!registryAccountServesHarness(r, agent, includeKeyed)) continue;
     out.push({
       id: r.id,
-      accountKey: `${agent}:name=${r.name}`,
+      accountKey: providerAccountUsageKey(agent, r.name),
       email: null,
       name: r.name,
       provider: r.provider,

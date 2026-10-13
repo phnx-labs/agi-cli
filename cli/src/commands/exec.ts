@@ -258,7 +258,8 @@ function writeRunStage(text: string, opts: { json?: boolean; quiet?: boolean }):
 
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
-  const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
+  const who = picked.email || picked.accountLabel;
+  const label = who ? `${who} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
   const caveat = result.usageUnverified ? ', usage unverified — no recent usage reading' : '';
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
@@ -2503,7 +2504,10 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
               if (pickedProviderAccount) {
                 try {
                   const picked = resolveSpawnAccount(pickedProviderAccount, agent, resolved.version, readMeta(), { useDefault: false });
-                  if (picked?.kind === 'provider') accountEnv = picked.env;
+                  if (picked?.kind === 'provider') {
+                    accountEnv = picked.env;
+                    spawnAccount = picked;
+                  }
                 } catch (err) {
                   console.error(chalk.red((err as Error).message));
                   process.exit(1);

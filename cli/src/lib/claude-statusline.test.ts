@@ -15,8 +15,12 @@ import {
   readClaudeIdentity,
   renderDelegate,
   resolveReminderPart,
+  resolveStatusLineAccount,
 } from './claude-statusline.js';
-import { findNativeAccountByIdentity } from './account-registry.js';
+import { addNativeAccount, findNativeAccountByIdentity } from './account-registry.js';
+import { buildAccountBundle } from './account-schema.js';
+import { writeBundleWithItemsSync } from './secrets-client.js';
+import { useFreshSecretsHome } from '../../tests/secrets-standalone.js';
 import { setRemindersFilePathForTest } from './reminders.js';
 import {
   readClaudeUsageCache,
@@ -40,6 +44,8 @@ afterEach(() => {
 });
 
 describe('Claude native status line', () => {
+  useFreshSecretsHome();
+
   it('renders hostname, active model, delegated output, and native quota windows', () => {
     expect(renderClaudeStatusLine({
       model: { display_name: 'Opus 5' },
@@ -184,7 +190,7 @@ describe('Claude native status line', () => {
         five_hour: { used_percentage: 12, resets_at: 1_800_000_000 },
         seven_day: { used_percentage: 34, resets_at: 1_800_100_000 },
       },
-    }, readClaudeIdentity(home))).toBe(true);
+    }, resolveStatusLineAccount({}, readClaudeIdentity(home)))).toBe(true);
 
     const snapshot = readClaudeUsageCache('claude:org=org-1');
     expect(snapshot?.source).toBe('last_seen');
@@ -197,7 +203,7 @@ describe('Claude native status line', () => {
       rate_limits: {
         five_hour: { used_percentage: 56, resets_at: 1_800_200_000 },
       },
-    }, readClaudeIdentity(home))).toBe(true);
+    }, resolveStatusLineAccount({}, readClaudeIdentity(home)))).toBe(true);
 
     const partialSnapshot = readClaudeUsageCache('claude:org=org-1');
     expect(partialSnapshot?.plan).toBe('Max');
@@ -209,7 +215,69 @@ describe('Claude native status line', () => {
 
   it('does not erase the cache when Claude omits rate_limits', () => {
     const home = tempHome();
-    expect(ingestClaudeStatusLineUsage({}, readClaudeIdentity(home))).toBe(false);
+    expect(ingestClaudeStatusLineUsage({}, resolveStatusLineAccount({}, readClaudeIdentity(home)))).toBe(false);
+  });
+
+  it('credits a setup-token session to its provider account, never to the home login it runs inside', () => {
+    const home = tempHome();
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'login@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
+    }));
+    priorCachePath = setClaudeUsageCachePathForTest(path.join(home, 'usage.json'));
+    const limited = new Date(Date.now() + 60 * 60_000);
+    writeClaudeUsageCache('claude:org=org-1', {
+      source: 'live',
+      sourceLabel: 'poll',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 100, resetsAt: limited, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 56, resetsAt: limited, windowMinutes: 10_080 },
+      ],
+    });
+
+    const provider = { id: 'prov-1', name: 'turing-token', provider: 'anthropic', auth: 'setup-token' as const };
+    const { bundle, items } = buildAccountBundle(provider, 'test-only-setup-token');
+    writeBundleWithItemsSync({ ...bundle, backend: 'file' }, items);
+    const account = resolveStatusLineAccount({ AGENTS_RUN_ACCOUNT_ID: provider.id }, readClaudeIdentity(home));
+    expect(account).toEqual({ usageKey: 'claude:name=turing-token', accountId: provider.id, label: 'turing-token' });
+
+    expect(ingestClaudeStatusLineUsage({
+      rate_limits: {
+        five_hour: { used_percentage: 31, resets_at: 1_800_000_000 },
+        seven_day: { used_percentage: 3, resets_at: 1_800_100_000 },
+      },
+    }, account)).toBe(true);
+
+    expect(readClaudeUsageCache('claude:name=turing-token')?.windows.map((w) => [w.key, w.usedPercent])).toEqual([
+      ['session', 31],
+      ['week', 3],
+    ]);
+    expect(readClaudeUsageCache('claude:org=org-1')?.windows.map((w) => [w.key, w.usedPercent])).toEqual([
+      ['session', 100],
+      ['week', 56],
+    ]);
+  });
+
+  it('keeps the home identity when the run account id names a native login, and credits nothing for an unknown id', () => {
+    const home = tempHome();
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'login@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
+    }));
+    const identity = readClaudeIdentity(home);
+    const work = addNativeAccount('work', 'claude', identity!.accountKey!, 'login@example.com', 'device');
+
+    expect(resolveStatusLineAccount({ AGENTS_RUN_ACCOUNT_ID: work.id }, identity))
+      .toEqual({ usageKey: 'claude:org=org-1', accountId: work.id, label: 'work' });
+
+    expect(resolveStatusLineAccount({}, identity))
+      .toEqual({ usageKey: 'claude:org=org-1', accountId: work.id, label: 'work' });
+
+    const unknown = resolveStatusLineAccount({ AGENTS_RUN_ACCOUNT_ID: 'ghost' }, identity);
+    expect(unknown).toEqual({ usageKey: null, accountId: null, label: 'unregistered account' });
+    expect(ingestClaudeStatusLineUsage({
+      rate_limits: { five_hour: { used_percentage: 5 } },
+    }, unknown)).toBe(false);
   });
 
   it('wraps and preserves a pre-existing status-line command', () => {
