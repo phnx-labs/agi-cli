@@ -16,6 +16,8 @@ import {
   projectNameForCwd,
   resolveProjectNameForCwd,
   confirmedProjectForCwd,
+  canonicalProjectName,
+  projectAliasTable,
   listProjectDefsCached,
   resetProjectDefsCache,
   type ProjectDef,
@@ -523,5 +525,41 @@ describe('projectDirsAbs', () => {
       repos: [{ slug: 'o/no-checkout' }],
     };
     expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA]);
+  });
+});
+
+describe('project aliases (old name -> current name)', () => {
+  it('reads aliases from the definition and round-trips them through the YAML', () => {
+    writeProjectDef({ name: 'rush', root: '~/src/rush', aliases: ['prix'] });
+    expect(loadProjectDef('rush')?.aliases).toEqual(['prix']);
+    expect(fs.readFileSync(path.join(dir, 'rush.yaml'), 'utf8')).toContain('aliases:');
+  });
+
+  it('rejects an alias that is not a project name, or is the project itself', () => {
+    expect(() => validateProjectDef({ name: 'rush', aliases: 'prix' }, 'rush')).toThrow(/aliases/);
+    expect(() => validateProjectDef({ name: 'rush', aliases: ['../x'] }, 'rush')).toThrow(/aliases/);
+    expect(() => validateProjectDef({ name: 'rush', aliases: ['rush'] }, 'rush')).toThrow(/aliases/);
+  });
+
+  it('fails loud when two definitions claim the same alias', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['prix'] }, { name: 'other', aliases: ['prix'] }];
+    expect(() => projectAliasTable(defs)).toThrow(/claimed by both "rush" and "other"/);
+  });
+
+  it('maps a former name to the current one and passes unknown names through', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['prix'] }];
+    expect(canonicalProjectName('prix', defs)).toBe('rush');
+    expect(canonicalProjectName('rush', defs)).toBe('rush');
+    expect(canonicalProjectName('atlas', defs)).toBe('atlas');
+  });
+
+  it('files a session under the current name when a stale definition under the old name still claims the cwd', () => {
+    writeProjectDef({ name: 'prix', root: '~/src/github.com/example/agents/rush' });
+    writeProjectDef({ name: 'rush', root: '~/src/github.com/example/agents', aliases: ['prix'] });
+    resetProjectDefsCache();
+    const cwd = path.join(HOME, 'src/github.com/example/agents/rush/cli');
+    expect(projectNameForCwd(cwd, listProjectDefsCached())).toBe('prix');
+    expect(confirmedProjectForCwd(cwd)).toBe('rush');
+    expect(resolveProjectNameForCwd(cwd, listProjectDefsCached())).toBe('rush');
   });
 });

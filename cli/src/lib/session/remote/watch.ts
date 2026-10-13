@@ -1,5 +1,5 @@
 import { SessionProjection } from '../projection.js';
-import { confirmedProjectForCwd } from '../../projects.js';
+import { canonicalProjectName, confirmedProjectForCwd, listProjectDefsCached, type ProjectDef } from '../../projects.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -82,6 +82,22 @@ export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWat
       ? { command: 'agents', args: ['ps', 'focus', row.sessionId!], ...(row.cwd ? { cwd: row.cwd } : {}) }
       : null,
   };
+}
+
+// A peer resolves confirmedProject against its own definitions, which may still use a project's former name.
+export function withCanonicalProject<T extends { confirmedProject: string | null }>(row: T, defs: ProjectDef[] = listProjectDefsCached()): T {
+  if (!row.confirmedProject) return row;
+  const name = canonicalProjectName(row.confirmedProject, defs);
+  return name === row.confirmedProject ? row : { ...row, confirmedProject: name };
+}
+
+export function canonicalizePeerSessionEnvelope(event: SessionWatchEnvelope): SessionWatchEnvelope {
+  if (event.type === 'reset') {
+    const defs = listProjectDefsCached();
+    return { ...event, rows: event.rows.map((row) => withCanonicalProject(row, defs)) };
+  }
+  if (event.type === 'upsert') return { ...event, row: withCanonicalProject(event.row) };
+  return event;
 }
 
 function epochMs(value: string | undefined): number {
@@ -526,7 +542,7 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
         try {
           const event = JSON.parse(line) as SessionWatchEnvelope;
           if (event.version !== SESSION_WATCH_VERSION || typeof event.sequence !== 'number') return false;
-          emit(event);
+          emit(canonicalizePeerSessionEnvelope(event));
           return true;
         } catch { return false;  }
       },

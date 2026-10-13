@@ -7,6 +7,7 @@ import { getCacheDir } from '../state.js';
 import { artifactKind, backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
 import { extractArtifacts, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { enrichGlanceFiles } from './glance-files.js';
+import { enrichLiveWork } from './pending-work.js';
 import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
 import { isSummarizerReady } from '../summarizer/config.js';
 
@@ -101,6 +102,9 @@ export const LIVE_STATUS_KEYS = [
   'activityHistogram',
   'userTurns',
   'subagents',
+  'pending',
+  'effort',
+  'fast',
   'preview',
   'tokPerSec',
   'awaitingReason',
@@ -514,6 +518,7 @@ export async function loadLocalActiveSessions(
   backfillActiveRowsFromIndex(sessions);
   for (const s of sessions) applyImmutableMemo(s);
   enrichGlanceFiles(sessions, now);
+  enrichLiveWork(sessions, now);
   updateImmutableMemos(sessions, now);
   const snap = writeCache('local', sessions, { capturedAt: now });
   return { sessions, servedFromCache: false, capturedAt: snap.capturedAt };
@@ -570,11 +575,6 @@ export async function loadFleetActiveSessions(
 
   const live = await opts.gather();
   for (const s of live.sessions) applyImmutableMemo(s);
-  updateImmutableMemos(live.sessions, now);
-  const snap = writeCache('fleet', live.sessions, {
-    capturedAt: now,
-    remoteDeviceCount: live.remoteDeviceCount,
-  });
   let self: string | undefined;
   try {
     const { machineId } = await import('../machine-id.js');
@@ -582,6 +582,13 @@ export async function loadFleetActiveSessions(
   } catch {
     self = undefined;
   }
+  // A peer's rows already carry the pending work its own daemon read; only this box's transcripts are readable here.
+  if (self !== undefined) enrichLiveWork(live.sessions.filter((s) => sessionProcessIsLocal(s, self)), now);
+  updateImmutableMemos(live.sessions, now);
+  const snap = writeCache('fleet', live.sessions, {
+    capturedAt: now,
+    remoteDeviceCount: live.remoteDeviceCount,
+  });
   if (self !== undefined) {
     const localOnly = live.sessions.filter((s) => sessionProcessIsLocal(s, self));
     writeCache('local', localOnly, { capturedAt: now });

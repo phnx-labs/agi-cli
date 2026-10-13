@@ -37,6 +37,8 @@ export interface ProjectIntegration {
 
 export interface ProjectDef {
   name: string;
+  /** Former names of this project. A session or peer row that resolves to one reads as `name`. */
+  aliases?: string[];
   description?: string;
   root?: string;
   defaultPath?: string;
@@ -96,6 +98,12 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
   }
 
   const def: ProjectDef = { name };
+  if (o.aliases !== undefined && o.aliases !== null) {
+    if (!Array.isArray(o.aliases) || o.aliases.some((a) => typeof a !== 'string' || !isSafeProjectName(a) || a === name)) {
+      throw new Error(`Project ${name}: "aliases" must be a list of former project names, other than the project's own name (got ${JSON.stringify(o.aliases)})`);
+    }
+    if (o.aliases.length > 0) def.aliases = [...new Set(o.aliases as string[])];
+  }
   if (typeof o.description === 'string') def.description = o.description;
   if (typeof o.root === 'string') def.root = o.root;
   if (typeof o.defaultPath === 'string') def.defaultPath = o.defaultPath;
@@ -421,18 +429,48 @@ export function resetProjectDefsCache(): void {
   projectDefsMemo = null;
 }
 
+/**
+ * Old project name -> current name, read from every definition's `aliases`.
+ * Two definitions claiming the same alias is a configuration error, not a tie to break.
+ */
+const aliasTableMemo = new WeakMap<ProjectDef[], Map<string, string>>();
+
+export function projectAliasTable(defs: ProjectDef[]): Map<string, string> {
+  const memo = aliasTableMemo.get(defs);
+  if (memo) return memo;
+  const table = new Map<string, string>();
+  for (const def of defs) {
+    for (const alias of def.aliases ?? []) {
+      const prior = table.get(alias);
+      if (prior !== undefined && prior !== def.name) {
+        throw new Error(`Project alias "${alias}" is claimed by both "${prior}" and "${def.name}"; keep it on one definition`);
+      }
+      table.set(alias, def.name);
+    }
+  }
+  aliasTableMemo.set(defs, table);
+  return table;
+}
+
+/** The current name for a project name that may be a former one. Unknown names pass through. */
+export function canonicalProjectName(name: string, defs: ProjectDef[] = listProjectDefsCached()): string {
+  return projectAliasTable(defs).get(name) ?? name;
+}
+
 export function confirmedProjectForCwd(
   cwd: string | undefined | null,
   defs: ProjectDef[] = listProjectDefsCached(),
 ): string | undefined {
 
   if (!cwd) return undefined;
-  return projectNameForCwd(cwd, defs);
+  const name = projectNameForCwd(cwd, defs);
+  return name === undefined ? undefined : canonicalProjectName(name, defs);
 }
 
 export function resolveProjectNameForCwd(cwd: string | undefined | null, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
-  return projectNameForCwd(cwd, defs) ?? resolveProjectKey(cwd);
+  const name = projectNameForCwd(cwd, defs);
+  return name === undefined ? resolveProjectKey(cwd) : canonicalProjectName(name, defs);
 }
 
 export function resolveDefinedProjectPath(
