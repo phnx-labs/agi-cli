@@ -99,7 +99,7 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
 
   const def: ProjectDef = { name };
   if (o.aliases !== undefined && o.aliases !== null) {
-    if (!Array.isArray(o.aliases) || o.aliases.some((a) => typeof a !== 'string' || !isSafeProjectName(a) || a === name)) {
+    if (!Array.isArray(o.aliases) || o.aliases.some((a) => typeof a !== 'string' || !isSafeProjectName(a) || a.toLowerCase() === name.toLowerCase())) {
       throw new Error(`Project ${name}: "aliases" must be a list of former project names, other than the project's own name (got ${JSON.stringify(o.aliases)})`);
     }
     if (o.aliases.length > 0) def.aliases = [...new Set(o.aliases as string[])];
@@ -198,6 +198,17 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
   return validateProjectDef(yaml.parse(raw), name);
 }
 
+const warnedAliases = new Set<string>();
+
+// stderr, once per message per process: a misconfigured alias must not break a read, and must not corrupt --json stdout.
+function warnIgnoredAliases(lines: string[]): void {
+  for (const line of lines) {
+    if (warnedAliases.has(line)) continue;
+    warnedAliases.add(line);
+    process.stderr.write(`agents: warning: ${line}\n`);
+  }
+}
+
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
   try {
@@ -212,7 +223,9 @@ export function listProjectDefs(): ProjectDef[] {
     const def = loadProjectDef(name);
     if (def) out.push(def);
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  warnIgnoredAliases(resolveProjectAliases(out).ignored);
+  return out;
 }
 
 export function writeProjectDef(def: ProjectDef): string {
@@ -429,32 +442,60 @@ export function resetProjectDefsCache(): void {
   projectDefsMemo = null;
 }
 
-/**
- * Old project name -> current name, read from every definition's `aliases`.
- * Two definitions claiming the same alias is a configuration error, not a tie to break.
- */
-const aliasTableMemo = new WeakMap<ProjectDef[], Map<string, string>>();
+interface AliasResolution {
+  /** lower-cased former name -> current project name */
+  table: Map<string, string>;
+  /** one line per alias that was ignored, and why */
+  ignored: string[];
+}
 
-export function projectAliasTable(defs: ProjectDef[]): Map<string, string> {
-  const memo = aliasTableMemo.get(defs);
+const aliasMemo = new WeakMap<ProjectDef[], AliasResolution>();
+
+/**
+ * Old project name -> current name, read from every definition's `aliases`, matched
+ * case-insensitively. Never throws: this runs on every row read. An alias that cannot
+ * be honoured is left out and reported in `ignored` (listProjectDefs warns once):
+ * - it names another live project (two of those naming each other is a cycle);
+ * - two definitions claim it.
+ * With those rules an alias always maps straight to a live name, so no chain or loop
+ * can form.
+ */
+export function resolveProjectAliases(defs: ProjectDef[]): AliasResolution {
+  const memo = aliasMemo.get(defs);
   if (memo) return memo;
-  const table = new Map<string, string>();
+  const live = new Map(defs.map((def) => [def.name.toLowerCase(), def]));
+  const claims = new Map<string, string[]>();
+  const ignored: string[] = [];
   for (const def of defs) {
-    for (const alias of def.aliases ?? []) {
-      const prior = table.get(alias);
-      if (prior !== undefined && prior !== def.name) {
-        throw new Error(`Project alias "${alias}" is claimed by both "${prior}" and "${def.name}"; keep it on one definition`);
+    for (const alias of new Set((def.aliases ?? []).map((a) => a.toLowerCase()))) {
+      const other = live.get(alias);
+      if (other) {
+        const back = (other.aliases ?? []).some((a) => a.toLowerCase() === def.name.toLowerCase());
+        ignored.push(back
+          ? `project aliases "${def.name}" -> "${other.name}" -> "${def.name}" form a cycle; ignoring "${alias}" on "${def.name}"`
+          : `project alias "${alias}" on "${def.name}" is the name of the live project "${other.name}"; ignoring it`);
+        continue;
       }
-      table.set(alias, def.name);
+      claims.set(alias, [...(claims.get(alias) ?? []), def.name]);
     }
   }
-  aliasTableMemo.set(defs, table);
-  return table;
+  const table = new Map<string, string>();
+  for (const [alias, owners] of claims) {
+    if (owners.length === 1) table.set(alias, owners[0]);
+    else ignored.push(`project alias "${alias}" is claimed by ${owners.map((o) => `"${o}"`).join(' and ')}; ignoring it until one definition drops it`);
+  }
+  const resolution = { table, ignored };
+  aliasMemo.set(defs, resolution);
+  return resolution;
+}
+
+export function projectAliasTable(defs: ProjectDef[]): Map<string, string> {
+  return resolveProjectAliases(defs).table;
 }
 
 /** The current name for a project name that may be a former one. Unknown names pass through. */
 export function canonicalProjectName(name: string, defs: ProjectDef[] = listProjectDefsCached()): string {
-  return projectAliasTable(defs).get(name) ?? name;
+  return projectAliasTable(defs).get(name.toLowerCase()) ?? name;
 }
 
 export function confirmedProjectForCwd(

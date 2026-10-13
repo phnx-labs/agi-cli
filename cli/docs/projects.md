@@ -74,7 +74,7 @@ dispatch:
 | Field | Purpose |
 | --- | --- |
 | `name` | Stable id, == filename. What `--project` takes. |
-| `aliases[]` | Former names of this project. A session whose cwd resolves to a former name (a stale definition still on disk), or a peer's row that still reports one, is filed under `name` instead (`confirmedProject`, the feed's project bucket). Each alias must be a valid project name other than `name`; two definitions claiming one alias is an error (`projectAliasTable`, `lib/projects.ts`). |
+| `aliases[]` | Former names of this project. A session whose cwd resolves to a former name (a stale definition still on disk), or a peer's row that still reports one, is filed under `name` instead (`confirmedProject`, the feed's project bucket). Matching is case-insensitive. An alias must be a valid project name other than `name`. An alias that is another live project's name (two projects naming each other are a cycle), or that two definitions claim, is ignored with one stderr warning when definitions load; a misconfigured alias never breaks a read (`resolveProjectAliases`, `lib/projects.ts`). |
 | `root` | Repo / monorepo root, home-relative → portable. |
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
 | `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout: it opts the repo into workspace probing (`status`) **and** into the directories an agent spawned on this project can reach (see [A project is a set of directories](#a-project-is-a-set-of-directories)). |

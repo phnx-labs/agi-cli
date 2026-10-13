@@ -1159,10 +1159,13 @@ storage-boundary half of SES-51 and all of SES-52), the `r2.backups` bundle conv
   subagent is pending while its status is `running`. A Claude background shell
   (a `run_in_background` Bash call, or one whose result reports a
   `backgroundTaskId`) is pending until a `<task-notification>` carrying a `<status>`
-  names its task or tool-use id, or a `TaskStop`/`KillShell` names its task. A
-  `Monitor` is pending until such a notification, a monitor-expired notice, or
-  `startedAtMs + timeoutMs` passes. Shells and monitors MUST NOT be reported for a
-  row whose `pidAlive` is not true. `subAgentCount` stays cumulative; a client MUST
+  names its task or tool-use id, or a `TaskStop`/`KillShell` naming its task
+  returns without `is_error`. A `Monitor` is pending until such a notification, a
+  monitor-expired notice, or `startedAtMs + timeoutMs` passes. No pending item MAY
+  be reported for a row whose `pidAlive` is not true, or one started before the
+  row's `processStartedAtMs` or before the transcript's latest process boundary
+  (a `cost-state` record or a `SessionStart:startup`/`resume` hook record). `effort`
+  is one of `low | medium | high | xhigh | max`. `subAgentCount` stays cumulative; a client MUST
   NOT read liveness from it. The row MAY carry `effort` and `fast` from the latest
   turn the transcript records, and MUST omit each when the transcript does not say
   (`lib/session/pending-work.ts`; `lib/session/pending-work.test.ts`).

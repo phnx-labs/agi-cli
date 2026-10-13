@@ -13,6 +13,8 @@ import {
 
 const FIXTURE = path.join(__dirname, 'testdata', 'claude-pending-work.jsonl');
 const CODEX_FIXTURE = path.join(__dirname, 'testdata', 'codex-turn-effort.jsonl');
+const RESUMED_FIXTURE = path.join(__dirname, 'testdata', 'claude-pending-resumed.jsonl');
+const AT1 = (minute: number) => Date.parse(`2026-10-13T01:${String(minute).padStart(2, '0')}:00.000Z`);
 const AT = (minute: number) => Date.parse(`2026-10-13T00:${String(minute).padStart(2, '0')}:00.000Z`);
 
 let dir: string;
@@ -98,10 +100,45 @@ describe('pending work from a Claude transcript', () => {
     expect(readSessionLiveWork(row(file), AT(13)).pending?.shells.map((s) => s.id)).toEqual(['bshellD']);
   });
 
+  it('keeps a shell running when its TaskStop fails, and ends it when a retry succeeds', () => {
+    const file = copyFixture();
+    const stop = (id: string, minute: number) => JSON.stringify({ type: 'assistant', timestamp: `2026-10-13T00:${minute}:00.000Z`, message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'TaskStop', input: { task_id: 'bshellA' } }] } });
+    const result = (id: string, minute: number, isError: boolean) => JSON.stringify({ type: 'user', timestamp: `2026-10-13T00:${minute}:00.000Z`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: isError ? 'No task found' : 'stopped', is_error: isError }] } });
+    fs.appendFileSync(file, `${stop('toolu_X1', 20)}\n${result('toolu_X1', 20, true)}\n`);
+    expect(readSessionLiveWork(row(file), AT(21)).pending?.shells.map((s) => s.id)).toEqual(['bshellA', 'bshellD']);
+    fs.appendFileSync(file, `${stop('toolu_X2', 22)}\n`);
+    expect(readSessionLiveWork(row(file), AT(22)).pending?.shells.map((s) => s.id)).toEqual(['bshellA', 'bshellD']);
+    fs.appendFileSync(file, `${result('toolu_X2', 23, false)}\n`);
+    expect(readSessionLiveWork(row(file), AT(23)).pending?.shells.map((s) => s.id)).toEqual(['bshellD']);
+  });
+
+  it('does not keep a dead row waiting on a subagent', () => {
+    const work = readSessionLiveWork(row(copyFixture(), { pidAlive: false, subagents: [subagent('a2', 'running', AT(9))] }), AT(12));
+    expect(work.pending).toBeUndefined();
+  });
+
   it('is absent when nothing is pending', () => {
     const file = path.join(dir, 'quiet.jsonl');
     fs.writeFileSync(file, fs.readFileSync(FIXTURE, 'utf8').split('\n')[0] + '\n');
     expect(readSessionLiveWork(row(file), AT(12)).pending).toBeUndefined();
+  });
+});
+
+describe('work from an earlier harness process is not pending', () => {
+  it('drops shells from before an exit record or a startup/resume marker, but not across clear or compact', () => {
+    const work = readSessionLiveWork(row(copyFixture(RESUMED_FIXTURE, 'resumed.jsonl')), AT1(30));
+    expect(work.pending).toEqual({ subagents: [], shells: [{ id: 'blive', description: 'Poll deploy', startedAtMs: AT1(21) }], monitors: [] });
+  });
+
+  it('drops work started before the live process started, with no marker in the file', () => {
+    const file = copyFixture();
+    const work = readSessionLiveWork(row(file, {
+      processStartedAtMs: AT(5),
+      subagents: [subagent('old', 'running', AT(2)), subagent('new', 'running', AT(9))],
+    }), AT(12));
+    expect(work.pending?.shells.map((s) => s.id)).toEqual(['bshellD']);
+    expect(work.pending?.monitors).toEqual([]);
+    expect(work.pending?.subagents.map((s) => s.id)).toEqual(['new']);
   });
 });
 

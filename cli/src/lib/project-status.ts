@@ -3,7 +3,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import chalk from 'chalk';
 import type { ActiveSession, ActiveStatus } from './session/active.js';
-import { projectNameForCwd, type ProjectDef } from './projects.js';
+import { canonicalProjectName, projectNameForCwd, type ProjectDef } from './projects.js';
 import { readRecentActivity } from './feed/activity.js';
 
 const execFileAsync = promisify(execFile);
@@ -58,8 +58,9 @@ export function rollupSessionsByProject(
   const ticketSeen = new Map<string, Set<string>>();
 
   for (const s of sessions) {
-    const name = projectNameForCwd(s.cwd, defs);
-    if (!name) continue;
+    const found = projectNameForCwd(s.cwd, defs);
+    if (!found) continue;
+    const name = canonicalProjectName(found, defs);
     let r = map.get(name);
     if (!r) {
       r = blank(name);

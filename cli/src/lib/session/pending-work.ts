@@ -40,14 +40,23 @@ interface PendingFold {
   ino: number;
   tasks: Map<string, BackgroundTask>;
   bashCalls: Map<string, { description: string; startedAtMs?: number }>;
+  /** TaskStop/KillShell calls awaiting their result: tool-use id -> the task they target. */
+  stopCalls: Map<string, string>;
+  /** The newest assistant line seen, parsed once per read for effort/speed. */
+  lastAssistant?: string;
   effort?: SessionEffort;
   fast?: boolean;
 }
 
 const folds = new Map<string, PendingFold>();
 
-/** A cold fold reads at most this much of a transcript's tail; a task started before it is not seen. */
-export const PENDING_COLD_TAIL_BYTES = 16 * 1024 * 1024;
+/**
+ * A cold fold (first read of a file in this process) reads at most this much of the
+ * transcript's tail. A background task started further back than this is not seen
+ * until the process that owns the fold restarts on a shorter file; the daemon keeps
+ * the fold warm, so only a cold read is bounded. Measured: 64 MiB folds in ~0.3 s.
+ */
+export const PENDING_COLD_TAIL_BYTES = 64 * 1024 * 1024;
 const MAX_READ_BYTES = 4 * 1024 * 1024;
 const MAX_PARTIAL_BYTES = 1024 * 1024;
 const MAX_BASH_CALLS = 256;
@@ -104,7 +113,9 @@ function foldClaudeToolUses(fold: PendingFold, record: Record<string, unknown>):
         ...(input.persistent === true ? { persistent: true } : {}),
       });
     } else if (block.name === 'TaskStop' || block.name === 'KillShell') {
-      endTask(fold, text(input.task_id) ?? text(input.shell_id));
+      // The stop only counts once its result comes back without an error.
+      const target = text(input.task_id) ?? text(input.shell_id);
+      if (target) fold.stopCalls.set(block.id, target);
     }
   }
 }
@@ -115,6 +126,12 @@ function foldClaudeToolResults(fold: PendingFold, record: Record<string, unknown
   for (const block of contentBlocks(record)) {
     if (block.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
     const id = block.tool_use_id;
+    const stopTarget = fold.stopCalls.get(id);
+    if (stopTarget !== undefined) {
+      fold.stopCalls.delete(id);
+      if (block.is_error !== true) endTask(fold, stopTarget);
+      continue;
+    }
     let task = fold.tasks.get(id);
     if (!task && taskId && fold.bashCalls.has(id)) {
       const call = fold.bashCalls.get(id)!;
@@ -158,38 +175,45 @@ function parse(line: string): Record<string, unknown> | undefined {
   }
 }
 
-function foldClaudeLines(fold: PendingFold, lines: string[]): void {
-  let lastAssistant: string | undefined;
-  for (const line of lines) {
-    if (line.includes('<task-notification>')) foldNotifications(fold, line);
-    const isAssistant = line.includes('"type":"assistant"');
-    if (isAssistant && line.includes('"effort":"')) lastAssistant = line;
-    if (isAssistant && line.includes('"tool_use"') && (line.includes('"name":"Bash"') || line.includes('"name":"Monitor"') || line.includes('"name":"TaskStop"') || line.includes('"name":"KillShell"'))) {
-      const record = parse(line);
-      if (record) foldClaudeToolUses(fold, record);
-    } else if (!isAssistant && line.includes('"tool_result"') && (line.includes('"backgroundTaskId"') || line.includes('"taskId"') || line.includes('"is_error":true'))) {
-      const record = parse(line);
-      if (record) foldClaudeToolResults(fold, record);
-    }
-  }
-  if (lastAssistant) {
-    const record = parse(lastAssistant);
-    if (record) foldClaudeRunSettings(fold, record);
-  }
+// Process boundaries. Claude writes a `cost-state` record when its process exits and
+// runs the SessionStart hook with `startup`/`resume` when a new one begins (not on
+// `clear`/`compact`, which keep the process). Background work dies with its process,
+// notified or not, so either boundary ends everything started before it.
+const PROCESS_START_RE = /"hookName":"SessionStart:(?:startup|resume)"/;
+
+function isProcessBoundary(line: string): boolean {
+  return line.startsWith('{"type":"cost-state"') || PROCESS_START_RE.test(line);
 }
 
-function foldCodexLines(fold: PendingFold, lines: string[]): void {
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (!lines[i].includes('"type":"turn_context"')) continue;
-    const effort = (parse(lines[i])?.payload as { effort?: unknown } | undefined)?.effort;
-    if (typeof effort === 'string' && EFFORTS.has(effort)) fold.effort = effort as SessionEffort;
+function foldClaudeLine(fold: PendingFold, line: string): void {
+  if (isProcessBoundary(line)) {
+    fold.tasks.clear();
+    fold.bashCalls.clear();
+    fold.stopCalls.clear();
     return;
   }
+  if (line.includes('<task-notification>')) foldNotifications(fold, line);
+  const isAssistant = line.includes('"type":"assistant"');
+  if (isAssistant && line.includes('"effort":"')) fold.lastAssistant = line;
+  if (isAssistant && line.includes('"tool_use"') && (line.includes('"name":"Bash"') || line.includes('"name":"Monitor"') || line.includes('"name":"TaskStop"') || line.includes('"name":"KillShell"'))) {
+    const record = parse(line);
+    if (record) foldClaudeToolUses(fold, record);
+  } else if (!isAssistant && line.includes('"tool_result"') && (line.includes('"backgroundTaskId"') || line.includes('"taskId"') || line.includes('"is_error":true') || [...fold.stopCalls.keys()].some((id) => line.includes(id)))) {
+    const record = parse(line);
+    if (record) foldClaudeToolResults(fold, record);
+  }
 }
 
-function readAppended(file: string, fold: PendingFold): string[] | undefined {
+function foldCodexLine(fold: PendingFold, line: string): void {
+  if (!line.includes('"type":"turn_context"')) return;
+  const effort = (parse(line)?.payload as { effort?: unknown } | undefined)?.effort;
+  if (typeof effort === 'string' && EFFORTS.has(effort)) fold.effort = effort as SessionEffort;
+}
+
+/** Feed every complete line appended since the last read to `onLine`, chunk by chunk. False when the file cannot be opened. */
+function readAppended(file: string, fold: PendingFold, onLine: (line: string) => void): boolean {
   let fd: number;
-  try { fd = fs.openSync(file, 'r'); } catch { return undefined; }
+  try { fd = fs.openSync(file, 'r'); } catch { return false; }
   try {
     const st = fs.fstatSync(fd);
     // A cold start begins mid-file, so its first line is a fragment and is dropped.
@@ -200,11 +224,12 @@ function readAppended(file: string, fold: PendingFold): string[] | undefined {
       fold.partial = '';
       fold.tasks.clear();
       fold.bashCalls.clear();
+      fold.stopCalls.clear();
+      delete fold.lastAssistant;
       delete fold.effort;
       delete fold.fast;
       skipFirst = fold.offset > 0;
     }
-    const lines: string[] = [];
     while (fold.offset < st.size) {
       const length = Math.min(MAX_READ_BYTES, st.size - fold.offset);
       const buffer = Buffer.alloc(length);
@@ -216,9 +241,9 @@ function readAppended(file: string, fold: PendingFold): string[] | undefined {
       fold.partial = parts.pop() ?? '';
       if (fold.partial.length > MAX_PARTIAL_BYTES) fold.partial = '';
       if (skipFirst) { parts.shift(); skipFirst = false; }
-      for (const part of parts) if (part) lines.push(part);
+      for (const part of parts) if (part) onLine(part);
     }
-    return lines;
+    return true;
   } finally {
     fs.closeSync(fd);
   }
@@ -228,14 +253,18 @@ function foldFor(file: string, agent: 'claude' | 'codex'): PendingFold | undefin
   let fold = folds.get(file);
   if (!fold || fold.agent !== agent) {
     if (folds.size >= MAX_FOLDS) folds.clear();
-    fold = { agent, offset: 0, partial: '', ino: -1, tasks: new Map(), bashCalls: new Map() };
+    fold = { agent, offset: 0, partial: '', ino: -1, tasks: new Map(), bashCalls: new Map(), stopCalls: new Map() };
     folds.set(file, fold);
   }
-  const lines = readAppended(file, fold);
-  if (!lines) { folds.delete(file); return undefined; }
-  if (agent === 'claude') foldClaudeLines(fold, lines);
-  else foldCodexLines(fold, lines);
-  return fold;
+  const target = fold;
+  const ok = readAppended(file, target, agent === 'claude' ? (line) => foldClaudeLine(target, line) : (line) => foldCodexLine(target, line));
+  if (!ok) { folds.delete(file); return undefined; }
+  if (target.lastAssistant) {
+    const record = parse(target.lastAssistant);
+    delete target.lastAssistant;
+    if (record) foldClaudeRunSettings(target, record);
+  }
+  return target;
 }
 
 function items(tasks: BackgroundTask[]): PendingWorkItem[] {
@@ -254,19 +283,24 @@ export interface SessionLiveWork {
 
 /**
  * Read one session file (incrementally, across calls) for its pending work and
- * run settings. Background shells and monitors die with the harness process, so
- * they count only while `pidAlive` is true.
+ * run settings. Subagents, background shells and monitors all die with the harness
+ * process, so they count only while `pidAlive` is true, and only work started by the
+ * CURRENT process counts: anything older than `processStartedAtMs` or the latest
+ * SessionStart startup/resume marker belongs to a process that is gone.
  */
 export function readSessionLiveWork(
-  row: Pick<ActiveSession, 'kind' | 'sessionFile' | 'pidAlive' | 'subagents'>,
+  row: Pick<ActiveSession, 'kind' | 'sessionFile' | 'pidAlive' | 'subagents' | 'processStartedAtMs'>,
   nowMs = Date.now(),
 ): SessionLiveWork {
-  const subagents: PendingWorkItem[] = (row.subagents ?? [])
-    .filter((agent) => agent.status === 'running')
+  const alive = row.pidAlive === true;
+  const current = (startedAtMs: number | undefined) =>
+    row.processStartedAtMs === undefined || startedAtMs === undefined || startedAtMs >= row.processStartedAtMs;
+  const subagents: PendingWorkItem[] = (alive ? row.subagents ?? [] : [])
+    .filter((agent) => agent.status === 'running' && current(agent.startedAtMs))
     .map((agent) => ({ id: agent.id, description: agent.description, ...(agent.startedAtMs !== undefined ? { startedAtMs: agent.startedAtMs } : {}) }));
   const agent = row.kind === 'claude' || row.kind === 'codex' ? row.kind : undefined;
   const fold = agent && row.sessionFile ? foldFor(row.sessionFile, agent) : undefined;
-  const live = row.pidAlive === true ? [...(fold?.tasks.values() ?? [])] : [];
+  const live = alive ? [...(fold?.tasks.values() ?? [])].filter((task) => current(task.startedAtMs)) : [];
   const shells = items(live.filter((task) => task.kind === 'shell'));
   const monitors = items(live.filter((task) => task.kind === 'monitor'
     && (task.persistent || task.timeoutMs === undefined || task.startedAtMs === undefined || task.startedAtMs + task.timeoutMs > nowMs)));

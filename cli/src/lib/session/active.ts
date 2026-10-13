@@ -30,7 +30,7 @@ import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from '@phnx-labs/sessions-cli/reader';
 import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from '@phnx-labs/sessions-cli/reader';
 import { AGENTS } from '../agents.js';
-import { confirmedProjectForCwd, listProjectDefsCached } from '../projects.js';
+import { canonicalProjectName, confirmedProjectForCwd, listProjectDefsCached, type ProjectDef } from '../projects.js';
 import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { machineId, normalizeHost } from '../machine-id.js';
@@ -201,8 +201,8 @@ export function isRunningLiveSession(s: ActiveSession): boolean {
   return Boolean(s.machine) && typeof s.pid === 'number' && s.pid > 0 && s.pidAlive === true;
 }
 
-export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'>): string {
-  if (s.cwd) return path.basename(s.cwd);
+export function activeSessionProjectKey(s: Pick<ActiveSession, 'cwd' | 'context'>, defs: ProjectDef[] = listProjectDefsCached()): string {
+  if (s.cwd) return canonicalProjectName(path.basename(s.cwd), defs);
   return s.context === 'cloud' ? 'cloud' : 'other';
 }
 
@@ -235,7 +235,7 @@ export function serializeActiveSessionsForJson(
   return sessions.map((s) => ({
     ...s,
     ticketId: s.ticket?.id ?? null,
-    project: activeSessionProjectKey(s),
+    project: activeSessionProjectKey(s, defs),
     confirmedProject: confirmedProjectForCwd(s.cwd, defs) ?? null,
     prLink: s.pr?.url ?? null,
     viewingIn: viewingInLabel(s) ?? null,
