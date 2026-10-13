@@ -135,6 +135,17 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Model the summarizer requests from summarizer.baseUrl, e.g. qwen2.5:3b. Overridden per-process by AGENTS_SUMMARIZER_MODEL.',
   },
   {
+    name: 'lead.model',
+    yamlKey: 'leadModel',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'sonnet',
+    description:
+      'Model the per-project Lead (`agents lead ask`) runs on, passed to `agents run claude --model`. A tier ' +
+      '(cheap|default|best|ultra) or a model id. Read when a Lead session starts; a running Lead keeps its model ' +
+      'until `agents lead stop` or the next context rotation.',
+  },
+  {
     name: 'updates.auto',
     yamlKey: 'updatesAuto',
     scope: 'user',

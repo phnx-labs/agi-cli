@@ -482,6 +482,7 @@ describe('listConfig', () => {
       'description',
       'formFactor',
       'interactive.host',
+      'lead.model',
       'menubar.autoUpdate',
       'menubar.enabled',
       'menubar.menu.artifactApps',

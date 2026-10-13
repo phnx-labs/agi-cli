@@ -61,6 +61,11 @@ if (process.argv[2] === '__self-heal-run') {
   process.exit(await runSelfHealChild());
 }
 
+if (process.argv[2] === '__lead-host') {
+  const { runLeadHost } = await import('./lib/lead/client.js');
+  process.exit(await runLeadHost(process.argv[3] ?? ''));
+}
+
 if (process.argv[2] === '__daemon-run') {
   const { runDaemon, log: daemonLog } = await import('./lib/daemon/daemon.js');
 

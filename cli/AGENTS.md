@@ -118,6 +118,15 @@ change that breaks any of them is a regression, not a detail:
   confirm is `unverified`: no choices, an open-session action only, refused by
   `feed answer`.
 
+`agents lead` is the per-project **Lead** (`src/commands/lead.ts`, `src/lib/lead/`): one
+warm headless Claude per project, owned by a detached host (`agents __lead-host <project>`,
+unix socket in `~/.agents/lead/<project>/`) that `ask` starts on demand. The host owns the
+stream-json child and one `feed watch --json` subscription for the per-turn state delta;
+the daemon does not host it (it stays on production code and restarts on self-update).
+Stops run only through `agents lead confirm <token>`. The NDJSON event shapes are a
+cross-repo contract with AGI EXT and the FastWispr bubble: change them only with both.
+Reference: [`docs/lead.md`](docs/lead.md).
+
 The fleet fan-out has its own budget: both `watchFleetFeed` and
 `watchFleetSessions` subscribe to peers through
 [`streamFromPeer`](src/lib/session/remote/peer-stream.ts), which backs off per peer
@@ -1302,6 +1311,7 @@ agents config set devices.linux-desk.computer.host vnc://10.0.0.5:5901
 agents config set summarizer.enabled on
 agents config set summarizer.baseUrl http://localhost:11434
 agents config set summarizer.model qwen2.5:3b
+agents config set lead.model sonnet
 ```
 
 The new command is a **facade over the existing YAML storage**
@@ -1700,6 +1710,7 @@ src/
                        #   `agents computer` was removed (PHNX-4227); everything else is `computer …`.
     menubar/           # AGI Menu installer/downloader/snapshot (the helper's SOURCE is phnx-labs/agi-menu, PHNX-4036)
     profiles.ts        # Host CLI + endpoint + model bundles
+    lead/              # `agents lead`: per-project host, stream-json parser, brief/delta, refs, confirm tokens (docs/lead.md)
 ```
 
 Note: the pure transcript **reader** — parse/render/state/trajectory/timeline/

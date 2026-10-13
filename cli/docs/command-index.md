@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_45 command groups · 338 commands._
+_46 command groups · 344 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -238,6 +238,17 @@ agents insights resources      Which skills/commands you actually invoke, and wh
 
 ```
 agents inspect <target>  Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.
+```
+
+## lead: Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
+
+```
+agents lead                  Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
+agents lead ask <text...>    Send one message to the project Lead and stream its reply
+agents lead confirm <token>  Run an action the Lead held for confirmation (a stop), by its token
+agents lead history          Print finished Lead turns for a project, oldest first
+agents lead status           Show whether each project Lead is warm, cold or stopped, with its session and context use
+agents lead stop             Stop a project Lead host and its Claude process (its session stays resumable)
 ```
 
 ## mcp: Connect agents to external tools via Model Context Protocol servers

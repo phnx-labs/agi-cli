@@ -549,6 +549,23 @@ agents config set summarizer.model qwen2.5:3b
 
 Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents send --channel mailbox`, so the decision routes back to the agent that asked it.
 
+### Talk to a project Lead
+
+```bash
+agents lead ask --project rush -- what is running?          # starts the warm Lead on first use
+agents lead ask --project rush --json -- put Claude on PHNX-4365
+agents lead confirm c_0123456789abcdef                     # a stop the Lead held for you
+agents lead history --project rush --json
+agents lead status --json
+agents lead stop --project rush
+```
+
+The Lead is one long-lived headless Claude per project that dispatches and manages agents through
+the CLIs (`agents ps|send|run|feed`, `sessions`, `artifacts list`, `linear`). It cannot edit files,
+and a stop runs only through a confirm token. A per-project host keeps it warm across callers, so a
+follow-up turn skips the harness boot. `--json` streams the NDJSON events the AGI EXT and bubble
+clients render. Reference: [cli/docs/lead.md](cli/docs/lead.md).
+
 ### Auto-nudge stalls
 
 ```bash

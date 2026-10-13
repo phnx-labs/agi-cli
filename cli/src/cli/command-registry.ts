@@ -52,6 +52,7 @@ export const loadTeams: ModuleLoader = async () => (await import('../commands/te
 const loadCloud: ModuleLoader = async () => (await import('../commands/cloud.js')).registerCloudCommands;
 const loadPs: ModuleLoader = async () => (await import('../commands/ps.js')).registerPsCommand;
 const loadSend: ModuleLoader = async () => (await import('../commands/send.js')).registerSendCommand;
+const loadLead: ModuleLoader = async () => (await import('../commands/lead.js')).registerLeadCommand;
 const loadFeed: ModuleLoader = async () => (await import('../commands/feed.js')).registerFeedCommand;
 const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
 const loadDaemon: ModuleLoader = async () => (await import('../commands/daemon.js')).registerDaemonCommand;
@@ -118,6 +119,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   ps: [loadPs],
   send: [loadSend],
   feed: [loadFeed],
+  lead: [loadLead],
   daemon: [loadDaemon],
   auth: [loadAuth],
   recordings: [loadRecordings],
