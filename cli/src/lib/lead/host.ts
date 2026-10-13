@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
+import * as path from 'node:path';
 import * as readline from 'node:readline';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -22,9 +23,10 @@ import {
   appendHistory, clearSessionState, readMemory, readSessionState, writeMemory, writeSessionState,
   type LeadHistoryTool, type LeadSessionState,
 } from './store.js';
-import { ensureLeadDir, type LeadPaths } from './paths.js';
+import { ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
+import { runArgv } from './shapes.js';
 import {
-  LEAD_ALLOWED_TOOLS, leadChildEnv, leadRunArgs, writeAgentsShim, writeLeadSettings,
+  LEAD_ALLOWED_TOOLS, agentsCliLaunch, curatedClientEnv, leadChildEnv, leadRunArgs, workerEnv, writeAgentsShim, writeLeadSettings,
   type Launch, type LeadSessionStart,
 } from './harness.js';
 
@@ -64,12 +66,13 @@ export interface LeadStatus {
 }
 
 export type LeadRequest =
-  | { op: 'ask'; text: string; voice?: number }
+  | { op: 'ask'; text: string; voice?: number; env?: Record<string, string> }
   | { op: 'status' }
   | { op: 'stop' }
   | { op: 'roster'; project?: string }
   | { op: 'resolve'; session: string }
-  | { op: 'hold-stop'; session: string };
+  | { op: 'hold-stop'; session: string }
+  | { op: 'spawn'; agent: string; prompt: string };
 
 export interface LeadHostRecord {
   pid: number;
@@ -88,6 +91,7 @@ export interface LeadHostOptions {
   harness: (args: string[]) => Launch;
   feed: Launch | null;
   childEnv?: NodeJS.ProcessEnv;
+  workerLaunch?: (args: string[]) => Launch;
   fetchTickets?: (def: ProjectDef) => Promise<BriefTicket[]>;
   fetchPrs?: (def: ProjectDef) => Promise<BriefPr[]>;
   teamKey?: string;
@@ -120,6 +124,13 @@ function pidAlive(pid: number): boolean {
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
+}
+
+export function isLeadRow(row: { title: string; cwd?: string }): boolean {
+  if (row.title.startsWith('lead-')) return true;
+  if (!row.cwd) return false;
+  const rel = path.relative(leadRoot(), path.resolve(row.cwd));
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
 export function readHostRecord(paths: LeadPaths): LeadHostRecord | null {
@@ -191,6 +202,7 @@ export class LeadHost {
   private readonly knownPrs = new Set<number>();
   private readonly ticketPrefixes = new Set<string>();
   private rotatedFrom: string | undefined;
+  private clientEnv: Record<string, string> = {};
   private resolveClosed!: () => void;
   readonly closed = new Promise<void>((resolve) => { this.resolveClosed = resolve; });
 
@@ -284,7 +296,7 @@ export class LeadHost {
   }
 
   private isSelf(row: RosterRow): boolean {
-    return row.id === this.childSessionId || row.title === `lead-${this.opts.project}`;
+    return row.id === this.childSessionId || isLeadRow(row);
   }
 
   private liveRows(): RosterRow[] {
@@ -326,6 +338,7 @@ export class LeadHost {
       const reply = (event: unknown) => { emit(event); socket.end(); };
       if (req.op === 'ask') {
         this.armIdle();
+        if (req.env) this.clientEnv = curatedClientEnv(req.env);
         void this.enqueue(req.text, req.voice, emit).finally(() => socket.end());
         return;
       }
@@ -339,6 +352,7 @@ export class LeadHost {
         } else if (req.op === 'roster') reply(this.rosterReply(req.project ?? this.opts.project));
         else if (req.op === 'resolve') reply(this.resolveReply(req.session));
         else if (req.op === 'hold-stop') reply(this.holdStop(req.session));
+        else if (req.op === 'spawn') reply(this.spawnWorker(req.agent, req.prompt));
         else reply({ type: 'error', message: `unknown op ${(req as { op?: string }).op}` });
       } catch (err) {
         reply({ type: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -370,6 +384,25 @@ export class LeadHost {
     this.active?.emit({ type: 'confirm', token: record.token, action: 'stop', sessionId: record.sessionId, label: record.label });
     this.log(`held stop of ${record.sessionId} as ${record.token}`);
     return { type: 'held', token: record.token, label: record.label, sessionId: record.sessionId };
+  }
+
+  private spawnWorker(agent: string, prompt: string): { type: 'spawned'; log: string; pid: number | undefined } {
+    const { paths, project } = this.opts;
+    const argv = runArgv(agent, prompt, project);
+    fs.mkdirSync(paths.runs, { recursive: true, mode: 0o700 });
+    const log = path.join(paths.runs, `${new Date().toISOString().replace(/[:.]/g, '-')}-${agent}.log`);
+    const fd = fs.openSync(log, 'a');
+    const launch = (this.opts.workerLaunch ?? agentsCliLaunch)(argv);
+    const child = spawn(launch.command, launch.args, {
+      detached: true,
+      stdio: ['ignore', fd, fd],
+      env: workerEnv(process.env, this.clientEnv, leadRoot()),
+      cwd: os.homedir(),
+    });
+    fs.closeSync(fd);
+    child.unref();
+    this.log(`spawned ${agent} worker pid ${child.pid} (${log})`);
+    return { type: 'spawned', log, pid: child.pid };
   }
 
   status(): LeadStatus {
@@ -534,7 +567,7 @@ export class LeadHost {
     let bootStart: number | null = null;
     const coldStart = async (forceFresh: boolean) => {
       engine = 'cold';
-      bootStart = Date.now();
+      bootStart ??= Date.now();
       if (state && state.briefed && !forceFresh) {
         this.spawnChild({ mode: 'resume', sessionId: state.sessionId });
         emit({ type: 'turn', turn: turnId, project: this.opts.project, session: state.sessionId, engine });

@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { LEAD_ALLOWED_TOOLS, cliVersion, leadChildEnv, leadRunArgs, leadSettings, writeAgentsShim, writeLeadSettings } from './harness.js';
-import { ensureLeadDir } from './paths.js';
+import { LEAD_ALLOWED_TOOLS, cliVersion, curatedClientEnv, workerEnv, leadChildEnv, leadRunArgs, leadSettings, writeAgentsShim, writeLeadSettings } from './harness.js';
+import { ensureLeadDir, leadRoot } from './paths.js';
 
 describe('Lead harness launch', () => {
   const paths = ensureLeadDir('harness-demo');
@@ -40,6 +40,21 @@ describe('Lead harness launch', () => {
     const file = writeAgentsShim(paths, { command: '/usr/bin/node', args: ["/opt/it's/index.js"] });
     expect(fs.readFileSync(file, 'utf-8')).toBe(`#!/bin/sh\nexec '/usr/bin/node' '/opt/it'\\''s/index.js' "$@"\n`);
     expect(fs.statSync(file).mode & 0o111).not.toBe(0);
+  });
+
+  it('gives dispatched workers the caller env minus every Lead marker and the Lead shim', () => {
+    const lead = leadChildEnv('harness-demo', paths, { PATH: '/usr/bin', HOME: '/home/u' });
+    const env = workerEnv(lead, curatedClientEnv({
+      PATH: '/home/u/.local/bin:/usr/bin', SSH_AUTH_SOCK: '/run/ssh', GH_TOKEN: 'g', LINEAR_API_KEY: 'l', DISPLAY: ':0',
+      AGENTS_LEAD_PROJECT: 'evil', RANDOM_SECRET: 'nope',
+    }), leadRoot());
+    expect(env).toMatchObject({ PATH: '/home/u/.local/bin:/usr/bin', HOME: '/home/u', SSH_AUTH_SOCK: '/run/ssh', GH_TOKEN: 'g', LINEAR_API_KEY: 'l', DISPLAY: ':0' });
+    expect(env.AGENTS_LEAD_PROJECT).toBeUndefined();
+    expect(env.AGENTS_NO_AUTOPULL).toBeUndefined();
+    expect(env.RANDOM_SECRET).toBeUndefined();
+    const hostOnly = workerEnv(lead, {}, leadRoot());
+    expect(hostOnly.PATH).toBe('/usr/bin');
+    expect(hostOnly.AGENTS_LEAD_PROJECT).toBeUndefined();
   });
 
   it('reads the CLI version from package.json', () => {

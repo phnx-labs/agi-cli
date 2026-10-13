@@ -25,10 +25,17 @@ describe('Lead tool shapes', () => {
     expect(() => linearPickupArgv('PHNX-1', 'nobody')).toThrow(/not a known agent/);
   });
 
-  it('send refuses slash commands and stays on the session channel', () => {
-    expect(sendArgv('abcd1234-0000', 'please continue')).toEqual(['send', '--channel', 'session', '--to', 'abcd1234-0000', '--text', 'please continue']);
-    expect(() => assertSendText('/exit')).toThrow(/slash command/);
-    expect(() => assertSendText('  /clear')).toThrow(/slash command/);
+  it('send types one labelled line and can never start with /, ! or #', () => {
+    expect(sendArgv('abcd1234-0000', 'please continue')).toEqual(['send', '--channel', 'session', '--to', 'abcd1234-0000', '--text', '[Lead] please continue']);
+    for (const bad of ['/exit', '  /clear', '!touch /tmp/pwned', ' \t!rm -rf ~', '#remember this', '\u0007!touch x']) {
+      expect(() => assertSendText(bad), bad).toThrow(/starts with \/, ! or #/);
+    }
+    for (const bad of ['continue\n/exit', 'continue\r!touch x', 'a\u2028/exit', 'a\u0085b']) {
+      expect(() => assertSendText(bad), JSON.stringify(bad)).toThrow(/one line/);
+    }
+    expect(assertSendText('fix it \u001b[31mnow\u0000!')).toBe('[Lead] fix it [31mnow!');
+    expect(assertSendText('run the tests, then report !important')).toBe('[Lead] run the tests, then report !important');
+    expect(sendArgv('abcd1234-0000', 'go')[6].startsWith('[Lead] ')).toBe(true);
   });
 
   it('linear reads and creates stay on the project with fixed flags', () => {

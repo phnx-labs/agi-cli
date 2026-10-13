@@ -1,24 +1,18 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import { execFile, spawn } from 'node:child_process';
-import { isAgentId } from '../types.js';
+import { execFile } from 'node:child_process';
 import { getCliLaunch } from '../cli-entry.js';
 import { loadProjectDef, type ProjectDef } from '../projects.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { connectHost, sendRequest } from './client.js';
+import {
+  LeadToolError, appendNote, assertAgent, assertSendText, assertSessionId, assertTask, assertTicketId, dispatchPrompt,
+  linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, runArgv, sendArgv,
+} from './shapes.js';
 import { ensureLeadDir, type LeadPaths } from './paths.js';
 import { readMemory } from './store.js';
 
-export const MAX_TASK_CHARS = 4_000;
-export const MAX_NOTE_CHARS = 500;
-export const MAX_MEMORY_LINES = 60;
-export const MAX_TASKS_LIMIT = 50;
-export const LINEAR_STATUSES = ['open', 'todo', 'progress', 'backlog', 'done'] as const;
-const TICKET_RE = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/;
-const SESSION_RE = /^[0-9a-f][0-9a-f-]{7,35}$/;
-const LINEAR_TIMEOUT_MS = 20_000;
+export * from './shapes.js';
 
-export class LeadToolError extends Error {}
+const LINEAR_TIMEOUT_MS = 20_000;
 
 export interface LeadToolContext {
   project: string;
@@ -34,87 +28,6 @@ export function leadToolContext(env: NodeJS.ProcessEnv = process.env): LeadToolC
   return { project, def, paths: ensureLeadDir(project) };
 }
 
-export function assertTicketId(id: string): string {
-  if (!TICKET_RE.test(id)) throw new LeadToolError(`'${id}' is not a ticket id (expected TEAM-123).`);
-  return id;
-}
-
-export function assertAgent(agent: string): string {
-  if (!isAgentId(agent)) throw new LeadToolError(`'${agent}' is not a known agent.`);
-  return agent;
-}
-
-export function assertSessionId(id: string): string {
-  if (!SESSION_RE.test(id)) throw new LeadToolError(`'${id}' is not a session id (a uuid or its first 8+ characters).`);
-  return id;
-}
-
-export function assertTask(text: string): string {
-  const task = text.trim();
-  if (!task) throw new LeadToolError('The task text is empty.');
-  if (task.length > MAX_TASK_CHARS) throw new LeadToolError(`The task text is over ${MAX_TASK_CHARS} characters.`);
-  return task;
-}
-
-export function assertSendText(text: string): string {
-  const body = assertTask(text);
-  if (body.startsWith('/')) throw new LeadToolError('Refusing to send a slash command into a session.');
-  return body;
-}
-
-export function linearProjectRef(def: ProjectDef): string {
-  const ref = def.linear?.projectId ?? def.linear?.name;
-  if (!ref) throw new LeadToolError(`Project '${def.name}' has no Linear project.`);
-  return ref;
-}
-
-export function dispatchPrompt(id: string, title: string): string {
-  return `Work on ${id}: ${title}`;
-}
-
-export function runArgv(agent: string, prompt: string, project: string): string[] {
-  return ['run', assertAgent(agent), assertTask(prompt), '--headless', '-P', project, '--mode', 'edit'];
-}
-
-export function linearPickupArgv(id: string, agent: string): string[] {
-  return ['update', assertTicketId(id), '--pickup', '--delegate', assertAgent(agent)];
-}
-
-export function sendArgv(sessionId: string, text: string): string[] {
-  return ['send', '--channel', 'session', '--to', sessionId, '--text', assertSendText(text)];
-}
-
-export function linearTasksArgv(def: ProjectDef, status: string, limit: number): string[] {
-  if (!(LINEAR_STATUSES as readonly string[]).includes(status)) {
-    throw new LeadToolError(`--status must be one of ${LINEAR_STATUSES.join(', ')}.`);
-  }
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TASKS_LIMIT) {
-    throw new LeadToolError(`--limit must be 1-${MAX_TASKS_LIMIT}.`);
-  }
-  return ['tasks', '--project', linearProjectRef(def), '--status', status, '--limit', String(limit), '--json'];
-}
-
-export function linearViewArgv(id: string): string[] {
-  return ['tasks', assertTicketId(id), '--json'];
-}
-
-export function linearCreateArgv(def: ProjectDef, title: string, description?: string): string[] {
-  const t = title.trim();
-  if (!t || t.length > 200) throw new LeadToolError('--title must be 1-200 characters.');
-  const args = ['create', t, '--project', linearProjectRef(def)];
-  if (description !== undefined) args.push('--description', assertTask(description));
-  return args;
-}
-
-export function appendNote(memory: string, note: string): string {
-  const clean = note.replace(/\s+/g, ' ').trim();
-  if (!clean) throw new LeadToolError('The note is empty.');
-  if (clean.length > MAX_NOTE_CHARS) throw new LeadToolError(`A note is at most ${MAX_NOTE_CHARS} characters.`);
-  const lines = memory.split('\n').filter((l) => l.trim().length > 0);
-  lines.push(`- ${clean}`);
-  return `${lines.slice(-MAX_MEMORY_LINES).join('\n')}\n`;
-}
-
 function runLinear(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile('linear', args, { timeout: LINEAR_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -122,17 +35,6 @@ function runLinear(args: string[]): Promise<string> {
       else resolve(stdout);
     });
   });
-}
-
-function spawnDetachedRun(paths: LeadPaths, argv: string[], agent: string): string {
-  fs.mkdirSync(paths.runs, { recursive: true, mode: 0o700 });
-  const log = path.join(paths.runs, `${new Date().toISOString().replace(/[:.]/g, '-')}-${agent}.log`);
-  const fd = fs.openSync(log, 'a');
-  const launch = getCliLaunch(argv);
-  const child = spawn(launch.command, launch.args, { detached: true, stdio: ['ignore', fd, fd] });
-  fs.closeSync(fd);
-  child.unref();
-  return log;
 }
 
 async function hostRequest(project: string, req: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -143,6 +45,11 @@ async function hostRequest(project: string, req: Record<string, unknown>): Promi
   if (!reply) throw new LeadToolError('The Lead host closed without a reply.');
   if ((reply as { type?: string }).type === 'error') throw new LeadToolError(String((reply as { message?: string }).message));
   return reply;
+}
+
+async function spawnWorker(ctx: LeadToolContext, agent: string, prompt: string): Promise<string> {
+  const reply = await hostRequest(ctx.project, { op: 'spawn', agent, prompt });
+  return String(reply.log);
 }
 
 export async function toolRoster(ctx: LeadToolContext, project?: string): Promise<string> {
@@ -156,15 +63,16 @@ export async function toolDispatch(ctx: LeadToolContext, ticket: string, agent: 
   assertTicketId(ticket);
   assertAgent(agent);
   const issue = JSON.parse(await runLinear(linearViewArgv(ticket))) as LinearIssue;
-  const argv = runArgv(agent, dispatchPrompt(issue.identifier, issue.title), ctx.project);
+  const prompt = dispatchPrompt(issue.identifier, issue.title);
+  runArgv(agent, prompt, ctx.project);
   await runLinear(linearPickupArgv(issue.identifier, agent));
-  const log = spawnDetachedRun(ctx.paths, argv, agent);
+  const log = await spawnWorker(ctx, agent, prompt);
   return `Dispatched ${agent} on ${issue.identifier}: ${issue.title}. ${issue.identifier} is In Progress, delegated to ${agent}. Log: ${log}`;
 }
 
 export async function toolStart(ctx: LeadToolContext, agent: string, task: string): Promise<string> {
-  const argv = runArgv(agent, task, ctx.project);
-  const log = spawnDetachedRun(ctx.paths, argv, agent);
+  runArgv(agent, task, ctx.project);
+  const log = await spawnWorker(ctx, agent, task);
   return `Started ${agent} on: ${assertTask(task).slice(0, 120)}. Log: ${log}`;
 }
 

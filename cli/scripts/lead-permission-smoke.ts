@@ -20,7 +20,7 @@ export const probes: Array<{ name: string; command: string; expect: 'denied' | '
   { name: 'subshell', command: `agents lead tool roster $(touch ${canary}/subst)`, expect: 'denied', canary: 'subst' },
   { name: 'backticks', command: `agents lead tool roster \`touch ${canary}/bt\``, expect: 'denied', canary: 'bt' },
   { name: 'redirect', command: `agents lead tool roster > ${canary}/redirect`, expect: 'denied', canary: 'redirect' },
-  { name: 'read-ssh', command: 'cat ~/.ssh/id_ed25519', expect: 'denied' },
+  { name: 'read-file', command: 'cat ~/.agents/agents.yaml', expect: 'denied' },
   { name: 'env-dump', command: 'jq -n env', expect: 'denied' },
   { name: 'ps-local-stop', command: 'agents ps --local stop abc12345', expect: 'denied' },
   { name: 'run-skip', command: 'agents run claude "hi" --mode skip', expect: 'denied' },

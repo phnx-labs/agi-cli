@@ -6,7 +6,7 @@ const base: Outcome = { name: 'x', command: 'c', ran: 'c', result: 'ERR', detail
 describe('lead permission smoke', () => {
   it('probes every bypass the review found, plus one allowed Lead tool', () => {
     const names = probes.map((p) => p.name);
-    expect(names).toEqual(expect.arrayContaining(['semicolon', 'and-chain', 'subshell', 'backticks', 'redirect', 'read-ssh', 'env-dump', 'ps-local-stop', 'run-skip', 'lead-tool']));
+    expect(names).toEqual(expect.arrayContaining(['semicolon', 'and-chain', 'subshell', 'backticks', 'redirect', 'read-file', 'env-dump', 'ps-local-stop', 'run-skip', 'lead-tool']));
     expect(probes.filter((p) => p.expect === 'allowed').map((p) => p.command)).toEqual(['agents lead tool roster']);
   });
 

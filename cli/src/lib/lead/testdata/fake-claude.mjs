@@ -10,6 +10,7 @@ const resume = flag('--resume');
 const sessionId = resume ?? flag('--session-id') ?? 'no-session';
 record({ argv, cwd: process.cwd(), envKeys: Object.keys(process.env).sort() });
 if (resume && process.env.FAKE_LEAD_RESUME_ERROR) {
+  await new Promise((r) => setTimeout(r, Number(process.env.FAKE_LEAD_RESUME_DELAY_MS ?? 0)));
   process.stderr.write(`${process.env.FAKE_LEAD_RESUME_ERROR}\n`);
   process.exit(1);
 }

@@ -71,6 +71,30 @@ export function leadChildEnv(project: string, paths: LeadPaths, source: NodeJS.P
   return env;
 }
 
+export const WORKER_ENV_PASSTHROUGH = [
+  ...LEAD_ENV_PASSTHROUGH,
+  'SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN', 'LINEAR_API_KEY', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY',
+  'DBUS_SESSION_BUS_ADDRESS', 'COLORTERM', 'EDITOR', 'VISUAL',
+] as const;
+
+export function curatedClientEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of WORKER_ENV_PASSTHROUGH) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  for (const [key, value] of Object.entries(source)) if (LEAD_ENV_AUTH.test(key) && value !== undefined) env[key] = value;
+  return env;
+}
+
+export function workerEnv(hostEnv: NodeJS.ProcessEnv, clientEnv: Record<string, string>, leadRootDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...curatedClientEnv(hostEnv), ...curatedClientEnv(clientEnv) };
+  if (env.PATH) {
+    env.PATH = env.PATH.split(path.delimiter).filter((dir) => dir && !path.resolve(dir).startsWith(path.resolve(leadRootDir))).join(path.delimiter);
+  }
+  return env;
+}
+
 export function leadRunArgs(project: string, model: string, start: LeadSessionStart, paths: LeadPaths): string[] {
   const session = start.mode === 'fresh'
     ? ['--session-id', start.sessionId, '--name', `lead-${project}`]

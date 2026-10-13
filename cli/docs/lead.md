@@ -49,8 +49,9 @@ agents lead stop --project <name>
   only when 123 is among the project's open or recently updated PRs, explicit GitHub PR
   urls, and live sessions by id or by an exact title of three or more words. The Lead's
   own session is never a ref.
-- `timing` is seconds: `boot` (spawn to Claude's init, cold turns only), `tools` (union of
-  tool run time), `model` (the rest).
+- `timing` is seconds: `boot` (from the first spawn of the turn to Claude's init, cold turns
+  only, including a failed resume before a fresh start), `tools` (union of tool run time),
+  `model` (the rest).
 
 ### History and status shapes
 
@@ -125,12 +126,19 @@ other program is denied. Each tool has one fixed shape:
 | Tool | Does |
 |---|---|
 | `roster [--project <p>]` | Live sessions from the host's feed snapshot (never a fleet `agents ps`) plus a fleet count. The only way the Lead sees sessions. |
-| `dispatch --ticket <ID> [--agent <a>]` | `linear update <ID> --pickup --delegate <a>`, then a detached `agents run <a> "Work on <ID>: <title>" --headless -P <project> --mode edit`. |
+| `dispatch --ticket <ID> [--agent <a>]` | `linear update <ID> --pickup --delegate <a>`, then asks the host to start `agents run <a> "Work on <ID>: <title>" --headless -P <project> --mode edit`, detached. |
 | `start --agent <a> -- <task>` | The same run shape for a task with no ticket. |
-| `send --session <id> -- <text>` | `agents send --channel session` to a live session of this project. Text starting with `/` is refused. |
+| `send --session <id> -- <text>` | `agents send --channel session` to a live session of this project. The text must be one line; control characters are stripped; text whose first non-space character is a slash, a bang or a hash is refused; and what is typed always starts with `[Lead] `, so the session never sees a slash command, a shell escape or a memory note. |
 | `stop --session <id>` | Mints a confirm token and emits the `confirm` event. Never stops anything. |
 | `linear tasks [--status …] [--limit n]`, `linear view <ID>`, `linear create --title <t> [--description <d>]` | Reads, and creation in the project's Linear project. |
 | `remember -- <note>` | Appends one note (at most 500 characters) to `memory.md`, keeping the last 60. |
+
+Workers are spawned by the host, not by the Lead's shell, with a curated copy of the calling
+client's environment (`PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`,
+`LINEAR_API_KEY`, `DISPLAY`, the Anthropic auth variables and similar). `AGENTS_LEAD_PROJECT`
+and the Lead's `agents` shim never reach a worker, so a worker cannot call the Lead tools or
+write its memory. The roster and the per-turn delta leave out Lead sessions (title `lead-*` or
+a cwd under `~/.agents/lead`).
 
 No tool accepts `--mode`, `--secrets`, `--device`, `--lease`, `--cloud` or pass-through
 arguments. Ticket, PR and session titles reach the model as data; the brief says so, and
@@ -140,7 +148,7 @@ arguments. Ticket, PR and session titles reach the model as data; the brief says
 `agents ps stop <sessionId>`. Tokens expire after 10 minutes; the host sweeps expired ones.
 
 `cli/scripts/lead-permission-smoke.ts` runs the real Claude launch shape against probes
-(`;`, `&&`, `$(…)`, backticks, `>`, `cat ~/.ssh/…`, `jq -n env`, `agents ps --local stop`,
+(`;`, `&&`, `$(…)`, backticks, `>`, `cat ~/.agents/agents.yaml`, `jq -n env`, `agents ps --local stop`,
 `agents run --mode skip`) and checks each is denied while `agents lead tool roster` runs:
 `AGENTS_BIN=agents-dev bun cli/scripts/lead-permission-smoke.ts`.
 

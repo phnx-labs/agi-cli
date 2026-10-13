@@ -4,7 +4,7 @@ import { setHelpSections } from '../lib/help.js';
 import { writeStdoutFlushed } from '../lib/stdout.js';
 import { connectHost, ensureHost, requireProjectDef, runConfirm, sendRequest } from '../lib/lead/client.js';
 import { ConfirmError } from '../lib/lead/confirm.js';
-import { leadModel } from '../lib/lead/harness.js';
+import { curatedClientEnv, leadModel } from '../lib/lead/harness.js';
 import { statusFromFiles, type LeadStatus } from '../lib/lead/host.js';
 import { leadPaths, listLeadProjects } from '../lib/lead/paths.js';
 import { readHistory } from '../lib/lead/store.js';
@@ -193,7 +193,7 @@ export function registerLeadCommand(program: Command): void {
         if (!text) throw new Error('Nothing to ask: pass the text after --.');
         const socket = await ensureHost(opts.project);
         let finished = false;
-        await sendRequest(socket, { op: 'ask', text, ...(voice !== undefined ? { voice } : {}) }, (obj) => {
+        await sendRequest(socket, { op: 'ask', text, env: curatedClientEnv(), ...(voice !== undefined ? { voice } : {}) }, (obj) => {
           const e = obj as unknown as LeadEvent;
           if (e.type === 'done') finished = true;
           if (e.type === 'error') failed = true;

@@ -3,9 +3,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { LeadHost, readHostRecord, type LeadStatus } from './host.js';
+import { LeadHost, isLeadRow, readHostRecord, type LeadStatus } from './host.js';
 import { connectHost, runConfirm, sendRequest } from './client.js';
-import { ensureLeadDir, type LeadPaths } from './paths.js';
+import { ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
 import { ConfirmError } from './confirm.js';
 import { readHistory, readSessionState } from './store.js';
 import { toolRoster, toolStop } from './tools.js';
@@ -21,6 +21,7 @@ const DEF = { name: PROJECT, repo: 'acme/demo', linear: { name: 'Demo' }, goals:
 let host: LeadHost;
 let paths: LeadPaths;
 let logFile: string;
+let workerDump: string;
 const childEnv: NodeJS.ProcessEnv = {};
 
 function harnessLog(): Array<{ argv?: string[]; cwd?: string; input?: string }> {
@@ -51,6 +52,7 @@ describe('Lead host over a fake stream-json harness', () => {
   beforeAll(async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lead-it-'));
     logFile = path.join(tmp, 'harness.ndjson');
+    workerDump = path.join(tmp, 'worker.json');
     paths = ensureLeadDir(PROJECT);
     Object.assign(childEnv, { PATH: process.env.PATH, HOME: process.env.HOME, FAKE_LEAD_LOG: logFile, FAKE_LEAD_SOCKET: paths.socket });
     host = new LeadHost({
@@ -62,6 +64,10 @@ describe('Lead host over a fake stream-json harness', () => {
       harness: (args) => ({ command: process.execPath, args: [FAKE_CLAUDE, ...args] }),
       feed: { command: process.execPath, args: [FAKE_FEED] },
       childEnv,
+      workerLaunch: (args) => ({
+        command: process.execPath,
+        args: ['-e', `require('fs').writeFileSync(${JSON.stringify(workerDump)}, JSON.stringify({ argv: process.argv.slice(1), env: process.env }))`, ...args],
+      }),
       teamKey: 'PHNX',
       fetchTickets: async () => [{ id: 'PHNX-4365', title: 'Rush MCP server', url: 'https://linear.app/acme/issue/PHNX-4365' }],
       fetchPrs: async () => [{ number: 3607, title: 'Lead CLI', url: 'https://github.com/acme/demo/pull/3607', draft: false, open: true }],
@@ -181,14 +187,18 @@ describe('Lead host over a fake stream-json harness', () => {
   it('starts fresh from the brief only when the session is gone', async () => {
     const old = readSessionState(paths)!.sessionId;
     childEnv.FAKE_LEAD_RESUME_ERROR = 'No conversation found with session ID: x';
+    childEnv.FAKE_LEAD_RESUME_DELAY_MS = '400';
     try {
       const events = await ask('still there?');
       const turns = events.filter((e) => e.type === 'turn');
       expect((turns.at(-1) as { session: string }).session).not.toBe(old);
-      done(events);
+      const d = done(events);
+      expect(d.timing.boot).toBeGreaterThanOrEqual(0.4);
+      expect(d.timing.model).toBeLessThan(0.4);
       expect(harnessLog().at(-1)!.input).toContain('# Lead brief: demo');
     } finally {
       delete childEnv.FAKE_LEAD_RESUME_ERROR;
+      delete childEnv.FAKE_LEAD_RESUME_DELAY_MS;
     }
   });
 
@@ -202,6 +212,32 @@ describe('Lead host over a fake stream-json harness', () => {
     expect(fs.readFileSync(paths.memory, 'utf-8')).toContain('remembered: PHNX-1 goes to Claude');
     expect(readSessionState(paths)).toMatchObject({ sessionId: turn.session, rotatedFrom: old });
     expect(harnessLog().at(-1)!.input).toContain('> - remembered: PHNX-1 goes to Claude');
+  });
+
+  it('spawns dispatched workers through the host with the caller env and no Lead markers', async () => {
+    const socket = await connectHost(PROJECT);
+    await sendRequest(socket!, {
+      op: 'ask', text: 'hello', env: { SSH_AUTH_SOCK: '/run/agent.sock', GH_TOKEN: 'gh', AGENTS_LEAD_PROJECT: 'evil', PATH: `${paths.bin}:/usr/bin` },
+    }, () => {});
+    let reply: Record<string, unknown> = {};
+    await sendRequest((await connectHost(PROJECT))!, { op: 'spawn', agent: 'codex', prompt: 'Work on PHNX-9: x' }, (r) => { reply = r; });
+    expect(reply.type).toBe('spawned');
+    for (let i = 0; i < 50 && !fs.existsSync(workerDump); i++) await new Promise((r) => setTimeout(r, 50));
+    const dump = JSON.parse(fs.readFileSync(workerDump, 'utf-8'));
+    expect(dump.argv).toEqual(['run', 'codex', 'Work on PHNX-9: x', '--headless', '-P', PROJECT, '--mode', 'edit']);
+    expect(dump.env).toMatchObject({ SSH_AUTH_SOCK: '/run/agent.sock', GH_TOKEN: 'gh', PATH: '/usr/bin' });
+    expect(dump.env.AGENTS_LEAD_PROJECT).toBeUndefined();
+    expect(dump.env.FAKE_LEAD_LOG).toBeUndefined();
+    let bad: Record<string, unknown> = {};
+    await sendRequest((await connectHost(PROJECT))!, { op: 'spawn', agent: 'sh -c', prompt: 'x' }, (r) => { bad = r; });
+    expect(bad).toMatchObject({ type: 'error', message: expect.stringContaining('not a known agent') });
+  });
+
+  it('recognizes Lead sessions by title or by a cwd under the Lead root', () => {
+    expect(isLeadRow({ title: 'lead-rush' })).toBe(true);
+    expect(isLeadRow({ title: 'This is a test', cwd: path.join(leadRoot(), 'agi') })).toBe(true);
+    expect(isLeadRow({ title: 'Fix login', cwd: '/home/u/src/app' })).toBe(false);
+    expect(isLeadRow({ title: 'Fix login', cwd: `${leadRoot()}-other` })).toBe(false);
   });
 
   it('answers status over the socket', async () => {
