@@ -1,13 +1,12 @@
-import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { foldRegistryCandidates, localRegistryRecords, type RunCandidateInputs } from './account-pool-collect.js';
-import { addAccount, readAccountRegistry } from '../account-registry.js';
-import { deleteKeychainTokenSync } from '../secrets-client.js';
-import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
+import { readAccountRegistry } from '../account-registry.js';
+import { buildAccountBundle } from '../account-schema.js';
+import { deleteKeychainTokenSync, writeBundleWithItemsSync } from '../secrets-client.js';
+import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 import type { RegistryAccountRecord } from './account-pool.js';
-import type { RotateCandidate } from './rotate.js';
+import { readinessFromCandidate, type RotateCandidate } from './rotate.js';
+import type { UsageSnapshot } from './usage.js';
 
 function nativeCandidate(over: Partial<RotateCandidate>): RotateCandidate {
   return {
@@ -84,6 +83,33 @@ describe('foldRegistryCandidates', () => {
       .toEqual(['claude-setup', 'or-key']);
   });
 
+  it('carries the provider usage key and its cached snapshot, so rotation excludes a limited token account', () => {
+    const resets = new Date(Date.now() + 60 * 60_000);
+    const limited: UsageSnapshot = {
+      source: 'last_seen',
+      sourceLabel: 'status line',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 100, resetsAt: resets, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 40, resetsAt: resets, windowMinutes: 10_080 },
+      ],
+    };
+    const asked: string[] = [];
+    const out = foldRegistryCandidates('claude', inputs({
+      usageSnapshotFor: (usageKey) => { asked.push(usageKey); return usageKey === 'claude:name=claude-setup' ? limited : null; },
+    }));
+    const token = out.find((c) => c.providerAccount === 'claude-setup')!;
+    expect(token.usageKey).toBe('claude:name=claude-setup');
+    expect(token.usageSnapshot).toBe(limited);
+    expect(asked).toEqual(['claude:name=claude-setup']);
+    expect(readinessFromCandidate(token)).toEqual({ ready: false, reason: 'rate_limited', email: null });
+
+    const blind = foldRegistryCandidates('claude', inputs()).find((c) => c.providerAccount === 'claude-setup')!;
+    expect(blind.usageKey).toBe('claude:name=claude-setup');
+    expect(blind.usageSnapshot).toBeNull();
+    expect(readinessFromCandidate(blind).ready).toBe(true);
+  });
+
   it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {
     const noSecret: RegistryAccountRecord[] = [{ name: 'claude-setup', provider: 'anthropic', auth: 'setup-token', secretPresent: false }];
     const out = foldRegistryCandidates('claude', inputs({ records: noSecret }));
@@ -93,17 +119,19 @@ describe('foldRegistryCandidates', () => {
   });
 });
 
-const fileBacked = await standaloneKeychainIsFileBacked();
-
-describe.skipIf(!fileBacked)('localRegistryRecords — which stored credentials a run may rotate through', () => {
+describe('localRegistryRecords — which stored credentials a run may rotate through', () => {
   useFreshSecretsHome();
 
   it('checks only the accounts that serve the harness, and keeps only those whose secret is present', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pool-'));
-    addAccount('claude-a', 'anthropic', 'setup-token', 'sk-ant-oat01-a', root);
-    addAccount('claude-b', 'anthropic', 'setup-token', 'sk-ant-oat01-b', root);
-    addAccount('claude-gone', 'anthropic', 'setup-token', 'sk-ant-oat01-c', root);
-    addAccount('or-key', 'openrouter', 'api-key', 'sk-or-secret', root);
+    for (const [name, provider, auth] of [
+      ['claude-a', 'anthropic', 'setup-token'],
+      ['claude-b', 'anthropic', 'setup-token'],
+      ['claude-gone', 'anthropic', 'setup-token'],
+      ['or-key', 'openrouter', 'api-key'],
+    ] as const) {
+      const { bundle, items } = buildAccountBundle({ id: name, name, provider, auth }, 'test-only-credential');
+      writeBundleWithItemsSync({ ...bundle, backend: 'file' }, items);
+    }
     deleteKeychainTokenSync(Object.values(readAccountRegistry().accounts).find((a) => a.name === 'claude-gone')!.secretRef);
 
     const started = Date.now();
@@ -114,6 +142,5 @@ describe.skipIf(!fileBacked)('localRegistryRecords — which stored credentials 
     expect((await localRegistryRecords('claude', true)).map((r) => r.name).sort()).toEqual(['claude-a', 'claude-b', 'or-key']);
     expect(await localRegistryRecords('kimi')).toEqual([]);
     expect(elapsed).toBeLessThan(5_000);
-    fs.rmSync(root, { recursive: true, force: true });
   });
 });

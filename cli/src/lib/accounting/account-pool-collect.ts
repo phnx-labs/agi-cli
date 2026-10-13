@@ -4,6 +4,7 @@ import { hasKeychainToken, isSecretsTransportError } from '../secrets-client.js'
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryAccountServesHarness, registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
+import { readClaudeUsageCache, type UsageSnapshot } from './usage.js';
 
 export async function localRegistryRecords(agent: AgentId, includeKeyed = false): Promise<RegistryAccountRecord[]> {
   try {
@@ -24,10 +25,11 @@ export interface RunCandidateInputs {
   native: RotateCandidate[];
   records: RegistryAccountRecord[];
   runVersion: string | undefined;
+  usageSnapshotFor?: (usageKey: string) => UsageSnapshot | null;
 }
 
 export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInputs, includeKeyed = false): RotateCandidate[] {
-  const { native, records, runVersion } = inputs;
+  const { native, records, runVersion, usageSnapshotFor } = inputs;
   if (!runVersion) return native;
 
   const seen = new Set(native.filter((c) => c.accountKey).map((c) => c.accountKey as string));
@@ -40,9 +42,9 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
       accountKey: r.accountKey,
       accountLabel: r.name,
       email: null,
-      usageKey: null,
+      usageKey: r.accountKey,
       usageStatus: null,
-      usageSnapshot: null,
+      usageSnapshot: usageSnapshotFor?.(r.accountKey) ?? null,
       usageError: null,
       usageMinutesToLimit: null,
       plan: null,
@@ -62,5 +64,10 @@ export async function collectRunCandidatesForRun(agent: AgentId, includeKeyed = 
     collectRunCandidates(agent),
     runVersion ? localRegistryRecords(agent, includeKeyed) : Promise.resolve([]),
   ]);
-  return foldRegistryCandidates(agent, { native, records, runVersion }, includeKeyed);
+  return foldRegistryCandidates(agent, {
+    native,
+    records,
+    runVersion,
+    usageSnapshotFor: (usageKey) => readClaudeUsageCache(usageKey),
+  }, includeKeyed);
 }
