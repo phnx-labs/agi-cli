@@ -237,7 +237,7 @@ stay on screen. Alert style is app-wide in macOS, so for a level whose schedule
 has no `stay` the CLI withdraws the banner about 10 s after posting it.
 
 **Helper version.** `--level`, `--sound`, `--reminder` and `--withdraw` need the
-first AGI Menu release after 1.18.1; the `menubar` floor in
+AGI Menu 1.19.0 or later; the `menubar` floor in
 [`src/lib/helper-versions.ts`](../src/lib/helper-versions.ts) is raised to it in
 the same CLI release that starts sending them.
 

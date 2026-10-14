@@ -7,7 +7,7 @@ interface HelperRelease {
 }
 
 export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
-  menubar: { tagPrefix: 'menubar', floor: '1.18.1' },
+  menubar: { tagPrefix: 'menubar', floor: '1.19.0' },
 };
 
 export function helperTag(helper: HelperName, version: string): string {

@@ -17,8 +17,8 @@
   this machine posts banners for every device's asks, read from the daemon's shared fleet
   stream; any other machine then posts none. Unset keeps each machine posting its own.
 - **AGI Menu argv.** Banners now pass `--level`, `--sound` and `--reminder <n>`, and a resolved
-  ask is withdrawn with `"AGI Menu" --notify --withdraw <key>`. Needs the AGI Menu release after
-  1.18.1. Source: `cli/src/lib/menubar/notify-desktop.ts`, `cli/docs/menubar.md`.
+  ask is withdrawn with `"AGI Menu" --notify --withdraw <key>`. Needs AGI Menu
+  1.19.0, which this release installs (the `menubar` floor moves to 1.19.0). Source: `cli/src/lib/menubar/notify-desktop.ts`, `cli/docs/menubar.md`.
 - **Claude permission asks name their command.** A Claude permission ask reads "Claude needs
   approval to run Bash: <command>" instead of "Claude needs your permission".
   Source: `cli/src/lib/feed/feed.ts` (the next `agents feed` run rewrites the installed hook).
