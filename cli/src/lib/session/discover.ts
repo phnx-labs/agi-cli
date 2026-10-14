@@ -1050,14 +1050,14 @@ export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId
       } catch {
         continue;
       }
-      if (typeof data?.sessionId !== 'string' || typeof data.name !== 'string' || !data.name.trim()) continue;
+      if (typeof data?.sessionId !== 'string') continue;
       const at = typeof data.updatedAt === 'number' ? data.updatedAt : typeof data.startedAt === 'number' ? data.startedAt : 0;
       const prev = newest.get(data.sessionId);
       if (prev && prev.at >= at) continue;
       newest.set(data.sessionId, {
         entry: {
           sessionId: data.sessionId,
-          name: data.name.trim(),
+          name: typeof data.name === 'string' ? data.name.trim() : '',
           source: typeof data.nameSource === 'string' ? data.nameSource : undefined,
         },
         at,

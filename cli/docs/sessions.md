@@ -274,10 +274,12 @@ touches the endpoint.
   because the row is also published into the git-tracked fleet mirror
   (SES-54a).
 - A session's **`label` has one resolver**, `resolveSessionName`
-  (`lib/session/title.ts`, PHNX-4387): a user `/rename`, then Claude's own
-  current name for the running process (`<config>/sessions/<pid>.json`, read
-  from every config home), then the `agents run --name` launch name (passed to
-  Claude as `claude --name` on a new launch), then Claude's `ai-title`. The
+  (`lib/session/title.ts`, PHNX-4387): a user rename (Claude's live
+  `nameSource: "user"` name, then the transcript's `custom-title`), then
+  Claude's other current name for the running process
+  (`<config>/sessions/<pid>.json`, read from every config home), then the label
+  already stored in the index, then the `agents run --name` launch name (passed
+  to Claude as `claude --name` on a new launch), then Claude's `ai-title`. The
   index and the live roster both call it, so `agents ps`, the extension's tab,
   sidebar card and status bar show the same name. Live rows also carry
   `startedAs`: the first prompt the session was started with, `/goal` and

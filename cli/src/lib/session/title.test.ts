@@ -183,6 +183,7 @@ describe('resolveSessionName — the label rung (PHNX-4387)', () => {
 
   it('a stored index label ranks below the transcript rename and the live name, above the launch name', () => {
     expect(resolveSessionName({ live: { name: 'Renamed', source: 'user' }, indexed: 'Old title' })).toBe('Renamed');
+    expect(resolveSessionName({ live: { name: 'B', source: 'user' }, customTitle: 'A' }), 'a rename the index has not read yet').toBe('B');
     expect(resolveSessionName({ live: { name: 'Claude name', source: 'ai' }, indexed: 'Artifacts-cli base' })).toBe('Claude name');
     expect(resolveSessionName({ customTitle: 'Rush credentials', live: { name: 'Claude name', source: 'ai' }, indexed: 'Rush credentials' })).toBe('Rush credentials');
     expect(resolveSessionName({ indexed: '  ', launchName: 'nightly' })).toBe('nightly');

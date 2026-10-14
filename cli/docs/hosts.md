@@ -805,7 +805,7 @@ writes a JSONL transcript to disk** (Claude/Codex/Gemini/Droid/…), and agents-
 
 So host progress = **tail the remote transcript file, offset-tracked**, parse the
 new lines, render with the existing `SessionEvent` pipeline. This is the same shape
-as `quickExtractTopic` in `session/active.ts`, which already does offset reads
+as `readTranscriptHead` in `session/active.ts`, which already does offset reads
 (`fs.readSync(fd, chunk, 0, chunkSize, totalRead)`) rather than re-reading the
 file or scanning the directory.
 

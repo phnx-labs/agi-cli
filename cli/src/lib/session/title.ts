@@ -109,7 +109,8 @@ function nonEmpty(s: string | null | undefined): string | undefined {
 
 export function resolveSessionName(n: SessionNameSources): string | undefined {
   const liveName = n.live && n.live.source !== 'derived' ? nonEmpty(n.live.name) : undefined;
-  return nonEmpty(n.customTitle)
+  return (n.live?.source === 'user' ? liveName : undefined)
+    ?? nonEmpty(n.customTitle)
     ?? liveName
     ?? nonEmpty(n.indexed)
     ?? nonEmpty(n.launchName)
