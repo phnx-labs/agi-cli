@@ -1,7 +1,8 @@
 import { normalizeHost } from '../machine-id.js';
 import { localMachineId } from '../session/origin-machine.js';
 import { loadDevicesSync } from './registry.js';
-import { isAutoPoolMember } from './pool.js';
+import { autoLaunchPreferredSet, isAutoPoolMember } from './pool.js';
+import { blocksPlacement } from './health.js';
 import {
   formatEmptyAutoPoolError,
   listOnlineDeviceNames,
@@ -11,7 +12,7 @@ import { probePoolSignals } from '../teams/placement-probe.js';
 
 export interface WorkerExclusion {
   device: string;
-  reason: 'unreachable' | 'probe timed out' | 'overloaded' | 'wrong-platform' | 'interactive';
+  reason: 'unreachable' | 'probe timed out' | 'overloaded' | 'disk low' | 'wrong-platform' | 'interactive';
 }
 
 interface WorkerPickPlan {
@@ -26,6 +27,7 @@ interface WorkerPickOptions {
   eligibleHosts?: string[];
   localMachine?: string;
   probe?: (pool: string[]) => Promise<Map<string, DevicePlacementSignal>>;
+  preferred?: ReadonlySet<string>;
 }
 
 const POSIX_PLATFORMS = ['linux', 'macos'] as const;
@@ -66,15 +68,16 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
       excluded.push({ device, reason: signal?.timedOut ? 'probe timed out' : 'unreachable' });
       return false;
     }
-    if (signal.headroom === 'loaded') {
-      excluded.push({ device, reason: 'overloaded' });
+    if (blocksPlacement(signal.headroom)) {
+      excluded.push({ device, reason: signal.headroom === 'disk-low' ? 'disk low' : 'overloaded' });
       return false;
     }
     return true;
   });
   if (eligible.length === 0) throw new Error(formatNoWorkerError(excluded, wanted));
 
-  const device = pickBestDevice(eligible, [], { signals });
+  const preferred = opts.preferred ?? autoLaunchPreferredSet(onPlatform, { roster: onPlatform });
+  const device = pickBestDevice(eligible, [], { signals, preferred });
   return {
     device,
     isLocal: normalizeHost(device) === local,

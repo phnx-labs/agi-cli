@@ -169,6 +169,8 @@ function headroomLabel(row: FleetHealthRow): string {
       return chalk.yellow('busy');
     case 'loaded':
       return chalk.red('loaded');
+    case 'disk-low':
+      return chalk.red('disk low');
     case 'unknown':
       return chalk.gray('unknown');
   }

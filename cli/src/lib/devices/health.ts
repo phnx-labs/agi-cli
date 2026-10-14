@@ -202,15 +202,34 @@ export function fleetCapacity(statsList: Iterable<DeviceStats>): FleetCapacity {
   return cap;
 }
 
-export type Headroom = 'idle' | 'light' | 'busy' | 'loaded' | 'unknown';
+export type Headroom = 'idle' | 'light' | 'busy' | 'loaded' | 'disk-low' | 'unknown';
+
+const GIB = 1024 ** 3;
+
+export const DISK_FLOOR_BYTES = 20 * GIB;
+
+export const MEM_COMFORT_BYTES = 16 * GIB;
+
+export function blocksPlacement(h: Headroom | undefined): boolean {
+  return h === 'loaded' || h === 'disk-low';
+}
+
+export function memPressurePercent(
+  s: Pick<DeviceStats, 'memPercent' | 'memFreeBytes'>,
+): number | undefined {
+  if (s.memFreeBytes !== undefined && s.memFreeBytes >= MEM_COMFORT_BYTES) return undefined;
+  return s.memPercent;
+}
 
 export function headroom(stats: DeviceStats | undefined): Headroom {
   if (!stats || !stats.reachable) return 'unknown';
-  const signals = [stats.loadPercent, stats.memPercent].filter(
+  if (stats.diskFreeBytes !== undefined && stats.diskFreeBytes < DISK_FLOOR_BYTES) return 'disk-low';
+  const hasSignal = stats.loadPercent !== undefined || stats.memPercent !== undefined;
+  if (!hasSignal) return 'unknown';
+  const signals = [stats.loadPercent, memPressurePercent(stats)].filter(
     (v): v is number => typeof v === 'number',
   );
-  if (signals.length === 0) return 'unknown';
-  const worst = Math.max(...signals);
+  const worst = signals.length ? Math.max(...signals) : 0;
   if (worst < 15) return 'idle';
   if (worst < 40) return 'light';
   if (worst < 75) return 'busy';

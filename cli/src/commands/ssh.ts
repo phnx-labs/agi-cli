@@ -144,7 +144,7 @@ import {
   type ConfigEntry,
   type ConfiguredDeviceRole,
 } from '../lib/device-config.js';
-import { filterAutoPool, listWorkerDevices } from '../lib/devices/pool.js';
+import { autoPoolSkips, autoSkipReason, filterAutoPool, listWorkerDevices } from '../lib/devices/pool.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
 import { isSelfHost } from '../lib/devices/self-host.js';
 import {
@@ -198,6 +198,7 @@ const HEADROOM_BADGE: Record<Headroom, string> = {
   light: chalk.green('● light'),
   busy: chalk.yellow('● busy'),
   loaded: chalk.red('● loaded'),
+  'disk-low': chalk.red('● disk low'),
   unknown: chalk.gray('· —'),
 };
 
@@ -1584,7 +1585,7 @@ function registerDevicesCommands(program: Command): void {
 
     if (opts.json) {
       const jsonRoles = listConfiguredDeviceRoles(names);
-      const autoPool = new Set(filterAutoPool(names, { roles: jsonRoles }));
+      const poolSkips = autoPoolSkips(names, { roles: jsonRoles });
       process.stdout.write(JSON.stringify(names.map((name) => {
         const config = deviceConfigJson(name);
         const health = statsMap?.get(name);
@@ -1594,7 +1595,8 @@ function registerDevicesCommands(program: Command): void {
           interactive: name === interactiveHost,
           ...(jsonRoles[name] ? { role: jsonRoles[name] } : {}),
           ...(typeof description === 'string' && description ? { description } : {}),
-          autoPool: autoPool.has(name),
+          autoPool: poolSkips.get(name) === null,
+          autoSkip: autoSkipReason(poolSkips.get(name) ?? null, health, reg[name].tailscale?.online !== false),
           ...(config ? { config } : {}),
           ...(health ? { health: { ...health, headroom: headroom(health) } } : {}),
         };

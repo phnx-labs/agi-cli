@@ -38,8 +38,7 @@ import {
   type ConfiguredDeviceRole,
 } from '../device-config.js';
 import { normalizeHost } from '../machine-id.js';
-
-const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal', 'desktop']);
+import { headroom, type DeviceStats } from './health.js';
 
 interface AutoPoolOptions {
   mode?: AutoPoolMode;
@@ -48,21 +47,41 @@ interface AutoPoolOptions {
   autoLaunch?: Record<string, AutoLaunchPreference>;
 }
 
-export function filterAutoPool(pool: string[], opts: AutoPoolOptions = {}): string[] {
+export type AutoPoolSkip = 'off' | 'personal' | 'desktop' | 'not-a-worker';
+
+export function autoPoolSkips(pool: string[], opts: AutoPoolOptions = {}): Map<string, AutoPoolSkip | null> {
   const roles = opts.roles ?? listConfiguredDeviceRoles(opts.roster ?? pool);
   const byHost = new Map(Object.entries(roles).map(([name, role]) => [normalizeHost(name), role]));
   const roleOf = (host: string) => byHost.get(normalizeHost(host));
   const disabled = disabledAutoLaunchSet(pool, opts);
-  const eligible = pool.filter((host) => {
-    if (disabled.has(normalizeHost(host))) return false;
+  const workersOnly = (opts.mode ?? autoPoolMode()) !== 'all'
+    && [...byHost.values()].some((role) => role === 'worker');
+  return new Map(pool.map((host): [string, AutoPoolSkip | null] => {
+    if (disabled.has(normalizeHost(host))) return [host, 'off'];
     const role = roleOf(host);
-    return role === undefined || !NEVER_AUTO.has(role);
-  });
-  const mode = opts.mode ?? autoPoolMode();
-  if (mode === 'all') return eligible;
-  const anyWorkerMarked = [...byHost.values()].some((role) => role === 'worker');
-  if (!anyWorkerMarked) return eligible;
-  return eligible.filter((host) => roleOf(host) === 'worker');
+    if (role === 'personal' || role === 'desktop') return [host, role];
+    if (workersOnly && role !== 'worker') return [host, 'not-a-worker'];
+    return [host, null];
+  }));
+}
+
+export type AutoSkip = AutoPoolSkip | 'offline' | 'unreachable' | 'loaded' | 'disk-low';
+
+export function autoSkipReason(
+  poolSkip: AutoPoolSkip | null,
+  stats: DeviceStats | undefined,
+  tailnetOnline = true,
+): AutoSkip | null {
+  if (poolSkip) return poolSkip;
+  if (!tailnetOnline) return 'offline';
+  if (stats && !stats.reachable) return 'unreachable';
+  const h = headroom(stats);
+  return h === 'loaded' || h === 'disk-low' ? h : null;
+}
+
+export function filterAutoPool(pool: string[], opts: AutoPoolOptions = {}): string[] {
+  const skips = autoPoolSkips(pool, opts);
+  return pool.filter((host) => skips.get(host) === null);
 }
 
 function disabledAutoLaunchSet(pool: string[], opts: AutoPoolOptions): Set<string> {

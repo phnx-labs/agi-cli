@@ -202,6 +202,16 @@ describe('headroom', () => {
     expect(at(50, 5)).toBe('busy');
     expect(at(5, 90)).toBe('loaded');
   });
+  it('reads a near-full disk as disk-low whatever the load', () => {
+    const s = { host: 'h', reachable: true, loadPercent: 3, memPercent: 20, fetchedAt: 0 };
+    expect(headroom({ ...s, diskFreeBytes: 632 * 1024 ** 2 })).toBe('disk-low');
+    expect(headroom({ ...s, diskFreeBytes: 32 * 1024 ** 3 })).toBe('light');
+  });
+  it('ignores memory percent while plenty of memory is free', () => {
+    const big = { host: 'h', reachable: true, loadPercent: 3, memPercent: 48, fetchedAt: 0 };
+    expect(headroom({ ...big, memFreeBytes: 62 * 1024 ** 3 })).toBe('idle');
+    expect(headroom({ ...big, memFreeBytes: 4 * 1024 ** 3 })).toBe('busy');
+  });
   it('is unknown when unreachable or statless', () => {
     expect(headroom(undefined)).toBe('unknown');
     expect(headroom({ host: 'h', reachable: false, fetchedAt: 0 })).toBe('unknown');
