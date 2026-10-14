@@ -325,7 +325,6 @@ export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelo
 let sharedLocal: FeedHub | null = null;
 let sharedFleet: FeedHub | null = null;
 
-/** The one fleet collector per process: the feed-stream socket and attention-notify both read it. */
 export function sharedFleetFeedHub(): FeedHub {
   return sharedFleet ??= new FeedHub({ watch: watchFleetFeed });
 }

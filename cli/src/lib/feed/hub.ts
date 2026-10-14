@@ -78,7 +78,6 @@ export class FeedHubState {
 
   get scopeNames(): string[] { return [...this.scopes.keys()]; }
 
-  /** Every open ask the stream holds, each with the session row it belongs to. */
   attention(): Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> {
     const out: Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> = [];
     for (const [scope, state] of this.scopes) {

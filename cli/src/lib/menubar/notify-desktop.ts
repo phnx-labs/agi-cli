@@ -15,10 +15,8 @@ export interface DesktopNotification {
   key?: string;
   sessionId?: string;
   choices?: { id: string; label: string }[];
-  /** urgent/high post as time-sensitive, normal/low as active. See docs/menubar.md §Attention banners for the helper floor. */
   level?: 'urgent' | 'high' | 'normal' | 'low';
   sound?: boolean;
-  /** n >= 1 marks the nth reminder of the same ask. */
   reminder?: number;
 }
 
@@ -37,10 +35,7 @@ export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   return args;
 }
 
-/**
- * Rides on `--notify` on purpose: an AGI Menu that predates withdraw requires
- * --title/--body and exits 2, instead of launching a second menu-bar instance.
- */
+// Rides on --notify so an AGI Menu without withdraw exits 2 instead of starting a second menu-bar instance.
 export function buildMenubarWithdrawArgs(keys: readonly string[]): string[] {
   const args = ['--notify'];
   for (const key of keys) args.push('--withdraw', key);
@@ -92,7 +87,6 @@ export function notifyDesktop(n: DesktopNotification): void {
   }
 }
 
-/** Removes delivered AGI Menu banners by key. osascript and notify-send banners cannot be recalled, so it is a no-op there. */
 export function withdrawDesktop(keys: readonly string[]): void {
   if (keys.length === 0 || os.platform() !== 'darwin') return;
   try {

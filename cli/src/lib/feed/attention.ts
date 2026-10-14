@@ -320,7 +320,6 @@ function coveredByResolution(candidate: AttentionCandidate, resolution?: Attenti
   return true;
 }
 
-// Linear's priority numbers: 0 None, 1 Urgent, 2 High, 3 Medium, 4 Low.
 const TICKET_PRIORITY: Record<number, { urgency: AttentionUrgency; name: string }> = {
   1: { urgency: 'urgent', name: 'Urgent' },
   2: { urgency: 'high', name: 'High' },
@@ -363,13 +362,7 @@ function releaseBlocker(item: UnrankedAttentionItem): string | undefined {
   return word ? `Blocks ${releaseNoun(word[0])}` : undefined;
 }
 
-/**
- * How fast an ask must reach the owner (PHNX-4369 contract 1). An ask that holds
- * up a release, deploy or merge is urgent whatever its ticket says; otherwise the
- * linked ticket's Linear priority decides, and an ask with neither is normal.
- * `costOfDelay` is deliberately not an input: every declared block carries
- * `high`, so it cannot tell a release apart from any other ask.
- */
+// costOfDelay is not an input: every declared block carries `high`, so it cannot single out a release.
 export function attentionUrgency(
   item: UnrankedAttentionItem,
   ticket?: { id: string; priority?: number },
@@ -394,7 +387,6 @@ export function reconcileAttention(input: {
   session: ActiveSession;
   pullRequest?: PullRequestAttentionSignal;
   resolution?: AttentionResolution;
-  /** Called only once an ask exists, so a session with nothing open never looks its ticket up. */
   ticketPriority?: (ticketId: string) => number | undefined;
   nowMs: number;
 }): AttentionItem | undefined {

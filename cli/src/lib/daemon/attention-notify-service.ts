@@ -1,32 +1,13 @@
 /**
- * Attention desktop banners as a supervised periodic service (PHNX-4004, PHNX-4369).
- *
- * Each tick takes the open asks — reconciled through the CLI-owned reconciler
- * (feed/attention.ts — never re-deriving detection) — and drives each one's
- * banner along the schedule its urgency level is configured with
- * (`menubar.menu.notify{Urgent,High,Normal,Low}`, feed/notify-schedule.ts): the
- * first banner at the level's first time after the ask opened, a reminder at
- * each later time, a withdraw when the ask resolves, and a withdraw about 10 s
- * after posting for a level without `stay` (macOS alert style is app-wide, so
- * "slides away" is the CLI withdrawing it). A `sidebar` level posts nothing.
- * The banner carries the category, the attention key (which is also the banner
- * identifier, so a reminder replaces the earlier banner), the session id and the
- * answerable choices, routed back through `agents feed answer <key> --choice <id>`.
- *
- * Which asks: with `interactive.host` unset, this host's own sessions. With it
- * set to THIS machine, every host's asks, read from the one shared fleet
- * collector `feed watch` uses (`sharedFleetFeedHub`) — no second SSH fan-out.
- * With it set to another machine, this host posts nothing: that machine posts.
- *
- * Idempotency is a filesystem ledger, not memory: `<key>` records the first
- * banner and the banner's state, `<key>#r<n>` the nth reminder, under
- * `~/.agents/.history/feed/notified/`, so a daemon restart never re-sends one.
- * It is pruned with the feed's 14-day retention rule. The same hourly pass runs
- * the mailbox gc, which drops open asks whose session is gone.
- *
- * Reader-independent: an attention banner must fire whether or not anyone is
- * watching the stream. `done` banners are deliberately NOT produced here; they
- * ride the run process's own exit (`run-notify.ts`).
+ * Attention desktop banners (PHNX-4004, PHNX-4369). Each tick takes the open asks
+ * from the CLI-owned reconciler (feed/attention.ts) and drives each banner along
+ * its urgency level's schedule (`menubar.menu.notify*`): first banner, reminders
+ * (same identifier, so they replace it), withdraw on resolve, and withdraw ~10 s
+ * after posting when the level has no `stay` (macOS alert style is app-wide).
+ * `interactive.host` unset: this host's asks; this machine: every host's, from
+ * the shared fleet collector; another machine: none. The ledger under
+ * `feed/notified/` (`<key>`, `<key>#r<n>`) makes a restart re-send nothing.
+ * `done` banners ride the run process's exit (`run-notify.ts`), not this service.
  */
 
 import * as fs from 'fs';
@@ -117,7 +98,6 @@ export function buildAttentionNotification(item: AttentionItem, session: BannerS
   return n;
 }
 
-/** unset → this host's own asks; this machine → every host's; another machine → none. */
 export function notifyScope(interactiveHost: string | undefined, self: string): NotifyScope {
   if (!interactiveHost?.trim()) return 'local';
   return normalizeHost(interactiveHost) === normalizeHost(self) ? 'fleet' : 'none';
@@ -135,7 +115,6 @@ export function readAttentionNotifySettings(): AttentionNotifySettings {
   return { interactiveHost: typeof host === 'string' ? host : undefined, schedules };
 }
 
-/** The furthest schedule stage already due, or -1 when the first banner is not due yet. */
 export function dueStage(schedule: NotifySchedule, openedMs: number, nowMs: number): number {
   if (schedule.sidebar) return -1;
   let stage = -1;
@@ -157,7 +136,6 @@ interface AttentionNotifyServiceOptions {
   getSessions?: () => Promise<ActiveSession[]>;
   notify?: (n: DesktopNotification) => void;
   withdraw?: (keys: string[]) => void;
-  /** The fleet's open asks plus the scopes the collector has heard from; undefined = subscribe to the shared fleet hub. */
   fleetAsks?: () => { asks: AttentionAsk[]; scopes: Set<string> };
   settings?: () => AttentionNotifySettings;
   self?: () => string;
@@ -330,7 +308,6 @@ export class AttentionNotifyService extends BasePeriodicService {
     return path.join(this.ledgerDir, encodeURIComponent(stage ? `${key}#r${stage}` : key));
   }
 
-  /** Banners posted and not yet resolved, read once from the ledger so a restart can still withdraw them. */
   private async loadBanners(): Promise<Map<string, BannerState>> {
     if (this.banners) return this.banners;
     const banners = new Map<string, BannerState>();
