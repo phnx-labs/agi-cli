@@ -12,7 +12,7 @@ interface PrHead {
   sha: string;
 }
 
-function parseNdjson(out: string): Array<Record<string, unknown>> {
+export function parseNdjson(out: string): Array<Record<string, unknown>> {
   const rows: Array<Record<string, unknown>> = [];
   for (const line of out.split('\n')) {
     const t = line.trim();
