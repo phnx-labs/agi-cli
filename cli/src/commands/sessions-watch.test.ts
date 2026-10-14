@@ -8,6 +8,6 @@ describe('sessions watch command', () => {
     registerSessionsWatchCommand(parent);
     const command = parent.commands.find((candidate) => candidate.name() === 'watch');
     expect(command).toBeDefined();
-    expect(command!.options.map((option) => option.long)).toEqual(['--json', '--local']);
+    expect(command!.options.map((option) => option.long)).toEqual(['--json', '--local', '--include-lead']);
   });
 });
