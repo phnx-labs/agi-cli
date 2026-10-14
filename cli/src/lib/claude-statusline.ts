@@ -8,8 +8,14 @@ import {
   readClaudeHomeConfig,
   type ClaudeHomeIdentity,
 } from './agent-spec/agents.js';
-import { findNativeAccountByIdentity, type NativeAccount } from './account-registry.js';
+import {
+  findAccount,
+  findNativeAccountByIdentity,
+  listNativeAccounts,
+  type NativeAccount,
+} from './account-registry.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
+import { providerAccountUsageKey } from './accounting/account-pool.js';
 import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 import { loadReminders, pickReminderForSession } from './reminders.js';
 import { readMeta } from './state.js';
@@ -68,18 +74,84 @@ function windowFromNative(
   };
 }
 
+/** The run-launch env var `agents run` sets to the id of the account whose credential the session runs with. */
+export const RUN_ACCOUNT_ID_ENV = 'AGENTS_RUN_ACCOUNT_ID';
+
+export interface StatusLineAccount {
+  /** Usage-cache key the session's rate limits are credited to; null when the credential is not known. */
+  usageKey: string | null;
+  /** Native or provider account id for the auth-outcome record. */
+  accountId: string | null;
+  /** Account part rendered in the status line. */
+  label: string;
+}
+
+export interface StatusLineAccountLookups {
+  nativeAccount?: (identity: ClaudeHomeIdentity | null) => NativeAccount | null;
+  nativeAccountById?: (id: string) => NativeAccount | null;
+  providerAccount?: (id: string) => { id: string; name: string } | null;
+}
+
+/**
+ * Which account a session's rate limits belong to. A session launched with a provider
+ * (setup-token) account runs inside the version home of a native login but authenticates
+ * as the token's account, so its limits must never be written under the home's identity:
+ * that overwrote a rate-limited login's 100% with the token account's headroom and made
+ * `--strategy balanced` pick the limited login again.
+ */
+export function resolveStatusLineAccount(
+  env: NodeJS.ProcessEnv,
+  identity: ClaudeHomeIdentity | null,
+  lookups: StatusLineAccountLookups = {},
+): StatusLineAccount {
+  const runAccountId = env[RUN_ACCOUNT_ID_ENV]?.trim();
+  if (runAccountId) {
+    const native = (lookups.nativeAccountById ?? findNativeAccountById)(runAccountId);
+    if (!native) {
+      const provider = (lookups.providerAccount ?? findProviderAccount)(runAccountId);
+      if (provider) {
+        return {
+          usageKey: providerAccountUsageKey('claude', provider.name),
+          accountId: provider.id,
+          label: provider.name,
+        };
+      }
+      return { usageKey: null, accountId: null, label: 'unregistered account' };
+    }
+  }
+  const native = (lookups.nativeAccount ?? resolveNativeAccount)(identity);
+  return {
+    usageKey: identity?.usageKey ?? null,
+    accountId: native?.id ?? null,
+    label: formatAccountPart(identity, native),
+  };
+}
+
+function findNativeAccountById(id: string): NativeAccount | null {
+  return listNativeAccounts(readMeta()).find((account) => account.agent === 'claude' && account.id === id) ?? null;
+}
+
+function findProviderAccount(id: string): { id: string; name: string } | null {
+  try {
+    const account = findAccount(id);
+    return account ? { id: account.id, name: account.name } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function ingestClaudeStatusLineUsage(
   payload: ClaudeStatusLinePayload,
-  identity: ClaudeHomeIdentity | null,
+  account: StatusLineAccount,
   versionHome?: string | null,
 ): boolean {
-  if (!identity?.usageKey || !payload.rate_limits) return false;
+  if (!account.usageKey || !payload.rate_limits) return false;
   const windows = [
     windowFromNative('session', payload.rate_limits.five_hour),
     windowFromNative('week', payload.rate_limits.seven_day),
   ].filter((value): value is UsageWindow => value !== null);
   if (windows.length === 0) return false;
-  mergeClaudeUsageCacheWindows(identity.usageKey, {
+  mergeClaudeUsageCacheWindows(account.usageKey, {
     source: 'live',
     sourceLabel: 'Claude response rate limits',
     capturedAt: new Date(),
@@ -88,7 +160,7 @@ export function ingestClaudeStatusLineUsage(
   });
   recordRunAuthOutcome({
     agent: 'claude',
-    accountId: resolveNativeAccount(identity)?.id ?? null,
+    accountId: account.accountId,
     home: versionHome ?? null,
     outcome: { ok: true },
   });
@@ -188,13 +260,14 @@ export async function runClaudeStatusLine(): Promise<number> {
   }
   const versionHome = versionHomeFromEnv(process.env);
   const identity = readClaudeIdentity(claudeHomeFromEnv(process.env));
-  if (versionHome) ingestClaudeStatusLineUsage(payload, identity, versionHome);
+  const account = resolveStatusLineAccount(process.env, identity);
+  if (versionHome) ingestClaudeStatusLineUsage(payload, account, versionHome);
   process.stdout.write(renderClaudeStatusLine(
     payload,
     undefined,
     versionHome ? renderDelegate(raw, versionHome) : '',
     resolveReminderPart(payload.session_id),
-    formatAccountPart(identity, resolveNativeAccount(identity)),
+    account.label,
   ));
   return 0;
 }

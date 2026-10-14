@@ -4,6 +4,7 @@ import { hasKeychainTokenSync, isSecretsTransportError } from '../secrets-client
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
 import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
+import { readClaudeUsageCache, type UsageSnapshot } from './usage.js';
 
 function localRegistryRecords(): RegistryAccountRecord[] {
   try {
@@ -21,10 +22,12 @@ export interface RunCandidateInputs {
   native: RotateCandidate[];
   records: RegistryAccountRecord[];
   runVersion: string | undefined;
+  /** Cached usage for a provider account's usage key (what its own sessions' status lines recorded). */
+  usageSnapshotFor?: (usageKey: string) => UsageSnapshot | null;
 }
 
 export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInputs, includeKeyed = false): RotateCandidate[] {
-  const { native, records, runVersion } = inputs;
+  const { native, records, runVersion, usageSnapshotFor } = inputs;
   if (!runVersion) return native;
 
   const seen = new Set(native.filter((c) => c.accountKey).map((c) => c.accountKey as string));
@@ -37,9 +40,9 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
       accountKey: r.accountKey,
       accountLabel: r.name,
       email: null,
-      usageKey: null,
+      usageKey: r.accountKey,
       usageStatus: null,
-      usageSnapshot: null,
+      usageSnapshot: usageSnapshotFor?.(r.accountKey) ?? null,
       usageError: null,
       usageMinutesToLimit: null,
       plan: null,
@@ -56,5 +59,10 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
 export async function collectRunCandidatesForRun(agent: AgentId, includeKeyed = false): Promise<RotateCandidate[]> {
   const native = await collectRunCandidates(agent);
   const runVersion = getGlobalDefault(agent) ?? listInstalledVersions(agent)[0];
-  return foldRegistryCandidates(agent, { native, records: localRegistryRecords(), runVersion }, includeKeyed);
+  return foldRegistryCandidates(agent, {
+    native,
+    records: localRegistryRecords(),
+    runVersion,
+    usageSnapshotFor: (usageKey) => readClaudeUsageCache(usageKey),
+  }, includeKeyed);
 }

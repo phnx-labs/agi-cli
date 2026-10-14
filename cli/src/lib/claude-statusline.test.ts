@@ -15,6 +15,7 @@ import {
   readClaudeIdentity,
   renderDelegate,
   resolveReminderPart,
+  resolveStatusLineAccount,
 } from './claude-statusline.js';
 import { findNativeAccountByIdentity } from './account-registry.js';
 import { setRemindersFilePathForTest } from './reminders.js';
@@ -26,6 +27,8 @@ import {
 
 const dirs: string[] = [];
 let priorCachePath: string | null = null;
+
+const noNative = { nativeAccount: () => null };
 
 function tempHome(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-claude-statusline-'));
@@ -184,7 +187,7 @@ describe('Claude native status line', () => {
         five_hour: { used_percentage: 12, resets_at: 1_800_000_000 },
         seven_day: { used_percentage: 34, resets_at: 1_800_100_000 },
       },
-    }, readClaudeIdentity(home))).toBe(true);
+    }, resolveStatusLineAccount({}, readClaudeIdentity(home), noNative))).toBe(true);
 
     const snapshot = readClaudeUsageCache('claude:org=org-1');
     expect(snapshot?.source).toBe('last_seen');
@@ -197,7 +200,7 @@ describe('Claude native status line', () => {
       rate_limits: {
         five_hour: { used_percentage: 56, resets_at: 1_800_200_000 },
       },
-    }, readClaudeIdentity(home))).toBe(true);
+    }, resolveStatusLineAccount({}, readClaudeIdentity(home), noNative))).toBe(true);
 
     const partialSnapshot = readClaudeUsageCache('claude:org=org-1');
     expect(partialSnapshot?.plan).toBe('Max');
@@ -209,7 +212,81 @@ describe('Claude native status line', () => {
 
   it('does not erase the cache when Claude omits rate_limits', () => {
     const home = tempHome();
-    expect(ingestClaudeStatusLineUsage({}, readClaudeIdentity(home))).toBe(false);
+    expect(ingestClaudeStatusLineUsage({}, resolveStatusLineAccount({}, readClaudeIdentity(home), noNative))).toBe(false);
+  });
+
+  it('credits a setup-token session to its provider account, never to the home login it runs inside', () => {
+    const home = tempHome();
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'login@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
+    }));
+    priorCachePath = setClaudeUsageCachePathForTest(path.join(home, 'usage.json'));
+    const limited = new Date(Date.now() + 60 * 60_000);
+    writeClaudeUsageCache('claude:org=org-1', {
+      source: 'live',
+      sourceLabel: 'poll',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 100, resetsAt: limited, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 56, resetsAt: limited, windowMinutes: 10_080 },
+      ],
+    });
+
+    const env = { CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-token', AGENTS_RUN_ACCOUNT_ID: 'prov-1' };
+    const account = resolveStatusLineAccount(env, readClaudeIdentity(home), {
+      ...noNative,
+      nativeAccountById: () => null,
+      providerAccount: (id) => (id === 'prov-1' ? { id, name: 'turing-token' } : null),
+    });
+    expect(account).toEqual({ usageKey: 'claude:name=turing-token', accountId: 'prov-1', label: 'turing-token' });
+
+    expect(ingestClaudeStatusLineUsage({
+      rate_limits: {
+        five_hour: { used_percentage: 31, resets_at: 1_800_000_000 },
+        seven_day: { used_percentage: 3, resets_at: 1_800_100_000 },
+      },
+    }, account)).toBe(true);
+
+    expect(readClaudeUsageCache('claude:name=turing-token')?.windows.map((w) => [w.key, w.usedPercent])).toEqual([
+      ['session', 31],
+      ['week', 3],
+    ]);
+    expect(readClaudeUsageCache('claude:org=org-1')?.windows.map((w) => [w.key, w.usedPercent])).toEqual([
+      ['session', 100],
+      ['week', 56],
+    ]);
+  });
+
+  it('keeps the home identity when the run account id names a native login, and credits nothing for an unknown id', () => {
+    const home = tempHome();
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({
+      oauthAccount: { emailAddress: 'login@example.com', accountUuid: 'account-1', organizationUuid: 'org-1' },
+    }));
+    const identity = readClaudeIdentity(home);
+    const work = {
+      kind: 'native' as const, id: 'acct-work', name: 'work', agent: 'claude' as const,
+      identityKey: identity!.accountKey!, identityLabel: 'login@example.com', scope: 'device' as const,
+    };
+    let providerLookups = 0;
+    const lookups = {
+      nativeAccount: () => work,
+      nativeAccountById: (id: string) => (id === 'acct-work' ? work : null),
+      providerAccount: () => { providerLookups += 1; return null; },
+    };
+
+    expect(resolveStatusLineAccount({ AGENTS_RUN_ACCOUNT_ID: 'acct-work', CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-minted' }, identity, lookups))
+      .toEqual({ usageKey: 'claude:org=org-1', accountId: 'acct-work', label: 'work' });
+    expect(providerLookups).toBe(0);
+
+    expect(resolveStatusLineAccount({}, identity, lookups))
+      .toEqual({ usageKey: 'claude:org=org-1', accountId: 'acct-work', label: 'work' });
+
+    const unknown = resolveStatusLineAccount({ AGENTS_RUN_ACCOUNT_ID: 'ghost' }, identity, lookups);
+    expect(unknown).toEqual({ usageKey: null, accountId: null, label: 'unregistered account' });
+    expect(ingestClaudeStatusLineUsage({
+      rate_limits: { five_hour: { used_percentage: 5 } },
+    }, unknown)).toBe(false);
   });
 
   it('wraps and preserves a pre-existing status-line command', () => {
