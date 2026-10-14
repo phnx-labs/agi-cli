@@ -2,7 +2,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ghExec, canonicalizeRepo, projectRepoSlugs, type GhExec } from './pr-mergeable.js';
-import { isRateLimitError, rollupForSha, type RollupItem } from './rest.js';
+import { isRateLimitError, parseNdjson, rollupForSha, type RollupItem } from './rest.js';
 import { cachedViewer, fetchViewerProfile } from './viewer.js';
 import { repoPathClaims, type ProjectDef } from '../projects.js';
 import { getCacheDir } from '../state.js';
@@ -117,16 +117,6 @@ const PR_JQ =
   'headSha: (.head.sha // ""), body: (.body // ""), ' +
   'mergeable: .mergeable, mergeableState: .mergeable_state, ' +
   'autoMerge: (if .auto_merge then {enabledBy: (.auto_merge.enabled_by.login // ""), method: (.auto_merge.merge_method // "")} else null end)}';
-
-function parseNdjson(out: string): Array<Record<string, unknown>> {
-  const rows: Array<Record<string, unknown>> = [];
-  for (const line of out.split('\n')) {
-    const t = line.trim();
-    if (!t) continue;
-    rows.push(JSON.parse(t) as Record<string, unknown>);
-  }
-  return rows;
-}
 
 export function rowToProjectPr(row: Record<string, unknown>): ProjectPr {
   return {

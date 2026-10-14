@@ -11,6 +11,7 @@ import {
   type ProjectPr,
   type RepoMergeAbility,
 } from './project-prs.js';
+import { parseNdjson } from './rest.js';
 import type { ProjectDef } from '../projects.js';
 
 export type NeedsMe = 'review' | 'failing' | 'conflicts';
@@ -71,7 +72,7 @@ async function searchOpenPrs(qualifier: string, gh: GhExec): Promise<SearchRow[]
     '-f', `q=is:pr is:open archived:false sort:updated-desc ${qualifier}`, '-f', `query=${SEARCH_QUERY}`,
     '--jq', '.data.search.nodes[] | select(.number)',
   ]);
-  return out.split('\n').filter((l) => l.trim()).map((l) => prFromNode(JSON.parse(l) as Record<string, unknown>));
+  return parseNdjson(out).map(prFromNode);
 }
 
 export async function listViewerOwners(viewer: string | null, gh: GhExec = ghExec): Promise<string[]> {
