@@ -4,7 +4,7 @@ import type { AgentId } from './types.js';
 import { MODEL_TIERS, type ModelTier } from './model-tiers.js';
 import { VERSION_RE } from './run-defaults.js';
 
-export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates' | 'menubar';
+export type ConfigScope = 'run' | 'interactive' | 'auto' | 'browser' | 'project' | 'device' | 'summarizer' | 'updates' | 'menubar' | 'lead';
 
 export const MENUBAR_MENU_PROPERTIES = [
   'defaultProject',
@@ -95,6 +95,11 @@ export interface ParsedSummarizerConfigKey {
   property: 'enabled' | 'baseUrl' | 'model';
 }
 
+export interface ParsedLeadConfigKey {
+  scope: 'lead';
+  property: 'model';
+}
+
 export interface ParsedUpdatesConfigKey {
   scope: 'updates';
   property: 'auto';
@@ -116,7 +121,8 @@ export type ParsedConfigKey =
   | ParsedDeviceConfigKey
   | ParsedSummarizerConfigKey
   | ParsedUpdatesConfigKey
-  | ParsedMenubarConfigKey;
+  | ParsedMenubarConfigKey
+  | ParsedLeadConfigKey;
 
 export type DeviceConfigProperty =
   | 'role'
@@ -213,6 +219,8 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'summarizer', property: summarizerMatch[1] as 'enabled' | 'baseUrl' | 'model' };
   }
 
+  if (raw === 'lead.model') return { scope: 'lead', property: 'model' };
+
   if (raw === 'menubar.enabled') return { scope: 'menubar', property: 'enabled' };
   if (raw === 'menubar.autoUpdate') return { scope: 'menubar', property: 'autoUpdate' };
 
@@ -268,6 +276,9 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   if (raw.startsWith('summarizer.')) {
     throw new Error(`Invalid summarizer config key '${key}'. Use summarizer.enabled, summarizer.baseUrl, or summarizer.model.`);
   }
+  if (raw.startsWith('lead.')) {
+    throw new Error(`Invalid lead config key '${key}'. Use lead.model.`);
+  }
   if (raw.startsWith('updates.')) {
     throw new Error(`Invalid updates config key '${key}'. Use updates.auto or updates.<agent>.auto.`);
   }
@@ -283,7 +294,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   throw new Error(
-    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices, summarizer, updates, menubar.`,
+    `Unknown config scope in '${key}'. Use one of: run, interactive, auto, browser, project, devices, summarizer, updates, menubar, lead.`,
   );
 }
 
@@ -312,6 +323,8 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
       return parsed.agent ? `updates.${parsed.agent}.auto` : 'updates.auto';
     case 'menubar':
       return parsed.section ? `menubar.${parsed.section}.${parsed.property}` : `menubar.${parsed.property}`;
+    case 'lead':
+      return 'lead.model';
   }
 }
 
@@ -337,6 +350,7 @@ export function listKnownConfigKeys(): string[] {
     'summarizer.model',
     'updates.auto',
     'updates.<agent>.auto',
+    'lead.model',
   );
   keys.push(...MENUBAR_CONFIG_KEYS);
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
@@ -408,6 +422,8 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return parsed.agent
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
+    case 'lead':
+      return 'config.leadModel (central agents.yaml; syncs fleet-wide)';
     case 'menubar':
       if (parsed.property === 'enabled') return 'devices/<self>/agents.yaml config.menubarEnabled';
       return `config.menubar${parsed.section === 'menu' ? 'Menu' : parsed.section === 'statusbar' ? 'Statusbar' : ''}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;

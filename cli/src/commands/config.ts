@@ -91,6 +91,8 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
       return parsed.property === 'enabled' ? parseBool(raw, key) : raw.trim();
     case 'updates':
       return parseBool(raw, key);
+    case 'lead':
+      return raw.trim();
     case 'menubar': {
       const spec = configKeySpec(formatConfigKey(parsed));
       if (spec.type === 'bool') return parseBool(raw, key);
@@ -191,6 +193,9 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       setConfigValue(formatConfigKey(parsed), value);
       return;
     }
+    case 'lead':
+      setConfigValue('lead.model', value);
+      return;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       if (parsed.property === 'notes') {
@@ -262,6 +267,11 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       unsetConfigValue(name);
       return had;
     }
+    case 'lead': {
+      const had = getConfigValue('lead.model').value !== undefined;
+      unsetConfigValue('lead.model');
+      return had;
+    }
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       const had = getConfigValue(configName, { device: parsed.device }).value !== undefined;
@@ -301,6 +311,8 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return parsed.agent ? rawAgentAutoUpdateSetting(parsed.agent) : rawGlobalAutoUpdateSetting();
     case 'menubar':
       return getConfigValue(formatConfigKey(parsed)).value;
+    case 'lead':
+      return getConfigValue('lead.model').value;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -376,6 +388,11 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     if (value !== undefined) {
       yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
     }
+  }
+
+  const leadModel = getConfigValue('lead.model').value;
+  if (leadModel !== undefined) {
+    yield { key: 'lead.model', value: leadModel, hint: configKeyStorageHint(parseConfigKey('lead.model')) };
   }
 
   const globalAutoUpdate = rawGlobalAutoUpdateSetting();

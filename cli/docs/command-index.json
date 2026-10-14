@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 45,
-  "commands": 338,
+  "groups": 46,
+  "commands": 355,
   "root": {
     "name": "agents",
     "path": "",
@@ -7079,6 +7079,586 @@
         }
       ],
       "subcommands": []
+    },
+    {
+      "name": "lead",
+      "path": "lead",
+      "aliases": [],
+      "description": "Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "# Ask the Lead (starts its warm host on first use; later turns reuse it)\nagents lead ask --project rush -- what is running?\nagents lead ask --project rush --json -- put Claude on PHNX-4365\n\n# A stop is held for you; run the token it printed\nagents lead confirm c_0123456789abcdef\n\n# What it said before, its state, and shutting it down\nagents lead history --project rush --limit 20 --json\nagents lead status --json\nagents lead stop --project rush",
+      "notes": "- One host process per project owns the Claude child and survives the caller exiting.\n  Its files live in ~/.agents/lead/<project>/ (session.json, memory.md, history.ndjson, host.log).\n- The Lead runs with isolated settings and may only run the fixed-shape agents lead tool commands.\n- Stops go through confirm tokens, which expire after 10 minutes.\n- The model is the lead.model setting (default sonnet): agents config set lead.model <model>.",
+      "subcommands": [
+        {
+          "name": "ask",
+          "path": "lead ask",
+          "aliases": [],
+          "description": "Send one message to the project Lead and stream its reply",
+          "args": [
+            {
+              "name": "text",
+              "required": true,
+              "variadic": true,
+              "description": "What to ask (put it after --)"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--project <name>",
+              "description": "Project name from agents projects list",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--voice <secs>",
+              "description": "The text is a voice transcript of this many seconds",
+              "long": "--voice",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Stream NDJSON events (turn, status, tool, text, confirm, done, error)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "confirm",
+          "path": "lead confirm",
+          "aliases": [],
+          "description": "Run an action the Lead held for confirmation (a stop), by its token",
+          "args": [
+            {
+              "name": "token",
+              "required": true,
+              "variadic": false,
+              "description": "The c_… token from the confirm event"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Stream NDJSON events (tool, done, error)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "history",
+          "path": "lead history",
+          "aliases": [],
+          "description": "Print finished Lead turns for a project, oldest first",
+          "args": [],
+          "options": [
+            {
+              "flags": "--project <name>",
+              "description": "Project name",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--limit <n>",
+              "description": "Only the last N turns",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Print a JSON array of turns",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "status",
+          "path": "lead status",
+          "aliases": [],
+          "description": "Show whether each project Lead is warm, cold or stopped, with its session and context use",
+          "args": [],
+          "options": [
+            {
+              "flags": "--project <name>",
+              "description": "Only this project",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Print JSON (an object with --project, else an array)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "stop",
+          "path": "lead stop",
+          "aliases": [],
+          "description": "Stop a project Lead host and its Claude process (its session stays resumable)",
+          "args": [],
+          "options": [
+            {
+              "flags": "--project <name>",
+              "description": "Project name",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Print {project, stopped}",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "tool",
+          "path": "lead tool",
+          "aliases": [],
+          "description": "The fixed-shape commands a Lead may run (only inside a Lead; the harness allows nothing else)",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "notes": "- These run inside the Lead's Claude process, which sets AGENTS_LEAD_PROJECT. Each has one fixed shape:\n  no --mode, --secrets, --device, --lease, --cloud or pass-through arguments exist on any of them.\n- stop never stops anything: it mints a confirm token the owner runs with agents lead confirm.",
+          "subcommands": [
+            {
+              "name": "dispatch",
+              "path": "lead tool dispatch",
+              "aliases": [],
+              "description": "Move a ticket to In Progress, delegate it, and start the agent on it in edit mode",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--ticket <id>",
+                  "description": "Ticket id, e.g. PHNX-4365",
+                  "long": "--ticket",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--agent <agent>",
+                  "description": "Agent to run",
+                  "long": "--agent",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "claude"
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "linear",
+              "path": "lead tool linear",
+              "aliases": [],
+              "description": "Read this project's Linear tickets, or create one",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": [
+                {
+                  "name": "create",
+                  "path": "lead tool linear create",
+                  "aliases": [],
+                  "description": "Create a ticket in this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--title <title>",
+                      "description": "Title",
+                      "long": "--title",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--description <text>",
+                      "description": "Description",
+                      "long": "--description",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "tasks",
+                  "path": "lead tool linear tasks",
+                  "aliases": [],
+                  "description": "List tickets of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--status <status>",
+                      "description": "open|todo|progress|backlog|done",
+                      "long": "--status",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false,
+                      "defaultValue": "open"
+                    },
+                    {
+                      "flags": "--limit <n>",
+                      "description": "1-50",
+                      "long": "--limit",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false,
+                      "defaultValue": "20"
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "view",
+                  "path": "lead tool linear view",
+                  "aliases": [],
+                  "description": "Show one ticket",
+                  "args": [
+                    {
+                      "name": "id",
+                      "required": true,
+                      "variadic": false,
+                      "description": "Ticket id"
+                    }
+                  ],
+                  "options": [
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                }
+              ]
+            },
+            {
+              "name": "remember",
+              "path": "lead tool remember",
+              "aliases": [],
+              "description": "Save one short note to the Lead's memory.md",
+              "args": [
+                {
+                  "name": "note",
+                  "required": true,
+                  "variadic": true,
+                  "description": "The note (after --)"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "roster",
+              "path": "lead tool roster",
+              "aliases": [],
+              "description": "List live sessions for this project (or --project) from the Lead host's live feed",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--project <name>",
+                  "description": "Another project",
+                  "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "send",
+              "path": "lead tool send",
+              "aliases": [],
+              "description": "Type a message into a running session of this project (slash commands are refused)",
+              "args": [
+                {
+                  "name": "text",
+                  "required": true,
+                  "variadic": true,
+                  "description": "The message (after --)"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--session <id>",
+                  "description": "Session id or 8+ character prefix",
+                  "long": "--session",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "start",
+              "path": "lead tool start",
+              "aliases": [],
+              "description": "Start an agent in edit mode on a task with no ticket",
+              "args": [
+                {
+                  "name": "task",
+                  "required": true,
+                  "variadic": true,
+                  "description": "The task (after --)"
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--agent <agent>",
+                  "description": "Agent to run",
+                  "long": "--agent",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "stop",
+              "path": "lead tool stop",
+              "aliases": [],
+              "description": "Ask the owner to confirm stopping a session; mints a confirm token, never stops anything",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--session <id>",
+                  "description": "Session id or 8+ character prefix",
+                  "long": "--session",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        }
+      ]
     },
     {
       "name": "mcp",
