@@ -5,11 +5,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { clearLiveSignalsCacheForTest, computeLiveSignals } from './active.js';
 
-// Real captures from yosemite-m6 (PHNX-4387): the transcript as it stood while
-// Claude streamed one long Write call (last event a tool_result at 19:19:23.484Z)
-// and the `<config>/sessions/<pid>.json` record Claude kept at that moment, which
-// said busy. The record is re-pointed at a live child process so the reader's own
-// liveness check passes against a real pid.
 const TESTDATA = path.join(import.meta.dirname, 'testdata', 'harness-status');
 const SESSION = 'ed7688d4-ca54-4747-8005-d59cfdbbf318';
 const SILENT_NOW = Date.parse('2026-10-14T19:21:35.906Z');
@@ -25,7 +20,6 @@ function startTicks(pid: number): string | undefined {
   }
 }
 
-/** A Claude config dir holding the silent transcript and a record for a live pid. */
 function liveClaude(status: string): string {
   const config = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-harness-status-'));
   tmp.push(config);
@@ -60,8 +54,6 @@ describe('computeLiveSignals reads the turn state Claude reports', () => {
   });
 
   it('a busy turn whose tail holds only request records is working, quiet since the last write', () => {
-    // Seen live on Claude 2.1.261: after each step it appends 100+ KB of
-    // api-request-blob records, so the bounded tail read holds no conversation event.
     const transcript = liveClaude('busy');
     const blob = JSON.stringify({ type: 'api-request-blob', blob: 'x'.repeat(16_000) });
     fs.appendFileSync(transcript, `${blob}\n`.repeat(10));

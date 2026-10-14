@@ -104,7 +104,6 @@ function locatorBadge(s: ActiveSession): string {
 function activeTimeCell(s: ActiveSession): string {
   const parts: string[] = [];
   if (s.startedAtMs) parts.push(`created ${formatCompactAge(new Date(s.startedAtMs).toISOString())}`);
-  // A working turn whose transcript is silent (Claude reports it busy) is quiet, not idle.
   if (s.activity === 'working' && s.quietSinceMs != null) parts.push(`quiet ${formatCompactAge(new Date(s.quietSinceMs).toISOString())}`);
   else if (s.lastActivityMs) parts.push(`idle ${formatCompactAge(new Date(s.lastActivityMs).toISOString())}`);
   return parts.join(' · ');

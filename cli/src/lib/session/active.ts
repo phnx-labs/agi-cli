@@ -371,11 +371,6 @@ export interface ActiveSession {
   accountLabel?: string;
   lastActivityMs?: number;
   lastEventMs?: number;
-  /**
-   * When a working turn's transcript went silent while Claude reports it busy (ms
-   * epoch); set only once the silence passes the two-minute window. A timestamp,
-   * not a duration, so the row is stable across polls.
-   */
   quietSinceMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
@@ -744,12 +739,6 @@ export function sessionIdFromFile(kind: string, file?: string): string | undefin
   return indexedSessionIdForFile(kind, file);
 }
 
-/**
- * SessionState plus when a working turn went quiet: the last event's stamp, or the
- * transcript's mtime when the bounded tail holds no event (Claude can append
- * 100+ KB of request records after a step). Set only while Claude reports the turn
- * busy and the transcript has been silent past the window.
- */
 type LiveState = SessionState & { quietSinceMs?: number };
 
 interface LiveSignals {
@@ -813,9 +802,6 @@ export function computeLiveSignals(
     if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
     liveTailCache.set(cacheKey, tail);
   }
-  // Claude's own turn state for its live process (PHNX-4387). Read on every call,
-  // not cached with the tail: it changes at turn edges while the transcript, and so
-  // its mtime, sits still through a long thinking or streaming step.
   const harnessStatus = kind === 'claude' && pidAlive ? readHarnessStatus(sessionFile)?.status : undefined;
   if (tail.events.length === 0 && harnessStatus !== 'busy') return {};
 
