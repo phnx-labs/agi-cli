@@ -1,14 +1,4 @@
-/**
- * The Linear priority of a session's ticket, for attention urgency (PHNX-4369).
- *
- * Reads are synchronous and served from disk (the reconciler is synchronous);
- * a missing or older-than-TTL entry starts ONE background `linear tasks <id>
- * --json` for that ticket and the answer lands on a later reconcile. So an
- * open ask costs at most one Linear read per ticket per TTL, never one per tick,
- * and a box without a signed-in `linear` CLI records "unknown" (null) for the
- * TTL instead of retrying every pass.
- */
-
+// Synchronous disk read; a miss starts one background Linear read per ticket per TTL, failures cached as null.
 import { isRateLimited, readCached, writeCached } from '../linear-cache.js';
 import { linearExec, type LinearExec } from '../quick-todo.js';
 

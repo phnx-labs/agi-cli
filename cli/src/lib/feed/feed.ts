@@ -813,8 +813,6 @@ def main():
                 existing = json.load(existing_file)
             if existing.get("kind") == "question":
                 return
-            # PermissionRequest already wrote this ask with its tool and command;
-            # the later generic "Claude needs your permission" must not replace it.
             if (
                 notification_type == "permission_prompt"
                 and existing.get("notificationType") == "permission_prompt"

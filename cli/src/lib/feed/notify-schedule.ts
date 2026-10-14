@@ -1,11 +1,3 @@
-/**
- * Per-urgency banner schedules, `menubar.menu.notify{Urgent,High,Normal,Low}`
- * (PHNX-4369 contract 2). A schedule is a token list: durations `<n>m` / `<n>h`
- * measured from when the ask opened (the first is the first banner, the rest
- * are reminders), plus the flags `stay` (the banner stays on screen) and
- * `sound`; or the single token `sidebar`, which posts no banner at all.
- */
-
 import type { AttentionUrgency } from './attention.js';
 
 export const NOTIFY_LEVELS: readonly AttentionUrgency[] = ['urgent', 'high', 'normal', 'low'];
@@ -30,7 +22,6 @@ export type NotifySchedule =
 
 const DURATION = /^(\d+)(m|h)$/;
 
-/** Parses a token list, or returns the reason it is invalid. */
 export function parseNotifySchedule(tokens: readonly string[]): NotifySchedule | string {
   if (tokens.length === 1 && tokens[0] === 'sidebar') return { sidebar: true };
   if (tokens.includes('sidebar')) return '"sidebar" must be the only token.';
@@ -67,7 +58,6 @@ export function notifyScheduleDescription(level: AttentionUrgency): string {
   );
 }
 
-/** "15 min", "1 h", "1 h 30 min" for a reminder's "Still waiting" subtitle. */
 export function formatWaited(ms: number): string {
   const minutes = Math.round(ms / 60_000);
   if (minutes < 60) return `${minutes} min`;
