@@ -1023,9 +1023,6 @@ function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
 }
 
 
-// Claude writes <config>/sessions/<pid>.json for each running process, in
-// whichever config home it runs under (the real HOME, a version home, an
-// account home), so every one of them is read.
 export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId: string }> {
   const newest = new Map<string, { entry: LiveSessionName & { sessionId: string }; at: number }>();
   for (const dir of getAgentSessionDirs('claude', 'sessions')) {
@@ -1085,8 +1082,6 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   });
 
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
-  // A running session appends to its transcript without touching the
-  // directory, so its file is re-checked every tick (a rename lands there).
   const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(
     leafDirs,
     '.jsonl',

@@ -20,9 +20,6 @@ const history = path.join(TEST_HOME, '.agents', '.history');
 const versionProjects = path.join(history, 'versions', 'claude', '2.1.289', 'home', '.claude', 'projects', '-repo');
 const accountSessions = path.join(history, 'accounts', 'claude', 'acct-names-0001', '.claude', 'sessions');
 
-// The real HOME's ~/.claude/projects is the one root the indexer stats on every
-// tick; a version-home transcript is only re-read when its directory changes or
-// it was scanned in the last ten minutes.
 fs.mkdirSync(path.join(TEST_HOME, '.claude', 'projects'), { recursive: true });
 
 afterAll(() => {

@@ -156,11 +156,6 @@ export function backfillActiveRowsFromMeta(
   }
 }
 
-// The one place a live row gets its `label`: Claude's current name for the
-// process, the stored index label, and the `agents run --name` launch name,
-// ranked by resolveSessionName. The terminal tab title is never an input; it
-// is a projection of this value. A row running on a peer keeps the label that
-// peer resolved, since the pid files and transcript are on its disk.
 export function applySessionNames(
   sessions: ActiveSession[],
   indexedLabel: (sessionId: string) => string | null | undefined = () => undefined,
