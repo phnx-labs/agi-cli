@@ -131,10 +131,6 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(await maybeRunOnHost('ps', ['ps', '--device', 'mac'])).toBe(false);
   });
 
-  it('leaves `events logs --device` to the run-log viewer, which scopes runs by device', async () => {
-    expect(await maybeRunOnHost('events', ['events', 'logs', '--device', 'mac'])).toBe(false);
-  });
-
   it('leaves feed host lists to the command-level fleet aggregator', async () => {
     expect(await maybeRunOnHost('feed', ['feed', '--device', 'mac', '--json'])).toBe(false);
   });

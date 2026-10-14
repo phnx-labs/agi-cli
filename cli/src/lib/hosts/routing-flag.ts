@@ -1,4 +1,5 @@
 import type { Command, Option } from 'commander';
+import { isRouterDeviceOption } from './option.js';
 
 export interface StripSpec {
   long: string;
@@ -19,6 +20,8 @@ export const ROUTING_OPTION_SPECS: StripSpec[] = [
   { long: 'devices', takesValue: true },
 ];
 
+const HOST_SELECTOR_FLAGS = ['device', 'hosts', 'devices'];
+
 export interface RoutingOccurrence {
   spec: StripSpec;
   start: number;
@@ -30,6 +33,7 @@ export interface RoutingOccurrence {
 export interface ScannedArgv {
   commandIndex?: number;
   routing: RoutingOccurrence[];
+  leaf?: Command;
 }
 
 let commandTree: Command | undefined;
@@ -134,7 +138,7 @@ export function scanArgv(args: string[], extra: StripSpec[] = []): ScannedArgv {
     if (cluster.occurrence) routing.push(cluster.occurrence);
     i = cluster.last;
   }
-  return { commandIndex, routing };
+  return { commandIndex, routing, leaf: chain.length > 1 ? chain[chain.length - 1] : undefined };
 }
 
 export function commandTokenIndex(args: string[]): number | undefined {
@@ -145,8 +149,19 @@ export function flagValue(args: string[], long: string, short?: string): string 
   return scanArgv(args, [{ long, short, takesValue: true }]).routing.find((r) => r.spec.long === long)?.value;
 }
 
+export function commandOwnsRoutingFlag(args: string[]): boolean {
+  const { routing, leaf } = scanArgv(args);
+  if (!leaf) return false;
+  return routing.some(
+    (r) =>
+      HOST_SELECTOR_FLAGS.includes(r.spec.long) &&
+      r.value !== undefined &&
+      leaf.options.some((o) => o.long === `--${r.spec.long}` && !isRouterDeviceOption(o)),
+  );
+}
+
 export function hasHostRoutingFlag(args: string[]): boolean {
   return scanArgv(args).routing.some(
-    (r) => ['device', 'hosts', 'devices'].includes(r.spec.long) && r.value !== undefined,
+    (r) => HOST_SELECTOR_FLAGS.includes(r.spec.long) && r.value !== undefined,
   );
 }
