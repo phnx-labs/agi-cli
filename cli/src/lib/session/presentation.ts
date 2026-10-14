@@ -402,6 +402,7 @@ export function formatLiveStatusHeadline(live: ActiveSession | undefined, bookma
   const needsYou = isAwaitingUser(live);
   const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
   let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
+  if (word === 'working' && live.quietMs != null) suffix = chalk.dim(`  quiet ${Math.floor(live.quietMs / 60_000)}m`);
   if (live.status === 'crashed') {
     suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
   } else if (live.status === 'orphaned') {

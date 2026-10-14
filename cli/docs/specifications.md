@@ -577,7 +577,13 @@ SSH access (§7); rendering sessions that no harness produced.
   its PID is dead or still alive. `unknown` derives phase `idle`. A structural
   `AskUserQuestion` / `ExitPlanMode` as last event MUST report `waiting_input` and
   MUST NOT decay with the freshness window (`sessions-cli/src/lib/session/state.ts`; test
-  `state.test.ts`). A dead process whose OWNING HOST WINDOW also stopped
+  `state.test.ts`). A live Claude process's own turn state, recorded by Claude
+  Code in `<config>/sessions/<pid>.json` and read with `readHarnessStatus`, MUST
+  be passed to the state engine as `harnessStatus` (`computeLiveSignals`): `busy`
+  reports `working` even when the transcript has been silent past the two-minute
+  window (trusted for at most 30 minutes of silence), `idle` reports `idle`, and
+  with no live record the two-minute window applies (PHNX-4387; test
+  `active.harness-status.test.ts`). A dead process whose OWNING HOST WINDOW also stopped
   republishing MUST report `crashed` rather than `closed` — see SES-18a, which
   narrows this clause.
 - **SES-18a (MUST).** A session's **host link** — whether any client is still
