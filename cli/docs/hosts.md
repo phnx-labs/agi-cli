@@ -113,7 +113,8 @@ generic `--device auto` passthrough still sample by launch history.
 | `loaded` | load or memory pressure at 75% or more | excluded, reason `overloaded` |
 | `busy` / `light` / `idle` | worst of load and memory pressure under 75 / 40 / 15% | ranked |
 
-A full disk outranks every other signal: an agent on a busy CPU is slow, but an
+Disk is read from `/` (`df -Pk /`), so a box whose worktrees live on a separate,
+larger partition is judged by its root filesystem. A full disk outranks every other signal: an agent on a busy CPU is slow, but an
 agent that cannot create its worktree does nothing. Memory pressure is percent
 used only while less than 16 GiB is free (`MEM_COMFORT_BYTES`); a 120 GiB box
 with 62 GiB free is not memory-bound at 48% used, and used to read `busy` and
@@ -166,8 +167,9 @@ carries `role`, an `autoPool` boolean (pool membership), and `autoSkip`: why
 `--device auto` would pass the device over right now, or `null` when it is
 eligible. `autoSkip` is one of `off` (`agents devices disable`), `personal`,
 `desktop`, `not-a-worker`, `offline` (the tailnet reports it offline),
-`unreachable` (the stats probe failed), `loaded`, or `disk-low`, checked in that
-order (`autoSkipReason`, `src/lib/devices/pool.ts`). AGI EXT's Settings > Devices
+`unreachable` (the stats probe failed), `loaded`, or `disk-low` (`autoSkipReason`,
+`src/lib/devices/pool.ts`). The pool reasons win over tailnet presence, which wins
+over health; a box both loaded and short of disk reports `disk-low`. AGI EXT's Settings > Devices
 section renders this field rather than deciding placement itself.
 
 ### `agents run auto` — all three routing layers
