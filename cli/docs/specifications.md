@@ -392,10 +392,32 @@ SSH access (§7); rendering sessions that no harness produced.
   Tests: `lib/session/active.terminal-child.test.ts`,
   `lib/session/active.account-label.test.ts`, `lib/session/active.unattrib-cache.test.ts`.
 
-- **SES-14 (MUST).** `label` (the session name) MUST resolve by priority: agent
-  title / `/rename` > `agents run --name` handle > unset (listing then falls back
-  to `topic`); an empty incoming label MUST NOT clobber a stored non-empty one
-  (`lib/session/db.ts:1726-1734,2304-2371`; test `db.names.test.ts:25-115`).
+- **SES-14 (MUST).** `label` (the session name) MUST resolve through the one
+  resolver, `resolveSessionName` (`lib/session/title.ts`), by priority: a user
+  `/rename` (`custom-title`, or Claude's live name with `nameSource: "user"`) >
+  the harness's current name for the running process (Claude's
+  `<config>/sessions/<pid>.json` `name`, read from every config home by
+  `readClaudeLiveNames`; a `derived` cwd placeholder is not a name) > the
+  `agents run --name` launch name > the harness-generated title (`ai-title`) >
+  unset (the headline then falls back per SES-14c). Index rows resolve it at
+  scan time (`readClaudeMeta`, `lib/session/discover.ts`); live rows resolve it
+  in `applySessionNames` (`lib/session/active.ts`) with the stored index label
+  ranked below a live rename and above a live name the index has not caught up
+  with. A peer's rows keep the label the peer resolved. The extension's tab
+  title is never an input. A running Claude session's transcript is re-checked
+  every index tick even when its directory is unchanged, so a rename reaches
+  the index within one tick. An empty incoming label MUST NOT clobber a stored
+  non-empty one (`lib/session/db.ts`; tests `title.test.ts`,
+  `db.names.test.ts`, `discover.session-names.test.ts`).
+- **SES-14d (MUST).** Every live row (`agents ps --json`, `agents ps watch
+  --json`) MUST carry `startedAs` when the session has a user prompt: the first
+  genuine user turn the session was started with, read from the transcript head
+  with harness-injected turns (`isMeta`) skipped, a `/goal <ask>` reduced to
+  `<ask>`, any other slash command kept as `/<name> <args>`, an argument-less
+  command skipped, whitespace collapsed and capped at 280 characters
+  (`startedAsFromUserTurn`, `lib/session/title.ts`). A harness whose head is
+  not read falls back to the indexed `firstUserMessage`. It is never the
+  resolved `title` and never a model paraphrase.
 - **SES-14a (MUST).** A harness-generated session title MUST pass through
   `cleanGeneratedSessionLabel` (`sessions-cli/src/lib/session/prompt.ts`) at the point the
   scanner composes `SessionMeta.label`, so injected skill scaffolding
@@ -2433,9 +2455,11 @@ schema (`--json` passes through each agent's native stream format).
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:345-349`), `AGENTS_RUNTIME` to `terminal`/`headless` from
   `resolveInteractive` (`lib/exec.ts:355`), `AGENTS_AGENT_NAME`
-  (`lib/exec.ts:374-376`), `AGENTS_CWD` when a cwd is given
-  (`lib/exec.ts:377-379`), and `AGENT_SESSION_NAME` when `--name` is given
-  (`lib/exec.ts:393-395`).
+  (`lib/exec.ts:374-376`), and `AGENTS_CWD` when a cwd is given
+  (`lib/exec.ts:377-379`). `--name` is not an env var: it reaches a harness
+  that has a name flag (Claude's `--name`, `nameFlag` in `AGENT_COMMANDS`) on
+  a new launch, never on a resume, and is recorded for the session index
+  (`recordRunName`).
 - **EXEC-4 (MUST).** `buildExecEnv` MUST assign actor-provenance env
   (`AGENTS_ACTOR`, `_KIND`, and when known `_NAME`/`_EMAIL`/`_GITHUB`/`_PHOENIX_ID`/`_AVATAR`, plus
   `GIT_AUTHOR_*`/`GIT_COMMITTER_*` for a resolved human) from

@@ -1692,8 +1692,8 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     last_user_message = COALESCE(excluded.last_user_message, sessions.last_user_message),
     -- Never let an empty/placeholder incoming label clobber a good stored one.
     -- A real incoming label (non-empty after trim) still wins; a blank one keeps
-    -- the label seeded by --name (seedLabelsFromNames) or refined by an agent
-    -- title / rename (syncLabels). A bare rescan carries no label, so it must
+    -- the label seeded by --name (seedLabelsFromNames) or resolved at an earlier
+    -- scan (resolveSessionName). A bare rescan carries no label, so it must
     -- preserve, not erase, the good one already stored.
     label = CASE
       WHEN excluded.label IS NULL OR trim(excluded.label) = '' THEN sessions.label
@@ -2266,41 +2266,6 @@ export function upsertSessionsBatch(
     }
   }
   maintainSessionSearchIndex(db);
-}
-
-export function syncLabels(labelMap: Map<string, string | null>): number {
-  if (labelMap.size === 0) return 0;
-  const db = getDB();
-  const ids = [...labelMap.keys()];
-  const CHUNK = 500;
-  const updates: Array<{ id: string; label: string | null }> = [];
-
-  for (let i = 0; i < ids.length; i += CHUNK) {
-    const chunk = ids.slice(i, i + CHUNK);
-    const placeholders = chunk.map(() => '?').join(',');
-    const rows = db
-      .prepare(`SELECT id, label FROM sessions WHERE id IN (${placeholders})`)
-      .all(...chunk) as Array<{ id: string; label: string | null }>;
-    for (const row of rows) {
-      const live = labelMap.get(row.id)?.trim() || null;
-      if (live && live !== (row.label ?? '')) {
-        updates.push({ id: row.id, label: live });
-      }
-    }
-  }
-  if (updates.length === 0) return 0;
-
-  const updSessions = db.prepare(`UPDATE sessions SET label = ? WHERE id = ?`);
-  const updFts = db.prepare(`UPDATE session_text SET label = ? WHERE rowid = ${SESSION_TEXT_ROWID}`);
-
-  const txn = db.transaction((items: typeof updates) => {
-    for (const { id, label } of items) {
-      updSessions.run(label, id);
-      updFts.run(label ?? '', id);
-    }
-  });
-  txn(updates);
-  return updates.length;
 }
 
 export function seedLabelsFromNames(nameMap: Map<string, string | null>): number {

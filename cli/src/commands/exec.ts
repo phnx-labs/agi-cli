@@ -619,7 +619,7 @@ export function registerRunCommand(program: Command): void {
     .option('--since <time>', 'With a bare --resume: only sessions newer than this (default 30d; e.g. 2h, 7d, 4w, or ISO date)')
     .option('-n, --limit <n>', 'With a bare --resume: maximum sessions loaded into the picker (default 200)')
     .option('--session-id <id>', 'Force a NEW conversation to use this exact session UUID (Claude only). This CREATES a session — to resume an existing one, use --resume.', parseExplicitSessionId)
-    .option('--name <slug>', 'Name the run — seeds the session label so it shows up as `<name>` in `sessions` and `agents ps` and resolves by it (and `agents events logs <name>` for --device runs) instead of an opaque id. An agent-generated title later refines the label; your name shows until then. Optional.')
+    .option('--name <slug>', 'Name the run. Claude receives it as its own session name (`claude --name`); for every harness it becomes the session label shown in `sessions` and `agents ps` and resolves by it (and `agents events logs <name>` for --device runs) instead of an opaque id. A rename inside the session replaces it. Ignored on --resume. Optional.')
     .option('--notify', 'Post a desktop notification when a headless run finishes. Fired by this process on exit, so it survives whatever launched the run (the menu bar dispatching it, a terminal you closed).')
     .option(
       '--terminal [backend]',

@@ -391,10 +391,6 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     delete result.AGENTS_RUN_ACCOUNT_ID;
   }
 
-  if (options.name) {
-    result.AGENT_SESSION_NAME = options.name;
-  }
-
   Object.assign(result, actorEnv(resolveActor()));
 
   return {
@@ -437,6 +433,7 @@ interface AgentCommandTemplate {
   modelFlag?: string;
   printFlags?: string[];
   verboseFlag?: string;
+  nameFlag?: string;
   resume?: (
     { flag: string; interactiveFlag?: string; headlessFlag?: string } |
     { subcommand: string }
@@ -457,6 +454,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modelFlag: '--model',
     printFlags: ['--print'],
     verboseFlag: '--verbose',
+    nameFlag: '--name',
     resume: { flag: '--resume' },
   },
   codex: {
@@ -750,6 +748,10 @@ export function buildExecCommand(options: ExecOptions): string[] {
     }
   } else if (options.sessionId && options.agent === 'claude') {
     cmd.push('--session-id', options.sessionId);
+  }
+
+  if (options.name && template.nameFlag && !options.resume) {
+    cmd.push(template.nameFlag, options.name);
   }
 
   if (effectiveModel && template.modelFlag) {

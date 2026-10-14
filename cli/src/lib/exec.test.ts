@@ -536,6 +536,24 @@ describe('buildExecCommand — native resume wiring', () => {
   });
 });
 
+describe('buildExecCommand — --name reaches a harness that has a name flag (PHNX-4387)', () => {
+  it('claude: a new launch passes --name to the harness', () => {
+    const cmd = buildExecCommand(execOpts({ agent: 'claude', name: 'name probe', headless: true, prompt: 'say hi' }));
+    expect(cmd[idx(cmd, '--name') + 1]).toBe('name probe');
+  });
+
+  it('claude: a resume keeps the session its existing name', () => {
+    const cmd = buildExecCommand(execOpts({ agent: 'claude', name: 'fork of x', resume: true, sessionId: 'abc-123', interactive: true }));
+    expect(cmd).not.toContain('--name');
+  });
+
+  it('a harness without a name flag gets no name argument', () => {
+    const cmd = buildExecCommand(execOpts({ agent: 'codex', name: 'nightly', headless: true, prompt: 'go' }));
+    expect(cmd).not.toContain('--name');
+    expect(cmd).not.toContain('nightly');
+  });
+});
+
 describe('shouldTapStdout (budget live-watcher attach gating, #346 FIX 3)', () => {
   it('TAPS a non-interactive run at a TTY when caps are active (the FIX 3 case)', () => {
     expect(shouldTapStdout( false,  false,  true)).toBe(true);
