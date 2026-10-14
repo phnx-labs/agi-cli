@@ -162,11 +162,7 @@ export function applySessionNames(sessions: ActiveSession[]): void {
   if (owned.length === 0) return;
   const live = readClaudeLiveNames();
   const launch = buildRunNameMap();
-  let indexed = new Map<string, { label?: string; customTitle?: string }>();
-  try {
-    indexed = getIndexedSessionNames(owned.flatMap((s) => s.sessionId ? [{ id: s.sessionId, filePath: s.sessionFile }] : []));
-  } catch {
-  }
+  const indexed = getIndexedSessionNames(owned.flatMap((s) => s.sessionId ? [{ id: s.sessionId, filePath: s.sessionFile }] : []));
   for (const s of owned) {
     const id = s.sessionId;
     if (id) s.name ??= launch.get(id) ?? undefined;
