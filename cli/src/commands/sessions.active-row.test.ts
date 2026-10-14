@@ -40,6 +40,15 @@ describe('renderActiveRowLines', () => {
     expect(line2).toContain('picker preview collapses to empty');
   });
 
+  it('a working turn Claude reports busy reads quiet, not idle (PHNX-4387)', () => {
+    const now = Date.now();
+    const s = active({ status: 'running', activity: 'working', quietSinceMs: now - (4 * 60_000 + 30_000), lastActivityMs: now - 4 * 60_000 });
+    const [line1] = renderActiveRowLines(s, '  ', 120);
+    expect(line1).toContain('working');
+    expect(line1).toContain('quiet 4m');
+    expect(line1).not.toContain('idle 4m');
+  });
+
   it('keeps every line within terminal width (no wrap under tmux/SSH), even when narrow', () => {
     const now = Date.now();
     const s = active({
