@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.26
+
+- **`agents ps` says how long a working Claude turn has been quiet (PHNX-4387).** The list row shows `quiet Nm` where it showed `idle Nm` for a turn Claude reports busy, including one whose transcript tail holds only request records (Claude 2.1.261 appends 100+ KB of them after a step), where no quiet time was shown. `agents ps --json` carries `quietSinceMs`, when the turn went silent, in place of `quietMs`: a timestamp is stable across polls, so a quiet row no longer rewrites the active-sessions journal on every poll, and the age is computed when it is shown. Source: `cli/src/lib/session/active.ts`, `cli/src/commands/ps-roster.ts`, `cli/src/lib/session/presentation.ts`.
+
 ## 1.23.25
 
 - **A Claude turn quiet for over two minutes stays `running` in `agents ps`.** Claude writes nothing to its transcript while it thinks or streams one long tool call, so a live turn turned idle after two minutes. agents-cli now passes the turn state Claude Code records in `<config>/sessions/<pid>.json` (`busy` / `idle`) to the state engine (`@phnx-labs/sessions-cli` 0.8.6): `busy` is `running`, `idle` is `idle`, and other harnesses keep the two-minute window. `agents ps --json` rows carry `quietMs` once a running turn has been silent past two minutes, and `agents ps <id>` shows `quiet Nm` beside `working`. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/session/presentation.ts`.
