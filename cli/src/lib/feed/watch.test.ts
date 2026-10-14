@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import { SessionWatchState, toSessionWatchRow } from '../session/watch.js';
+import { SessionWatchState, canonicalizePeerSessionEnvelope, toSessionWatchRow } from '../session/watch.js';
 import { FeedSessionProjection, FeedWatchState, normalizePeerEnvelope, projectSessionEnvelope, type FeedWatchEnvelope } from './watch.js';
 
 function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession {
@@ -79,6 +79,36 @@ describe('feed watch operator projection', () => {
   });
 });
 
+
+describe('a peer row filed under a former project name reads as the current one', () => {
+  it('rewrites confirmedProject on peer reset and upsert envelopes from the local alias table', async () => {
+    const fs = await import('node:fs');
+    const os = await import('node:os');
+    const path = await import('node:path');
+    const { resetProjectDefsCache, writeProjectDef } = await import('../projects.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-alias-'));
+    const prior = process.env.AGENTS_PROJECTS_DIR;
+    process.env.AGENTS_PROJECTS_DIR = dir;
+    try {
+      writeProjectDef({ name: 'rush', root: '~/src/rush', aliases: ['prix'] });
+      resetProjectDefsCache();
+      const peerRow = { ...toSessionWatchRow('worker-a', session('misc', { cwd: '/home/peer/src/agents' })), confirmedProject: 'prix' };
+      const reset = normalizePeerEnvelope({ v: 1, streamId: 's', sequence: 1, type: 'reset', capturedAt: 1, scope: 'worker-a', agents: [peerRow], attention: [] } as unknown as FeedWatchEnvelope);
+      expect(reset.type === 'reset' && reset.agents[0].confirmedProject).toBe('rush');
+      const upsert = normalizePeerEnvelope({ v: 1, streamId: 's', sequence: 2, type: 'agent.upsert', scope: 'worker-a', rowKey: peerRow.rowKey, agent: peerRow } as unknown as FeedWatchEnvelope);
+      expect(upsert.type === 'agent.upsert' && upsert.agent.confirmedProject).toBe('rush');
+      const unrelated = normalizePeerEnvelope({ v: 1, streamId: 's', sequence: 3, type: 'agent.upsert', scope: 'worker-a', rowKey: 'k', agent: { ...peerRow, confirmedProject: 'atlas' } } as unknown as FeedWatchEnvelope);
+      expect(unrelated.type === 'agent.upsert' && unrelated.agent.confirmedProject).toBe('atlas');
+      const sessions = new SessionWatchState('peer');
+      const sessionReset = canonicalizePeerSessionEnvelope({ ...sessions.reset('worker-a', [session('misc')]), rows: [peerRow] });
+      expect(sessionReset.type === 'reset' && sessionReset.rows[0].confirmedProject).toBe('rush');
+    } finally {
+      if (prior === undefined) delete process.env.AGENTS_PROJECTS_DIR; else process.env.AGENTS_PROJECTS_DIR = prior;
+      resetProjectDefsCache();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('confirmedProject rides the serialized feed stream (PHNX-3999 F08/F09)', () => {
   it('carries explicit null for an unbound directory through reset and upsert', async () => {

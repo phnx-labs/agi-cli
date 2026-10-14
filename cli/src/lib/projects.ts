@@ -37,6 +37,7 @@ export interface ProjectIntegration {
 
 export interface ProjectDef {
   name: string;
+  aliases?: string[];
   description?: string;
   root?: string;
   defaultPath?: string;
@@ -96,6 +97,12 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
   }
 
   const def: ProjectDef = { name };
+  if (o.aliases !== undefined && o.aliases !== null) {
+    if (!Array.isArray(o.aliases) || o.aliases.some((a) => typeof a !== 'string' || !isSafeProjectName(a) || a.toLowerCase() === name.toLowerCase())) {
+      throw new Error(`Project ${name}: "aliases" must be a list of former project names, other than the project's own name (got ${JSON.stringify(o.aliases)})`);
+    }
+    if (o.aliases.length > 0) def.aliases = [...new Set(o.aliases as string[])];
+  }
   if (typeof o.description === 'string') def.description = o.description;
   if (typeof o.root === 'string') def.root = o.root;
   if (typeof o.defaultPath === 'string') def.defaultPath = o.defaultPath;
@@ -190,6 +197,16 @@ export function loadProjectDef(name: string): ProjectDef | undefined {
   return validateProjectDef(yaml.parse(raw), name);
 }
 
+const warnedAliases = new Set<string>();
+
+function warnIgnoredAliases(lines: string[]): void {
+  for (const line of lines) {
+    if (warnedAliases.has(line)) continue;
+    warnedAliases.add(line);
+    process.stderr.write(`agents: warning: ${line}\n`);
+  }
+}
+
 export function listProjectDefs(): ProjectDef[] {
   let files: string[];
   try {
@@ -204,7 +221,9 @@ export function listProjectDefs(): ProjectDef[] {
     const def = loadProjectDef(name);
     if (def) out.push(def);
   }
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  warnIgnoredAliases(resolveProjectAliases(out).ignored);
+  return out;
 }
 
 export function writeProjectDef(def: ProjectDef): string {
@@ -421,18 +440,64 @@ export function resetProjectDefsCache(): void {
   projectDefsMemo = null;
 }
 
+interface AliasResolution {
+  table: Map<string, string>;
+  ignored: string[];
+}
+
+const aliasMemo = new WeakMap<ProjectDef[], AliasResolution>();
+
+export function resolveProjectAliases(defs: ProjectDef[]): AliasResolution {
+  const memo = aliasMemo.get(defs);
+  if (memo) return memo;
+  const live = new Map(defs.map((def) => [def.name.toLowerCase(), def]));
+  const claims = new Map<string, string[]>();
+  const ignored: string[] = [];
+  for (const def of defs) {
+    for (const alias of new Set((def.aliases ?? []).map((a) => a.toLowerCase()))) {
+      const other = live.get(alias);
+      if (other) {
+        const back = (other.aliases ?? []).some((a) => a.toLowerCase() === def.name.toLowerCase());
+        ignored.push(back
+          ? `project aliases "${def.name}" -> "${other.name}" -> "${def.name}" form a cycle; ignoring "${alias}" on "${def.name}"`
+          : `project alias "${alias}" on "${def.name}" is the name of the live project "${other.name}"; ignoring it`);
+        continue;
+      }
+      claims.set(alias, [...(claims.get(alias) ?? []), def.name]);
+    }
+  }
+  const table = new Map<string, string>();
+  for (const [alias, owners] of claims) {
+    if (owners.length === 1) table.set(alias, owners[0]);
+    else ignored.push(`project alias "${alias}" is claimed by ${owners.map((o) => `"${o}"`).join(' and ')}; ignoring it until one definition drops it`);
+  }
+  const resolution = { table, ignored };
+  aliasMemo.set(defs, resolution);
+  return resolution;
+}
+
+export function projectAliasTable(defs: ProjectDef[]): Map<string, string> {
+  return resolveProjectAliases(defs).table;
+}
+
+export function canonicalProjectName(name: string, defs: ProjectDef[] = listProjectDefsCached()): string {
+  return projectAliasTable(defs).get(name.toLowerCase()) ?? name;
+}
+
 export function confirmedProjectForCwd(
   cwd: string | undefined | null,
   defs: ProjectDef[] = listProjectDefsCached(),
 ): string | undefined {
 
   if (!cwd) return undefined;
-  return projectNameForCwd(cwd, defs);
+  const name = projectNameForCwd(cwd, defs);
+  return name === undefined ? undefined : canonicalProjectName(name, defs);
 }
 
 export function resolveProjectNameForCwd(cwd: string | undefined | null, defs: ProjectDef[]): string | undefined {
   if (!cwd) return undefined;
-  return projectNameForCwd(cwd, defs) ?? resolveProjectKey(cwd);
+  const name = projectNameForCwd(cwd, defs);
+  return name === undefined ? resolveProjectKey(cwd) : canonicalProjectName(name, defs);
 }
 
 export function resolveDefinedProjectPath(

@@ -9,8 +9,9 @@ import { machineId, normalizeHost } from '../machine-id.js';
 import { shellQuote } from '../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../hosts/remote-cmd.js';
 import { getFeedDir } from '../state.js';
+import { listProjectDefsCached } from '../projects.js';
 import { streamFromPeer } from '../session/remote/peer-stream.js';
-import { watchLocalSessions, type SessionWatchEnvelope, type SessionWatchRow, type SessionWatchScopeStatus, type WatchLocalOptions } from '../session/watch.js';
+import { watchLocalSessions, withCanonicalProject, type SessionWatchEnvelope, type SessionWatchRow, type SessionWatchScopeStatus, type WatchLocalOptions } from '../session/watch.js';
 import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { type ActivityEvent } from './activity.js';
@@ -296,9 +297,16 @@ function remoteFeedWatchCommand(os: string): string {
 
 export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
 
+  if (event.type === 'agent.upsert') {
+    const agent = withCanonicalProject(event.agent);
+    return agent === event.agent ? event : { ...event, agent };
+  }
   if (event.type !== 'reset') return event;
-  if (Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
-  return { ...event, tools: event.tools ?? [], setup: event.setup ?? [] };
+  const defs = listProjectDefsCached();
+  const agents = event.agents.map((agent) => withCanonicalProject(agent, defs));
+  const renamed = agents.some((agent, i) => agent !== event.agents[i]);
+  if (!renamed && Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
+  return { ...event, agents, tools: event.tools ?? [], setup: event.setup ?? [] };
 }
 
 let sharedLocal: FeedHub | null = null;

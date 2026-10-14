@@ -31,6 +31,7 @@ import {
   isSafeProjectName,
   validateProjectDef,
   projectNameForCwd,
+  canonicalProjectName,
   projectRepoTargetsForDef,
   type ProjectDef,
   type ProjectContext,
@@ -113,7 +114,8 @@ interface ViewDetection {
 }
 
 export function detectProjectForPath(cwd: string, defs: ProjectDef[]): ViewDetection {
-  const name = projectNameForCwd(cwd, defs);
+  const found = projectNameForCwd(cwd, defs);
+  const name = found === undefined ? undefined : canonicalProjectName(found, defs);
   const def = name ? defs.find((d) => d.name === name) : undefined;
   return {
     name: name ?? null,

@@ -41,6 +41,7 @@ machine.
 
 ```yaml
 name: rush                      # stable id == filename; what --project takes
+aliases: [prix]                 # former names; rows that resolve to one read as `rush`
 description: "Rush app"
 root: ~/src/github.com/phnx-labs/rush
 defaultPath: ~/src/github.com/phnx-labs/rush/apps/web   # where an agent's cwd lands
@@ -73,6 +74,7 @@ dispatch:
 | Field | Purpose |
 | --- | --- |
 | `name` | Stable id, == filename. What `--project` takes. |
+| `aliases[]` | Former names of this project. A session whose cwd resolves to a former name (a stale definition still on disk), or a peer's row that still reports one, is filed under `name` instead (`confirmedProject`, the feed's project bucket). Matching is case-insensitive. An alias must be a valid project name other than `name`. An alias that is another live project's name (two projects naming each other are a cycle), or that two definitions claim, is ignored with one stderr warning when definitions load; a misconfigured alias never breaks a read (`resolveProjectAliases`, `lib/projects.ts`). |
 | `root` | Repo / monorepo root, home-relative → portable. |
 | `defaultPath` | Where an agent's cwd lands (a monorepo subdir). Defaults to `root`. |
 | `repo` / `repos[]` | GitHub slug(s), each with an optional `subpath`, for the PR/merge rollup. `repos[].path` (home-relative) names that repo's local checkout: it opts the repo into workspace probing (`status`) **and** into the directories an agent spawned on this project can reach (see [A project is a set of directories](#a-project-is-a-set-of-directories)). |
@@ -165,7 +167,9 @@ Definitions also rename the fleet's activity. `resolveProjectNameForCwd`
 project's **name** — a multi-repo project is one bucket, not one per repo — and
 anything else falls back to the repository-level key (`lib/project-key.ts`). Each
 machine resolves its own cwds against its own (synced) definitions before events
-cross the wire. `agents feed --project <name>` narrows the stream to one project.
+cross the wire. A reader also maps a peer row's `confirmedProject` through its own
+`aliases`, so a box whose definitions still use a project's old name does not split
+the bucket (`normalizePeerEnvelope`, `canonicalizePeerSessionEnvelope`). `agents feed --project <name>` narrows the stream to one project.
 
 ## `status` and `view` are one body
 

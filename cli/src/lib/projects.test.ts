@@ -1,5 +1,6 @@
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { activeSessionProjectKey } from './session/active.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -16,6 +17,8 @@ import {
   projectNameForCwd,
   resolveProjectNameForCwd,
   confirmedProjectForCwd,
+  canonicalProjectName,
+  resolveProjectAliases,
   listProjectDefsCached,
   resetProjectDefsCache,
   type ProjectDef,
@@ -523,5 +526,76 @@ describe('projectDirsAbs', () => {
       repos: [{ slug: 'o/no-checkout' }],
     };
     expect(projectDirsAbs(def, { forRemote: false })).toEqual([realA]);
+  });
+});
+
+describe('project aliases (old name -> current name)', () => {
+  it('reads aliases from the definition and round-trips them through the YAML', () => {
+    writeProjectDef({ name: 'rush', root: '~/src/rush', aliases: ['prix'] });
+    expect(loadProjectDef('rush')?.aliases).toEqual(['prix']);
+    expect(fs.readFileSync(path.join(dir, 'rush.yaml'), 'utf8')).toContain('aliases:');
+  });
+
+  it('rejects an alias that is not a project name, or is the project itself', () => {
+    expect(() => validateProjectDef({ name: 'rush', aliases: 'prix' }, 'rush')).toThrow(/aliases/);
+    expect(() => validateProjectDef({ name: 'rush', aliases: ['../x'] }, 'rush')).toThrow(/aliases/);
+    expect(() => validateProjectDef({ name: 'rush', aliases: ['rush'] }, 'rush')).toThrow(/aliases/);
+  });
+
+  it('ignores an alias two definitions claim, without throwing on the read path, and warns once at load', () => {
+    const writes: string[] = [];
+    const spy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: string | Uint8Array) => { writes.push(String(chunk)); return true; });
+    try {
+      writeProjectDef({ name: 'alpha', root: '~/src/alpha', aliases: ['b'] });
+      writeProjectDef({ name: 'gamma', root: '~/src/gamma', aliases: ['b'] });
+      resetProjectDefsCache();
+      expect(confirmedProjectForCwd(path.join(HOME, 'src/alpha/x'))).toBe('alpha');
+      expect(confirmedProjectForCwd(path.join(HOME, 'src/gamma'))).toBe('gamma');
+      expect(canonicalProjectName('b')).toBe('b');
+      listProjectDefs();
+      const warned = writes.filter((w) => w.includes('"b" is claimed by "alpha" and "gamma"'));
+      expect(warned).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('ignores an alias that names another live project', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['prix', 'atlas'] }, { name: 'atlas' }];
+    const { table, ignored } = resolveProjectAliases(defs);
+    expect(table.get('prix')).toBe('rush');
+    expect(table.has('atlas')).toBe(false);
+    expect(canonicalProjectName('atlas', defs)).toBe('atlas');
+    expect(ignored.join('\n')).toMatch(/"atlas" on "rush" is the name of the live project "atlas"/);
+  });
+
+  it('rejects a cycle: two projects naming each other keep their own names', () => {
+    const defs: ProjectDef[] = [{ name: 'a', aliases: ['b'] }, { name: 'b', aliases: ['a'] }];
+    const { table, ignored } = resolveProjectAliases(defs);
+    expect(table.size).toBe(0);
+    expect(canonicalProjectName('a', defs)).toBe('a');
+    expect(canonicalProjectName('b', defs)).toBe('b');
+    expect(ignored.filter((l) => l.includes('cycle'))).toHaveLength(2);
+  });
+
+  it('matches aliases case-insensitively', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['Prix'] }];
+    expect(canonicalProjectName('prix', defs)).toBe('rush');
+    expect(canonicalProjectName('PRIX', defs)).toBe('rush');
+    expect(() => validateProjectDef({ name: 'rush', aliases: ['RUSH'] }, 'rush')).toThrow(/aliases/);
+    expect(resolveProjectAliases([{ name: 'rush', aliases: ['ATLAS'] }, { name: 'atlas' }]).table.size).toBe(0);
+  });
+
+  it('maps a former name to the current one and passes unknown names through', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['prix'] }];
+    expect(canonicalProjectName('prix', defs)).toBe('rush');
+    expect(canonicalProjectName('rush', defs)).toBe('rush');
+    expect(canonicalProjectName('atlas', defs)).toBe('atlas');
+  });
+
+  it('files the path-derived project key under the current name too', () => {
+    const defs: ProjectDef[] = [{ name: 'rush', aliases: ['prix'] }];
+    expect(activeSessionProjectKey({ cwd: '/home/u/src/prix', context: 'terminal' }, defs)).toBe('rush');
+    expect(activeSessionProjectKey({ cwd: '/home/u/src/other', context: 'terminal' }, defs)).toBe('other');
   });
 });

@@ -427,7 +427,40 @@ project out of a folder name. `null` means Uncategorized — the row is still li
 it is just not filed under a project nobody bound it to. It is resolved on the
 device that owns the path (a definition root is a local path), and rides the live
 row, the history row, and `agents ps --json`, so every consumer reads the
-same verdict. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
+same verdict. A definition's `aliases:` (former names) are applied on top: a cwd
+that resolves to a former name, and a peer row still reporting one, read as the
+current name (`canonicalProjectName`; peers in `normalizePeerEnvelope` and
+`canonicalizePeerSessionEnvelope`; also the path-derived `project` key and the
+`projects` status rollup). The alias table is data in the project YAML, never a
+name check in code. Matching is case-insensitive, and `resolveProjectAliases`
+never throws on the read path: an alias that names another live project (two that
+name each other are a cycle) or that two definitions claim is ignored, and
+`listProjectDefs` prints one stderr warning for it.
+
+**Live rows also carry `pending`, `effort` and `fast`.** `pending` is
+`{subagents, shells, monitors}`, each `[{id, description, startedAtMs}]`, and lists
+only work running NOW: subagents whose status is `running`, Claude background
+shells (`run_in_background`, or a call the harness backgrounded) with no
+`<task-notification>` status and no successful `TaskStop`/`KillShell` (an
+`is_error` result does not end the task), and `Monitor` watches not yet ended,
+expired by notice, or past `timeoutMs`. All three die with the harness, so they
+count only while `pidAlive` is true and only when started by the CURRENT process:
+work older than the row's `processStartedAtMs`, or before the transcript's latest
+process boundary (a `cost-state` exit record, or a `SessionStart:startup`/`resume`
+hook record; `clear` and `compact` keep the process), is dropped, so a resumed or
+forked session never inherits a ghost. The field is absent when nothing is
+pending. A client shows `idle` + `pending` as Waiting, not as needing
+the operator — `subAgentCount` is cumulative and never a liveness signal.
+`effort`/`fast` come from the latest Claude reply (`effort`, `usage.speed`) or Codex
+`turn_context` (`effort` only; Codex records no speed, so `fast` is absent).
+`effort` is one of `low | medium | high | xhigh | max`. One
+incremental per-file fold reads them
+([`src/lib/session/pending-work.ts`](src/lib/session/pending-work.ts), at most the
+last 64 MiB on a cold read, appended bytes after; a task started further back is
+not seen by a cold reader — the daemon's fold stays warm, so this bounds only a
+fresh process on a very long transcript), stamped by
+`loadLocalActiveSessions` and, for this box's rows, `loadFleetActiveSessions`; a
+peer's rows arrive already stamped by its own daemon. `SessionMeta.lastUserMessage` (schema v48) carries the latest genuine turn
 beside `firstUserMessage`, and `deriveSessionRecap` classifies that raw turn —
 with the row's attachments in hand — rather than the already-collapsed `topic`.
 
