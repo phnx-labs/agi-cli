@@ -182,8 +182,6 @@ export class AttentionNotifyService extends BasePeriodicService {
   }
 
   protected async onStart(_ctx: DaemonContext): Promise<void> {
-    // The first sweep waits an hour: running it on the first tick turned every
-    // slow startup into another overrun and another restart.
     this.lastHourlyMs = this.now();
   }
 
@@ -364,9 +362,6 @@ export class AttentionNotifyService extends BasePeriodicService {
       this.sweep(ctx, fetched);
       return;
     }
-    // A fleet tick reads the shared stream and never scans sessions itself. The full
-    // scan can take minutes on a loaded Mac, so it runs beside the tick, one at a time,
-    // instead of holding the 10 s tick past the daemon's restart threshold.
     if (this.gcScan) return;
     this.gcScan = this.getSessions()
       .then((sessions) => this.sweep(ctx, sessions))
