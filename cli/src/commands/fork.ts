@@ -107,9 +107,11 @@ export async function runFork(
 
   const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced', '--name', options.name || `fork of ${label}`];
   const sourceIsHere = !source.machine || isSelfHost(source.machine);
-  const landsOnSource = options.device
-    ? sourceIsHere || options.device.toLowerCase() === source.machine?.toLowerCase()
-    : sourceIsHere;
+  const landsOnSource = !options.device
+    ? sourceIsHere
+    : sourceIsHere
+      ? isSelfHost(options.device)
+      : options.device.toLowerCase() === source.machine.toLowerCase();
   if (source.cwd && landsOnSource) runArgs.push('--cwd', source.cwd);
   if (options.device) runArgs.push('--device', options.device);
   if (options.terminal !== undefined) {
