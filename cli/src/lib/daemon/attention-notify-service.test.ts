@@ -5,6 +5,8 @@ import * as path from 'path';
 import { AttentionNotifyService, buildAttentionNotification, dueStage, notifyScope, type AttentionAsk } from './attention-notify-service.js';
 import { DEFAULT_NOTIFY_SCHEDULES, parseNotifySchedule, type NotifySchedule } from '../feed/notify-schedule.js';
 import { buildMenubarNotifyArgs } from '../menubar/notify-desktop.js';
+import { FeedHub } from '../feed/hub.js';
+import { FeedWatchState, type FeedWatchEnvelope } from '../feed/envelope.js';
 import { blockIdForSession, publishBlock } from '../feed/feed.js';
 import type { AttentionItem } from '../feed/attention.js';
 import type { ActiveSession } from '../session/active.js';
@@ -166,7 +168,9 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   let posts: DesktopNotification[];
   let withdrawn: string[][];
   let clock: number;
-  let asks: AttentionAsk[];
+  let hub: FeedHub;
+  let emit: ((event: FeedWatchEnvelope) => void) | undefined;
+  const wire = new FeedWatchState();
 
   const OPENED = Date.parse('2026-10-13T08:00:00.000Z');
   const MIN = 60_000;
@@ -195,17 +199,30 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
     posts = [];
     withdrawn = [];
     clock = OPENED;
-    asks = [];
+    emit = undefined;
+    hub = new FeedHub({ watch: async (o) => { emit = o.emit; await new Promise((r) => o.signal.addEventListener('abort', r)); } });
   });
-  afterEach(() => {
+  afterEach(async () => {
+    await hub.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {  }
   });
+
+  async function attached() {
+    const detach = hub.subscribe(() => {});
+    for (let i = 0; i < 5 && !emit; i++) await new Promise((r) => setTimeout(r, 0));
+    return detach;
+  }
+
+  async function setAsks(list: AttentionAsk[], scope = 'yosemite-m6') {
+    if (!emit) await attached();
+    emit!(wire.emit({ type: 'reset', scope, capturedAt: clock, agents: [], attention: list.map((a) => a.item), tools: [], setup: [] }));
+  }
 
   function makeService(interactiveHost: string | undefined = 'zion') {
     return new AttentionNotifyService({
       self: () => 'zion',
       settings: () => ({ interactiveHost, schedules: DEFAULTS() }),
-      fleetAsks: () => ({ asks, scopes: new Set(['yosemite-m6']) }),
+      fleetHub: () => hub,
       getSessions: async () => [],
       notify: (n) => posts.push(n),
       withdraw: (keys) => withdrawn.push(keys),
@@ -221,7 +238,7 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   }
 
   it('urgent: banner at 0 with --level urgent and sound, reminders at 15 and 30 min, withdraw on resolve', async () => {
-    asks = [ask('urgent')];
+    await setAsks([ask('urgent')]);
     const service = makeService();
     await at(service, 0);
     await at(service, 1);
@@ -240,7 +257,7 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
     expect(posts[2]).toMatchObject({ reminder: 2, subtitle: 'yosemite-m6 · agents-cli · Still waiting · 30 min' });
     expect(withdrawn).toEqual([]);
 
-    asks = [];
+    await setAsks([]);
     await at(service, 31);
     expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
     await at(service, 32);
@@ -248,19 +265,19 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   });
 
   it('a restarted daemon re-sends nothing already sent and still withdraws the live banner', async () => {
-    asks = [ask('urgent')];
+    await setAsks([ask('urgent')]);
     await at(makeService(), 15);
     expect(posts.map((p) => p.reminder)).toEqual([1]);
     const restarted = makeService();
     await at(restarted, 20);
     expect(posts).toHaveLength(1);
-    asks = [];
+    await setAsks([]);
     await at(restarted, 21);
     expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
   });
 
   it('normal: first banner at 5 min with no sound, withdrawn about 10 s later because the level has no stay', async () => {
-    asks = [ask('normal')];
+    await setAsks([ask('normal')]);
     const service = makeService();
     await at(service, 4);
     expect(posts).toHaveLength(0);
@@ -274,13 +291,13 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
     clock += 5_000;
     await service.tick(ctx, new AbortController().signal);
     expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
-    asks = [];
+    await setAsks([]);
     await at(service, 7);
     expect(withdrawn).toHaveLength(1);
   });
 
   it('sidebar level posts nothing at any time', async () => {
-    asks = [ask('low')];
+    await setAsks([ask('low')]);
     const service = makeService();
     for (const m of [0, 5, 60, 600]) await at(service, m);
     expect(posts).toEqual([]);
@@ -288,7 +305,7 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   });
 
   it('interactive.host set to another machine: this host posts nothing', async () => {
-    asks = [ask('urgent')];
+    await setAsks([ask('urgent')]);
     const service = makeService('yosemite-s1');
     await at(service, 0);
     await at(service, 30);
@@ -296,26 +313,49 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   });
 
   it('a late daemon posts only the latest due stage, as that reminder', async () => {
-    asks = [ask('urgent')];
+    await setAsks([ask('urgent')]);
     await at(makeService(), 40);
     expect(posts).toHaveLength(1);
     expect(posts[0]).toMatchObject({ reminder: 2, subtitle: 'yosemite-m6 · agents-cli · Still waiting · 40 min' });
   });
 
-  it('a peer the collector has not heard from yet does not count as resolved', async () => {
-    asks = [ask('urgent')];
-    const service = makeService();
-    await at(service, 0);
-    asks = [];
-    const blind = new AttentionNotifyService({
+  it('a peer that has only reported unavailable does not count as resolved, so its banner stays up', async () => {
+    await setAsks([ask('urgent')]);
+    await at(makeService(), 0);
+    expect(posts).toHaveLength(1);
+    const restartedHub = new FeedHub({ watch: async (o) => {
+      o.emit(wire.emit({ type: 'scope', scope: 'yosemite-m6', capturedAt: clock, status: 'unavailable', reason: 'ssh: timed out' }));
+      await new Promise((r) => o.signal.addEventListener('abort', r));
+    } });
+    const restarted = new AttentionNotifyService({
       self: () => 'zion',
       settings: () => ({ interactiveHost: 'zion', schedules: DEFAULTS() }),
-      fleetAsks: () => ({ asks: [], scopes: new Set() }),
+      fleetHub: () => restartedHub,
       notify: (n) => posts.push(n), withdraw: (keys) => withdrawn.push(keys), gc: () => {},
       ledgerDir: path.join(tmp, 'notified'), now: () => clock,
     });
-    await at(blind, 1);
+    await at(restarted, 1);
+    await at(restarted, 2);
+    expect(restartedHub.state.scopeNames).toContain('yosemite-m6');
     expect(withdrawn).toEqual([]);
+    await restartedHub.close();
+  });
+
+  it('switching interactive.host away withdraws every banner this host still shows', async () => {
+    await setAsks([ask('urgent')]);
+    let host = 'zion';
+    const service = new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ interactiveHost: host, schedules: DEFAULTS() }),
+      fleetHub: () => hub, getSessions: async () => [],
+      notify: (n) => posts.push(n), withdraw: (keys) => withdrawn.push(keys), gc: () => {},
+      ledgerDir: path.join(tmp, 'notified'), now: () => clock,
+    });
+    await at(service, 0);
+    host = '';
+    clock += 31_000;
+    await service.tick(ctx, new AbortController().signal);
+    expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
   });
 });
 
