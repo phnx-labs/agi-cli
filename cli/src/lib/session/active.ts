@@ -1,4 +1,5 @@
 import { writerProcessView } from './process-view.js';
+import { markLeadSessions } from '../lead/visibility.js';
 import { span, spanSync } from '../daemon/diagnostics.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -295,6 +296,7 @@ export interface ActiveSession {
   sessionId?: string;
   cwd?: string;
   project?: string | null;
+  lead?: boolean;
   label?: string;
   name?: string;
   topic?: string;
@@ -1552,6 +1554,7 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
     annotateOrchestratorLabels(merged);
     foldRecap(merged);
     foldPhase(merged);
+    markLeadSessions(merged);
   }, count(merged));
   return merged;
 }

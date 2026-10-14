@@ -5132,6 +5132,15 @@
               "negate": false
             },
             {
+              "flags": "--include-lead",
+              "description": "Also stream project Lead sessions (agents lead), which are hidden by default",
+              "long": "--include-lead",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -10588,6 +10597,15 @@
           "negate": true
         },
         {
+          "flags": "--include-lead",
+          "description": "Also list project Lead sessions (agents lead), which are hidden by default",
+          "long": "--include-lead",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "-h, --help",
           "description": "Show help",
           "short": "-h",
@@ -11275,6 +11293,15 @@
               "flags": "--local",
               "description": "Watch only this machine",
               "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--include-lead",
+              "description": "Also stream project Lead sessions (agents lead), which are hidden by default",
+              "long": "--include-lead",
               "required": false,
               "optional": false,
               "variadic": false,
