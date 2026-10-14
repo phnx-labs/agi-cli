@@ -105,6 +105,7 @@ export async function runFork(
   });
 
   const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced', '--name', options.name || `fork of ${label}`];
+  if (source.cwd) runArgs.push('--cwd', source.cwd);
   if (options.device) runArgs.push('--device', options.device);
   if (options.terminal !== undefined) {
     runArgs.push('--terminal');

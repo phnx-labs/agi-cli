@@ -52,6 +52,7 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(recap).toContain('insight widgets need gaps closed');
     expect(recap).toContain('/continue 11111111-2222-3333-4444-555555555555');
     expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of Prix Evals']));
+    expect(args[args.indexOf('--cwd') + 1]).toBe('/home/u/prix');
   });
 
   it('forks a CROSS-DEVICE, non-claude source where the old transcript copy threw "transcript not found"', async () => {

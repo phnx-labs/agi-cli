@@ -435,11 +435,11 @@ async function printSessionPreview(query: string, scope: PreviewScope): Promise<
     const args = ['ps', 'preview', session.id, '--local'];
     if (scope.json) args.push('--json');
     const rendered = await runOnPeer(args, transcriptPeer);
-    if (rendered === 'no-target') {
+    if (rendered === 'no-target' || rendered === 'unreachable') {
       console.error(chalk.red(`Session ${session.id} is on ${transcriptPeer}, but that device is not reachable.`));
       return false;
     }
-    return true;
+    return rendered === 'ok';
   }
 
   const live = (await liveSessionsById()).get(session.id);
