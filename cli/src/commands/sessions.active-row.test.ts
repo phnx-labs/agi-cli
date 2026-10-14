@@ -42,7 +42,7 @@ describe('renderActiveRowLines', () => {
 
   it('a working turn Claude reports busy reads quiet, not idle (PHNX-4387)', () => {
     const now = Date.now();
-    const s = active({ status: 'running', activity: 'working', quietMs: 4 * 60_000 + 30_000, lastActivityMs: now - 4 * 60_000 });
+    const s = active({ status: 'running', activity: 'working', quietSinceMs: now - (4 * 60_000 + 30_000), lastActivityMs: now - 4 * 60_000 });
     const [line1] = renderActiveRowLines(s, '  ', 120);
     expect(line1).toContain('working');
     expect(line1).toContain('quiet 4m');

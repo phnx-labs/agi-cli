@@ -371,8 +371,12 @@ export interface ActiveSession {
   accountLabel?: string;
   lastActivityMs?: number;
   lastEventMs?: number;
-  /** How long a working turn's transcript has been silent while Claude reports it busy. */
-  quietMs?: number;
+  /**
+   * When a working turn's transcript went silent while Claude reports it busy (ms
+   * epoch); set only once the silence passes the two-minute window. A timestamp,
+   * not a duration, so the row is stable across polls.
+   */
+  quietSinceMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
   origin?: 'cli' | 'routine';
@@ -740,8 +744,16 @@ export function sessionIdFromFile(kind: string, file?: string): string | undefin
   return indexedSessionIdForFile(kind, file);
 }
 
+/**
+ * SessionState plus when a working turn went quiet: the last event's stamp, or the
+ * transcript's mtime when the bounded tail holds no event (Claude can append
+ * 100+ KB of request records after a step). Set only while Claude reports the turn
+ * busy and the transcript has been silent past the window.
+ */
+type LiveState = SessionState & { quietSinceMs?: number };
+
 interface LiveSignals {
-  state?: SessionState;
+  state?: LiveState;
   tokPerSec?: number;
 }
 
@@ -807,7 +819,11 @@ export function computeLiveSignals(
   const harnessStatus = kind === 'claude' && pidAlive ? readHarnessStatus(sessionFile)?.status : undefined;
   if (tail.events.length === 0 && harnessStatus !== 'busy') return {};
 
-  const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs, harnessStatus });
+  const state: LiveState = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs, harnessStatus });
+  if (harnessStatus === 'busy' && state.activity === 'working') {
+    const quietSinceMs = state.quietMs != null ? nowMs - state.quietMs : tail.events.length === 0 ? mtimeMs : undefined;
+    if (quietSinceMs != null && nowMs - quietSinceMs >= ACTIVE_MTIME_WINDOW_MS) state.quietSinceMs = quietSinceMs;
+  }
   return { state, tokPerSec: tail.tokPerSec };
 }
 
@@ -815,7 +831,7 @@ function statusFromActivity(activity: SessionActivity): ActiveStatus {
   return activity === 'working' ? 'running' : activity === 'waiting_input' ? 'input_required' : 'idle';
 }
 
-function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
+function applyState(base: Omit<ActiveSession, 'status'>, state: LiveState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
   if (!state) return { ...base, pidAlive, status: resolveFallbackStatus(fallbackFile, pidAlive) };
   const life = lifecycleStatus(pidAlive, base.lastActivityMs ?? sessionFileTimes(fallbackFile).mtimeMs);
   return {
@@ -829,7 +845,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
-    quietMs: state.quietMs,
+    quietSinceMs: state.quietSinceMs,
     plan: state.plan,
     todos: state.todos,
     tail: state.tail,

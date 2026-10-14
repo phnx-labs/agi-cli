@@ -56,6 +56,20 @@ describe('computeLiveSignals reads the turn state Claude reports', () => {
     const { state } = computeLiveSignals('claude', liveClaude('busy'), '/tmp/phnx4387-silent', true, SILENT_NOW);
     expect(state?.activity).toBe('working');
     expect(state?.quietMs).toBe(SILENT_NOW - Date.parse('2026-10-14T19:19:23.484Z'));
+    expect(state?.quietSinceMs).toBe(Date.parse('2026-10-14T19:19:23.484Z'));
+  });
+
+  it('a busy turn whose tail holds only request records is working, quiet since the last write', () => {
+    // Seen live on Claude 2.1.261: after each step it appends 100+ KB of
+    // api-request-blob records, so the bounded tail read holds no conversation event.
+    const transcript = liveClaude('busy');
+    const blob = JSON.stringify({ type: 'api-request-blob', blob: 'x'.repeat(16_000) });
+    fs.appendFileSync(transcript, `${blob}\n`.repeat(10));
+    const lastWrite = SILENT_NOW - 3 * 60_000;
+    fs.utimesSync(transcript, new Date(lastWrite), new Date(lastWrite));
+    const { state } = computeLiveSignals('claude', transcript, '/tmp/phnx4387-silent', true, SILENT_NOW);
+    expect(state?.activity).toBe('working');
+    expect(state?.quietSinceMs).toBe(fs.statSync(transcript).mtimeMs);
   });
 
   it('the same transcript with no live record falls back to the two-minute window', () => {
