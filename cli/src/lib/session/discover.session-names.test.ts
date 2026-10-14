@@ -11,6 +11,7 @@ process.env.USERPROFILE = TEST_HOME;
 const { scanClaudeSession, scanSessionsIncremental, readClaudeLiveNames } = await import('./discover.js');
 const { getSessionById, getDB, closeDB } = await import('./db.js');
 const { recordRunName } = await import('./run-names.js');
+const { resolveSessionName } = await import('./title.js');
 
 const FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'session-names', 'claude-goal-renamed.jsonl');
 const FIXTURE_LINES = fs.readFileSync(FIXTURE, 'utf-8').split('\n').filter(Boolean);
@@ -48,7 +49,7 @@ function makeCold(file: string): void {
 describe('Claude session names in the index (PHNX-4387)', () => {
   it('a /rename beats the generated title even when Claude re-appends the ai-title after it', async () => {
     const scan = await scanClaudeSession(FIXTURE);
-    expect(scan.label).toBe('Rush credentials');
+    expect(resolveSessionName(scan)).toBe('Rush credentials');
   });
 
   it('reads Claude live names from account homes, not only ~/.claude', () => {
@@ -68,6 +69,20 @@ describe('Claude session names in the index (PHNX-4387)', () => {
     expect(getSessionById(id)?.label, 'not running: a cold file waits for its directory to change').toBe('Artifacts-cli base');
 
     writeLiveName(4102, id, 'Rush credentials', 'user');
+    await scanSessionsIncremental({ agent: 'claude' });
+    expect(getSessionById(id)?.label).toBe('Rush credentials');
+  });
+
+  it('a rename appended as the process exits still reaches the index', async () => {
+    const id = '5e55a000-0000-4000-8000-00000000a004';
+    const file = writeTranscript(id, FIXTURE_LINES.slice(0, RENAME_AT));
+    writeLiveName(4103, id, 'repo-4a', 'derived');
+    await scanSessionsIncremental({ agent: 'claude' });
+    expect(getSessionById(id)?.label).toBe('Artifacts-cli base');
+
+    fs.rmSync(path.join(accountSessions, '4103.json'));
+    makeCold(file);
+    fs.appendFileSync(file, FIXTURE_LINES.slice(RENAME_AT).map((l) => l.replaceAll('5e55a000-0000-4000-8000-000000004387', id)).join('\n') + '\n');
     await scanSessionsIncremental({ agent: 'claude' });
     expect(getSessionById(id)?.label).toBe('Rush credentials');
   });

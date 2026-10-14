@@ -1834,10 +1834,12 @@ rolling monologue and belongs to the live preview/`lastAgentLine` slot instead.
 Live rows resolve it in `deriveSessionRecap` (`src/lib/session/active.ts`),
 indexed rows in `sessionHeadline` (`src/lib/session/title.ts`); no surface
 re-derives its own ordering. The `label` rung itself has one resolver,
-`resolveSessionName` (`title.ts`, PHNX-4387): user `/rename` → Claude's current
-name from `<config>/sessions/<pid>.json` in any config home (`readClaudeLiveNames`)
-→ `agents run --name` (passed to Claude as `--name`) → Claude's `ai-title`. The
-index calls it in `readClaudeMeta`, live rows in `applySessionNames`; the
+`resolveSessionName` (`title.ts`, PHNX-4387): the transcript's `custom-title`
+(a `/rename`, or `agents run --name` passed to Claude as `--name`) → Claude's
+current name from `<config>/sessions/<pid>.json` in any config home
+(`readClaudeLiveNames`) → the stored index label → the launch name → Claude's
+`ai-title`. The index calls it in `readClaudeMeta`, live rows once per gather in
+`applySessionNames` (index label and `customTitle` via `getIndexedSessionNames`); the
 extension's tab title is a projection of it, never an input. Live rows also
 carry `startedAs`, the first prompt with `/goal` and injected turns stripped. `generatedTitle` is produced ONCE per session by the
 daemon's `session-title` service with a cheap model and persisted in

@@ -52,7 +52,7 @@ async function replay(
 function expectScanParity(inc: any, full: any) {
   expect(inc).toEqual(full);
   const fields = [
-    'timestamp', 'cwd', 'gitBranch', 'version', 'topic', 'label', 'entrypoint',
+    'timestamp', 'cwd', 'gitBranch', 'version', 'topic', 'customTitle', 'aiTitle', 'entrypoint',
     'messageCount', 'tokenCount', 'outputTokens', 'costUsd', 'durationMs',
     'lastActivity', 'contentText', 'prUrl', 'prNumber', 'worktreeSlug',
     'ticketId', 'createdTickets', 'spawnedTeam', 'plan', 'todos', 'recentDirectoriesTouched',
@@ -180,7 +180,7 @@ describe('incremental parity — title/plan after boundary', () => {
     ]);
     const { inc, full } = await replay([chunkA, chunkB]);
     expect(inc.topic).toBe('first prompt topic');
-    expect(inc.label).toBe('renamed-in-tail');
+    expect(inc.customTitle).toBe('renamed-in-tail');
     expect(inc.plan).toBe('# Tail plan');
     expectScanParity(inc, full);
   });
@@ -197,8 +197,8 @@ describe('incremental parity — title/plan after boundary', () => {
     const { inc, full } = await replay([chunkA, chunkB]);
     expect(inc.topic).toBe('start');
     expect(full.topic).toBe('start');
-    expect(inc.label).toBe('set-early');
-    expect(full.label).toBe('set-early');
+    expect(inc.customTitle).toBe('set-early');
+    expect(full.customTitle).toBe('set-early');
     expectScanParity(inc, full);
   });
 });
