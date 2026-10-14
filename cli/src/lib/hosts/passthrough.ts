@@ -18,7 +18,7 @@ import {
   resolveInteractiveDevice,
   interactiveUnsetError,
 } from '../devices/interactive-host.js';
-import { commandOwnsRoutingFlag, flagValue, ROUTING_OPTION_SPECS } from './routing-flag.js';
+import { commandOwnsDeviceFlag, flagValue, ROUTING_OPTION_SPECS } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
 import {
@@ -404,7 +404,7 @@ export async function maybeRunOnHost(
 
   if (OWN_HOST_COMMANDS.has(command)) return false;
 
-  if (commandOwnsRoutingFlag(allArgs)) return false;
+  if (commandOwnsDeviceFlag(allArgs)) return false;
 
   if (command === 'teams') {
 

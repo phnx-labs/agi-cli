@@ -20,8 +20,6 @@ export const ROUTING_OPTION_SPECS: StripSpec[] = [
   { long: 'devices', takesValue: true },
 ];
 
-const HOST_SELECTOR_FLAGS = ['device', 'hosts', 'devices'];
-
 export interface RoutingOccurrence {
   spec: StripSpec;
   start: number;
@@ -149,19 +147,14 @@ export function flagValue(args: string[], long: string, short?: string): string 
   return scanArgv(args, [{ long, short, takesValue: true }]).routing.find((r) => r.spec.long === long)?.value;
 }
 
-export function commandOwnsRoutingFlag(args: string[]): boolean {
+export function commandOwnsDeviceFlag(args: string[]): boolean {
   const { routing, leaf } = scanArgv(args);
-  if (!leaf) return false;
-  return routing.some(
-    (r) =>
-      HOST_SELECTOR_FLAGS.includes(r.spec.long) &&
-      r.value !== undefined &&
-      leaf.options.some((o) => o.long === `--${r.spec.long}` && !isRouterDeviceOption(o)),
-  );
+  if (!leaf || !routing.some((r) => r.spec.long === 'device' && r.value !== undefined)) return false;
+  return leaf.options.some((o) => o.long === '--device' && !isRouterDeviceOption(o));
 }
 
 export function hasHostRoutingFlag(args: string[]): boolean {
   return scanArgv(args).routing.some(
-    (r) => HOST_SELECTOR_FLAGS.includes(r.spec.long) && r.value !== undefined,
+    (r) => ['device', 'hosts', 'devices'].includes(r.spec.long) && r.value !== undefined,
   );
 }

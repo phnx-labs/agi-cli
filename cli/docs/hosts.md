@@ -324,12 +324,12 @@ about a command nobody typed, sending the user looking in the wrong place
 is the name set, pinned to the real command tree by a test.
 
 **A command that declares its own `--device` owns it.** The router steps aside
-whenever the resolved (sub)command registers `--device`, `--devices` or `--hosts`
-itself: `agents fork <id> --device <box>` places the sibling, `agents cloud run
+whenever the resolved (sub)command registers `--device` itself: `agents fork <id> --device <box>` places the sibling, `agents cloud run
 --device <box>` targets a host, `agents projects status|pull --device <box>` scopes
 the fleet read. Only the `--device` that `addHostOption`
 ([`src/lib/hosts/option.ts`](../src/lib/hosts/option.ts)) declares is the router's
-own. Before PHNX-4387 the router consulted a hand-kept list of top-level names, so a
+own, and `--devices`/`--hosts` are always the router's (a `routines add --devices a,b
+--device mac` still forwards to `mac`). Before PHNX-4387 the router consulted a hand-kept list of top-level names, so a
 command that moved (`agents sessions fork` became `agents fork`) lost `--device`
 without any error at build time. `passthrough.device-guard.test.ts` walks the full
 command tree and fails if any command that declares `--device` is rejected.

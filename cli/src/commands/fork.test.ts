@@ -61,6 +61,10 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     await runFork(remote.id, { device: 'yosemite-m5' }, onDevice.deps);
     expect(onDevice.launched[0][onDevice.launched[0].indexOf('--cwd') + 1]).toBe('/home/u/prix');
 
+    const elsewhere = fakeDeps({ stdout: previewJson(remote, null) });
+    await runFork(remote.id, { device: 'yosemite-m1' }, elsewhere.deps);
+    expect(elsewhere.launched[0]).not.toContain('--cwd');
+
     const local = { ...remote, machine: undefined };
     const here = fakeDeps({ stdout: previewJson(local, null) });
     await runFork(remote.id, {}, here.deps);
