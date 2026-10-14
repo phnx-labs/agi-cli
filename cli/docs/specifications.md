@@ -393,22 +393,28 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/active.account-label.test.ts`, `lib/session/active.unattrib-cache.test.ts`.
 
 - **SES-14 (MUST).** `label` (the session name) MUST resolve through the one
-  resolver, `resolveSessionName` (`lib/session/title.ts`), by priority: a user
-  `/rename` (`custom-title`, or Claude's live name with `nameSource: "user"`) >
-  the harness's current name for the running process (Claude's
+  resolver, `resolveSessionName` (`lib/session/title.ts`), by priority: the
+  transcript's latest user rename (`custom-title`; `claude --name` writes one
+  too) > the harness's current name for the running process (Claude's
   `<config>/sessions/<pid>.json` `name`, read from every config home by
-  `readClaudeLiveNames`; a `derived` cwd placeholder is not a name) > the
-  `agents run --name` launch name > the harness-generated title (`ai-title`) >
-  unset (the headline then falls back per SES-14c). Index rows resolve it at
-  scan time (`readClaudeMeta`, `lib/session/discover.ts`); live rows resolve it
-  in `applySessionNames` (`lib/session/active.ts`) with the stored index label
-  ranked below a live rename and above a live name the index has not caught up
-  with. A peer's rows keep the label the peer resolved. The extension's tab
-  title is never an input. A running Claude session's transcript is re-checked
-  every index tick even when its directory is unchanged, so a rename reaches
-  the index within one tick. An empty incoming label MUST NOT clobber a stored
-  non-empty one (`lib/session/db.ts`; tests `title.test.ts`,
-  `db.names.test.ts`, `discover.session-names.test.ts`).
+  `readClaudeLiveNames`; a `derived` cwd placeholder is not a name) > the label
+  already stored in the index > the `agents run --name` launch name > the
+  harness-generated title (`ai-title`) > unset (the headline then falls back per
+  SES-14c). Index rows resolve it at scan time (`readClaudeMeta`,
+  `lib/session/discover.ts`). Live rows resolve it once per gather in
+  `applySessionNames` (`lib/session/active.ts`), reading the stored label and
+  the transcript's `customTitle` from the index in one batched query
+  (`getIndexedSessionNames`, `lib/session/db.ts`); a `--device` launcher row
+  and a teammate with no session id yet resolve from their launch name. A
+  peer's rows keep the label the peer resolved. The extension's tab title is
+  never an input. A Claude transcript is re-checked every daemon index tick
+  while its pid file exists and for ten minutes after it disappears, even when
+  its directory is unchanged, so a rename reaches the index within a tick. A
+  rename appended to a session that has not been live under this daemon in the
+  last ten minutes waits for its directory to change. An empty incoming label
+  MUST NOT clobber a stored non-empty one (`lib/session/db.ts`; tests
+  `title.test.ts`, `db.names.test.ts`, `discover.session-names.test.ts`,
+  `active.session-names.test.ts`).
 - **SES-14d (MUST).** Every live row (`agents ps --json`, `agents ps watch
   --json`) MUST carry `startedAs` when the session has a user prompt: the first
   genuine user turn the session was started with, read from the transcript head

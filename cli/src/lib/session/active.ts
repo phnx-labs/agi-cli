@@ -24,7 +24,7 @@ import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord,
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { resolveSessionName, startedAsFromUserTurn } from './title.js';
-import { latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
+import { getIndexedSessionNames, latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
 import { parseSession } from '@phnx-labs/sessions-cli/reader';
@@ -125,7 +125,6 @@ export function backfillActiveRowsFromMeta(
   metaById: Map<string, BackfillMeta>,
 ): void {
   const accounts = listNativeAccounts(readMeta());
-  applySessionNames(sessions, (id) => metaById.get(id)?.label);
   for (const s of sessions) {
     if (!s.sessionId) continue;
     const m = metaById.get(s.sessionId);
@@ -133,6 +132,7 @@ export function backfillActiveRowsFromMeta(
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
     s.accountLabel ??= sessionAccountLabel(s.kind, m, accounts);
+    if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.lastUserMessage && m.lastUserMessage) s.lastUserMessage = m.lastUserMessage;
     if (!s.generatedTitle && m.generatedTitle) s.generatedTitle = m.generatedTitle;
@@ -156,27 +156,26 @@ export function backfillActiveRowsFromMeta(
   }
 }
 
-export function applySessionNames(
-  sessions: ActiveSession[],
-  indexedLabel: (sessionId: string) => string | null | undefined = () => undefined,
-): void {
+export function applySessionNames(sessions: ActiveSession[]): void {
   const self = machineId();
-  const owned: ActiveSession[] = [];
-  for (const s of sessions) {
-    const peerRow = !!s.machine && s.machine !== self && s.offloadedFrom !== self;
-    if (!peerRow) owned.push(s);
-    else if (s.sessionId) s.label ||= indexedLabel(s.sessionId) ?? undefined;
-  }
+  const owned = sessions.filter((s) => !s.machine || s.machine === self || s.offloadedFrom === self);
   if (owned.length === 0) return;
   const live = readClaudeLiveNames();
   const launch = buildRunNameMap();
+  let indexed = new Map<string, { label?: string; customTitle?: string }>();
+  try {
+    indexed = getIndexedSessionNames(owned.flatMap((s) => s.sessionId ? [{ id: s.sessionId, filePath: s.sessionFile }] : []));
+  } catch {
+  }
   for (const s of owned) {
     const id = s.sessionId;
     if (id) s.name ??= launch.get(id) ?? undefined;
     const runsHere = !s.machine || s.machine === self;
+    const stored = id ? indexed.get(id) : undefined;
     s.label = resolveSessionName({
+      customTitle: stored?.customTitle,
       live: id && runsHere ? live.get(id) : undefined,
-      indexed: id ? indexedLabel(id) : undefined,
+      indexed: stored?.label,
       launchName: s.name,
     }) ?? s.label;
   }

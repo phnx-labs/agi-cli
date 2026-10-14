@@ -181,9 +181,10 @@ describe('resolveSessionName — the label rung (PHNX-4387)', () => {
     expect(resolveSessionName({ live: { name: 'muqsitnawaz-6f', source: 'derived' }, aiTitle: 'Fix login' })).toBe('Fix login');
   });
 
-  it('a stored index label ranks below a live rename and above a live name the index has not caught up with', () => {
+  it('a stored index label ranks below the transcript rename and the live name, above the launch name', () => {
     expect(resolveSessionName({ live: { name: 'Renamed', source: 'user' }, indexed: 'Old title' })).toBe('Renamed');
-    expect(resolveSessionName({ live: { name: 'Claude name', source: 'ai' }, indexed: 'Rush credentials' })).toBe('Rush credentials');
+    expect(resolveSessionName({ live: { name: 'Claude name', source: 'ai' }, indexed: 'Artifacts-cli base' })).toBe('Claude name');
+    expect(resolveSessionName({ customTitle: 'Rush credentials', live: { name: 'Claude name', source: 'ai' }, indexed: 'Rush credentials' })).toBe('Rush credentials');
     expect(resolveSessionName({ indexed: '  ', launchName: 'nightly' })).toBe('nightly');
   });
 });

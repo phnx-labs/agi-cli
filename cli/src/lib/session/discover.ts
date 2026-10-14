@@ -198,7 +198,6 @@ interface ClaudeSessionScan {
   firstUserMessage?: string;
   customTitle?: string;
   aiTitle?: string;
-  label?: string;
   messageCount: number;
   tokenCount?: number;
   outputTokens?: number;
@@ -1023,6 +1022,18 @@ function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
 }
 
 
+const lastSeenLiveMs = new Map<string, number>();
+
+function recentlyLive(sessionIds: Iterable<string>, now: number): Set<string> {
+  for (const id of sessionIds) lastSeenLiveMs.set(id, now);
+  const hot = new Set<string>();
+  for (const [id, at] of lastSeenLiveMs) {
+    if (now - at <= HOT_FILE_WINDOW_MS) hot.add(id);
+    else lastSeenLiveMs.delete(id);
+  }
+  return hot;
+}
+
 export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId: string }> {
   const newest = new Map<string, { entry: LiveSessionName & { sessionId: string }; at: number }>();
   for (const dir of getAgentSessionDirs('claude', 'sessions')) {
@@ -1082,10 +1093,11 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
   });
 
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
+  const hot = recentlyLive(liveNames.keys(), Date.now());
   const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(
     leafDirs,
     '.jsonl',
-    fp => liveNames.has(sessionIdOf(fp)),
+    fp => hot.has(sessionIdOf(fp)),
   );
   const winnerBySession = new Map<string, string>();
 
@@ -2925,7 +2937,6 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
       ? state.lastTsMs - state.firstTsMs
       : undefined;
 
-  const label = resolveSessionName({ customTitle: state.customTitle, aiTitle: state.aiTitle });
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
 
@@ -2939,7 +2950,6 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
     firstUserMessage: state.firstUserMessage,
     customTitle: state.customTitle,
     aiTitle: state.aiTitle,
-    label,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
     toolCallCount: state.toolCallCount,

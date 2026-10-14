@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery, getDB } from '../db.js';
+import { resolveSessionName } from '../title.js';
 import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, isCompleteSessionId, looksLikeSessionId, readGrokMeta } from '../discover.js';
 import { machineId } from '../sync/config.js';
 import { getHistoryDir } from '../../state.js';
@@ -212,7 +213,7 @@ describe('scanClaudeSession title resolution', () => {
     ]);
     const scan = await scanClaudeSession(fp);
     expect(scan.topic).toBe('fix the auth refresh bug please');
-    expect(scan.label).toBe('close-li-outreach-gap');
+    expect(resolveSessionName(scan)).toBe('close-li-outreach-gap');
   });
 
   it('falls back to ai-title when there is no custom-title', async () => {
@@ -222,7 +223,7 @@ describe('scanClaudeSession title resolution', () => {
     ]);
     const scan = await scanClaudeSession(fp);
     expect(scan.topic).toBe('do the thing');
-    expect(scan.label).toBe('Release new version of agents-cli');
+    expect(resolveSessionName(scan)).toBe('Release new version of agents-cli');
   });
 
   it('collapses an ai-title generated from a skill preamble to the skill', async () => {
@@ -231,7 +232,7 @@ describe('scanClaudeSession title resolution', () => {
       { type: 'ai-title', aiTitle: 'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue', sessionId: 's' },
     ]);
     const scan = await scanClaudeSession(fp);
-    expect(scan.label).toBe('/continue');
+    expect(resolveSessionName(scan)).toBe('/continue');
   });
 
   it('never rewrites a user custom-title, even one naming a skills path', async () => {
@@ -240,14 +241,14 @@ describe('scanClaudeSession title resolution', () => {
       { type: 'custom-title', customTitle: 'rewrite the skills/continue docs', sessionId: 's' },
     ]);
     const scan = await scanClaudeSession(fp);
-    expect(scan.label).toBe('rewrite the skills/continue docs');
+    expect(resolveSessionName(scan)).toBe('rewrite the skills/continue docs');
   });
 
   it('falls back to the first-prompt topic when no title events exist', async () => {
     const fp = write([userMsg('investigate the flaky test')]);
     const scan = await scanClaudeSession(fp);
     expect(scan.topic).toBe('investigate the flaky test');
-    expect(scan.label).toBeUndefined();
+    expect(resolveSessionName(scan)).toBeUndefined();
   });
 
   it('takes the last custom-title when renamed more than once', async () => {
@@ -258,7 +259,7 @@ describe('scanClaudeSession title resolution', () => {
     ]);
     const scan = await scanClaudeSession(fp);
     expect(scan.topic).toBe('start');
-    expect(scan.label).toBe('second name');
+    expect(resolveSessionName(scan)).toBe('second name');
   });
 
   it('ignores whitespace-only title values', async () => {
@@ -268,7 +269,7 @@ describe('scanClaudeSession title resolution', () => {
     ]);
     const scan = await scanClaudeSession(fp);
     expect(scan.topic).toBe('real prompt here');
-    expect(scan.label).toBeUndefined();
+    expect(resolveSessionName(scan)).toBeUndefined();
   });
 
   it('sets lastActivity to the last event time, distinct from the creation timestamp', async () => {

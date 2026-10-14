@@ -2268,6 +2268,42 @@ export function upsertSessionsBatch(
   maintainSessionSearchIndex(db);
 }
 
+export function getIndexedSessionNames(
+  rows: Array<{ id: string; filePath?: string }>,
+): Map<string, { label?: string; customTitle?: string }> {
+  const out = new Map<string, { label?: string; customTitle?: string }>();
+  if (rows.length === 0) return out;
+  const db = getDB();
+  const CHUNK = 500;
+  const filePathById = new Map(rows.map((r) => [r.id, r.filePath]));
+  const ids = [...filePathById.keys()];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const indexed = db
+      .prepare(`SELECT id, label, file_path FROM sessions WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all(...chunk) as Array<{ id: string; label: string | null; file_path: string | null }>;
+    for (const row of indexed) {
+      out.set(row.id, { label: row.label ?? undefined });
+      filePathById.set(row.id, filePathById.get(row.id) ?? row.file_path ?? undefined);
+    }
+  }
+  const idByLedgerKey = new Map<string, string>();
+  for (const [id, fp] of filePathById) if (fp) idByLedgerKey.set(canonicalLedgerKey(fp), id);
+  const keys = [...idByLedgerKey.keys()];
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const chunk = keys.slice(i, i + CHUNK);
+    const titled = db
+      .prepare(`SELECT file_path, json_extract(parser_state, '$.customTitle') AS custom_title FROM scan_ledger WHERE file_path IN (${chunk.map(() => '?').join(',')}) AND json_valid(parser_state)`)
+      .all(...chunk) as Array<{ file_path: string; custom_title: string | null }>;
+    for (const row of titled) {
+      if (typeof row.custom_title !== 'string' || !row.custom_title) continue;
+      const id = idByLedgerKey.get(row.file_path)!;
+      out.set(id, { ...out.get(id), customTitle: row.custom_title });
+    }
+  }
+  return out;
+}
+
 export function seedLabelsFromNames(nameMap: Map<string, string | null>): number {
   if (nameMap.size === 0) return 0;
   const db = getDB();

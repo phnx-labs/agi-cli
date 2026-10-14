@@ -6,7 +6,7 @@ import { AgentType } from './parsers.js';
 import { getDelta } from './summarizer.js';
 import { debug } from './debug.js';
 import { readClaudeLiveNames } from '../session/discover.js';
-import { resolveSessionName } from '../session/title.js';
+import { resolveSessionName, type LiveSessionName } from '../session/title.js';
 import { resolveTeammateDelivery } from './delivery.js';
 import { hasUncommittedChanges } from './worktree.js';
 
@@ -408,7 +408,7 @@ export async function handleStatus(
   let maxTimestamp = since || new Date(0).toISOString();
   const claudeLiveNames = allAgents.some((agent) => agent.agentType === 'claude')
     ? readClaudeLiveNames()
-    : new Map();
+    : new Map<string, LiveSessionName>();
 
   for (const agent of agents) {
     await agent.readNewEvents();
