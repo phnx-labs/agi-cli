@@ -1,4 +1,4 @@
-import { machineId } from '../machine-id.js';
+import { machineId, normalizeHost } from '../machine-id.js';
 import { blocksPlacement, memPressurePercent, type Headroom } from '../devices/health.js';
 
 export interface DevicePlacementSignal {
@@ -231,7 +231,7 @@ export function pickBestDevice(
     if (signedIn !== 0) return signedIn;
     const preferred = opts?.preferred;
     if (preferred && preferred.size > 0) {
-      const pref = (preferred.has(a) ? 0 : 1) - (preferred.has(b) ? 0 : 1);
+      const pref = (preferred.has(normalizeHost(a)) ? 0 : 1) - (preferred.has(normalizeHost(b)) ? 0 : 1);
       if (pref !== 0) return pref;
     }
     const tier = headroomTier(sa?.headroom) - headroomTier(sb?.headroom);

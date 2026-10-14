@@ -242,6 +242,11 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
     expect(pickBestDevice(['box-a', 'box-b'], [], { signals, preferred: new Set(['box-a']) })).toBe('box-a');
   });
 
+  it('matches a preferred device by normalized name, as autoLaunchPreferredSet returns them', () => {
+    const signals = sig({ 'Box-A.local': { headroom: 'busy' }, 'box-b': { headroom: 'idle' } });
+    expect(pickBestDevice(['Box-A.local', 'box-b'], [], { signals, preferred: new Set(['box-a']) })).toBe('Box-A.local');
+  });
+
   it('a signed-out preferred device does NOT jump ahead of a signed-in one', () => {
     const signals = sig({
       'box-a': { installed: true, signedIn: false, headroom: 'idle' },
