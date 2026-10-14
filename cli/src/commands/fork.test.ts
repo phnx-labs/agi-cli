@@ -55,7 +55,7 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(args).not.toContain('--cwd');
   });
 
-  it('starts the sibling in the source cwd when it lands on a device or the source is here', async () => {
+  it('starts the sibling in the source cwd only on the machine that holds the source', async () => {
     const remote = { id: '11111111-aaaa-3333-4444-555555555555', shortId: '11111111', agent: 'claude', cwd: '/home/u/prix', machine: 'yosemite-m5', label: 'x' };
     const onDevice = fakeDeps({ stdout: previewJson(remote, null) });
     await runFork(remote.id, { device: 'yosemite-m5' }, onDevice.deps);
@@ -69,6 +69,14 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     const here = fakeDeps({ stdout: previewJson(local, null) });
     await runFork(remote.id, {}, here.deps);
     expect(here.launched[0][here.launched[0].indexOf('--cwd') + 1]).toBe('/home/u/prix');
+
+    const toDevice = fakeDeps({ stdout: previewJson(local, null) });
+    await runFork(remote.id, { device: 'yosemite-m1' }, toDevice.deps);
+    expect(toDevice.launched[0][toDevice.launched[0].indexOf('--cwd') + 1]).toBe('/home/u/prix');
+
+    const toOtherBox = fakeDeps({ stdout: previewJson(local, null) });
+    await runFork(remote.id, { device: 'yosemite-m1' }, toOtherBox.deps);
+    expect(toOtherBox.launched[0]).not.toContain('--cwd');
   });
 
   it('forks a CROSS-DEVICE, non-claude source where the old transcript copy threw "transcript not found"', async () => {
