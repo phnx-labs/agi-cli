@@ -31,7 +31,7 @@ const DB_PATH = getSessionsDbPath();
 
 export const SCHEMA_VERSION = 52;
 
-export const CONTENT_INDEX_VERSION = 7;
+export const CONTENT_INDEX_VERSION = 8;
 
 const RESOURCE_INDEX_VERSION = 2;
 
