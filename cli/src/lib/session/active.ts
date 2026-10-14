@@ -29,7 +29,7 @@ import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKi
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
 import { parseSession } from '@phnx-labs/sessions-cli/reader';
 import { computeTokPerSec } from './throughput.js';
-import { inferSessionState, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from '@phnx-labs/sessions-cli/reader';
+import { inferSessionState, readHarnessStatus, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from '@phnx-labs/sessions-cli/reader';
 import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from '@phnx-labs/sessions-cli/reader';
 import { AGENTS } from '../agents.js';
 import { canonicalProjectName, confirmedProjectForCwd, listProjectDefsCached, type ProjectDef } from '../projects.js';
@@ -371,6 +371,8 @@ export interface ActiveSession {
   accountLabel?: string;
   lastActivityMs?: number;
   lastEventMs?: number;
+  /** How long a working turn's transcript has been silent while Claude reports it busy. */
+  quietMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
   origin?: 'cli' | 'routine';
@@ -799,9 +801,13 @@ export function computeLiveSignals(
     if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
     liveTailCache.set(cacheKey, tail);
   }
-  if (tail.events.length === 0) return {};
+  // Claude's own turn state for its live process (PHNX-4387). Read on every call,
+  // not cached with the tail: it changes at turn edges while the transcript, and so
+  // its mtime, sits still through a long thinking or streaming step.
+  const harnessStatus = kind === 'claude' && pidAlive ? readHarnessStatus(sessionFile)?.status : undefined;
+  if (tail.events.length === 0 && harnessStatus !== 'busy') return {};
 
-  const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
+  const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs, harnessStatus });
   return { state, tokPerSec: tail.tokPerSec };
 }
 
@@ -823,6 +829,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
+    quietMs: state.quietMs,
     plan: state.plan,
     todos: state.todos,
     tail: state.tail,
