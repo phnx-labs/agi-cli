@@ -393,9 +393,10 @@ SSH access (§7); rendering sessions that no harness produced.
   `lib/session/active.account-label.test.ts`, `lib/session/active.unattrib-cache.test.ts`.
 
 - **SES-14 (MUST).** `label` (the session name) MUST resolve through the one
-  resolver, `resolveSessionName` (`lib/session/title.ts`), by priority: the
-  transcript's latest user rename (`custom-title`; `claude --name` writes one
-  too) > the harness's current name for the running process (Claude's
+  resolver, `resolveSessionName` (`lib/session/title.ts`), by priority: a user
+  rename, read first from Claude's live `nameSource: "user"` name (written at
+  the moment of the rename) and then from the transcript's latest
+  `custom-title` (`claude --name` writes one too) > the harness's other current name for the running process (Claude's
   `<config>/sessions/<pid>.json` `name`, read from every config home by
   `readClaudeLiveNames`; a `derived` cwd placeholder is not a name) > the label
   already stored in the index > the `agents run --name` launch name > the
@@ -408,7 +409,7 @@ SSH access (§7); rendering sessions that no harness produced.
   and a teammate with no session id yet resolve from their launch name. A
   peer's rows keep the label the peer resolved. The extension's tab title is
   never an input. A Claude transcript is re-checked every daemon index tick
-  while its pid file exists and for ten minutes after it disappears, even when
+  while its pid file exists (named or not) and for ten minutes after it disappears, even when
   its directory is unchanged, so a rename reaches the index within a tick. A
   rename appended to a session that has not been live under this daemon in the
   last ten minutes waits for its directory to change. An empty incoming label

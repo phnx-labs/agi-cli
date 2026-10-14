@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { dedupeByMachineSession, getActiveSessions, findSessionFileForKind, listTerminalsActive, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
+import { applySessionNames, dedupeByMachineSession, getActiveSessions, findSessionFileForKind, listTerminalsActive, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
 import { isSessionIdShape } from '../lib/session/pid-registry.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
@@ -279,6 +279,7 @@ export function editorTabsForSelector(selector: string, tabs: ActiveSession[], n
 }
 
 async function focusEditorTab(tab: ActiveSession): Promise<boolean> {
+  applySessionNames([tab]);
   const variant = editorVariantForHost(tab.host)!;
   for (const spec of focusTabSpecs(variant, tab.workspaceDir!, tab.terminalId!)) {
     const result = await runLocal(spec, 10_000);
