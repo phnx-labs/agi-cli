@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { liveStatusWord } from '../lib/session/presentation.js';
+import { formatLiveStatusHeadline, liveStatusWord } from '../lib/session/presentation.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function row(partial: Partial<ActiveSession>): ActiveSession {
@@ -29,5 +29,14 @@ describe('liveStatusWord (status text for the default list, not just a glyph)', 
   it('lifecycle status (closed/abandoned) wins over any residual parsed activity', () => {
     expect(liveStatusWord(row({ status: 'closed', activity: 'idle' }))).toBe('closed');
     expect(liveStatusWord(row({ status: 'abandoned', activity: 'working' }))).toBe('abandoned');
+  });
+});
+
+describe('formatLiveStatusHeadline (PHNX-4387)', () => {
+  it('a working turn Claude reports busy says how long the transcript has been quiet', () => {
+    const headline = formatLiveStatusHeadline(row({ kind: 'claude', activity: 'working', status: 'running', quietSinceMs: Date.now() - 132_422 }));
+    expect(headline).toContain('working');
+    expect(headline).toContain('quiet 2m');
+    expect(formatLiveStatusHeadline(row({ kind: 'claude', activity: 'working', status: 'running' }))).not.toContain('quiet');
   });
 });
