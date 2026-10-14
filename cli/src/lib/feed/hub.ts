@@ -77,6 +77,21 @@ export class FeedHubState {
   }
 
   get scopeNames(): string[] { return [...this.scopes.keys()]; }
+
+  /** Every open ask the stream holds, each with the session row it belongs to. */
+  attention(): Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> {
+    const out: Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> = [];
+    for (const [scope, state] of this.scopes) {
+      const seen = new Set<string>();
+      for (const item of state.attention.values()) {
+        if (seen.has(item.key)) continue;
+        seen.add(item.key);
+        const agent = [...state.agents.values()].find((row) => row.sessionId === item.sessionId && !row.previous);
+        out.push({ scope, item, ...(agent ? { agent } : {}) });
+      }
+    }
+    return out;
+  }
 }
 
 type Subscriber = { emit: (event: FeedWatchEnvelope) => void; state: FeedWatchState };

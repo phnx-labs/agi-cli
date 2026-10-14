@@ -196,6 +196,71 @@ runs the stage on its selected signing Mac and pulls the result back.
   first prompt. The menu must not reconstruct a title from control text, and must
   accept a better authoritative title that arrives after the first render.
 
+## Attention banners (PHNX-4369)
+
+Mac banners for agent asks come only from AGI Menu, posted by the
+`attention-notify` daemon service
+([`src/lib/daemon/attention-notify-service.ts`](../src/lib/daemon/attention-notify-service.ts))
+through a one-shot `"AGI Menu" --notify`. The extension never posts its own.
+
+**Post** (`buildMenubarNotifyArgs`, [`src/lib/menubar/notify-desktop.ts`](../src/lib/menubar/notify-desktop.ts)):
+
+```
+"AGI Menu" --notify --title <t> --body <b> [--subtitle <s>] [--action <a>] [--agent <id>]
+           [--category permission|question|plan_review|done|failure] [--key <attention-key>]
+           [--session <id>] [--choice <id>=<label> ...]
+           [--level urgent|high|normal|low] [--sound] [--reminder <n>]
+```
+
+| Flag | Meaning |
+|---|---|
+| `--key` | The attention key. It is also the banner identifier, so a reminder **replaces** the earlier banner instead of stacking. |
+| `--choice` | One button per answer, labelled with the ask's real option label; the helper registers a per-ask category on the fly (merged with existing categories, old ones pruned) and runs `agents feed answer <key> --choice <id>`. |
+| `--level` | The ask's `urgency`. `urgent` and `high` post as `.timeSensitive`, `normal` and `low` as `.active`. |
+| `--sound` | Play the default sound. Set when the level's schedule lists `sound`. |
+| `--reminder <n>` | `n >= 1` marks the nth reminder. The CLI also puts `Still waiting · 15 min` in the subtitle. |
+
+**Withdraw** (`buildMenubarWithdrawArgs`):
+
+```
+"AGI Menu" --notify --withdraw <key> [--withdraw <key> ...]
+```
+
+removes delivered banners with those identifiers and exits 0. It rides on
+`--notify` deliberately: a helper that predates withdraw requires `--title`/`--body`
+and exits 2, instead of launching a second menu-bar instance. On Linux
+(`notify-send`) and the osascript fallback a banner cannot be recalled, so
+withdraw is a no-op there.
+
+The helper's Info.plist sets `NSUserNotificationAlertStyle = alert`, so banners
+stay on screen. Alert style is app-wide in macOS, so for a level whose schedule
+has no `stay` the CLI withdraws the banner about 10 s after posting it.
+
+**Helper version.** `--level`, `--sound`, `--reminder` and `--withdraw` need the
+first AGI Menu release after 1.18.1; the `menubar` floor in
+[`src/lib/helper-versions.ts`](../src/lib/helper-versions.ts) is raised to it in
+the same CLI release that starts sending them.
+
+**Schedules** are the user-scope string-list keys
+`menubar.menu.notifyUrgent` / `notifyHigh` / `notifyNormal` / `notifyLow`
+([`src/lib/feed/notify-schedule.ts`](../src/lib/feed/notify-schedule.ts)). Tokens:
+durations `<n>m` / `<n>h` in increasing order, measured from when the ask opened
+(the first posts the banner, each later one a reminder), plus `stay` and `sound`;
+or the single token `sidebar` for no banner. Defaults: urgent
+`["0m","15m","30m","stay","sound"]`, high `["0m","30m","stay"]`, normal
+`["5m","1h"]`, low `["sidebar"]`. `agents config set` rejects anything else.
+
+**Lifecycle.** Each 5 s tick posts the furthest stage that is due (a daemon that
+was down posts only the latest one, as that reminder), records one ledger file per
+key and per reminder under `~/.agents/.history/feed/notified/` so a restart never
+re-sends, withdraws the banner when the ask resolves, and withdraws it ~10 s after
+posting when the level has no `stay`.
+
+**Which machine posts.** `interactive.host` unset: each host posts its own asks.
+Set to this machine: it posts every host's asks, read from the daemon's one
+shared fleet collector (`sharedFleetFeedHub`, the same stream `feed watch --json`
+reads — no second SSH fan-out). Set to another machine: this host posts nothing.
+
 ## Commands
 
 `agents menubar` is hidden from `--help`: it holds only the four verbs AGI Menu

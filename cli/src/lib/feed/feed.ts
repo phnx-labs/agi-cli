@@ -813,6 +813,14 @@ def main():
                 existing = json.load(existing_file)
             if existing.get("kind") == "question":
                 return
+            # PermissionRequest already wrote this ask with its tool and command;
+            # the later generic "Claude needs your permission" must not replace it.
+            if (
+                notification_type == "permission_prompt"
+                and existing.get("notificationType") == "permission_prompt"
+                and (existing.get("questions") or [{}])[0].get("header") == "Approval needed"
+            ):
+                return
         except Exception:
             pass
         message = payload.get("message", "")
@@ -827,25 +835,29 @@ def main():
     elif hook_event == "PermissionRequest":
         tool_name = payload.get("tool_name") or "a tool"
         tool_input = payload.get("tool_input", {})
+        transcript_path = str(payload.get("transcript_path") or "")
+        is_claude = "permission_suggestions" in payload or "/.claude/" in transcript_path.replace(os.sep, "/")
         command = ""
         if isinstance(tool_input, dict):
             command = (
                 tool_input.get("command")
                 or tool_input.get("cmd")
                 or tool_input.get("path")
+                or (tool_input.get("file_path") or tool_input.get("url") or tool_input.get("pattern") if is_claude else "")
                 or ""
             )
             if isinstance(command, list):
                 command = " ".join(str(c) for c in command)
         detail = f": {command}" if command else ""
+        who = "Claude" if is_claude else "Codex"
         normalized_questions = [{
-            "text": f"Codex needs approval to run {tool_name}{detail}",
+            "text": f"{who} needs approval to run {tool_name}{detail}",
             "header": "Approval needed",
             "multiSelect": False,
         }]
         kind = "notification"
         notification_type = "permission_prompt"
-        codex_approval = True
+        codex_approval = not is_claude
     else:
         tool_input = payload.get("tool_input", {})
         questions = tool_input.get("questions", [])

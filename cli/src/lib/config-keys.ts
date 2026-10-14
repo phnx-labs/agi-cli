@@ -42,6 +42,10 @@ export const MENUBAR_MENU_PROPERTIES = [
   'githubHidden',
   'githubDrafts',
   'githubBots',
+  'notifyUrgent',
+  'notifyHigh',
+  'notifyNormal',
+  'notifyLow',
 ] as const;
 
 export const MENUBAR_STATUSBAR_PROPERTIES = ['goalCountdown'] as const;

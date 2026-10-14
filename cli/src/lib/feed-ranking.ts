@@ -12,6 +12,8 @@ const RUNAWAY_TOK_PER_SEC = 250;
 const RUNAWAY_BURN_USD_PER_HOUR = 25;
 const RELAUNCH_LOOP_COUNT = 3;
 const RELAUNCH_LOOP_WINDOW_MS = 10 * 60_000;
+// Past a day an ask is stale, not more urgent: uncapped, a 40-day-old ask outranked every live one.
+export const MAX_IDLE_MINUTES = 24 * 60;
 
 export interface FeedSessionSignal {
   sessionId?: string;
@@ -121,7 +123,7 @@ export function burnUsdPerHour(signal: FeedSessionSignal | undefined, block: Ope
 function idleMinutes(block: OpenBlock, nowMs: number): number {
   const ts = Date.parse(block.ts);
   if (!Number.isFinite(ts)) return 0;
-  return Math.max(0, (nowMs - ts) / 60_000);
+  return Math.min(MAX_IDLE_MINUTES, Math.max(0, (nowMs - ts) / 60_000));
 }
 
 function blastRadii(blocks: OpenBlock[]): Map<string, number> {

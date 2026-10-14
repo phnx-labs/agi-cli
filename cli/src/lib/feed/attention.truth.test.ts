@@ -14,6 +14,11 @@ import { reconcileAttention } from './attention.js';
 import { AttentionNotifyService } from '../daemon/attention-notify-service.js';
 import { FeedWatchState, projectSessionEnvelope, type FeedWatchEnvelope } from './watch.js';
 import type { DesktopNotification } from '../menubar/notify-desktop.js';
+import { parseNotifySchedule, type NotifySchedule } from './notify-schedule.js';
+
+// Banner timing has its own tests; these pin what reaches the banner, so every level posts at once.
+const AT_ONCE = parseNotifySchedule(['0m', 'stay']) as NotifySchedule;
+const postAtOnce = () => ({ schedules: { urgent: AT_ONCE, high: AT_ONCE, normal: AT_ONCE, low: AT_ONCE } });
 
 const TESTDATA = path.join(import.meta.dirname, 'testdata');
 const scratch: string[] = [];
@@ -86,7 +91,7 @@ describe('a completed trivial task followed by an idle_prompt is not a request',
     const posts: DesktopNotification[] = [];
     const ledgerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-truth-ledger-'));
     scratch.push(ledgerDir);
-    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW });
+    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW, settings: postAtOnce, gc: () => {} });
     await service.tick({ log: () => {} }, new AbortController().signal);
     expect(posts).toEqual([]);
     expect(fs.existsSync(ledgerDir) ? fs.readdirSync(ledgerDir) : []).toEqual([]);
@@ -110,7 +115,7 @@ describe('a real permission prompt is a permission with the harness choices, unt
       kind: 'permission', source: 'hook', state: 'open', sessionId: PENDING,
       key: `zion/${PENDING}/2026-09-10T10:00:05.250000+00:00`,
     });
-    expect(item.question?.text).toBe('Claude needs your permission to use Bash');
+    expect(item.question?.text).toBe('Claude needs approval to run Bash: bun test');
     expect(item.choices).toEqual([
       { id: 'approve', label: 'Approve', deliveryKey: '1' },
       { id: 'approve-session', label: 'Approve for session', deliveryKey: '2' },
@@ -120,11 +125,11 @@ describe('a real permission prompt is a permission with the harness choices, unt
     const posts: DesktopNotification[] = [];
     const ledgerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-truth-ledger-'));
     scratch.push(ledgerDir);
-    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW });
+    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW, settings: postAtOnce, gc: () => {} });
     await service.tick({ log: () => {} }, new AbortController().signal);
     await service.tick({ log: () => {} }, new AbortController().signal);
     expect(posts).toHaveLength(1);
-    expect(posts[0]).toMatchObject({ category: 'permission', key: item.key, sessionId: PENDING, body: 'Claude needs your permission to use Bash' });
+    expect(posts[0]).toMatchObject({ category: 'permission', key: item.key, sessionId: PENDING, body: 'Claude needs approval to run Bash: bun test' });
     expect(posts[0].choices?.map((c) => c.id)).toEqual(['approve', 'approve-session', 'deny']);
 
     const envelopes = await project(row);
@@ -155,7 +160,7 @@ describe('a real permission prompt is a permission with the harness choices, unt
     const posts: DesktopNotification[] = [];
     const ledgerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attention-truth-ledger-'));
     scratch.push(ledgerDir);
-    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW });
+    const service = new AttentionNotifyService({ getSessions: async () => [row], notify: (n) => posts.push(n), feedRoot: getFeedDir(), ledgerDir, now: () => NOW, settings: postAtOnce, gc: () => {} });
     await service.tick({ log: () => {} }, new AbortController().signal);
     expect(posts).toHaveLength(1);
     const later = NOW + 10 * 60_000;
