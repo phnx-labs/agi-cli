@@ -2,7 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { AttentionNotifyService, buildAttentionNotification } from './attention-notify-service.js';
+import { AttentionNotifyService, buildAttentionNotification, dueStage, notifyScope, type AttentionAsk } from './attention-notify-service.js';
+import { DEFAULT_NOTIFY_SCHEDULES, parseNotifySchedule, type NotifySchedule } from '../feed/notify-schedule.js';
+import { buildMenubarNotifyArgs } from '../menubar/notify-desktop.js';
 import { blockIdForSession, publishBlock } from '../feed/feed.js';
 import type { AttentionItem } from '../feed/attention.js';
 import type { ActiveSession } from '../session/active.js';
@@ -40,6 +42,7 @@ describe('buildAttentionNotification', () => {
     ],
     replyCapability: 'terminal',
     fingerprint: 'abc',
+    urgency: 'normal',
   };
 
   it('carries category, key, session, agent, subtitle, and choices for a permission item', () => {
@@ -127,6 +130,7 @@ describe('AttentionNotifyService — ledger idempotency', () => {
       feedRoot: path.join(tmp, 'feed'),
       ledgerDir: path.join(tmp, 'notified'),
       now: () => 1_000_000,
+      gc: () => {},
     });
   }
 
@@ -154,5 +158,181 @@ describe('AttentionNotifyService — ledger idempotency', () => {
     expect(posts).toHaveLength(1);
     await makeService().tick(ctx, signal);
     expect(posts).toHaveLength(1);
+  });
+});
+
+describe('AttentionNotifyService — per-urgency schedule, reminders and withdraw (PHNX-4369)', () => {
+  let tmp: string;
+  let posts: DesktopNotification[];
+  let withdrawn: string[][];
+  let clock: number;
+  let asks: AttentionAsk[];
+
+  const OPENED = Date.parse('2026-10-13T08:00:00.000Z');
+  const MIN = 60_000;
+  const DEFAULTS = () => ({
+    urgent: parseNotifySchedule(DEFAULT_NOTIFY_SCHEDULES.urgent) as NotifySchedule,
+    high: parseNotifySchedule(DEFAULT_NOTIFY_SCHEDULES.high) as NotifySchedule,
+    normal: parseNotifySchedule(DEFAULT_NOTIFY_SCHEDULES.normal) as NotifySchedule,
+    low: parseNotifySchedule(DEFAULT_NOTIFY_SCHEDULES.low) as NotifySchedule,
+  });
+
+  function ask(urgency: AttentionItem['urgency'], id = 'sess-1'): AttentionAsk {
+    return {
+      item: {
+        key: `yosemite-m6/${id}/t1`, sessionId: id, mailboxId: id, host: 'yosemite-m6', project: 'agents-cli',
+        kind: 'permission', source: 'hook', state: 'open', openedAt: new Date(OPENED).toISOString(),
+        question: { text: 'Claude needs approval to run Bash: npm publish' },
+        choices: [{ id: 'approve', label: 'Approve' }, { id: 'deny', label: 'Deny' }],
+        replyCapability: 'terminal', fingerprint: 'f', urgency,
+      },
+      session: { label: 'release', kind: 'claude' },
+    };
+  }
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-sched-'));
+    posts = [];
+    withdrawn = [];
+    clock = OPENED;
+    asks = [];
+  });
+  afterEach(() => {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {  }
+  });
+
+  function makeService(interactiveHost: string | undefined = 'zion') {
+    return new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ interactiveHost, schedules: DEFAULTS() }),
+      fleetAsks: () => ({ asks, scopes: new Set(['yosemite-m6']) }),
+      getSessions: async () => [],
+      notify: (n) => posts.push(n),
+      withdraw: (keys) => withdrawn.push(keys),
+      gc: () => {},
+      ledgerDir: path.join(tmp, 'notified'),
+      now: () => clock,
+    });
+  }
+
+  async function at(service: AttentionNotifyService, minutes: number) {
+    clock = OPENED + minutes * MIN;
+    await service.tick(ctx, new AbortController().signal);
+  }
+
+  it('urgent: banner at 0 with --level urgent and sound, reminders at 15 and 30 min, withdraw on resolve', async () => {
+    asks = [ask('urgent')];
+    const service = makeService();
+    await at(service, 0);
+    await at(service, 1);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ level: 'urgent', sound: true, key: 'yosemite-m6/sess-1/t1', subtitle: 'yosemite-m6 · agents-cli' });
+    expect(posts[0].reminder).toBeUndefined();
+    expect(buildMenubarNotifyArgs(posts[0])).toEqual(expect.arrayContaining(['--level', 'urgent', '--sound']));
+
+    await at(service, 15);
+    await at(service, 16);
+    expect(posts).toHaveLength(2);
+    expect(posts[1]).toMatchObject({ reminder: 1, key: 'yosemite-m6/sess-1/t1', subtitle: 'yosemite-m6 · agents-cli · Still waiting · 15 min' });
+
+    await at(service, 30);
+    expect(posts).toHaveLength(3);
+    expect(posts[2]).toMatchObject({ reminder: 2, subtitle: 'yosemite-m6 · agents-cli · Still waiting · 30 min' });
+    expect(withdrawn).toEqual([]);
+
+    asks = [];
+    await at(service, 31);
+    expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
+    await at(service, 32);
+    expect(withdrawn).toHaveLength(1);
+  });
+
+  it('a restarted daemon re-sends nothing already sent and still withdraws the live banner', async () => {
+    asks = [ask('urgent')];
+    await at(makeService(), 15);
+    expect(posts.map((p) => p.reminder)).toEqual([1]);
+    const restarted = makeService();
+    await at(restarted, 20);
+    expect(posts).toHaveLength(1);
+    asks = [];
+    await at(restarted, 21);
+    expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
+  });
+
+  it('normal: first banner at 5 min with no sound, withdrawn about 10 s later because the level has no stay', async () => {
+    asks = [ask('normal')];
+    const service = makeService();
+    await at(service, 4);
+    expect(posts).toHaveLength(0);
+    await at(service, 5);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ level: 'normal' });
+    expect(posts[0].sound).toBeUndefined();
+    clock += 5_000;
+    await service.tick(ctx, new AbortController().signal);
+    expect(withdrawn).toEqual([]);
+    clock += 5_000;
+    await service.tick(ctx, new AbortController().signal);
+    expect(withdrawn).toEqual([['yosemite-m6/sess-1/t1']]);
+    asks = [];
+    await at(service, 7);
+    expect(withdrawn).toHaveLength(1);
+  });
+
+  it('sidebar level posts nothing at any time', async () => {
+    asks = [ask('low')];
+    const service = makeService();
+    for (const m of [0, 5, 60, 600]) await at(service, m);
+    expect(posts).toEqual([]);
+    expect(withdrawn).toEqual([]);
+  });
+
+  it('interactive.host set to another machine: this host posts nothing', async () => {
+    asks = [ask('urgent')];
+    const service = makeService('yosemite-s1');
+    await at(service, 0);
+    await at(service, 30);
+    expect(posts).toEqual([]);
+  });
+
+  it('a late daemon posts only the latest due stage, as that reminder', async () => {
+    asks = [ask('urgent')];
+    await at(makeService(), 40);
+    expect(posts).toHaveLength(1);
+    expect(posts[0]).toMatchObject({ reminder: 2, subtitle: 'yosemite-m6 · agents-cli · Still waiting · 40 min' });
+  });
+
+  it('a peer the collector has not heard from yet does not count as resolved', async () => {
+    asks = [ask('urgent')];
+    const service = makeService();
+    await at(service, 0);
+    asks = [];
+    const blind = new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ interactiveHost: 'zion', schedules: DEFAULTS() }),
+      fleetAsks: () => ({ asks: [], scopes: new Set() }),
+      notify: (n) => posts.push(n), withdraw: (keys) => withdrawn.push(keys), gc: () => {},
+      ledgerDir: path.join(tmp, 'notified'), now: () => clock,
+    });
+    await at(blind, 1);
+    expect(withdrawn).toEqual([]);
+  });
+});
+
+describe('notifyScope', () => {
+  it('unset → local, this machine → fleet, another machine → none', () => {
+    expect(notifyScope(undefined, 'zion')).toBe('local');
+    expect(notifyScope('Zion', 'zion')).toBe('fleet');
+    expect(notifyScope('yosemite-s1', 'zion')).toBe('none');
+  });
+});
+
+describe('dueStage', () => {
+  it('counts each time from when the ask opened', () => {
+    const s = parseNotifySchedule(['5m', '1h']) as NotifySchedule;
+    expect(dueStage(s, 0, 4 * 60_000)).toBe(-1);
+    expect(dueStage(s, 0, 5 * 60_000)).toBe(0);
+    expect(dueStage(s, 0, 61 * 60_000)).toBe(1);
+    expect(dueStage(parseNotifySchedule(['sidebar']) as NotifySchedule, 0, 1e9)).toBe(-1);
   });
 });

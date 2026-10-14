@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildMenubarNotifyArgs,
+  buildMenubarWithdrawArgs,
   buildOsascriptNotifyArgs,
   notifyDesktop,
   spawnDetachedQuiet,
+  withdrawDesktop,
 } from './notify-desktop.js';
 
 describe('buildMenubarNotifyArgs', () => {
@@ -107,10 +109,33 @@ describe('buildMenubarNotifyArgs', () => {
     expect(args[args.indexOf('--choice') + 1]).toBe('approve=a=b=c');
   });
 
+  it('appends the urgency level, sound and reminder number after the choices (PHNX-4369)', () => {
+    const args = buildMenubarNotifyArgs({
+      title: 'T', body: 'B', key: 'zion/s/1', choices: [{ id: 'approve', label: 'Approve' }],
+      level: 'urgent', sound: true, reminder: 2,
+    });
+    expect(args.slice(args.indexOf('--choice'))).toEqual([
+      '--choice', 'approve=Approve', '--level', 'urgent', '--sound', '--reminder', '2',
+    ]);
+  });
+
+  it('leaves out --sound and --reminder for a quiet first banner', () => {
+    const args = buildMenubarNotifyArgs({ title: 'T', body: 'B', level: 'normal', sound: false, reminder: 0 });
+    expect(args).toEqual(['--notify', '--title', 'T', '--body', 'B', '--level', 'normal']);
+  });
+
   it('passes title/body verbatim as separate argv (no shell interpolation)', () => {
     const args = buildMenubarNotifyArgs({ title: 'a "b" $c', body: 'x; rm -rf /' });
     expect(args[args.indexOf('--title') + 1]).toBe('a "b" $c');
     expect(args[args.indexOf('--body') + 1]).toBe('x; rm -rf /');
+  });
+});
+
+describe('buildMenubarWithdrawArgs', () => {
+  it('rides on --notify with one --withdraw per key, so an older helper exits 2 instead of opening a second menu', () => {
+    expect(buildMenubarWithdrawArgs(['zion/a/1', 'm6/b/2'])).toEqual([
+      '--notify', '--withdraw', 'zion/a/1', '--withdraw', 'm6/b/2',
+    ]);
   });
 });
 
@@ -148,6 +173,12 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
     ).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(true).toBe(true);
+  });
+
+  it('withdraw is a quiet no-op where banners cannot be recalled', () => {
+    process.env.PATH = '';
+    expect(() => withdrawDesktop(['zion/a/1'])).not.toThrow();
+    expect(() => withdrawDesktop([])).not.toThrow();
   });
 });
 

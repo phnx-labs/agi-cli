@@ -10,8 +10,8 @@
   },
   "questions": [
     {
-      "text": "Claude needs your permission to use Bash",
-      "header": "Permission needed",
+      "text": "Claude needs approval to run Bash: bun test",
+      "header": "Approval needed",
       "multiSelect": false
     }
   ],

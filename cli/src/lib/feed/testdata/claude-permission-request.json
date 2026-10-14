@@ -1,0 +1,15 @@
+{
+  "session_id": "claude-perm-sess",
+  "transcript_path": "/home/user/.agents/.history/accounts/claude/acct/.claude/projects/-repo/claude-perm-sess.jsonl",
+  "cwd": "/home/user/repo",
+  "permission_mode": "default",
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "secrets exec npmjs.com -- npm publish --tag next",
+    "description": "Publish the release candidate"
+  },
+  "permission_suggestions": [
+    { "type": "addRules", "rules": [{ "toolName": "Bash", "ruleContent": "npm publish:*" }], "behavior": "allow", "destination": "localSettings" }
+  ]
+}

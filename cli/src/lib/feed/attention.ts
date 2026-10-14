@@ -27,6 +27,9 @@ export type AttentionKind =
 
 export type ReplyCapability = 'terminal' | 'tmux' | 'cloud' | 'team' | 'none';
 
+export const ATTENTION_URGENCIES = ['urgent', 'high', 'normal', 'low'] as const;
+export type AttentionUrgency = (typeof ATTENTION_URGENCIES)[number];
+
 export interface AttentionChoice extends BlockOption {
   id: string;
   deliveryKey?: string;
@@ -48,6 +51,8 @@ export interface AttentionItem {
   safeDefault?: string;
   fingerprint: string;
   sourceCursor?: SourceCursor;
+  urgency: AttentionUrgency;
+  urgencyReason?: string;
 }
 
 export interface PullRequestAttentionSignal {
@@ -61,8 +66,10 @@ export interface PullRequestAttentionSignal {
   isDraft?: boolean;
 }
 
+type UnrankedAttentionItem = Omit<AttentionItem, 'urgency' | 'urgencyReason'>;
+
 interface AttentionCandidate {
-  item: AttentionItem;
+  item: UnrankedAttentionItem;
   generation: string;
 }
 
@@ -128,7 +135,7 @@ function choicesForItem(
   return questionChoices(question, structured);
 }
 
-export function harnessOf(session: ActiveSession): string {
+export function harnessOf(session: Partial<Pick<ActiveSession, 'harness' | 'kind'>>): string {
   return session.harness ?? session.kind ?? '';
 }
 
@@ -210,7 +217,7 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
   if (blockSource(block) === 'hook' && resolvedByLaterEvidence(block, session)) return undefined;
   if (kind === 'permission' && !permissionVerifiable(block, session, nowMs)) kind = 'unverified';
   const generation = blockGeneration(block);
-  const item: AttentionItem = {
+  const item: UnrankedAttentionItem = {
     key: attentionKey(block.host, block.sessionId, generation),
     sessionId: block.sessionId,
     mailboxId: block.mailboxId,
@@ -245,7 +252,7 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
   const host = session.host ?? 'unknown';
   const sessionId = session.sessionId ?? '';
   const generation = generationForSession(session);
-  const item: AttentionItem = {
+  const item: UnrankedAttentionItem = {
     key: attentionKey(host, sessionId, generation),
     sessionId,
     mailboxId: sessionId,
@@ -277,7 +284,7 @@ function attentionFromPullRequest(
     header: 'Review',
   };
   const generation = `pr${pr.number}:${pr.reviewDecision ?? pr.state ?? ''}`;
-  const item: AttentionItem = {
+  const item: UnrankedAttentionItem = {
     key: attentionKey(host, sessionId, generation),
     sessionId,
     mailboxId: sessionId,
@@ -313,11 +320,82 @@ function coveredByResolution(candidate: AttentionCandidate, resolution?: Attenti
   return true;
 }
 
+// Linear's priority numbers: 0 None, 1 Urgent, 2 High, 3 Medium, 4 Low.
+const TICKET_PRIORITY: Record<number, { urgency: AttentionUrgency; name: string }> = {
+  1: { urgency: 'urgent', name: 'Urgent' },
+  2: { urgency: 'high', name: 'High' },
+  3: { urgency: 'normal', name: 'Medium' },
+  4: { urgency: 'low', name: 'Low' },
+};
+
+const RELEASE_COMMAND = new RegExp([
+  String.raw`(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:publish|release|deploy)`,
+  String.raw`(?:cargo|vsce|ovsx)\s+publish`,
+  String.raw`twine\s+upload`,
+  String.raw`gh\s+pr\s+merge`,
+  String.raw`gh\s+release\s+create`,
+  String.raw`release\.sh`,
+  String.raw`(?:wrangler|fly|flyctl|railway|vercel)\s+deploy`,
+  String.raw`terraform\s+apply`,
+  String.raw`kubectl\s+apply`,
+  String.raw`helm\s+(?:upgrade|install)`,
+  String.raw`docker\s+push`,
+].map((p) => String.raw`\b${p}\b`).join('|'), 'i');
+const RELEASE_WORD = /\b(?:publish(?:es|ing)?|releas(?:e|es|ing)|deploy(?:s|ing)?|merg(?:e|es|ing))\b/i;
+// A command ask is matched on its command only: a path such as src/merge.ts is not a merge.
+const COMMAND_KINDS: ReadonlySet<AttentionKind> = new Set(['permission', 'unverified']);
+const PROSE_KINDS: ReadonlySet<AttentionKind> = new Set(['question', 'plan_review', 'declared']);
+
+function releaseNoun(match: string): string {
+  const m = match.toLowerCase();
+  if (/deploy|terraform|kubectl|helm|docker/.test(m)) return 'a deploy';
+  if (/merg/.test(m)) return 'a merge';
+  return 'a release';
+}
+
+function releaseBlocker(item: UnrankedAttentionItem): string | undefined {
+  const text = item.question?.text ?? '';
+  if (!COMMAND_KINDS.has(item.kind) && !PROSE_KINDS.has(item.kind)) return undefined;
+  const command = RELEASE_COMMAND.exec(text);
+  if (command) return `Blocks ${releaseNoun(command[0])} (${command[0].replace(/\s+/g, ' ')})`;
+  if (!PROSE_KINDS.has(item.kind)) return undefined;
+  const word = RELEASE_WORD.exec(text);
+  return word ? `Blocks ${releaseNoun(word[0])}` : undefined;
+}
+
+/**
+ * How fast an ask must reach the owner (PHNX-4369 contract 1). An ask that holds
+ * up a release, deploy or merge is urgent whatever its ticket says; otherwise the
+ * linked ticket's Linear priority decides, and an ask with neither is normal.
+ * `costOfDelay` is deliberately not an input: every declared block carries
+ * `high`, so it cannot tell a release apart from any other ask.
+ */
+export function attentionUrgency(
+  item: UnrankedAttentionItem,
+  ticket?: { id: string; priority?: number },
+): { urgency: AttentionUrgency; urgencyReason?: string } {
+  const release = releaseBlocker(item);
+  if (release) return { urgency: 'urgent', urgencyReason: release };
+  const known = ticket?.priority !== undefined ? TICKET_PRIORITY[ticket.priority] : undefined;
+  if (ticket && known) {
+    return known.urgency === 'normal'
+      ? { urgency: 'normal' }
+      : { urgency: known.urgency, urgencyReason: `${known.name} ticket ${ticket.id}` };
+  }
+  return { urgency: 'normal' };
+}
+
+export function attentionTicketId(session: ActiveSession, block?: OpenBlock): string | undefined {
+  return session.ticket?.id ?? block?.ticket ?? undefined;
+}
+
 export function reconcileAttention(input: {
   block?: OpenBlock;
   session: ActiveSession;
   pullRequest?: PullRequestAttentionSignal;
   resolution?: AttentionResolution;
+  /** Called only once an ask exists, so a session with nothing open never looks its ticket up. */
+  ticketPriority?: (ticketId: string) => number | undefined;
   nowMs: number;
 }): AttentionItem | undefined {
   const fromBlock =
@@ -330,5 +408,7 @@ export function reconcileAttention(input: {
     attentionFromPullRequest(input.session, input.nowMs, input.pullRequest);
   if (!candidate) return undefined;
   if (coveredByResolution(candidate, input.resolution)) return undefined;
-  return candidate.item;
+  const ticketId = attentionTicketId(input.session, input.block);
+  const ticket = ticketId ? { id: ticketId, priority: input.ticketPriority?.(ticketId) } : undefined;
+  return { ...candidate.item, ...attentionUrgency(candidate.item, ticket) };
 }

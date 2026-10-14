@@ -68,8 +68,13 @@ describe('menubar snapshot', () => {
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
         'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
+        'menubar.menu.notifyUrgent': ['0m', '15m', '30m', 'stay', 'sound'],
+        'menubar.menu.notifyHigh': ['0m', '30m', 'stay'],
+        'menubar.menu.notifyNormal': ['5m', '1h'],
+        'menubar.menu.notifyLow': ['sidebar'],
       });
       setConfigValue('menubar.menu.pinnedProjects', ['Rush']);
+      setConfigValue('menubar.menu.notifyUrgent', ['0m', '10m', 'stay']);
       setConfigValue('menubar.menu.tabOrder', ['home', 'projects', 'sessions', 'inbox']);
       setConfigValue('menubar.menu.hiddenTabs', ['inbox']);
       setConfigValue('menubar.menu.homeGoals', ['company', 'myDay']);
@@ -93,6 +98,10 @@ describe('menubar snapshot', () => {
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
         'menubar.menu.artifactApps': [],
         'menubar.menu.githubHidden': [],
+        'menubar.menu.notifyUrgent': ['0m', '10m', 'stay'],
+        'menubar.menu.notifyHigh': ['0m', '30m', 'stay'],
+        'menubar.menu.notifyNormal': ['5m', '1h'],
+        'menubar.menu.notifyLow': ['sidebar'],
       });
     } finally {
       if (prevHome === undefined) delete process.env.HOME;

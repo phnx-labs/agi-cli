@@ -10,6 +10,7 @@ import { assertValidDeviceName, assertRegistrableDeviceName } from './devices/re
 import { migrateDeviceConfigStores } from './devices/config-migration.js';
 import type { FleetManifest } from './fleet/types.js';
 import { isAgentId } from './types.js';
+import { DEFAULT_NOTIFY_SCHEDULES, NOTIFY_LEVELS, NOTIFY_LEVEL_KEYS, notifyScheduleDescription, validateNotifySchedule } from './feed/notify-schedule.js';
 
 export type ConfigScope = 'user' | 'device';
 
@@ -696,6 +697,15 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       return null;
     },
   },
+  ...NOTIFY_LEVELS.map((level): ConfigKeySpec => ({
+    name: NOTIFY_LEVEL_KEYS[level],
+    yamlKey: `menubarMenuNotify${level[0].toUpperCase()}${level.slice(1)}`,
+    scope: 'user',
+    type: 'string-list',
+    defaultValue: [...DEFAULT_NOTIFY_SCHEDULES[level]],
+    description: notifyScheduleDescription(level),
+    validate: validateNotifySchedule(NOTIFY_LEVEL_KEYS[level]),
+  })),
   {
     name: 'menubar.menu.githubHidden',
     yamlKey: 'menubarMenuGithubHidden',

@@ -14,6 +14,7 @@ import { streamFromPeer } from '../session/remote/peer-stream.js';
 import { watchLocalSessions, withCanonicalProject, type SessionWatchEnvelope, type SessionWatchRow, type SessionWatchScopeStatus, type WatchLocalOptions } from '../session/watch.js';
 import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
+import { cachedTicketPriority } from './ticket-priority.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
 import { watchToolActivity, type ToolDiff } from './tool-activity.js';
@@ -128,6 +129,7 @@ function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | u
     block: readBlock(blockId), session: reconcilerSession(agent),
     resolution: readResolution(blockId),
     pullRequest, nowMs: Date.now(),
+    ticketPriority: (ticketId) => cachedTicketPriority(ticketId, Date.now()),
   });
 }
 
@@ -295,21 +297,38 @@ function remoteFeedWatchCommand(os: string): string {
     : `bash -lc ${shellQuote(`agents ${args.map(shellQuote).join(' ')}`)}`;
 }
 
+function withUrgency(item: AttentionItem): AttentionItem {
+  // A peer on a CLI older than PHNX-4369 sends no urgency; its asks rank as normal.
+  return item.urgency ? item : { ...item, urgency: 'normal' };
+}
+
 export function normalizePeerEnvelope(event: FeedWatchEnvelope): FeedWatchEnvelope {
 
   if (event.type === 'agent.upsert') {
     const agent = withCanonicalProject(event.agent);
     return agent === event.agent ? event : { ...event, agent };
   }
+  if (event.type === 'attention.upsert') {
+    const attention = withUrgency(event.attention);
+    return attention === event.attention ? event : { ...event, attention };
+  }
   if (event.type !== 'reset') return event;
   const defs = listProjectDefsCached();
   const agents = event.agents.map((agent) => withCanonicalProject(agent, defs));
+  const attention = event.attention.map(withUrgency);
   const renamed = agents.some((agent, i) => agent !== event.agents[i]);
-  if (!renamed && Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
-  return { ...event, agents, tools: event.tools ?? [], setup: event.setup ?? [] };
+  const ranked = attention.some((item, i) => item !== event.attention[i]);
+  if (!renamed && !ranked && Array.isArray(event.tools) && Array.isArray(event.setup)) return event;
+  return { ...event, agents, attention, tools: event.tools ?? [], setup: event.setup ?? [] };
 }
 
 let sharedLocal: FeedHub | null = null;
+let sharedFleet: FeedHub | null = null;
+
+/** The one fleet collector per process: the feed-stream socket and attention-notify both read it. */
+export function sharedFleetFeedHub(): FeedHub {
+  return sharedFleet ??= new FeedHub({ watch: watchFleetFeed });
+}
 
 export function sharedLocalFeedHub(): FeedHub {
   return sharedLocal ??= new FeedHub({

@@ -118,6 +118,33 @@ change that breaks any of them is a regression, not a detail:
   confirm is `unverified`: no choices, an open-session action only, refused by
   `feed answer`.
 
+**Every attention row carries `urgency` and, when there is one, `urgencyReason`
+(PHNX-4369).** `urgent | high | normal | low`, computed once by the reconciler
+(`attentionUrgency`, [`src/lib/feed/attention.ts`](src/lib/feed/attention.ts)) so no
+consumer classifies: an ask that holds up a release, deploy or merge is `urgent`
+("Blocks a release (npm publish)") — matched on the command for a permission ask,
+on the text for a question; otherwise the linked ticket's Linear priority decides
+(Urgent/High/Low; Medium and None read normal; "High ticket PHNX-3890"); otherwise
+`normal`. `costOfDelay` is not an input — every declared block carries `high`. The
+ticket comes from the session row (`ticket.id`) or the block, and its priority from
+[`src/lib/feed/ticket-priority.ts`](src/lib/feed/ticket-priority.ts): a synchronous
+disk-cache read that starts at most one background `linear tasks <id> --json` per
+ticket per 30 minutes, only once an ask exists. A peer on an older CLI sends no
+urgency; `normalizePeerEnvelope` reads it as `normal`.
+
+**The banner schedule, reminders, withdraw and the fleet rule live in the
+`attention-notify` daemon service** and the helper argv they use is a cross-repo
+contract — see [`docs/menubar.md` §Attention banners](docs/menubar.md#attention-banners-phnx-4369).
+The same service runs `gcMailbox` hourly, so an open ask whose session is gone
+leaves the feed a day later even when nobody runs `agents feed --dispatch`, and
+`rankFeedBlocks` caps an ask's idle term at 24 h so a stale ask cannot outrank
+every live one.
+
+Claude's `PermissionRequest` hook writes "Claude needs approval to run <tool>:
+<command>" (Codex keeps "Codex needs approval to run …"), and the later
+`permission_prompt` Notification does not overwrite that richer block with
+"Claude needs your permission".
+
 `agents lead` is the per-project **Lead** (`src/commands/lead.ts`, `src/lib/lead/`): one
 warm headless Claude per project, owned by a detached host (`agents __lead-host <project>`,
 unix socket in `~/.agents/lead/<project>/`) that `ask` starts on demand. The host owns the
@@ -1396,8 +1423,11 @@ starts hidden), and
 open filters and its Merged filter. Three keys shape the GitHub tab (PHNX-4269):
 `githubHidden` (org/account logins or `owner/repo` slugs it leaves out; default `[]`),
 `githubDrafts` (show drafts; default `true`) and `githubBots` (show bot-opened PRs; default
-`false`). Settings is never in
-either tab list: it is always shown. The five list keys are `string-list` keys stored
+`false`). Four keys schedule attention banners (PHNX-4369):
+`notifyUrgent`, `notifyHigh`, `notifyNormal` and `notifyLow`, token lists of times
+(`0m`, `15m`, `1h`, increasing, from when the ask opened) plus `stay` and `sound`, or
+just `sidebar`; see [`docs/menubar.md` §Attention banners](docs/menubar.md#attention-banners-phnx-4369). Settings is never in
+either tab list: it is always shown. The list keys are `string-list` keys stored
 as YAML lists and emitted as JSON arrays; `agents config set` replaces the whole list
 from a JSON array (`'["Rush","Ops, west"]'`, what the menu writes) or comma-separated
 items (what a person types), and the order, membership, and duplicate rules are

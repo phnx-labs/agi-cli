@@ -47,6 +47,20 @@ describe('rankFeedBlocks', () => {
     });
   });
 
+  it('caps idle time at a day, so a 40-day-old ask no longer tops a costlier live one', () => {
+    const now = new Date('2026-10-13T12:00:00.000Z');
+    const ranked = rankFeedBlocks(
+      [
+        block('ancient', '2026-09-03T12:00:00.000Z'),
+        block('live-costly', '2026-10-13T06:00:00.000Z', { costOfDelay: 'high' }),
+      ],
+      [],
+      now,
+    );
+    expect(ranked.map((b) => b.sessionId)).toEqual(['live-costly', 'ancient']);
+    expect(ranked[1].delayRank.idleMinutes).toBe(24 * 60);
+  });
+
   it('sinks suppressible stalls to zero irreducibility', () => {
     const ranked = rankFeedBlocks(
       [block('stall', '2026-07-21T11:00:00.000Z', { questions: [{ text: 'Should I continue?' }] })],

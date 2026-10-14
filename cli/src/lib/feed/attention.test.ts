@@ -519,3 +519,69 @@ describe('feed lifecycle emission (real store, no mocking)', () => {
     expect(readResolution(blockId, dir)?.reason).toBe('session_advanced');
   });
 });
+
+describe('attention urgency (PHNX-4369)', () => {
+  const nowMs = Date.parse('2026-08-23T10:05:00.000Z');
+  const sess = (partial: Partial<ActiveSession> = {}) => session({ sessionId: 'sess-1', ...partial });
+  const permission = (text: string) => openQuestionBlock({
+    kind: 'notification', notificationType: 'permission_prompt',
+    sourceCursor: { lastActivityMs: Date.parse('2026-08-23T10:00:00.000Z') },
+    questions: [{ text, header: 'Approval needed' }],
+  });
+
+  it('a permission that runs npm publish is urgent and says why, whatever the ticket priority', () => {
+    const item = reconcileAttention({
+      block: permission('Claude needs approval to run Bash: cd cli && npm publish --tag next'),
+      session: sess({ lastEventMs: Date.parse('2026-08-23T09:59:00.000Z'), ticket: { id: 'PHNX-1' } } as Partial<ActiveSession>),
+      ticketPriority: () => 4,
+      nowMs,
+    })!;
+    expect(item).toMatchObject({ kind: 'permission', urgency: 'urgent', urgencyReason: 'Blocks a release (npm publish)' });
+  });
+
+  it('a command ask is matched on its command, not on a path that happens to say merge', () => {
+    const item = reconcileAttention({ block: permission('Claude needs approval to run Edit: src/merge.ts'), session: sess({ lastEventMs: 1 }), nowMs })!;
+    expect(item).toMatchObject({ urgency: 'normal' });
+    expect(item.urgencyReason).toBeUndefined();
+  });
+
+  it('a question that asks to merge or deploy is urgent', () => {
+    const item = reconcileAttention({ block: openQuestionBlock({ questions: [{ text: 'Ready to merge PR #12 into main?' }] }), session: sess(), nowMs })!;
+    expect(item).toMatchObject({ urgency: 'urgent', urgencyReason: 'Blocks a merge' });
+  });
+
+  it.each([
+    [1, 'urgent', 'Urgent ticket PHNX-3890'],
+    [2, 'high', 'High ticket PHNX-3890'],
+    [3, 'normal', undefined],
+    [0, 'normal', undefined],
+    [4, 'low', 'Low ticket PHNX-3890'],
+    [undefined, 'normal', undefined],
+  ])('Linear priority %s maps to %s', (priority, urgency, reason) => {
+    const asked: string[] = [];
+    const item = reconcileAttention({
+      block: openQuestionBlock(),
+      session: sess({ ticket: { id: 'PHNX-3890' } } as Partial<ActiveSession>),
+      ticketPriority: (id) => { asked.push(id); return priority; },
+      nowMs,
+    })!;
+    expect(asked).toEqual(['PHNX-3890']);
+    expect(item.urgency).toBe(urgency);
+    expect(item.urgencyReason).toBe(reason);
+  });
+
+  it('a session with nothing open never looks its ticket up', () => {
+    const asked: string[] = [];
+    expect(reconcileAttention({
+      session: sess({ ticket: { id: 'PHNX-1' } } as Partial<ActiveSession>),
+      ticketPriority: (id) => { asked.push(id); return 1; },
+      nowMs,
+    })).toBeUndefined();
+    expect(asked).toEqual([]);
+  });
+
+  it('a block that names its ticket is ranked by it when the session row carries none', () => {
+    const item = reconcileAttention({ block: openQuestionBlock({ ticket: 'PHNX-9' }), session: sess(), ticketPriority: () => 2, nowMs })!;
+    expect(item).toMatchObject({ urgency: 'high', urgencyReason: 'High ticket PHNX-9' });
+  });
+});

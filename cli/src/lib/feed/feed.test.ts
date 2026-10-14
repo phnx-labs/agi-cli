@@ -941,6 +941,35 @@ describe('feed store', () => {
     expect(blocks[0].questions[0].header).toBe('Approval needed');
   });
 
+  it.runIf(hasPython)('real hook names the tool and command of a Claude PermissionRequest, and the later Notification keeps it', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-claude-perm-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const payload = fs.readFileSync(path.join(import.meta.dirname, 'testdata', 'claude-permission-request.json'), 'utf-8');
+    const request = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], { input: payload, env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    expect(request.status).toBe(0);
+    const expected = {
+      kind: 'notification',
+      notificationType: 'permission_prompt',
+      questions: [{ text: 'Claude needs approval to run Bash: secrets exec npmjs.com -- npm publish --tag next', header: 'Approval needed' }],
+    };
+    expect(listBlocks(feedDir)).toMatchObject([expected]);
+    expect(listBlocks(feedDir)[0]).not.toHaveProperty('safeDefault');
+
+    const notification = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'claude-perm-sess',
+        hook_event_name: 'Notification',
+        notification_type: 'permission_prompt',
+        title: 'Permission Prompt',
+        message: 'Claude needs your permission',
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(notification.status).toBe(0);
+    expect(listBlocks(feedDir)).toMatchObject([expected]);
+  });
+
   it.runIf(hasPython)('real hook clears a Codex approval block once the approved tool runs', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-clear-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
