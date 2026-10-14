@@ -113,6 +113,7 @@ export function mergePlacementSignal(
     headroom: stats ? headroom(stats) : undefined,
     loadPercent: stats?.loadPercent,
     memPercent: stats?.memPercent,
+    memFreeBytes: stats?.memFreeBytes,
     installed: readiness?.installed,
     signedIn: readiness?.signedIn,
     pickerEligible: readiness?.pickerEligible,

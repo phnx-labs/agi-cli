@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { filterAutoPool, isAutoPoolMember, listWorkerDevices, describeAutoPool, autoLaunchPreferredSet } from './pool.js';
+import { filterAutoPool, isAutoPoolMember, listWorkerDevices, describeAutoPool, autoLaunchPreferredSet, autoPoolSkips, autoSkipReason } from './pool.js';
 
 
 const FLEET = ['zion', 'yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone'];
@@ -63,6 +63,30 @@ describe('filterAutoPool (the allowlist rule)', () => {
   it('matches hosts by normalized name, so an FQDN candidate still resolves', () => {
     const roles = { 'yosemite-s0': 'worker' } as const;
     expect(filterAutoPool(['YOSEMITE-S0', 'zion'], { mode: 'workers', roles, autoLaunch: {} })).toEqual(['YOSEMITE-S0']);
+  });
+
+  it('autoPoolSkips names why each device is out of the pool', () => {
+    const roles = { zion: 'personal', 'mac-mini': 'desktop', 'yosemite-s0': 'worker', 'yosemite-s1': 'worker' } as const;
+    const skips = autoPoolSkips(FLEET, { mode: 'workers', roles, autoLaunch: { 'yosemite-s1': { enabled: false } } });
+    expect(Object.fromEntries(skips)).toEqual({
+      zion: 'personal',
+      'yosemite-s0': null,
+      'yosemite-s1': 'off',
+      'mac-mini': 'desktop',
+      iphone: 'not-a-worker',
+    });
+  });
+
+  it('autoSkipReason adds the health gate after the pool rule', () => {
+    const GIB = 1024 ** 3;
+    const live = { host: 'h', reachable: true, fetchedAt: 0, loadPercent: 3, memPercent: 20, diskFreeBytes: 500 * GIB };
+    expect(autoSkipReason(null, live)).toBeNull();
+    expect(autoSkipReason(null, { ...live, diskFreeBytes: GIB / 2 })).toBe('disk-low');
+    expect(autoSkipReason(null, { ...live, loadPercent: 120 })).toBe('loaded');
+    expect(autoSkipReason(null, { host: 'h', reachable: false, fetchedAt: 0 })).toBe('unreachable');
+    expect(autoSkipReason('personal', { ...live, diskFreeBytes: GIB / 2 })).toBe('personal');
+    expect(autoSkipReason(null, undefined)).toBeNull();
+    expect(autoSkipReason(null, undefined, false)).toBe('offline');
   });
 
   it('isAutoPoolMember answers for one host', () => {

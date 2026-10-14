@@ -174,6 +174,14 @@ describe('classifyExclusions — health/harness filters (RUSH-2002)', () => {
     expect(excluded).toEqual([{ device: 'box-a', reason: 'overloaded' }]);
   });
 
+  it('excludes a disk-low device with its own reason, not as overloaded', () => {
+    const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
+      signals: sig({ 'box-a': { headroom: 'disk-low', loadPercent: 3 }, 'box-b': { headroom: 'busy' } }),
+    });
+    expect(eligible).toEqual(['box-b']);
+    expect(excluded).toEqual([{ device: 'box-a', reason: 'disk-low' }]);
+  });
+
   it('excludes a device the agent is not installed on', () => {
     const { eligible, excluded } = classifyExclusions(['box-a', 'box-b'], [], {
       signals: sig({ 'box-a': { installed: false }, 'box-b': { installed: true } }),

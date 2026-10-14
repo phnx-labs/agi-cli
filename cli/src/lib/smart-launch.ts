@@ -2,6 +2,7 @@
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
 import { loadDevicesSync } from './devices/registry.js';
+import { blocksPlacement } from './devices/health.js';
 import { autoLaunchPreferredSet, describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
@@ -99,15 +100,17 @@ export function formatNoHealthyDeviceError(
   const excluded = pool.map((key) => {
     const signal = signals.get(key);
     let reason: string;
-    if (signal?.reachable === true && signal.headroom !== 'loaded' && signal.installed === undefined) {
+    if (signal?.reachable === true && !blocksPlacement(signal.headroom) && signal.installed === undefined) {
       if (signal.timedOut) timedOutCount++;
       reason = signal.timedOut ? 'readiness probe timed out' : 'readiness probe did not answer';
     } else if (signal?.reachable === true) {
       reason = signal.headroom === 'loaded'
         ? 'overloaded'
-        : signal.installed !== true || signal.signedIn !== true
-          ? `no ready harness account${signal.reason ? ` (${signal.reason})` : ''}`
-          : 'ineligible';
+        : signal.headroom === 'disk-low'
+          ? 'disk low'
+          : signal.installed !== true || signal.signedIn !== true
+            ? `no ready harness account${signal.reason ? ` (${signal.reason})` : ''}`
+            : 'ineligible';
     } else if (signal?.timedOut) {
       timedOutCount++;
       reason = 'probe timed out';
@@ -167,7 +170,7 @@ export async function resolveDeviceAuto(
   }
   const eligiblePool = pool.filter((key) => {
     const signal = signals.get(key);
-    if (signal?.reachable !== true || signal.headroom === 'loaded') return false;
+    if (signal?.reachable !== true || blocksPlacement(signal.headroom)) return false;
     if (!agent) return opts.probe ? true : signal.installed === true && signal.signedIn === true;
     return signal.installed === true && (opts.accountPicker === true
       ? signal.pickerEligible === true

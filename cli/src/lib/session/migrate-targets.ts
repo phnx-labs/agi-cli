@@ -23,7 +23,8 @@ const HEADROOM_ORDER: Record<Headroom, number> = {
   light: 1,
   busy: 2,
   loaded: 3,
-  unknown: 4,
+  'disk-low': 4,
+  unknown: 5,
 };
 
 function platformOf(os: string | undefined): string | undefined {

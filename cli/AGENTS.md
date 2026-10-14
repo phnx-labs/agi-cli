@@ -1524,8 +1524,8 @@ keys, `role` is **shared**: it lives in that device's tracked
 push/pull`, because every box has to agree on where agents may land. The
 vocabulary is `worker | personal | desktop`. `desktop` is a headed always-on box
 — the release/credential home, e.g. a Mac mini: it is NOT headless fan-out
-capacity, so like `personal` it is excluded from `--device auto` (both are in
-`NEVER_AUTO`), but it IS a headed box with a real interactive login, so for the
+capacity, so like `personal` it is excluded from `--device auto` (both are
+skipped by `autoPoolSkips`, `pool.ts`), but it IS a headed box with a real interactive login, so for the
 Claude auth strategy it sits in the SAME "headed" bucket as `personal`
 (`isHeadedDeviceRole`, `device-config.ts`) — it authenticates from its own
 per-version login, never the worker setup-token. **Which credential a run injects
@@ -1571,7 +1571,15 @@ commands) at once; `agents devices enable <name>` (the default) restores it.
 narrow the pool — it BOOSTS the box in the ranker: `autoLaunchPreferredSet`
 (`pool.ts`) feeds `pickBestDevice` (`teams/scheduler.ts`), which ranks a preferred
 device ahead of its load-equal peers, after the signed-in tier and before load, so
-the boost overrides load-based ordering without overriding hard health;
+the boost overrides load-based ordering without overriding hard health
+(`run`/`exec`/`teams` placement and `devices pick` all pass it; `ssh auto` and the
+generic passthrough still sample by launch history). Hard health is
+`blocksPlacement` (`devices/health.ts`): `loaded`, or `disk-low` when `/` has
+under 20 GiB free, because an agent that cannot create a worktree does nothing.
+Memory pressure counts only while under 16 GiB is free, so a large box at 48%
+used is not ranked below a small idle one. `agents devices list --json` reports
+the verdict per device as `autoSkip` (`autoSkipReason`, `pool.ts`), which is what
+AGI EXT's Settings > Devices section renders;
 `agents devices config <name> auto-launch.preferred --unset` removes it. Both flags are **shared** device-scope
 keys living in `devices/<name>/agents.yaml` `config.autoLaunch{Enabled,Preferred}`
 (a fleet-wide default rides `fleet.defaults.config`, set with `--fleet`), so they

@@ -35,7 +35,7 @@ import {
 } from './scheduler.js';
 import { probePoolSignals } from './placement-probe.js';
 import { readMaxConcurrentCaps } from '../device-config.js';
-import { filterAutoPool, listWorkerDevices } from '../devices/pool.js';
+import { autoLaunchPreferredSet, filterAutoPool, listWorkerDevices } from '../devices/pool.js';
 import { redactSecrets, sanitizeForTerminal } from '../redact.js';
 import chalk from 'chalk';
 
@@ -1987,6 +1987,7 @@ export class AgentManager {
     const placeOpts = {
       maxConcurrent,
       signals,
+      preferred: autoLaunchPreferredSet(pool, { roster: pool }),
       defaultDevices: pool,
       agentLabel: this.placementAgentLabel(agent),
     };

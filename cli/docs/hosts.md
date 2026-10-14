@@ -38,10 +38,11 @@ agents run claude                      --device mac-mini          # interactive:
 agents run claude "…"                  --device auto
 ```
 
-Pass `auto` as the `--device` value to pick a host from 14-day session
-affinity (weighted by launch counts on `sessions.db` `machine`; most-used online
-device has highest probability). Harness stays the agent you typed — never
-auto-picked. Affinity failure degrades to local rather than aborting the run.
+Pass `auto` as the `--device` value to place the run on the best eligible
+device in the automatic-placement pool (see [Health gate and
+ranking](#health-gate-and-ranking)). Harness stays the agent you typed — never
+auto-picked. When no device is eligible the run fails loud with each device's
+reason rather than running here.
 
 ### A bare interactive run stays on this machine
 
@@ -96,6 +97,28 @@ reachable, `--device auto` fails loud naming the fix rather than quietly running
 on the machine you are sitting at — including through `agents ssh auto` and the
 generic `--device auto` passthrough, which resolve `auto` via the same pool.
 
+### Health gate and ranking
+
+Inside the pool, `pickBestDevice` (`src/lib/teams/scheduler.ts`) excludes a box
+whose headroom (`headroom()`, `src/lib/devices/health.ts`) blocks placement, then
+ranks the rest: signed in to the agent, then `auto-launch.preferred`, then the
+headroom tier, then running teammates, then load. `agents run --device auto`
+(and bare `agents run auto`), `agents teams` placement, and `agents devices pick`
+all apply the same gate and the same `preferred` boost. `agents ssh auto` and the
+generic `--device auto` passthrough still sample by launch history.
+
+| Headroom | Rule | Placement |
+|---|---|---|
+| `disk-low` | less than 20 GiB free on `/` (`DISK_FLOOR_BYTES`) | excluded, reason `disk-low` |
+| `loaded` | load or memory pressure at 75% or more | excluded, reason `overloaded` |
+| `busy` / `light` / `idle` | worst of load and memory pressure under 75 / 40 / 15% | ranked |
+
+A full disk outranks every other signal: an agent on a busy CPU is slow, but an
+agent that cannot create its worktree does nothing. Memory pressure is percent
+used only while less than 16 GiB is free (`MEM_COMFORT_BYTES`); a 120 GiB box
+with 62 GiB free is not memory-bound at 48% used, and used to read `busy` and
+lose every pick to a 27 GiB box.
+
 ### Probe budget: relayed peers get longer (PHNX-3682)
 
 Placement probes each candidate over SSH and excludes any box that does not
@@ -139,19 +162,26 @@ from any box writes that device's folder, not a shared central map.
 `agents devices list` tags marked rows (and shows each box's `spec` —
 cores/RAM/disk — plus live load/mem/disk and the one-line `description`), and
 `agents devices list --json`
-carries `role` plus an `autoPool` boolean per device.
+carries `role`, an `autoPool` boolean (pool membership), and `autoSkip`: why
+`--device auto` would pass the device over right now, or `null` when it is
+eligible. `autoSkip` is one of `off` (`agents devices disable`), `personal`,
+`desktop`, `not-a-worker`, `offline` (the tailnet reports it offline),
+`unreachable` (the stats probe failed), `loaded`, or `disk-low`, checked in that
+order (`autoSkipReason`, `src/lib/devices/pool.ts`). AGI EXT's Settings > Devices
+section renders this field rather than deciding placement itself.
 
 ### `agents run auto` — all three routing layers
 
 `auto` as the AGENT name (`agents run auto "…"`, distinct from `--device auto`)
 composes the full dispatch stack:
 
-1. **Host** — with no `--device` flag, the affinity pick above runs
-   (launches^1.3 weighted sample among online devices). A remote pick dispatches
+1. **Host** — with no `--device` flag, `run auto` places itself as
+   `--device auto` (`runAutoDefaultsToAffinity`, `commands/exec.ts`), so the
+   health gate and ranking above apply. A remote pick dispatches
    `agents run auto …` to that host over the same SSH path, and the harness +
    account layers resolve THERE (usage is per-machine); the dispatcher marks the
    host layer resolved (`AGENTS_RUN_AUTO_HOST_RESOLVED=1`) so the remote never
-   re-runs affinity and chain-hops. `--device <name>` pins this layer.
+   re-runs placement and chain-hops. `--device <name>` pins this layer.
 2. **Harness** — `pickHarnessWeighted` (lib/rotate.ts): installed harnesses with
    ≥1 healthy account, weighted by best-account headroom
    (`100 − min routingUsed%`), sampled with the same `weightedRandomByCapacity`

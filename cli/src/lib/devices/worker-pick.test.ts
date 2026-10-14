@@ -84,6 +84,30 @@ describe('resolveWorkerDevice', () => {
     expect(err).toContain('worker-b (overloaded)');
   });
 
+  it('never offloads onto a box whose disk is nearly full, however idle (the m1 incident)', async () => {
+    const plan = await resolveWorkerDevice({
+      eligibleHosts: ['worker-a', 'worker-b'],
+      localMachine: 'laptop',
+      preferred: new Set(),
+      probe: probeFrom({
+        'worker-a': { reachable: true, headroom: 'disk-low', loadPercent: 3 },
+        'worker-b': healthy(40),
+      }),
+    });
+    expect(plan.device).toBe('worker-b');
+    expect(plan.excluded).toContainEqual<WorkerExclusion>({ device: 'worker-a', reason: 'disk low' });
+  });
+
+  it('honours a preferred device over a less-loaded one', async () => {
+    const plan = await resolveWorkerDevice({
+      eligibleHosts: ['worker-a', 'worker-b'],
+      localMachine: 'laptop',
+      preferred: new Set(['worker-b']),
+      probe: probeFrom({ 'worker-a': healthy(2), 'worker-b': healthy(10) }),
+    });
+    expect(plan.device).toBe('worker-b');
+  });
+
   it('reports isLocal when the pick is this machine', async () => {
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a'],

@@ -1,5 +1,5 @@
 import { machineId } from '../machine-id.js';
-import type { Headroom } from '../devices/health.js';
+import { blocksPlacement, memPressurePercent, type Headroom } from '../devices/health.js';
 
 export interface DevicePlacementSignal {
   reachable?: boolean;
@@ -7,6 +7,7 @@ export interface DevicePlacementSignal {
   headroom?: Headroom;
   loadPercent?: number;
   memPercent?: number;
+  memFreeBytes?: number;
   installed?: boolean;
   signedIn?: boolean;
   pickerEligible?: boolean;
@@ -25,7 +26,7 @@ interface PlacementOptions {
   preferred?: ReadonlySet<string>;
 }
 
-type ExclusionReason = 'unreachable' | 'probe-timed-out' | 'overloaded' | 'capped' | 'not-installed';
+type ExclusionReason = 'unreachable' | 'probe-timed-out' | 'overloaded' | 'disk-low' | 'capped' | 'not-installed';
 
 interface ExcludedDevice {
   device: string;
@@ -68,7 +69,9 @@ export function formatNoViableMessage(excluded: ExcludedDevice[], agentLabel?: s
       ? " Add a device to the pool, raise a cap, or wait for the pool to free up / come back online ('agents devices ping')."
       : allCapped
         ? " Raise a cap with 'agents devices config <name> agents.max-concurrent N' or add a device to the pool."
-        : ' Add a device to the pool, raise a cap, or bring an overloaded box under load.';
+        : excluded.some((e) => e.reason === 'disk-low')
+          ? ' Free disk on a disk-low box (agents need at least 20G free), or add a device to the pool.'
+          : ' Add a device to the pool, raise a cap, or bring an overloaded box under load.';
   const reasons = allCapped
     ? excluded.map((e) => `${e.device} (${e.detail})`).join(', ')
     : perDevice;
@@ -146,7 +149,7 @@ export function pickLeastLoaded(
 
 function loadCost(s: DevicePlacementSignal | undefined): number | undefined {
   if (!s) return undefined;
-  const vals = [s.loadPercent, s.memPercent].filter((v): v is number => typeof v === 'number');
+  const vals = [s.loadPercent, memPressurePercent(s)].filter((v): v is number => typeof v === 'number');
   return vals.length ? Math.max(...vals) : undefined;
 }
 
@@ -179,8 +182,8 @@ export function classifyExclusions(
       excluded.push({ device: d, reason: 'not-installed' });
       continue;
     }
-    if (s?.headroom === 'loaded') {
-      excluded.push({ device: d, reason: 'overloaded' });
+    if (blocksPlacement(s?.headroom)) {
+      excluded.push({ device: d, reason: s?.headroom === 'disk-low' ? 'disk-low' : 'overloaded' });
       continue;
     }
     const cap = caps[d];
