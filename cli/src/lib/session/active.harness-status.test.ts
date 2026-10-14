@@ -42,7 +42,7 @@ describe.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('
     for (const dir of tmp) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('a turn silent for over two minutes is idle without a report and working on busy, with quietMs', () => {
+  it('a turn silent for over two minutes is idle without a report and working on busy, quiet since the last event', () => {
     const bare = configWith();
     expect(computeLiveSignals('claude', bare, '/tmp/phnx4387-silent', true, SILENT_NOW).state!.activity).toBe('idle');
 
@@ -50,6 +50,18 @@ describe.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('
     const { state } = computeLiveSignals('claude', busy, '/tmp/phnx4387-silent', true, SILENT_NOW);
     expect(state!.activity).toBe('working');
     expect(state!.quietMs).toBe(SILENT_NOW - LAST_EVENT_MS);
+    expect(state!.quietSinceMs).toBe(LAST_EVENT_MS);
+  });
+
+  it('a busy turn whose tail holds only request records is working, quiet since the last write', () => {
+    const busy = configWith('busy');
+    const blob = JSON.stringify({ type: 'api-request-blob', blob: 'x'.repeat(16_000) });
+    fs.appendFileSync(busy, `${blob}\n`.repeat(10));
+    const lastWrite = SILENT_NOW - 3 * 60_000;
+    fs.utimesSync(busy, new Date(lastWrite), new Date(lastWrite));
+    const { state } = computeLiveSignals('claude', busy, '/tmp/phnx4387-silent', true, SILENT_NOW);
+    expect(state!.activity).toBe('working');
+    expect(state!.quietSinceMs).toBe(fs.statSync(busy).mtimeMs);
   });
 
   it('an idle report reads idle', () => {

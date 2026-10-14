@@ -34,7 +34,7 @@ describe('liveStatusWord (status text for the default list, not just a glyph)', 
 
 describe('formatLiveStatusHeadline (PHNX-4387)', () => {
   it('a working turn the harness reports as running says how long the transcript has been quiet', () => {
-    const headline = formatLiveStatusHeadline(row({ kind: 'claude', activity: 'working', status: 'running', quietMs: 132_422 }));
+    const headline = formatLiveStatusHeadline(row({ kind: 'claude', activity: 'working', status: 'running', quietSinceMs: Date.now() - 132_422 }));
     expect(headline).toContain('working');
     expect(headline).toContain('quiet 2m');
     expect(formatLiveStatusHeadline(row({ kind: 'claude', activity: 'working', status: 'running' }))).not.toContain('quiet');

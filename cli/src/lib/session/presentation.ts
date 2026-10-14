@@ -47,7 +47,7 @@ import { redactSecrets, sanitizeForTerminal } from '../redact.js';
 import type { ActiveSession } from './active.js';
 import { listBookmarks } from './bookmarks.js';
 import { readArchivedSessionPreview, readSessionContent, readSessionTimelineAny } from './db.js';
-import { formatRelativeTime, sessionAgeParts, type SessionAgeParts } from './relative-time.js';
+import { formatCompactAge, formatRelativeTime, sessionAgeParts, type SessionAgeParts } from './relative-time.js';
 import { ticketLabel } from './selection.js';
 import { sessionHeadline } from './title.js';
 import { padToWidth, stringWidth, terminalWidth, truncateToWidth } from './width.js';
@@ -402,7 +402,7 @@ export function formatLiveStatusHeadline(live: ActiveSession | undefined, bookma
   const needsYou = isAwaitingUser(live);
   const reason = live.awaitingReason ? ` (${live.awaitingReason.replace('_', ' ')})` : '';
   let suffix = needsYou ? chalk.yellow(`  ← needs you${reason}`) : '';
-  if (word === 'working' && live.quietMs != null) suffix = chalk.dim(`  quiet ${Math.floor(live.quietMs / 60_000)}m`);
+  if (word === 'working' && live.quietSinceMs != null) suffix = chalk.dim(`  quiet ${formatCompactAge(new Date(live.quietSinceMs).toISOString())}`);
   if (live.status === 'crashed') {
     suffix = chalk.redBright('  ← the host app or connection went away and took the agent with it');
   } else if (live.status === 'orphaned') {

@@ -371,7 +371,7 @@ export interface ActiveSession {
   accountLabel?: string;
   lastActivityMs?: number;
   lastEventMs?: number;
-  quietMs?: number;
+  quietSinceMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
   origin?: 'cli' | 'routine';
@@ -739,8 +739,10 @@ export function sessionIdFromFile(kind: string, file?: string): string | undefin
   return indexedSessionIdForFile(kind, file);
 }
 
+type LiveState = SessionState & { quietSinceMs?: number };
+
 interface LiveSignals {
-  state?: SessionState;
+  state?: LiveState;
   tokPerSec?: number;
 }
 
@@ -803,7 +805,11 @@ export function computeLiveSignals(
   const harnessStatus = kind === 'claude' && pidAlive ? readHarnessStatus(sessionFile)?.status : undefined;
   if (tail.events.length === 0 && harnessStatus !== 'busy') return {};
 
-  const state = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, harnessStatus, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
+  const state: LiveState = inferSessionState(tail.events, { cwd, pidAlive, mtimeMs, harnessStatus, activeWindowMs: ACTIVE_MTIME_WINDOW_MS, nowMs });
+  if (harnessStatus === 'busy' && state.activity === 'working') {
+    const quietSinceMs = state.quietMs != null ? nowMs - state.quietMs : tail.events.length === 0 ? mtimeMs : undefined;
+    if (quietSinceMs != null && nowMs - quietSinceMs >= ACTIVE_MTIME_WINDOW_MS) state.quietSinceMs = quietSinceMs;
+  }
   return { state, tokPerSec: tail.tokPerSec };
 }
 
@@ -811,7 +817,7 @@ function statusFromActivity(activity: SessionActivity): ActiveStatus {
   return activity === 'working' ? 'running' : activity === 'waiting_input' ? 'input_required' : 'idle';
 }
 
-function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
+function applyState(base: Omit<ActiveSession, 'status'>, state: LiveState | undefined, fallbackFile: string | undefined, pidAlive: boolean): ActiveSession {
   if (!state) return { ...base, pidAlive, status: resolveFallbackStatus(fallbackFile, pidAlive) };
   const life = lifecycleStatus(pidAlive, base.lastActivityMs ?? sessionFileTimes(fallbackFile).mtimeMs);
   return {
@@ -825,7 +831,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     awaitingReason: state.awaitingReason,
     question: state.question,
     lastEventMs: state.lastEventMs,
-    quietMs: state.quietMs,
+    quietSinceMs: state.quietSinceMs,
     plan: state.plan,
     todos: state.todos,
     tail: state.tail,
