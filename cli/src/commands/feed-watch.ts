@@ -3,6 +3,7 @@ import { setHelpSections } from '../lib/help.js';
 import { type FeedWatchEnvelope } from '../lib/feed/watch.js';
 import { streamFeedFromHub, waitForHub } from '../lib/feed/hub-server.js';
 import { ensureDaemonStarted } from '../lib/daemon/daemon.js';
+import { hideLeadInFeedEnvelope, leadSessionIds } from '../lib/lead/visibility.js';
 
 async function attachToHub(signal: AbortSignal, emit: (event: FeedWatchEnvelope) => void, scope: 'fleet' | 'local'): Promise<void> {
   try { await streamFeedFromHub({ signal, emit, scope }); return; }
@@ -23,7 +24,8 @@ async function attachToHub(signal: AbortSignal, emit: (event: FeedWatchEnvelope)
 
 export function registerFeedWatchCommand(parent: Command): void {
   const command = parent.command('watch').description('Stream the canonical agent, attention, tool, and activity projection as NDJSON')
-    .option('--json', 'Emit versioned NDJSON envelopes').option('--local', 'Watch only this machine');
+    .option('--json', 'Emit versioned NDJSON envelopes').option('--local', 'Watch only this machine')
+    .option('--include-lead', 'Also stream project Lead sessions (agents lead), which are hidden by default');
   setHelpSections(command, {
     examples: `agents feed watch --json\nagents feed watch --json --local`,
     notes: 'Order by streamId + sequence. Unavailable scopes retain their last rows until reset on reconnect. '
@@ -31,7 +33,7 @@ export function registerFeedWatchCommand(parent: Command): void {
       + '--local is the per-machine stream the collector itself subscribes to over ssh.',
   });
   command.action(async (_opts, invoked) => {
-    const opts = invoked.optsWithGlobals() as { local?: boolean; json?: boolean };
+    const opts = invoked.optsWithGlobals() as { local?: boolean; json?: boolean; includeLead?: boolean };
     if (!opts.json) invoked.error("error: required option '--json' not specified");
     const controller = new AbortController();
     const stop = () => controller.abort();
@@ -41,7 +43,9 @@ export function registerFeedWatchCommand(parent: Command): void {
       if (error.code !== 'EPIPE') writeFailure = error;
       controller.abort();
     };
-    const emit = (event: FeedWatchEnvelope) => process.stdout.write(`${JSON.stringify(event)}\n`);
+    const leadIds = leadSessionIds();
+    const emit = (event: FeedWatchEnvelope) =>
+      process.stdout.write(`${JSON.stringify(opts.includeLead ? event : hideLeadInFeedEnvelope(event, leadIds))}\n`);
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     process.stdout.on('error', stopOnClosedConsumer);
     try {

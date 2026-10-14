@@ -41,6 +41,7 @@ interface PsOptions {
   interactive?: boolean;
   bookmarks?: boolean;
   routine?: boolean | string;
+  includeLead?: boolean;
 }
 
 export function statusFlags(values: string[] | undefined): LiveStatusFlags {
@@ -73,7 +74,8 @@ export function registerPsCommand(program: Command): void {
     .option('--status <state...>', `Only these live states: ${PS_STATUSES.join(', ')} (repeatable or comma-separated)`)
     .option('--bookmarks', 'Only bookmarked sessions (bookmark one with `sessions bookmark <id>`)')
     .option('--routines, --routine [name]', 'Only routine-run sessions; pass a name to narrow to one routine (fuzzy name matching)')
-    .option('--no-interactive', 'Print the roster instead of opening the picker on a TTY');
+    .option('--no-interactive', 'Print the roster instead of opening the picker on a TTY')
+    .option('--include-lead', 'Also list project Lead sessions (agents lead), which are hidden by default');
 
   setHelpSections(ps, {
     examples: `
@@ -133,6 +135,7 @@ export function registerPsCommand(program: Command): void {
       interactive: opts.interactive,
       bookmarks: opts.bookmarks,
       routine: opts.routine,
+      includeLead: opts.includeLead,
     });
   });
 

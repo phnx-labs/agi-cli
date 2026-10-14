@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { withoutLeadSessions } from '../lib/lead/visibility.js';
 import chalk from 'chalk';
 import { sessionDisplayAgent, linkUrl } from '@phnx-labs/sessions-cli/reader';
 import {
@@ -412,10 +413,12 @@ export async function renderActiveSessions(
     bookmarksOnly?: boolean;
     statuses?: LiveStatusFilter[];
     routine?: boolean | string;
+    includeLead?: boolean;
   } = {},
 ): Promise<void> {
   const self = machineId();
   const gathered = await gatherActiveSessions(opts);
+  if (!opts.includeLead) gathered.sessions = withoutLeadSessions(gathered.sessions);
   const { remoteDeviceCount, remoteSkipped, remoteDiscoveryFailed } = gathered;
   backfillActiveRowsFromIndex(gathered.sessions);
   const merged = opts.bookmarksOnly
@@ -546,6 +549,7 @@ export interface LiveRosterOptions extends LiveStatusFlags {
   bookmarks?: boolean;
   routine?: boolean | string;
   project?: string;
+  includeLead?: boolean;
   sort?: string;
 }
 
@@ -584,5 +588,6 @@ export async function runLiveRoster(options: LiveRosterOptions): Promise<void> {
     bookmarksOnly: options.bookmarks === true,
     statuses: liveStatuses,
     routine: options.routine,
+    includeLead: options.includeLead === true,
   });
 }

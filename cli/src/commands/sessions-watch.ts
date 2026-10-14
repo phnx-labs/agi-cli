@@ -2,12 +2,14 @@ import type { Command } from 'commander';
 import { machineId } from '../lib/machine-id.js';
 import { setHelpSections } from '../lib/help.js';
 import { watchFleetSessions, watchLocalSessions } from '../lib/session/watch.js';
+import { hideLeadInSessionEnvelope, leadSessionIds } from '../lib/lead/visibility.js';
 
 export function registerSessionsWatchCommand(parent: Command): void {
   const command = parent.command('watch')
     .description('Stream canonical live and recoverable session row changes as NDJSON')
     .option('--json', 'Emit versioned NDJSON envelopes')
-    .option('--local', 'Watch only this machine');
+    .option('--local', 'Watch only this machine')
+    .option('--include-lead', 'Also stream project Lead sessions (agents lead), which are hidden by default');
 
   setHelpSections(command, {
     examples: `
@@ -25,7 +27,7 @@ export function registerSessionsWatchCommand(parent: Command): void {
   });
 
   command.action(async (_options: { local?: boolean; json?: boolean }, invoked: Command) => {
-    const options = invoked.optsWithGlobals() as { local?: boolean; json?: boolean };
+    const options = invoked.optsWithGlobals() as { local?: boolean; json?: boolean; includeLead?: boolean };
     if (!options.json) invoked.error('error: required option \'--json\' not specified');
     const controller = new AbortController();
     const stop = () => controller.abort();
@@ -40,8 +42,9 @@ export function registerSessionsWatchCommand(parent: Command): void {
     process.once('SIGTERM', stop);
     process.stdout.on('error', stopOnClosedConsumer);
     try {
+      const leadIds = leadSessionIds();
       const emit = (event: Parameters<Parameters<typeof watchFleetSessions>[0]['emit']>[0]) =>
-        process.stdout.write(`${JSON.stringify(event)}\n`);
+        process.stdout.write(`${JSON.stringify(options.includeLead ? event : hideLeadInSessionEnvelope(event, leadIds))}\n`);
       if (options.local) await watchLocalSessions({ scope: machineId(), signal: controller.signal, emit });
       else await watchFleetSessions({ signal: controller.signal, emit });
     } finally {

@@ -1,4 +1,5 @@
 import { SessionProjection } from '../projection.js';
+import { isLeadCwd } from '../../lead/visibility.js';
 import { canonicalProjectName, confirmedProjectForCwd, listProjectDefsCached, type ProjectDef } from '../../projects.js';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -165,6 +166,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(session.harness ? { harness: session.harness } : {}),
     sessionId: session.id,
     ...(session.cwd ? { cwd: session.cwd } : {}),
+    ...(isLeadCwd(session.cwd) ? { lead: true } : {}),
     ...(session.project ? { project: session.project } : {}),
     confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
     ...(session.label ? { label: session.label } : {}),

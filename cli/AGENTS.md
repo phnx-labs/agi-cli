@@ -128,6 +128,8 @@ the fixed-shape `agents lead tool` commands; never widen that allow-list to raw 
 `linear` or shell prefixes (a compound command or a flag like `--mode skip` slips through
 them). Stops run only through `agents lead confirm <token>`. The NDJSON event shapes are a
 cross-repo contract with AGI EXT and the FastWispr bubble: change them only with both.
+Lead sessions carry `lead: true` and are hidden from `ps`, `ps watch` and `feed watch`
+unless `--include-lead` (`src/lib/lead/visibility.ts`); `sessions` still indexes them.
 Reference: [`docs/lead.md`](docs/lead.md).
 
 The fleet fan-out has its own budget: both `watchFleetFeed` and

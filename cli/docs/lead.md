@@ -167,6 +167,14 @@ arguments. Ticket, PR and session titles reach the model as data; the brief says
 | `confirms/<token>.json` | pending confirms |
 | `surface.json` | client-owned `{ "surface": "bubble" \| "docked" }`; the CLI never writes it, and clients treat a missing file as `docked` |
 
+## Visibility
+
+The Lead's own Claude session is not shown as an ordinary session. Rows whose cwd is under
+`~/.agents/lead` (on any machine) or whose id is in a Lead's `session.json` carry `lead: true`,
+and `agents ps`, `agents ps watch --json` and `agents feed watch --json` leave them out unless
+`--include-lead` is passed. The session index is untouched, so `sessions` still lists and
+searches a Lead's transcript.
+
 ## Setting
 
 `lead.model` (user scope, central `agents.yaml`, default `sonnet`) is the model passed to
