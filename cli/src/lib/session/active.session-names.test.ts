@@ -66,4 +66,18 @@ describe('applySessionNames — one label for every live row (PHNX-4387)', () =>
     applySessionNames(rows, () => 'Mirror label');
     expect(rows[0].label).toBe('Peer name');
   });
+
+  it('a teammate with no session id yet shows its team name', () => {
+    const rows = [row('', { sessionId: undefined, context: 'teams', name: 'reviewer' })];
+    applySessionNames(rows);
+    expect(rows[0].label).toBe('reviewer');
+  });
+
+  it('a --device launcher row keeps its --name; the peer pid files are not on this disk', () => {
+    writeLiveName(5103, 'offloaded-a', 'Name on this box', 'user');
+    recordRunName({ sessionId: 'offloaded-a', name: 'nightly', agent: 'claude' });
+    const rows = [row('offloaded-a', { machine: `${machineId()}-peer`, offloadedFrom: machineId() })];
+    applySessionNames(rows);
+    expect(rows[0].label).toBe('nightly');
+  });
 });
