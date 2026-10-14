@@ -58,7 +58,7 @@ describe('feed watch and answer commands', () => {
     const feed = program.commands.find((command) => command.name() === 'feed');
     const watch = feed?.commands.find((command) => command.name() === 'watch');
     const answer = feed?.commands.find((command) => command.name() === 'answer');
-    expect(watch?.options.map((option) => option.long)).toEqual(['--json', '--local']);
+    expect(watch?.options.map((option) => option.long)).toEqual(['--json', '--local', '--include-lead']);
     expect(answer?.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--choice', '--text', '--as', '--json']));
   });
 });
