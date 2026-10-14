@@ -371,7 +371,6 @@ export interface ActiveSession {
   accountLabel?: string;
   lastActivityMs?: number;
   lastEventMs?: number;
-  /** How long a turn the harness reports as running has written nothing to its transcript (ms). */
   quietMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
@@ -801,8 +800,6 @@ export function computeLiveSignals(
     if (liveTailCache.size >= LIVE_TAIL_CACHE_MAX) liveTailCache.clear();
     liveTailCache.set(cacheKey, tail);
   }
-  // Claude Code reports its own turn state per live process; it is read fresh on
-  // every call because it changes while the transcript (and so the cache) does not.
   const harnessStatus = kind === 'claude' && pidAlive ? readHarnessStatus(sessionFile)?.status : undefined;
   if (tail.events.length === 0 && harnessStatus !== 'busy') return {};
 

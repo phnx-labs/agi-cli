@@ -4,16 +4,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { clearLiveSignalsCacheForTest, computeLiveSignals } from './active.js';
 
-// A real Claude turn captured on yosemite-m6 (PHNX-4387): the transcript went
-// silent while Claude streamed one long Write call, and Claude Code's record for
-// the process said `busy` throughout. The record is rewritten for this test
-// process so the reader's liveness check passes against a real live pid.
 const FIXTURE = path.join(import.meta.dirname, 'testdata', 'harness-status', 'busy');
 const SLUG = '-tmp-phnx4387-silent';
 const SESSION = 'ed7688d4-ca54-4747-8005-d59cfdbbf318';
 const record = JSON.parse(fs.readFileSync(path.join(FIXTURE, 'sessions', '160908.json'), 'utf8'));
 const LAST_EVENT_MS = Date.parse('2026-10-14T19:19:23.484Z');
-// Seen live: 132 s after the last event the released build said idle.
 const SILENT_NOW = Date.parse('2026-10-14T19:21:35.906Z');
 const tmp: string[] = [];
 
@@ -41,8 +36,7 @@ function configWith(status?: string): string {
   return transcript;
 }
 
-// The reader trusts a record only on Linux (start ticks) and macOS (started since boot).
-describe.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('computeLiveSignals reads the turn state Claude Code reports', () => {
+describe.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('computeLiveSignals reads the turn state Claude Code records for a live pid (a real turn silent during one long Write call)', () => {
   beforeEach(() => clearLiveSignalsCacheForTest());
   afterAll(() => {
     for (const dir of tmp) fs.rmSync(dir, { recursive: true, force: true });
