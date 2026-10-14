@@ -47,6 +47,10 @@ describe('every command that declares --device gets past the fleet router (PHNX-
     expect(names).toEqual(expect.arrayContaining(['fork', 'cloud run', 'projects status', 'projects pull', 'events logs', 'daemon index backfill tools']));
   });
 
+  it.each([['fork', 'abc'], ['cloud', 'run'], ['projects', 'status'], ['projects', 'pull']])('agents %s %s --device is left to the command', async (...path) => {
+    expect(await maybeRunOnHost(path[0], [...path, '--device', 'yosemite-m5'])).toBe(false);
+  });
+
   it.each(paths.map((p) => [p.join(' '), p]))('agents %s --device is not rejected', async (_name, path) => {
     expect(await rejectionFor(path as string[])).toBeUndefined();
   });

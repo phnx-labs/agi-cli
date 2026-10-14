@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { getCliLaunch } from '../lib/cli-entry.js';
 import { buildForkRecap, forkLabelFor } from '../lib/session/fork.js';
+import { isSelfHost } from '../lib/devices/self-host.js';
 
 interface ForkOptions {
   name?: string;
@@ -105,7 +106,8 @@ export async function runFork(
   });
 
   const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced', '--name', options.name || `fork of ${label}`];
-  if (source.cwd) runArgs.push('--cwd', source.cwd);
+  const sourceIsHere = !source.machine || isSelfHost(source.machine);
+  if (source.cwd && (options.device || sourceIsHere)) runArgs.push('--cwd', source.cwd);
   if (options.device) runArgs.push('--device', options.device);
   if (options.terminal !== undefined) {
     runArgs.push('--terminal');
