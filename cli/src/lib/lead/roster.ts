@@ -1,3 +1,5 @@
+import { sessionHeadline } from '../session/title.js';
+
 export interface RosterRow {
   id: string;
   title: string;
@@ -21,7 +23,9 @@ export function rosterRowFromFeed(scope: string, agent: Row): RosterRow | null {
   if (!id || agent.previous === true) return null;
   return {
     id,
-    title: str(agent.title) ?? str(agent.label) ?? str(agent.topic) ?? id.slice(0, 8),
+    title: str(agent.title)
+      ?? sessionHeadline({ label: str(agent.label), generatedTitle: str(agent.generatedTitle), topic: str(agent.topic) })
+      ?? id.slice(0, 8),
     status: str(agent.status) ?? 'unknown',
     host: str(agent.machine) ?? scope,
     project: str(agent.confirmedProject),
