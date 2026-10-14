@@ -161,19 +161,24 @@ export function applySessionNames(
   indexedLabel: (sessionId: string) => string | null | undefined = () => undefined,
 ): void {
   const self = machineId();
-  const local: ActiveSession[] = [];
+  const owned: ActiveSession[] = [];
   for (const s of sessions) {
-    if (!s.sessionId) continue;
-    if (!s.machine || s.machine === self) local.push(s);
-    else s.label ||= indexedLabel(s.sessionId) ?? undefined;
+    const peerRow = !!s.machine && s.machine !== self && s.offloadedFrom !== self;
+    if (!peerRow) owned.push(s);
+    else if (s.sessionId) s.label ||= indexedLabel(s.sessionId) ?? undefined;
   }
-  if (local.length === 0) return;
+  if (owned.length === 0) return;
   const live = readClaudeLiveNames();
   const launch = buildRunNameMap();
-  for (const s of local) {
-    const id = s.sessionId!;
-    s.name ??= launch.get(id) ?? undefined;
-    s.label = resolveSessionName({ live: live.get(id), indexed: indexedLabel(id), launchName: s.name }) ?? s.label;
+  for (const s of owned) {
+    const id = s.sessionId;
+    if (id) s.name ??= launch.get(id) ?? undefined;
+    const runsHere = !s.machine || s.machine === self;
+    s.label = resolveSessionName({
+      live: id && runsHere ? live.get(id) : undefined,
+      indexed: id ? indexedLabel(id) : undefined,
+      launchName: s.name,
+    }) ?? s.label;
   }
 }
 
