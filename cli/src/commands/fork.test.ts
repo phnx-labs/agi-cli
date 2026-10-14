@@ -52,7 +52,19 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(recap).toContain('insight widgets need gaps closed');
     expect(recap).toContain('/continue 11111111-2222-3333-4444-555555555555');
     expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of Prix Evals']));
-    expect(args[args.indexOf('--cwd') + 1]).toBe('/home/u/prix');
+    expect(args).not.toContain('--cwd');
+  });
+
+  it('starts the sibling in the source cwd when it lands on a device or the source is here', async () => {
+    const remote = { id: '11111111-aaaa-3333-4444-555555555555', shortId: '11111111', agent: 'claude', cwd: '/home/u/prix', machine: 'yosemite-m5', label: 'x' };
+    const onDevice = fakeDeps({ stdout: previewJson(remote, null) });
+    await runFork(remote.id, { device: 'yosemite-m5' }, onDevice.deps);
+    expect(onDevice.launched[0][onDevice.launched[0].indexOf('--cwd') + 1]).toBe('/home/u/prix');
+
+    const local = { ...remote, machine: undefined };
+    const here = fakeDeps({ stdout: previewJson(local, null) });
+    await runFork(remote.id, {}, here.deps);
+    expect(here.launched[0][here.launched[0].indexOf('--cwd') + 1]).toBe('/home/u/prix');
   });
 
   it('forks a CROSS-DEVICE, non-claude source where the old transcript copy threw "transcript not found"', async () => {
