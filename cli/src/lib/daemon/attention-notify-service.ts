@@ -161,6 +161,7 @@ export class AttentionNotifyService extends BasePeriodicService {
   private readonly ledgerDir: string;
   private readonly now: () => number;
   private lastHourlyMs = 0;
+  private gcScan: Promise<void> | null = null;
   private settingsCache?: { at: number; value: AttentionNotifySettings };
   private banners: Map<string, BannerState> | null = null;
   private fleetHub: FeedHub | null = null;
@@ -181,6 +182,9 @@ export class AttentionNotifyService extends BasePeriodicService {
   }
 
   protected async onStart(_ctx: DaemonContext): Promise<void> {
+    // The first sweep waits an hour: running it on the first tick turned every
+    // slow startup into another overrun and another restart.
+    this.lastHourlyMs = this.now();
   }
 
   protected async onStop(): Promise<void> {
@@ -356,8 +360,22 @@ export class AttentionNotifyService extends BasePeriodicService {
     if (nowMs - this.lastHourlyMs < HOURLY_MS) return;
     this.lastHourlyMs = nowMs;
     await this.pruneLedger(nowMs);
+    if (fetched) {
+      this.sweep(ctx, fetched);
+      return;
+    }
+    // A fleet tick reads the shared stream and never scans sessions itself. The full
+    // scan can take minutes on a loaded Mac, so it runs beside the tick, one at a time,
+    // instead of holding the 10 s tick past the daemon's restart threshold.
+    if (this.gcScan) return;
+    this.gcScan = this.getSessions()
+      .then((sessions) => this.sweep(ctx, sessions))
+      .catch((err: Error) => ctx.log('WARN', `attention-notify: mailbox gc skipped: ${err.message}`, { event: 'attention.gc.failed' }))
+      .finally(() => { this.gcScan = null; });
+  }
+
+  private sweep(ctx: DaemonContext, sessions: ActiveSession[]): void {
     try {
-      const sessions = fetched ?? await this.getSessions();
       const active = new Set(sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id));
       spanSync('attention.gc', () => this.gc(active));
     } catch (err) {

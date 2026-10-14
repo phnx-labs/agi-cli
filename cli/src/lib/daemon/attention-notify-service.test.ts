@@ -341,6 +341,27 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
     await restartedHub.close();
   });
 
+  it('a fleet tick never waits on the session scan behind the hourly mailbox sweep', async () => {
+    // zion, load ~120: getActiveSessions took past 100 s inside this tick and the
+    // daemon restarted 50 times in a day. The scan must run beside the tick.
+    await setAsks([ask('urgent')]);
+    let scans = 0;
+    const service = new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ interactiveHost: 'zion', schedules: DEFAULTS() }),
+      fleetHub: () => hub,
+      getSessions: () => { scans += 1; return new Promise<never>(() => {}); },
+      notify: (n) => posts.push(n), withdraw: (keys) => withdrawn.push(keys), gc: () => {},
+      ledgerDir: path.join(tmp, 'notified'), now: () => clock,
+    });
+    await at(service, 0);
+    await at(service, 61);
+    // Both ticks settled while the scan never did; the second hourly sweep found
+    // the first scan still running and did not start another.
+    expect(posts).toHaveLength(2);
+    expect(scans).toBe(1);
+  });
+
   it('switching interactive.host away withdraws every banner this host still shows', async () => {
     await setAsks([ask('urgent')]);
     let host = 'zion';
