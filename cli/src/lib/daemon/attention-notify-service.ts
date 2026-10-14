@@ -136,7 +136,7 @@ interface AttentionNotifyServiceOptions {
   getSessions?: () => Promise<ActiveSession[]>;
   notify?: (n: DesktopNotification) => void;
   withdraw?: (keys: string[]) => void;
-  fleetAsks?: () => { asks: AttentionAsk[]; scopes: Set<string> };
+  fleetHub?: () => FeedHub;
   settings?: () => AttentionNotifySettings;
   self?: () => string;
   gc?: (activeBoxIds: Set<string>) => void;
@@ -153,7 +153,7 @@ export class AttentionNotifyService extends BasePeriodicService {
   private readonly getSessions: () => Promise<ActiveSession[]>;
   private readonly notify: (n: DesktopNotification) => void;
   private readonly withdraw: (keys: string[]) => void;
-  private readonly injectedFleetAsks?: () => { asks: AttentionAsk[]; scopes: Set<string> };
+  private readonly fleetHubOf: () => FeedHub;
   private readonly readSettings: () => AttentionNotifySettings;
   private readonly self: () => string;
   private readonly gc: (activeBoxIds: Set<string>) => void;
@@ -171,7 +171,7 @@ export class AttentionNotifyService extends BasePeriodicService {
     this.getSessions = opts.getSessions ?? (() => getActiveSessions());
     this.notify = opts.notify ?? notifyDesktop;
     this.withdraw = opts.withdraw ?? withdrawDesktop;
-    this.injectedFleetAsks = opts.fleetAsks;
+    this.fleetHubOf = opts.fleetHub ?? sharedFleetFeedHub;
     this.readSettings = opts.settings ?? readAttentionNotifySettings;
     this.self = opts.self ?? machineId;
     this.feedRoot = opts.feedRoot;
@@ -192,8 +192,9 @@ export class AttentionNotifyService extends BasePeriodicService {
     const settings = this.settings(nowMs);
     const scope = notifyScope(settings.interactiveHost, this.self());
     if (scope !== 'fleet') this.releaseFleet();
-    const { asks, scopes } = scope === 'local'
-      ? await this.localAsks(nowMs)
+    const local = scope === 'local' ? await this.localAsks(nowMs) : undefined;
+    const { asks, scopes } = local
+      ? { asks: local.asks, scopes: null }
       : scope === 'fleet'
         ? this.fleetAsks()
         : { asks: [], scopes: null };
@@ -251,7 +252,7 @@ export class AttentionNotifyService extends BasePeriodicService {
       ctx.log('INFO', `attention-notify: withdrew ${toWithdraw.length} banner(s)`, { event: 'attention.withdrawn', keys: toWithdraw });
     }
 
-    await this.hourly(ctx, nowMs);
+    await this.hourly(ctx, nowMs, local?.sessions);
     ctx.log('DEBUG', `attention-notify: ${asks.length} ask(s) in ${scope} scope, ${posted} banner(s) posted`, { event: 'attention.tick', scope, asks: asks.length, posted });
   }
 
@@ -262,7 +263,7 @@ export class AttentionNotifyService extends BasePeriodicService {
     return this.settingsCache.value;
   }
 
-  private async localAsks(nowMs: number): Promise<{ asks: AttentionAsk[]; scopes: Set<string> }> {
+  private async localAsks(nowMs: number): Promise<{ asks: AttentionAsk[]; sessions: ActiveSession[] }> {
     const sessions = await span('attention.sessions', () => this.getSessions(), () => ({}));
     const host = normalizeHost(this.self());
     const asks: AttentionAsk[] = [];
@@ -279,12 +280,11 @@ export class AttentionNotifyService extends BasePeriodicService {
       }));
       if (item) asks.push({ item, session: projected });
     }
-    return { asks, scopes: new Set([host]) };
+    return { asks, sessions };
   }
 
   private fleetAsks(): { asks: AttentionAsk[]; scopes: Set<string> } {
-    if (this.injectedFleetAsks) return this.injectedFleetAsks();
-    const hub = sharedFleetFeedHub();
+    const hub = this.fleetHubOf();
     // The feed-stream service closes the shared hub when it stops; re-attach rather than read a dead stream.
     if (this.fleetHub !== hub || !this.detachFleet || !hub.active) {
       this.releaseFleet();
@@ -295,7 +295,7 @@ export class AttentionNotifyService extends BasePeriodicService {
       item: item.urgency ? item : { ...item, urgency: 'normal' as const },
       session: agent ?? {},
     }));
-    return { asks, scopes: new Set(hub.state.scopeNames) };
+    return { asks, scopes: hub.state.reportingScopes };
   }
 
   private releaseFleet(): void {
@@ -352,12 +352,12 @@ export class AttentionNotifyService extends BasePeriodicService {
     await atomicWriteFile(this.ledgerPath(state.key), JSON.stringify(state), 'utf-8');
   }
 
-  private async hourly(ctx: DaemonContext, nowMs: number): Promise<void> {
+  private async hourly(ctx: DaemonContext, nowMs: number, fetched?: ActiveSession[]): Promise<void> {
     if (nowMs - this.lastHourlyMs < HOURLY_MS) return;
     this.lastHourlyMs = nowMs;
     await this.pruneLedger(nowMs);
     try {
-      const sessions = await this.getSessions();
+      const sessions = fetched ?? await this.getSessions();
       const active = new Set(sessions.map(mailboxIdForActiveSession).filter((id): id is string => !!id));
       spanSync('attention.gc', () => this.gc(active));
     } catch (err) {

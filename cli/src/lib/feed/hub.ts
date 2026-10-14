@@ -15,15 +15,18 @@ interface ScopeState {
   setup: ToolSetupRow[];
   capturedAt: number;
   status?: { status: SessionWatchScopeStatus; reason?: string };
+  resetOrder: number;
+  unavailableOrder: number;
 }
 
 function emptyScope(): ScopeState {
-  return { agents: new Map(), attention: new Map(), tools: new Map(), setup: [], capturedAt: 0 };
+  return { agents: new Map(), attention: new Map(), tools: new Map(), setup: [], capturedAt: 0, resetOrder: 0, unavailableOrder: 0 };
 }
 
 export class FeedHubState {
   private readonly scopes = new Map<string, ScopeState>();
   private readonly activity: ActivityEvent[] = [];
+  private order = 0;
 
   private scope(name: string): ScopeState {
     const key = normalizeHost(name);
@@ -41,6 +44,7 @@ export class FeedHubState {
         scope.tools = new Map(event.tools.map((tool) => [tool.rowKey, tool]));
         scope.setup = event.setup;
         scope.capturedAt = event.capturedAt;
+        scope.resetOrder = ++this.order;
         break;
       case 'agent.upsert': scope.agents.set(event.rowKey, event.agent); break;
       case 'agent.remove': scope.agents.delete(event.rowKey); break;
@@ -51,6 +55,7 @@ export class FeedHubState {
       case 'setup.snapshot': scope.setup = event.setup; break;
       case 'scope':
         scope.status = { status: event.status, ...(event.reason ? { reason: event.reason } : {}) };
+        if (event.status === 'unavailable') scope.unavailableOrder = ++this.order;
         break;
       case 'activity.append':
         this.activity.push(event.event);
@@ -77,6 +82,13 @@ export class FeedHubState {
   }
 
   get scopeNames(): string[] { return [...this.scopes.keys()]; }
+
+  // A scope whose rows can be trusted as complete: it sent a reset, and no unavailable since.
+  get reportingScopes(): Set<string> {
+    const out = new Set<string>();
+    for (const [name, scope] of this.scopes) if (scope.resetOrder > scope.unavailableOrder) out.add(name);
+    return out;
+  }
 
   attention(): Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> {
     const out: Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> = [];
