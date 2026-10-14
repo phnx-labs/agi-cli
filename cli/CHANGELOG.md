@@ -1,5 +1,116 @@
 # Changelog
 
+## 1.23.22
+
+- **Secrets calls go through the published `@phnx-labs/secrets-cli/client`, and an unset `SECRETS_HOME` is no longer forced to `~/.agents` (PHNX-4227). Requires the `secrets` engine 0.4.0 or newer.**
+  agents-cli kept a private copy of the process client for `secrets __serve`; it
+  now imports the one secrets-cli 0.4.0 publishes (exact-pinned) and keeps only its
+  typed wrappers, so the two cannot drift. Timeouts, the
+  `AGENTS_SECRETS_PASSPHRASE` alias, one `secrets __serve` process per request,
+  and engine stderr going to `secrets-serve.log` under the agents logs directory
+  (never the terminal) are unchanged. Every response now carries the engine's
+  contract, so an engine older than 0.4.0 fails every secrets read with
+  `ENGINE_INCOMPATIBLE` instead of reporting a missing bundle from another root.
+  Upgrade each machine, fleet workers included, with
+  `agents setup tools --tool secrets` (or `npm i -g @phnx-labs/secrets-cli@0.4.0`);
+  `agents doctor` reports an old engine as the critical
+  `secrets-engine-incompatible` finding, locally and for fleet devices. Every
+  internal secrets read and the agents launched by `agents run` leave an unset
+  `SECRETS_HOME` unset, so the standalone uses its own default root
+  (`~/.agents/.secrets`, which adopts the earlier `~/.agents` and `~/.secrets`
+  stores on first use and follows `AGENTS_REAL_HOME` when a harness such as
+  Cursor swaps `HOME`); an explicit `SECRETS_HOME` still wins. A bundle push
+  (`agents accounts login --fleet`, the worker `auth-sync` provisioning) likewise
+  stops pinning the receiver to `~/.agents`, so the bundle lands in the default
+  root the worker's agents-cli now reads; an explicit `remoteSecretsHome` still
+  wins. The standalone `agents setup tools` installs is raised from 0.1.8 to
+  0.4.0. `agents setup secrets` enforces that floor through the same
+  `ensureToolPins` path instead of accepting any `secrets` on PATH, and an
+  explicit `SECRETS_BIN` below it fails with the version it read rather than
+  installing over PATH. Source: `cli/src/lib/secrets-client.ts`,
+  `cli/src/lib/exec.ts`, `cli/src/lib/secrets-cli.ts`,
+  `cli/src/lib/standalone-tools.ts`, `cli/src/commands/setup-secrets.ts`,
+  `cli/src/commands/doctor.ts`, `cli/src/lib/devices/doctor-findings.ts`,
+  `cli/package.json`, `cli/tests/secrets-standalone.ts`.
+
+- **Agent asks carry an urgency.** `agents feed watch --json` attention rows carry `urgency`
+  (`urgent`, `high`, `normal`, `low`) and, when there is one, `urgencyReason`
+  ("Blocks a release (npm publish)", "High ticket PHNX-3890"). An ask that holds up a release,
+  deploy or merge is urgent; otherwise the linked ticket's Linear priority decides; otherwise
+  normal. A ticket's priority is read at most once per 30 minutes.
+  Source: `cli/src/lib/feed/attention.ts`, `cli/src/lib/feed/ticket-priority.ts`.
+- **Banner schedules per urgency, with reminders.** New user-scope keys
+  `menubar.menu.notifyUrgent`, `notifyHigh`, `notifyNormal` and `notifyLow` set when an ask's
+  Mac banner posts: times such as `0m`, `15m`, `1h` measured from when the ask opened (the
+  first posts the banner, later ones remind), plus `stay` and `sound`, or just `sidebar` for no
+  banner. Defaults: urgent `["0m","15m","30m","stay","sound"]`, high `["0m","30m","stay"]`,
+  normal `["5m","1h"]`, low `["sidebar"]`. `agents config set` rejects anything else. The daemon
+  withdraws a banner when its ask resolves, and about 10 seconds after posting for a level
+  without `stay`. A reminder replaces the earlier banner and says "Still waiting · 15 min".
+  Source: `cli/src/lib/daemon/attention-notify-service.ts`, `cli/src/lib/feed/notify-schedule.ts`.
+- **Fleet asks reach the machine you sit at.** With `interactive.host` set to this machine,
+  this machine posts banners for every device's asks, read from the daemon's shared fleet
+  stream; any other machine then posts none. Unset keeps each machine posting its own.
+- **AGI Menu argv.** Banners now pass `--level`, `--sound` and `--reminder <n>`, and a resolved
+  ask is withdrawn with `"AGI Menu" --notify --withdraw <key>`. Needs AGI Menu
+  1.19.0, which this release installs (the `menubar` floor moves to 1.19.0). Source: `cli/src/lib/menubar/notify-desktop.ts`, `cli/docs/menubar.md`.
+- **Claude permission asks name their command.** A Claude permission ask reads "Claude needs
+  approval to run Bash: <command>" instead of "Claude needs your permission".
+  Source: `cli/src/lib/feed/feed.ts` (the next `agents feed` run rewrites the installed hook).
+- **Stale asks leave.** The daemon runs the mailbox gc hourly, so an open ask whose session is
+  gone is removed a day later without `agents feed --dispatch`, and `agents feed` ranking caps an
+  ask's idle time at 24 hours so a weeks-old ask no longer tops the list.
+  Source: `cli/src/lib/daemon/attention-notify-service.ts`, `cli/src/lib/feed-ranking.ts`.
+
+- **Session rows say what a session is still waiting on.** `agents feed watch --json`,
+  `agents ps watch --json` and `agents ps --json` rows carry `pending`
+  (`{subagents, shells, monitors}`, each `[{id, description, startedAtMs}]`): only work running
+  now, read from the transcript — subagents whose status is `running`, Claude background shells
+  (`run_in_background`, or a call the harness moved to the background) with no completion
+  notification and no successful `TaskStop`, and `Monitor` watches that have not ended or
+  expired. It is absent when nothing is pending. Everything counts only while the harness
+  process is alive and only when that process started it, so a resumed or forked session does
+  not inherit a dead run's shell. An `idle` row with `pending` is waiting on itself, not on you; `subAgentCount` is
+  still the cumulative total and says nothing about liveness.
+  Source: `cli/src/lib/session/pending-work.ts`, `cli/src/lib/session/session-cache.ts`.
+- **Rows carry `effort` and `fast` when the transcript records them.** Claude rows take
+  `effort` from the latest reply's `effort` and `fast` from its `usage.speed`; Codex rows take
+  `effort` from the latest `turn_context`. Each is absent when the session does not say;
+  `effort` is one of `low`, `medium`, `high`, `xhigh`, `max`.
+  Source: `cli/src/lib/session/pending-work.ts`.
+- **Project aliases.** A project definition may list `aliases:` — former names of the project.
+  A session that resolves to a former name, or a peer row that still reports one, is filed under
+  the current name (`confirmedProject`, the path-derived `project` key, the feed's project
+  bucket, `agents projects status`). Matching is case-insensitive. An alias that names another
+  live project, forms a cycle, or is claimed by two definitions is ignored with a warning.
+  Source: `cli/src/lib/projects.ts`, `cli/src/lib/feed/watch.ts`, `cli/src/lib/session/remote/watch.ts`.
+
+- **`--since` accepts weeks and rejects values it cannot read.** `agents daemon logs --since 1week`
+  used to print nothing, because the parser had no week unit and an unreadable value silently
+  meant "now". `daemon logs` and `events` now share one parser that takes `1w`/`1week`/`2weeks`
+  and ISO dates, and an unparseable `--since` exits non-zero with `Invalid --since value`. A bare
+  number now means seconds, so `events --since 2024` is 2024 seconds ago, not 1 January 2024;
+  write the full ISO date (`2024-01-01`).
+  Source: `cli/src/lib/hooks/cache.ts`, `cli/src/commands/daemon.ts`, `cli/src/commands/events.ts`.
+- **A signal-killed process no longer exits 0.** After a self-upgrade, `agents` re-runs your
+  command; if that child was killed by a signal, the CLI exited 0. It now exits 128+signal
+  (143 for SIGTERM), the same code the `browser` and `computer` forwarders report.
+  Source: `cli/src/lib/platform/process.ts`, `cli/src/bootstrap.ts`.
+- **The watchdog log follows `AGENTS_LOGS_DIR`.** `watchdog.log` was always written to
+  `~/.agents/.cache/logs`, even when `AGENTS_LOGS_DIR` pointed elsewhere; `agents watchdog history`
+  now reads and reports the same logs directory every other log uses.
+  Source: `cli/src/lib/watchdog/log.ts`.
+- **Smaller fixes.** `agents cloud` with an unrunnable `codex` binary now fails with
+  `could not run …` instead of an unhandled spawn error; two background auto-pull workers no
+  longer both take a fresh repo lock (the lock is created with `O_EXCL`); `agents teams` pickers color a PR-open teammate the
+  same magenta everywhere; `agents repo status` columns stay aligned with wide (CJK/emoji) names.
+  Source: `cli/src/lib/cloud/codex.ts`, `cli/src/lib/auto-pull.ts`, `cli/src/lib/teams/delivery.ts`,
+  `cli/src/commands/repo.ts`.
+
+- **`agents lead`: a warm per-project Lead you can ask, with an NDJSON stream for UIs.** `agents lead ask --project <name> [--voice <secs>] [--json] -- <text>` sends one message to a long-lived headless Claude for that project and streams `turn`, `status`, `tool`, `text`, `confirm`, `done` (with `summary`, `refs` and `timing`) and `error` events. A detached host per project, started on demand, keeps the stream-json Claude process warm, resumes it with `--resume` after a crash, and rotates to a fresh session with `memory.md` past 60% context. The Lead runs with isolated settings (no user or project settings, hooks or MCP servers), in `~/.agents/lead/<project>/`, with a minimal environment, and can only call fixed-shape `agents lead tool` commands (`roster`, `dispatch`, `start`, `send`, `stop`, `linear`, `remember`); compound shell commands are denied. A stop it requests becomes a confirm token for `agents lead confirm <token>` that expires after 10 minutes. `agents lead history|status|stop` complete the group, and `lead.model` (default `sonnet`) picks the model. Source: `cli/src/commands/lead.ts`, `cli/src/lib/lead/`, `cli/docs/lead.md`.
+
+- **Lead sessions no longer show up as ordinary sessions.** A project Lead (`agents lead`) runs a headless Claude session of its own, and `agents ps`, `agents ps watch --json` and `agents feed watch --json` listed it like any other agent, so AGI EXT and the FastWispr bubble rendered it as a session card. Live and history rows for a session whose cwd is under `~/.agents/lead`, or whose id is a Lead host's session, now carry `lead: true`, and those three surfaces leave them out by default; `--include-lead` shows them for debugging. The session index is unchanged, so `sessions` still finds a Lead's transcript. Source: `cli/src/lib/lead/visibility.ts`, `cli/src/lib/session/active.ts`, `cli/src/lib/session/remote/watch.ts`, `cli/src/commands/ps.ts`, `cli/src/commands/sessions-watch.ts`, `cli/src/commands/feed-watch.ts`.
+
 ## 1.23.21
 
 - **`agents projects prs` reads open PRs in one GraphQL query per repository or owner.**
