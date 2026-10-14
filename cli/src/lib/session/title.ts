@@ -1,5 +1,6 @@
 
 import { createHash } from 'node:crypto';
+import { cleanFirstUserMessage, cleanGeneratedSessionLabel } from '@phnx-labs/sessions-cli/reader';
 import type { AgentId } from '../types.js';
 import type { SessionTitleCandidateRow } from './db.js';
 
@@ -87,6 +88,62 @@ export function sessionHeadline<
   T extends { label?: string | null; generatedTitle?: string | null; topic?: string | null },
 >(row: CarriesTitleRung<T>): string | undefined {
   return row.label || row.generatedTitle || row.topic || undefined;
+}
+
+export interface LiveSessionName {
+  name: string;
+  source?: string;
+}
+
+export interface SessionNameSources {
+  customTitle?: string | null;
+  live?: LiveSessionName | null;
+  indexed?: string | null;
+  launchName?: string | null;
+  aiTitle?: string | null;
+}
+
+function nonEmpty(s: string | null | undefined): string | undefined {
+  return s?.trim() || undefined;
+}
+
+// The `label` rung of sessionHeadline, resolved the same way for index rows and
+// live rows: a user rename, then the harness's current name for the running
+// process (a `derived` one is Claude's cwd placeholder, not a name), then
+// the `agents run --name` launch name, then the harness's generated title.
+// `indexed` is a label already resolved at index time; it ranks below a live
+// user rename and above a live name the index has not caught up with yet.
+export function resolveSessionName(n: SessionNameSources): string | undefined {
+  const liveName = n.live && n.live.source !== 'derived' ? nonEmpty(n.live.name) : undefined;
+  return nonEmpty(n.customTitle)
+    ?? (n.live?.source === 'user' ? liveName : undefined)
+    ?? nonEmpty(n.indexed)
+    ?? liveName
+    ?? nonEmpty(n.launchName)
+    ?? cleanGeneratedSessionLabel(n.aiTitle ?? undefined);
+}
+
+export const STARTED_AS_MAX_CHARS = 280;
+
+const COMMAND_RE = /<command-name>\s*(\/[^<\s]+)\s*<\/command-name>[\s\S]*?(?:<command-args>([\s\S]*?)<\/command-args>|$)/;
+
+// The prompt a session was started with, from one user turn: `/goal <ask>`
+// is the ask itself, any other slash command keeps its name, an argument-less
+// command (`/clear`, `/model`) is not a prompt, and everything else goes
+// through the same cleaner as firstUserMessage.
+export function startedAsFromUserTurn(text: string): string | undefined {
+  const command = COMMAND_RE.exec(text);
+  let prompt: string | undefined;
+  if (command) {
+    const args = command[2]?.trim();
+    if (!args) return undefined;
+    prompt = command[1] === '/goal' ? args : `${command[1]} ${args}`;
+  } else {
+    prompt = cleanFirstUserMessage(text);
+  }
+  const flat = prompt?.replace(/\s+/g, ' ').trim();
+  if (!flat) return undefined;
+  return flat.length > STARTED_AS_MAX_CHARS ? `${flat.slice(0, STARTED_AS_MAX_CHARS - 1).trimEnd()}…` : flat;
 }
 
 type IsNever<T> = [T] extends [never] ? true : false;

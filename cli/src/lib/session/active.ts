@@ -21,8 +21,9 @@ import {
 } from './pid-registry.js';
 import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
-import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
+import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
+import { resolveSessionName, startedAsFromUserTurn } from './title.js';
 import { latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
@@ -124,6 +125,7 @@ export function backfillActiveRowsFromMeta(
   metaById: Map<string, BackfillMeta>,
 ): void {
   const accounts = listNativeAccounts(readMeta());
+  applySessionNames(sessions, (id) => metaById.get(id)?.label);
   for (const s of sessions) {
     if (!s.sessionId) continue;
     const m = metaById.get(s.sessionId);
@@ -131,7 +133,6 @@ export function backfillActiveRowsFromMeta(
     if (!s.version && m.version) s.version = m.version;
     if (!s.account && m.account) s.account = m.account;
     s.accountLabel ??= sessionAccountLabel(s.kind, m, accounts);
-    if (!s.label && m.label) s.label = m.label;
     if (!s.firstUserMessage && m.firstUserMessage) s.firstUserMessage = m.firstUserMessage;
     if (!s.lastUserMessage && m.lastUserMessage) s.lastUserMessage = m.lastUserMessage;
     if (!s.generatedTitle && m.generatedTitle) s.generatedTitle = m.generatedTitle;
@@ -152,6 +153,32 @@ export function backfillActiveRowsFromMeta(
       if (!Number.isNaN(ts)) s.lastActivityMs = ts;
     }
     applyRecap(s);
+  }
+}
+
+// The one place a live row gets its `label`: Claude's current name for the
+// process, the stored index label, and the `agents run --name` launch name,
+// ranked by resolveSessionName. The terminal tab title is never an input; it
+// is a projection of this value. A row running on a peer keeps the label that
+// peer resolved, since the pid files and transcript are on its disk.
+export function applySessionNames(
+  sessions: ActiveSession[],
+  indexedLabel: (sessionId: string) => string | null | undefined = () => undefined,
+): void {
+  const self = machineId();
+  const local: ActiveSession[] = [];
+  for (const s of sessions) {
+    if (!s.sessionId) continue;
+    if (!s.machine || s.machine === self) local.push(s);
+    else s.label ||= indexedLabel(s.sessionId) ?? undefined;
+  }
+  if (local.length === 0) return;
+  const live = readClaudeLiveNames();
+  const launch = buildRunNameMap();
+  for (const s of local) {
+    const id = s.sessionId!;
+    s.name ??= launch.get(id) ?? undefined;
+    s.label = resolveSessionName({ live: live.get(id), indexed: indexedLabel(id), launchName: s.name }) ?? s.label;
   }
 }
 
@@ -304,6 +331,7 @@ export interface ActiveSession {
   lastUserMessage?: string;
   generatedTitle?: string;
   title?: string;
+  startedAs?: string;
   recapSource?: RecapSource;
   userPromptClean?: string;
   userPromptKind?: UserPromptKind;
@@ -555,7 +583,6 @@ interface LiveTerminalEntry {
   tabIndex?: number;
   pid: number;
   kind: string;
-  label?: string | null;
   cwd?: string | null;
   startedAtMs: number;
   windowId?: string;
@@ -817,26 +844,15 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
   };
 }
 
-function extractClaudeUserText(parsed: any): string | undefined {
-  const msg = parsed.message;
-  if (!msg?.content) return undefined;
-  const content = Array.isArray(msg.content) ? msg.content : [msg.content];
-  const texts: string[] = [];
-  for (const block of content) {
-    if (typeof block === 'string') texts.push(block);
-    else if (block?.type === 'text' && typeof block.text === 'string') texts.push(block.text);
-  }
-  return texts.join('\n').trim() || undefined;
-}
-
-function quickExtractTopic(sessionFile: string): string | undefined {
+export function readTranscriptHead(sessionFile: string): { topic?: string; startedAs?: string } {
   let fd: number;
   try {
     fd = fs.openSync(sessionFile, 'r');
   } catch {
-    return undefined;
+    return {};
   }
 
+  const head: { topic?: string; startedAs?: string } = {};
   try {
     const chunkSize = 256 * 1024;
     const maxBytes = 2 * 1024 * 1024;
@@ -871,8 +887,9 @@ function quickExtractTopic(sessionFile: string): string | undefined {
         if (parsed.type === 'user') {
           const text = extractClaudeUserText(parsed);
           if (text) {
-            const topic = extractSessionTopic(text);
-            if (topic) return topic;
+            head.startedAs ??= startedAsFromUserTurn(text);
+            head.topic ??= extractSessionTopic(text);
+            if (head.topic && head.startedAs) return head;
           }
         }
       }
@@ -882,7 +899,7 @@ function quickExtractTopic(sessionFile: string): string | undefined {
     fs.closeSync(fd);
   }
 
-  return undefined;
+  return head;
 }
 
 export function summarizeMission(prompt: string | null | undefined): string | undefined {
@@ -901,7 +918,7 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
   return running.map((a): ActiveSession => {
     const ownSessionId = a.remoteSessionId ?? undefined;
     const sessionFile = findSessionFileForKind(a.agentType, a.cwd ?? undefined, ownSessionId);
-    const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
+    const { topic, startedAs } = sessionFile ? readTranscriptHead(sessionFile) : {};
     const pidAlive = a.pid ? isPidAlive(a.pid) : true;
     const { state, tokPerSec } = computeLiveSignals(a.agentType, sessionFile, a.cwd ?? undefined, pidAlive);
     const resolvedId = ownSessionId ?? sessionIdFromFile(a.agentType, sessionFile);
@@ -917,8 +934,9 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
       offloadedFrom: offloaded ? self : undefined,
       orchestratorSessionId: a.parentSessionId ?? undefined,
       cwd: a.cwd ?? undefined,
-      label: a.name ?? undefined,
+      name: a.name ?? undefined,
       topic,
+      startedAs,
       tokPerSec,
       sessionFile,
       startedAtMs: a.startedAt.getTime(),
@@ -939,8 +957,6 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
   for (const r of await readProcessTable()) procByPid.set(r.pid, r);
   const children = childrenByParent(new Map([...procByPid.values()].map(r => [r.pid, r.ppid])));
 
-  const labelMap = buildClaudeLabelMap();
-  const runNameMap = buildRunNameMap();
   const self = machineId();
 
   return entries.flatMap((t): ActiveSession[] => {
@@ -953,9 +969,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     const sessionKind = pidEntry?.agent ?? t.kind;
     if (!resolvedId && !isSessionTrackedAgent(sessionKind)) return [];
     const sessionFile = resolvedId ? findSessionFileForKind(sessionKind, cwd, resolvedId) : undefined;
-    const label = t.label ?? (resolvedId ? labelMap.get(resolvedId) : undefined) ?? undefined;
-    const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
-    const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
+    const { topic, startedAs } = sessionFile ? readTranscriptHead(sessionFile) : {};
     const pidAlive = isPidAlive(t.pid, t.startedAtMs);
     const { state, tokPerSec } = computeLiveSignals(sessionKind, sessionFile, cwd, pidAlive);
     return [applyState({
@@ -971,9 +985,8 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
       originTerminal: pidEntry?.originTerminal,
       tabIndex: t.tabIndex,
       cwd,
-      label,
-      name,
       topic,
+      startedAs,
       tokPerSec,
       sessionFile,
       startedAtMs: pidEntry?.startedAtMs ?? t.startedAtMs,
@@ -1316,7 +1329,6 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
 
   let hookIndex: HookSessionIndex | undefined;
   let children: Map<number, number[]> | undefined;
-  const runNameMap = buildRunNameMap();
   const ensureChildren = (): Map<number, number[]> => children ??= childrenByParent(ppidMap);
 
   const out: ActiveSession[] = [];
@@ -1344,15 +1356,13 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
     if (!exactId && !launchId) continue;
     const cwd = cwds[i] ?? entry?.cwd ?? undefined;
     const sessionFile = findSessionFileForKind(kind, cwd, exactId);
-    const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
+    const { topic, startedAs } = sessionFile ? readTranscriptHead(sessionFile) : {};
     const host = detectHost(pid, procByPid);
     const tty = procByPid.get(pid)?.tty;
     const context = unattributedContext(host, tty);
     const { state, tokPerSec } = computeLiveSignals(kind, sessionFile, cwd, true);
     const { birthtimeMs, mtimeMs } = sessionFileTimes(sessionFile);
     const resolvedId = exactId ?? sessionIdFromFile(kind, sessionFile);
-    const name = resolvedId ? runNameMap.get(resolvedId) ?? undefined : undefined;
-    const label = name;
     out.push(applyState({
       context,
       kind,
@@ -1362,9 +1372,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<{ se
       pid,
       cwd,
       sessionId: resolvedId,
-      label,
-      name,
       topic,
+      startedAs,
       tokPerSec,
       sessionFile,
       startedAtMs: hookRec?.ts ?? birthtimeMs,
@@ -1487,7 +1496,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     const pid = id.pid ?? (parseInt(pidRaw, 10) || undefined);
     const cwd = liveEntry?.cwd ?? meta?.cwd ?? (curPath || undefined);
     const sessionFile = id.sessionId ? findSessionFileForKind(id.agent, cwd, id.sessionId) : undefined;
-    const topic = sessionFile ? quickExtractTopic(sessionFile) : undefined;
+    const { topic, startedAs } = sessionFile ? readTranscriptHead(sessionFile) : {};
     const paneDead = paneDeadRaw === '1';
     const pidAlive = !paneDead && (pid ? isPidAlive(pid, liveEntry?.startedAtMs) : true);
     const { state, tokPerSec } = computeLiveSignals(id.agent, sessionFile, cwd, pidAlive);
@@ -1507,6 +1516,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
       sessionId: id.sessionId ?? sessionIdFromFile(id.agent, sessionFile),
       cwd,
       topic,
+      startedAs,
       tokPerSec,
       sessionFile,
       startedAtMs: liveEntry?.startedAtMs ?? birthtimeMs,
@@ -1551,6 +1561,7 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   spanSync('active.fold', () => {
     foldHostLink(merged);
     foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
+    applySessionNames(merged);
     annotateOrchestratorLabels(merged);
     foldRecap(merged);
     foldPhase(merged);
@@ -1737,6 +1748,7 @@ export function deriveImportantMessage(
 function applyRecap(s: ActiveSession): void {
   const recap = deriveSessionRecap(s);
   s.title = recap.title;
+  s.startedAs ??= s.firstUserMessage ? startedAsFromUserTurn(s.firstUserMessage) : undefined;
   s.recapSource = recap.recapSource;
   s.userPromptClean = recap.userPromptClean;
   s.userPromptKind = recap.userPromptKind;

@@ -87,8 +87,9 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
     const rows = await scan();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ pid: shell!.pid, sessionId: sessionB, terminalId: 'T',
-      launchId: 'launch-B', harness: 'custom', owner: 'test-owner', label: 'My tab', kind: 'claude',
+      launchId: 'launch-B', harness: 'custom', owner: 'test-owner', kind: 'claude',
       windowId: 'window', tabIndex: 3, sessionFile: path.join(transcriptDir, `${sessionB}.jsonl`) });
+    expect(rows[0].label, 'the tab title is a projection of the CLI name, never an input (PHNX-4387)').toBeUndefined();
     const unattributed = await listUnattributedActive(new Set(rows.map(row => row.pid!)));
     expect(unattributed.some(row => row.pid === pid || row.sessionId === sessionB)).toBe(false);
     expect(processTableLiveReadCountForTest()).toBe(1);
@@ -99,7 +100,7 @@ describe.skipIf(process.platform === 'win32')('published shell adopts its live a
   it('keeps published A when the shell has no agent child, with optional terminalId', async () => {
     await startTab(0);
     const [before] = await scan();
-    expect(before).toMatchObject({ sessionId: sessionA, label: 'My tab', pid: shell!.pid });
+    expect(before).toMatchObject({ sessionId: sessionA, pid: shell!.pid });
     expect(before.terminalId).toBeUndefined();
     const published = JSON.parse(fs.readFileSync(registry, 'utf8'));
     published.window.entries[0].terminalId = 'published-T';

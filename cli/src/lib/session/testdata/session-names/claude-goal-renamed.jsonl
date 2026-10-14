@@ -1,0 +1,10 @@
+{"type": "permission-mode", "permissionMode": "auto", "sessionId": "5e55a000-0000-4000-8000-000000004387"}
+{"type": "user", "sessionId": "5e55a000-0000-4000-8000-000000004387", "timestamp": "2026-10-14T03:50:00.000Z", "cwd": "/repo", "version": "2.1.289", "message": {"role": "user", "content": "<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args>Build the artifacts CLI base -- then show it to me</command-args>"}}
+{"type": "user", "sessionId": "5e55a000-0000-4000-8000-000000004387", "timestamp": "2026-10-14T03:50:00.100Z", "cwd": "/repo", "message": {"role": "user", "content": "<local-command-stdout>Goal set: Build the artifacts CLI base -- then show it to me</local-command-stdout>"}}
+{"type": "user", "isMeta": true, "sessionId": "5e55a000-0000-4000-8000-000000004387", "timestamp": "2026-10-14T03:50:00.200Z", "cwd": "/repo", "message": {"role": "user", "content": "A session-scoped Stop hook is now active with condition: \"Build the artifacts CLI base -- then show it to me\". Briefly acknowledge the goal, then immediately start (or continue) working toward it."}}
+{"type": "assistant", "sessionId": "5e55a000-0000-4000-8000-000000004387", "timestamp": "2026-10-14T03:50:05.000Z", "message": {"id": "msg_1", "role": "assistant", "model": "claude-opus-5-5", "content": [{"type": "text", "text": "Starting on the artifacts CLI."}]}}
+{"type": "ai-title", "aiTitle": "Artifacts-cli base", "sessionId": "5e55a000-0000-4000-8000-000000004387"}
+{"type": "user", "sessionId": "5e55a000-0000-4000-8000-000000004387", "timestamp": "2026-10-14T04:30:00.000Z", "cwd": "/repo", "message": {"role": "user", "content": [{"type": "text", "text": "now wire the Rush credentials"}]}}
+{"type": "custom-title", "customTitle": "Rush credentials", "sessionId": "5e55a000-0000-4000-8000-000000004387"}
+{"type": "agent-name", "agentName": "Rush credentials", "sessionId": "5e55a000-0000-4000-8000-000000004387"}
+{"type": "ai-title", "aiTitle": "Artifacts-cli base", "sessionId": "5e55a000-0000-4000-8000-000000004387"}

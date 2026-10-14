@@ -5,7 +5,9 @@ import {
   SESSION_TITLE_PROMPT_MARKER,
   isSessionTitlePrompt,
   renderSessionTitlePrompt,
+  resolveSessionName,
   sanitizeGeneratedTitle,
+  startedAsFromUserTurn,
   selectSessionsNeedingTitle,
   sessionHeadline,
   sessionTitleSourceKey,
@@ -157,5 +159,51 @@ describe('selectSessionsNeedingTitle (generate once, then cache-hit)', () => {
     ];
     const { pending } = selectSessionsNeedingTitle(rows, { limit: 1 });
     expect(pending.map((p) => p.row.id)).toEqual(['a']);
+  });
+});
+
+describe('resolveSessionName — the label rung (PHNX-4387)', () => {
+  it('ranks a user rename, the live name, the launch name, then the generated title', () => {
+    const all = {
+      customTitle: 'Rush credentials',
+      live: { name: 'Live name', source: 'ai' },
+      launchName: 'fork of X',
+      aiTitle: 'Artifacts-cli base',
+    };
+    expect(resolveSessionName(all)).toBe('Rush credentials');
+    expect(resolveSessionName({ ...all, customTitle: undefined })).toBe('Live name');
+    expect(resolveSessionName({ ...all, customTitle: undefined, live: undefined })).toBe('fork of X');
+    expect(resolveSessionName({ aiTitle: 'Artifacts-cli base' })).toBe('Artifacts-cli base');
+    expect(resolveSessionName({})).toBeUndefined();
+  });
+
+  it("skips Claude's cwd-derived placeholder name", () => {
+    expect(resolveSessionName({ live: { name: 'muqsitnawaz-6f', source: 'derived' }, aiTitle: 'Fix login' })).toBe('Fix login');
+  });
+
+  it('a stored index label ranks below a live rename and above a live name the index has not caught up with', () => {
+    expect(resolveSessionName({ live: { name: 'Renamed', source: 'user' }, indexed: 'Old title' })).toBe('Renamed');
+    expect(resolveSessionName({ live: { name: 'Claude name', source: 'ai' }, indexed: 'Rush credentials' })).toBe('Rush credentials');
+    expect(resolveSessionName({ indexed: '  ', launchName: 'nightly' })).toBe('nightly');
+  });
+});
+
+describe('startedAsFromUserTurn (PHNX-4387)', () => {
+  it('reduces a /goal command to its ask', () => {
+    const goal = '<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args>Fix the fork across devices -- then show me</command-args>';
+    expect(startedAsFromUserTurn(goal)).toBe('Fix the fork across devices -- then show me');
+  });
+
+  it('keeps any other slash command with its arguments and skips an argument-less one', () => {
+    expect(startedAsFromUserTurn('<command-name>/design:prototype</command-name><command-args>the sidebar</command-args>'))
+      .toBe('/design:prototype the sidebar');
+    expect(startedAsFromUserTurn('<command-name>/clear</command-name><command-args></command-args>')).toBeUndefined();
+  });
+
+  it('collapses whitespace and caps a long prompt', () => {
+    expect(startedAsFromUserTurn('fix\n\n  the   bug')).toBe('fix the bug');
+    const long = startedAsFromUserTurn('x'.repeat(1000))!;
+    expect(long.length).toBe(280);
+    expect(long.endsWith('…')).toBe(true);
   });
 });

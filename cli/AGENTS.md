@@ -1828,12 +1828,18 @@ render a right/bottom **preview pane** built by `buildPreview(session)` in
 full last message, wrapped), and one width-capped `Details ▸` fold (session id,
 skills, plugins, hooks, links, dirs, repos).
 The card leads with the session's **headline**, and that headline is one ladder
-everywhere (PHNX-3797): `/rename` label → the daemon-generated `generatedTitle` →
+everywhere (PHNX-3797): `label` → the daemon-generated `generatedTitle` →
 the first-prompt topic — **never** the agent's latest transcript line, which is a
 rolling monologue and belongs to the live preview/`lastAgentLine` slot instead.
 Live rows resolve it in `deriveSessionRecap` (`src/lib/session/active.ts`),
 indexed rows in `sessionHeadline` (`src/lib/session/title.ts`); no surface
-re-derives its own ordering. `generatedTitle` is produced ONCE per session by the
+re-derives its own ordering. The `label` rung itself has one resolver,
+`resolveSessionName` (`title.ts`, PHNX-4387): user `/rename` → Claude's current
+name from `<config>/sessions/<pid>.json` in any config home (`readClaudeLiveNames`)
+→ `agents run --name` (passed to Claude as `--name`) → Claude's `ai-title`. The
+index calls it in `readClaudeMeta`, live rows in `applySessionNames`; the
+extension's tab title is a projection of it, never an input. Live rows also
+carry `startedAs`, the first prompt with `/goal` and injected turns stripped. `generatedTitle` is produced ONCE per session by the
 daemon's `session-title` service with a cheap model and persisted in
 `sessions.generated_title` beside the hash of the user text it came from, so a
 titled session never costs another model call and re-titles only when that first

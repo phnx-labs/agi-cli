@@ -7,7 +7,7 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-dbnames-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
-const { upsertSession, seedLabelsFromNames, syncLabels, ftsSearch, getSessionById, findSessionsByShortIds } =
+const { upsertSession, seedLabelsFromNames, ftsSearch, getSessionById, findSessionsByShortIds } =
   await import('./db.js');
 type SessionMeta = import('@phnx-labs/sessions-cli/reader').SessionMeta;
 
@@ -43,8 +43,7 @@ describe('--name seeds the unified session label', () => {
   });
 
   it('an agent-generated title WINS over the --name seed (refine beats seed)', () => {
-    upsertSession(meta('run-refine'), '');
-    syncLabels(new Map([['run-refine', 'Real generated title']]));
+    upsertSession(meta('run-refine', { label: 'Real generated title' }), '');
     seedLabelsFromNames(new Map([['run-refine', 'my-seed']]));
     expect(getSessionById('run-refine')?.label).toBe('Real generated title');
     expect(ftsSearch('Real generated title')[0]?.sessionId).toBe('run-refine');
@@ -90,21 +89,6 @@ describe('upsertSession preserves a good label; a real one still wins (clobber f
     expect(getSessionById('clobber-real')?.label).toBe('new-real-label');
     expect(ftsSearch('new-real-label')[0]?.sessionId).toBe('clobber-real');
     expect(ftsSearch('old-label').some(h => h.score >= 800_000)).toBe(false);
-  });
-
-  it('syncLabels can still CHANGE a label after the preserve fix', () => {
-    upsertSession(meta('sync-change', { label: 'first' }), '');
-    expect(getSessionById('sync-change')?.label).toBe('first');
-    syncLabels(new Map([['sync-change', 'renamed']]));
-    expect(getSessionById('sync-change')?.label).toBe('renamed');
-    expect(ftsSearch('renamed')[0]?.sessionId).toBe('sync-change');
-  });
-
-  it('syncLabels does not erase a stored label when live metadata has no name', () => {
-    upsertSession(meta('sync-empty', { label: 'generated-title' }), '');
-    syncLabels(new Map([['sync-empty', null]]));
-    expect(getSessionById('sync-empty')?.label).toBe('generated-title');
-    expect(ftsSearch('generated-title')[0]?.sessionId).toBe('sync-empty');
   });
 
   it('the first upsert still sets a real label (INSERT path unaffected)', () => {

@@ -273,8 +273,17 @@ touches the endpoint.
   redacted (only `--no-redact` opts out) and terminal escapes always stripped —
   because the row is also published into the git-tracked fleet mirror
   (SES-54a).
+- A session's **`label` has one resolver**, `resolveSessionName`
+  (`lib/session/title.ts`, PHNX-4387): a user `/rename`, then Claude's own
+  current name for the running process (`<config>/sessions/<pid>.json`, read
+  from every config home), then the `agents run --name` launch name (passed to
+  Claude as `claude --name` on a new launch), then Claude's `ai-title`. The
+  index and the live roster both call it, so `agents ps`, the extension's tab,
+  sidebar card and status bar show the same name. Live rows also carry
+  `startedAs`: the first prompt the session was started with, `/goal` and
+  harness-injected turns stripped (SES-14d).
 - Every session row's **headline is a user-anchored name, never the agent's latest
-  message** (PHNX-3797). One ladder decides it everywhere — `/rename` label →
+  message** (PHNX-3797). One ladder decides it everywhere — `label` →
   `generatedTitle` → the first-prompt `topic` — implemented once in
   `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
   `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,

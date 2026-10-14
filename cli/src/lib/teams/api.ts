@@ -5,7 +5,8 @@ import { AgentManager, AgentStatus, resolveMode, type TaskType, type TeammateFai
 import { AgentType } from './parsers.js';
 import { getDelta } from './summarizer.js';
 import { debug } from './debug.js';
-import { buildClaudeLabelMap } from '../session/discover.js';
+import { readClaudeLiveNames } from '../session/discover.js';
+import { resolveSessionName } from '../session/title.js';
 import { resolveTeammateDelivery } from './delivery.js';
 import { hasUncommittedChanges } from './worktree.js';
 
@@ -405,9 +406,9 @@ export async function handleStatus(
   }
 
   let maxTimestamp = since || new Date(0).toISOString();
-  const claudeLabels = allAgents.some((agent) => agent.agentType === 'claude')
-    ? buildClaudeLabelMap()
-    : new Map<string, string | null>();
+  const claudeLiveNames = allAgents.some((agent) => agent.agentType === 'claude')
+    ? readClaudeLiveNames()
+    : new Map();
 
   for (const agent of agents) {
     await agent.readNewEvents();
@@ -446,7 +447,7 @@ export async function handleStatus(
       version: agent.version,
       remote_session_id: agent.remoteSessionId,
       session_label: agent.remoteSessionId
-        ? claudeLabels.get(agent.remoteSessionId) ?? null
+        ? resolveSessionName({ live: claudeLiveNames.get(agent.remoteSessionId) }) ?? null
         : null,
       name: agent.name,
       after: agent.after,

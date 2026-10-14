@@ -41,7 +41,6 @@ import {
   getDirLedgerForPaths,
   recordDirScans,
   recordScans,
-  syncLabels,
   seedLabelsFromNames,
   syncTopics,
   upsertSessionsBatch,
@@ -59,6 +58,7 @@ import {
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
+import { resolveSessionName, type LiveSessionName, type SessionNameSources } from './title.js';
 import { resolveLinearApiKey } from '../linear-cache.js';
 import {
   ToolCallCollector,
@@ -196,6 +196,8 @@ interface ClaudeSessionScan {
   model?: string;
   topic?: string;
   firstUserMessage?: string;
+  customTitle?: string;
+  aiTitle?: string;
   label?: string;
   messageCount: number;
   tokenCount?: number;
@@ -731,6 +733,7 @@ interface LeafDirScan {
 function collectChangedFilesInLeafDirs(
   leafDirs: LeafDir[],
   ext: string,
+  isHotFile?: (filePath: string) => boolean,
 ): LeafDirScan {
   const disabled = dirLedgerDisabled();
   const dirStamps = disabled ? new Map<string, DirStamp>() : getDirLedgerForPaths(leafDirs.map(d => d.dirPath));
@@ -762,7 +765,7 @@ function collectChangedFilesInLeafDirs(
     if (dirUnchanged) {
       const stamps = isLiveRoot ? null : getScanStampsForPaths(files);
       for (const filePath of files) {
-        let hot = isLiveRoot;
+        let hot = isLiveRoot || isHotFile?.(filePath) === true;
         if (!hot && stamps) {
           const s = stamps.get(filePath);
           hot = s?.extractorVersion !== CONTENT_INDEX_VERSION
@@ -1020,39 +1023,46 @@ function claudeAccountIndex(refresh = false): ClaudeAccountIndex {
 }
 
 
-export function buildClaudeLabelMap(): Map<string, string | null> {
-  const map = new Map<string, { label: string | null; startedAt: number }>();
-  const dir = path.join(HOME, '.claude', 'sessions');
-  if (!fs.existsSync(dir)) return new Map();
-
-  let files: string[];
-  try {
-    files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
-  } catch {
-    return new Map();
-  }
-
-  for (const f of files) {
+// Claude writes <config>/sessions/<pid>.json for each running process, in
+// whichever config home it runs under (the real HOME, a version home, an
+// account home), so every one of them is read.
+export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId: string }> {
+  const newest = new Map<string, { entry: LiveSessionName & { sessionId: string }; at: number }>();
+  for (const dir of getAgentSessionDirs('claude', 'sessions')) {
+    let files: string[];
     try {
-      const data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
-      if (typeof data.sessionId !== 'string') continue;
-      const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : null;
-      const startedAt = typeof data.startedAt === 'number' ? data.startedAt : 0;
-      const existing = map.get(data.sessionId);
-      if (!existing || startedAt > existing.startedAt) {
-        map.set(data.sessionId, { label: name, startedAt });
+      files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      let data: any;
+      try {
+        data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'));
+      } catch {
+        continue;
       }
-    } catch {  }
+      if (typeof data?.sessionId !== 'string' || typeof data.name !== 'string' || !data.name.trim()) continue;
+      const at = typeof data.updatedAt === 'number' ? data.updatedAt : typeof data.startedAt === 'number' ? data.startedAt : 0;
+      const prev = newest.get(data.sessionId);
+      if (prev && prev.at >= at) continue;
+      newest.set(data.sessionId, {
+        entry: {
+          sessionId: data.sessionId,
+          name: data.name.trim(),
+          source: typeof data.nameSource === 'string' ? data.nameSource : undefined,
+        },
+        at,
+      });
+    }
   }
-
-  const out = new Map<string, string | null>();
-  for (const [sid, { label }] of map) out.set(sid, label);
-  return out;
+  return new Map([...newest].map(([id, { entry }]) => [id, entry]));
 }
 
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   claudeAccountIndex(true);
-  const labelMap = buildClaudeLabelMap();
+  const liveNames = readClaudeLiveNames();
+  const launchNames = buildRunNameMap();
 
   const roots = getAgentSessionDirs('claude', 'projects');
   const leafDirs: LeafDir[] = [];
@@ -1074,8 +1084,14 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
     }
   });
 
-  const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(leafDirs, '.jsonl');
   const sessionIdOf = (fp: string) => path.basename(fp).replace('.jsonl', '');
+  // A running session appends to its transcript without touching the
+  // directory, so its file is re-checked every tick (a rename lands there).
+  const { changed: changedAll, allFiles } = collectChangedFilesInLeafDirs(
+    leafDirs,
+    '.jsonl',
+    fp => liveNames.has(sessionIdOf(fp)),
+  );
   const winnerBySession = new Map<string, string>();
 
   for (const { filePath } of allFiles) {
@@ -1095,9 +1111,11 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
     for (const { filePath, scan } of changed) {
       try {
         const sessionId = path.basename(filePath).replace('.jsonl', '');
-        const label = labelMap.get(sessionId) ?? undefined;
         const priorRow = priorStates.get(filePath);
-        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, label);
+        const result = await readClaudeMeta(filePath, sessionId, scan, priorRow, {
+          live: liveNames.get(sessionId),
+          launchName: launchNames.get(sessionId),
+        });
         if (result) {
           entries.push({
             meta: result.meta,
@@ -1123,7 +1141,6 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
     recordScans(touched);
   }
 
-  if (labelMap.size > 0) syncLabels(labelMap);
 }
 
 async function readClaudeMeta(
@@ -1131,7 +1148,7 @@ async function readClaudeMeta(
   sessionId: string,
   scanStamp: ScanStamp,
   priorRow: { parserState: string | null; fileMtimeMs: number; extractorVersion?: number | null } | undefined,
-  label?: string,
+  names: Pick<SessionNameSources, 'live' | 'launchName'> = {},
 ): Promise<{
   meta: SessionMeta;
   content: string;
@@ -1152,6 +1169,7 @@ async function readClaudeMeta(
   if (mode === 'incremental') claudeIncrementalScanCount++;
   else claudeFullScanCount++;
   const isTeamOrigin = scan.entrypoint === 'sdk-cli';
+  const label = resolveSessionName({ customTitle: scan.customTitle, aiTitle: scan.aiTitle, ...names });
   const acct = resolveClaudeAccount(claudeAccountIndex(), filePath, scan.version, readSessionActorRecord(sessionId)?.accountId);
 
   let meta: SessionMeta;
@@ -1174,7 +1192,7 @@ async function readClaudeMeta(
       accountOrg: acct.orgName ?? undefined,
       topic: scan.topic,
       firstUserMessage: scan.firstUserMessage,
-      label: label || scan.label,
+      label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
@@ -1213,7 +1231,7 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       model: scan.model,
-      label: label || scan.label,
+      label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
@@ -2912,7 +2930,7 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
       ? state.lastTsMs - state.firstTsMs
       : undefined;
 
-  const label = state.customTitle || cleanGeneratedSessionLabel(state.aiTitle);
+  const label = resolveSessionName({ customTitle: state.customTitle, aiTitle: state.aiTitle });
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
 
@@ -2924,6 +2942,8 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
     model: state.model,
     topic: state.topic,
     firstUserMessage: state.firstUserMessage,
+    customTitle: state.customTitle,
+    aiTitle: state.aiTitle,
     label,
     entrypoint: state.entrypoint,
     messageCount: state.messageCount,
@@ -3751,7 +3771,7 @@ function safeRealpathSync(p: string): string | null {
   }
 }
 
-function extractClaudeUserText(parsed: any): string | undefined {
+export function extractClaudeUserText(parsed: any): string | undefined {
   if (parsed.isMeta === true) return undefined;
 
   const content = parsed.message?.content;
