@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.23
+
+- **The daemon no longer restarts in a loop on a busy Mac when it posts banners for the whole fleet.** With `interactive.host` set to this machine, `attention-notify` ran its hourly mailbox sweep inside its 10-second tick, and in that mode the sweep began with a full session scan. On a Mac at load ~120 the scan took over 100 s, the daemon restarted for the overrun, and the restarted service ran the sweep again on its first tick (50 restarts in a day on the owner's laptop). The scan now runs beside the tick, one at a time, and the first sweep waits an hour after the service starts. Source: `cli/src/lib/daemon/attention-notify-service.ts`.
+
 ## 1.23.22
 
 - **Secrets calls go through the published `@phnx-labs/secrets-cli/client`, and an unset `SECRETS_HOME` is no longer forced to `~/.agents` (PHNX-4227). Requires the `secrets` engine 0.4.0 or newer.**
