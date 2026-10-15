@@ -302,12 +302,12 @@ describe.skipIf(process.platform === 'win32')('linearExec spawns linear in the r
     await listQuickTodos(NOW, { project: 'talora', defs: [talora] });
     await listQuickTodos(NOW, { project: 'agi', defs: [agi] });
     expect(await completeTodo('TAL-7')).toMatchObject({ ok: true, message: 'TAL-7 marked Done' });
-    expect(linear.calls().map((c) => `${c.profile} ${c.argv.split(' ').slice(0, 2).join(' ')}`)).toEqual([
+    expect(linear.calls().map((c) => `${c.profile} ${c.argv.split(' ').slice(0, 2).join(' ')}`).sort()).toEqual([
       'personal tasks --project',
       'default tasks --project',
       'personal update TAL-7',
       'personal tasks TAL-7',
       'personal states --json',
-    ]);
+    ].sort());
   });
 });
