@@ -19,8 +19,8 @@ function rateLimitRoot(): string {
   return rateLimitDirOverride ?? path.join(getCacheDir(), 'linear-rate-limit');
 }
 
-function keyDir(apiKey: string): string {
-  const hash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
+function keyDir(bucket: string): string {
+  const hash = crypto.createHash('sha256').update(bucket).digest('hex').slice(0, 16);
   return path.join(rateLimitRoot(), hash);
 }
 
@@ -33,8 +33,8 @@ function createdMsOf(name: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function linearRequestsInWindow(apiKey: string, nowMs: number = Date.now()): number {
-  const dir = keyDir(apiKey);
+export function linearRequestsInWindow(bucket: string, nowMs: number = Date.now()): number {
+  const dir = keyDir(bucket);
   let names: string[];
   try {
     names = fs.readdirSync(dir);
@@ -60,9 +60,9 @@ export function linearRequestsInWindow(apiKey: string, nowMs: number = Date.now(
 
 let reserveSeq = 0;
 
-export function reserveLinearRequest(apiKey: string, nowMs: number = Date.now()): boolean {
-  if (linearRequestsInWindow(apiKey, nowMs) >= LINEAR_HOURLY_REQUEST_BUDGET) return false;
-  const dir = keyDir(apiKey);
+export function reserveLinearRequest(bucket: string, nowMs: number = Date.now()): boolean {
+  if (linearRequestsInWindow(bucket, nowMs) >= LINEAR_HOURLY_REQUEST_BUDGET) return false;
+  const dir = keyDir(bucket);
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `${nowMs}.${process.pid}.${reserveSeq++}`), '');

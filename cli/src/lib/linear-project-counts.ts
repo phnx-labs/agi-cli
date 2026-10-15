@@ -30,6 +30,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached, resolveLinearApiKey } from './linear-cache.js';
 import { reserveLinearRequest } from './linear-rate-limit.js';
+import { DEFAULT_LINEAR_PROFILE } from './linear-projects.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 const TIMEOUT_MS = 8_000;
@@ -209,7 +210,7 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey(profile);
   if (!apiKey) return undefined;
-  if (!reserveLinearRequest(apiKey)) return undefined;
+  if (!reserveLinearRequest(profile ?? DEFAULT_LINEAR_PROFILE)) return undefined;
   const issuesSelection =
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
     PAGE_SIZE +
