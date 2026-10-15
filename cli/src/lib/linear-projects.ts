@@ -1,15 +1,52 @@
 
 import { execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 export const LINEAR_PROFILE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+export const DEFAULT_LINEAR_PROFILE = 'default';
 
-export function isValidLinearProfile(profile: string): boolean {
-  return LINEAR_PROFILE_PATTERN.test(profile);
+export function linearProfileError(profile: string): string | null {
+  if (profile === DEFAULT_LINEAR_PROFILE) {
+    return `"${DEFAULT_LINEAR_PROFILE}" is reserved for the default workspace; omit the profile instead`;
+  }
+  if (!LINEAR_PROFILE_PATTERN.test(profile)) return `a linear-cli profile name matches ${LINEAR_PROFILE_PATTERN} (got ${JSON.stringify(profile)})`;
+  return null;
 }
 
 export function linearSpawnEnv(profile: string | undefined, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
-  if (!profile) return base;
-  return { ...base, LINEAR_PROFILE: profile };
+  return { ...base, LINEAR_PROFILE: profile ?? DEFAULT_LINEAR_PROFILE };
+}
+
+export function linearTeamKey(home: string, profile?: string): string | undefined {
+  const config = profile
+    ? path.join(home, '.linear-cli', 'profiles', profile, 'config.json')
+    : path.join(home, '.linear-cli', 'config.json');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(config, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  const key = (JSON.parse(raw) as { teamKey?: unknown }).teamKey;
+  return typeof key === 'string' && key.length > 0 ? key : undefined;
+}
+
+export function profileForIssueId(id: string, home: string = os.homedir()): string | undefined {
+  const team = id.slice(0, Math.max(0, id.lastIndexOf('-'))).toUpperCase();
+  if (!team || linearTeamKey(home)?.toUpperCase() === team) return undefined;
+  let profiles: string[];
+  try {
+    profiles = fs.readdirSync(path.join(home, '.linear-cli', 'profiles'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw err;
+  }
+  const hits = profiles.filter((p) => linearProfileError(p) === null && linearTeamKey(home, p)?.toUpperCase() === team);
+  if (hits.length > 1) throw new Error(`Linear team ${team} is in more than one linear-cli profile (${hits.join(', ')}); give each profile its own teamKey`);
+  return hits[0];
 }
 
 export interface LinearProjectLite {
@@ -79,6 +116,7 @@ export function listLinearProjects(profile?: string): LinearProjectLite[] {
       encoding: 'utf8',
       timeout: 8000,
       maxBuffer: 16 * 1024 * 1024,
+      env: linearSpawnEnv(profile),
       ...(profile ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}),
     });
   } catch (err) {
@@ -123,13 +161,13 @@ export interface LinearLink {
 export function nextLinearLink(
   prior: { projectId?: string; url?: string; name?: string; profile?: string } | undefined,
   project: LinearProjectLite,
-  profile?: string,
+  profile?: string | false,
 ): LinearLink {
 
   const next: LinearLink = { projectId: project.id, name: project.name };
   const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
   if (url) next.url = url;
-  const keptProfile = profile ?? prior?.profile;
+  const keptProfile = profile === false ? undefined : profile ?? prior?.profile;
   if (keptProfile) next.profile = keptProfile;
   return next;
 }

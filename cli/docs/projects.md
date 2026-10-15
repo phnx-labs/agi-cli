@@ -340,7 +340,7 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects view <name>` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [nameOrPath] [--json] [--path [dir]] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (alias `view`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
-| `agents projects link <name> --linear [query] [--profile <p>]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. `--profile <p>` lists and binds from that linear-cli profile's workspace (`linear --profile <p> projects --json`) and records `linear.profile`; a re-link without `--profile` keeps the stored one. A linear CLI that cannot read the profile fails the command, naming the profile. |
+| `agents projects link <name> --linear [query] [--profile <p> \| --no-profile]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. `--profile <p>` lists and binds from that linear-cli profile's workspace (`linear --profile <p> projects --json`) and records `linear.profile`; a re-link without `--profile` keeps the stored one, and `--no-profile` removes it. A linear CLI that cannot read the profile fails the command, naming the profile. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects remove <name> [--json]` (alias `rm`) | Remove the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
@@ -450,16 +450,32 @@ agents projects link talora --linear Talora --profile personal
 ```
 
 With `linear.profile` set, everything agents-cli does in Linear for that project
-targets that workspace; without it nothing changes.
+targets that workspace; without it the project stays in the default workspace.
+This needs linear-cli 0.32.0 or later: older versions ignore `LINEAR_PROFILE` and
+reject `--profile`, so `link --profile` fails and every other call reaches the
+default workspace.
 
-- Every `linear` spawn made for the project (`projects todo add/list --project`, the
-  Lead's tools and brief) runs with `LINEAR_PROFILE=<p>` in its env, and the Lead
-  process itself carries it. `todo done`/`undo` name only an issue id, so they use
-  the default workspace.
+- The profile name `default` is reserved for the default workspace. It is refused
+  as `--profile` and as `linear.profile`; omit the profile instead. `link
+  --no-profile` removes a stored profile and binds from the default workspace.
+- Every `linear` spawn agents-cli makes pins the workspace in its env:
+  `LINEAR_PROFILE=<p>` for a project with a profile and `LINEAR_PROFILE=default`
+  for everything else, so neither linear-cli's own cwd profile nor a
+  `LINEAR_PROFILE` exported in the shell can redirect it. That covers `projects
+  todo add/list --project`, `projects link`, the Lead's tools and brief, the Lead
+  process, and the workers it starts (a client's `LINEAR_PROFILE` never reaches
+  them).
+- `todo done`/`undo` and a feed ask's ticket priority know only an issue id, so
+  they take the profile from its team key: the profile whose
+  `~/.linear-cli/profiles/<p>/config.json` `teamKey` matches. A team key in the
+  default config, or in no profile, means the default workspace; one claimed by
+  two profiles is an error.
 - The `linear` card line's GraphQL read takes its key from the profile
-  (`~/.linear-cli/profiles/<p>/config.json` `apiKey`, then the Keychain item
-  `linear-api-key` for account `<p>`) and never from `$LINEAR_API_KEY`, which
-  belongs to the default workspace.
+  (`~/.linear-cli/profiles/<p>/config.json` `apiKey`, then the Keychain service
+  `linear-api-key.<p>`) and never from `$LINEAR_API_KEY`, which belongs to the
+  default workspace. A profile's key has its own Keychain service, never an
+  account under `linear-api-key`, because a lookup by service alone would match
+  any account under it and could hand the default workspace a profile's key.
 - `agents projects list --json` and `agents projects status --path <dir> --json`
   include `linear.profile`; the `--path` shape adds the key only when the def
   sets it.

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { getCliLaunch } from '../cli-entry.js';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../fs-atomic.js';
 import { configKeySpec, getConfigValue } from '../device-config.js';
+import { linearSpawnEnv } from '../linear-projects.js';
 import type { LeadPaths } from './paths.js';
 
 export const LEAD_TOOL_NAMES = ['roster', 'dispatch', 'start', 'send', 'stop', 'linear', 'remember'] as const;
@@ -73,13 +74,12 @@ export function leadChildEnv(
   env.PATH = [paths.bin, env.PATH].filter(Boolean).join(path.delimiter);
   env.AGENTS_LEAD_PROJECT = project;
   env.AGENTS_NO_AUTOPULL = '1';
-  if (linearProfile) env.LINEAR_PROFILE = linearProfile;
-  return env;
+  return linearSpawnEnv(linearProfile, env);
 }
 
 export const WORKER_ENV_PASSTHROUGH = [
   ...LEAD_ENV_PASSTHROUGH,
-  'SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN', 'LINEAR_API_KEY', 'LINEAR_PROFILE', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY',
+  'SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN', 'LINEAR_API_KEY', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY',
   'DBUS_SESSION_BUS_ADDRESS', 'COLORTERM', 'EDITOR', 'VISUAL',
 ] as const;
 
@@ -93,12 +93,17 @@ export function curatedClientEnv(source: NodeJS.ProcessEnv = process.env): Recor
   return env;
 }
 
-export function workerEnv(hostEnv: NodeJS.ProcessEnv, clientEnv: Record<string, string>, leadRootDir: string): NodeJS.ProcessEnv {
+export function workerEnv(
+  hostEnv: NodeJS.ProcessEnv,
+  clientEnv: Record<string, string>,
+  leadRootDir: string,
+  linearProfile?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...curatedClientEnv(hostEnv), ...curatedClientEnv(clientEnv) };
   if (env.PATH) {
     env.PATH = env.PATH.split(path.delimiter).filter((dir) => dir && !path.resolve(dir).startsWith(path.resolve(leadRootDir))).join(path.delimiter);
   }
-  return env;
+  return linearSpawnEnv(linearProfile, env);
 }
 
 export function leadRunArgs(project: string, model: string, start: LeadSessionStart, paths: LeadPaths): string[] {

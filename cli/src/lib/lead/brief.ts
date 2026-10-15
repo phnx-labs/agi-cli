@@ -5,6 +5,8 @@ import type { ProjectDef } from '../projects.js';
 import { linearSpawnEnv } from '../linear-projects.js';
 import { formatRosterRow, type RosterSnapshot } from './roster.js';
 
+export { linearTeamKey } from '../linear-projects.js';
+
 export const BRIEF_FETCH_TIMEOUT_MS = 8_000;
 const DIGEST_MAX_CHARS = 2_500;
 
@@ -95,21 +97,6 @@ export async function fetchRecentPrs(repo: string | undefined, cwd: string | und
     number: number; title: string; html_url: string; draft?: boolean; state: string;
   }>;
   return raw.map((p) => ({ number: p.number, title: p.title, url: p.html_url, draft: p.draft === true, open: p.state === 'open' }));
-}
-
-export function linearTeamKey(home: string, profile?: string): string | undefined {
-  const config = profile
-    ? path.join(home, '.linear-cli', 'profiles', profile, 'config.json')
-    : path.join(home, '.linear-cli', 'config.json');
-  let raw: string;
-  try {
-    raw = fs.readFileSync(config, 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
-  }
-  const key = (JSON.parse(raw) as { teamKey?: unknown }).teamKey;
-  return typeof key === 'string' && key.length > 0 ? key : undefined;
 }
 
 export function quoteNotes(memory: string): string {

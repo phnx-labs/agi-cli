@@ -63,7 +63,7 @@ import {
   type ProjectWarning,
 } from '../lib/project-status.js';
 import { fetchLinearProjectCounts, linearIssuesPageFetcher, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
-import { LINEAR_PROFILE_PATTERN, isValidLinearProfile, listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { linearProfileError, listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import { checkRepoSlug } from '../lib/project-doctor.js';
 import { formatFocusAreas, readFocusAreas, type FocusArea } from '../lib/project-focus.js';
 import { formatVerdict, scheduleVerdict } from '../lib/project-schedule.js';
@@ -1498,7 +1498,8 @@ async function runProjectCard(
     .description('Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).')
     .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
     .option('--profile <name>', 'linear-cli profile (workspace) the project lives in; stored as linear.profile and kept on later re-links')
-    .action((name: string, opts: { linear?: string | boolean; profile?: string }) => {
+    .option('--no-profile', 'Bind from the default workspace and remove a stored linear.profile')
+    .action((name: string, opts: { linear?: string | boolean; profile?: string | false }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
@@ -1508,11 +1509,12 @@ async function runProjectCard(
         console.error(chalk.red('Nothing to link. Pass a tracker flag, e.g. --linear [query].'));
         process.exit(1);
       }
-      if (opts.profile !== undefined && !isValidLinearProfile(opts.profile)) {
-        console.error(chalk.red(`Invalid --profile "${opts.profile}": a linear-cli profile name matches ${LINEAR_PROFILE_PATTERN}.`));
+      const invalidProfile = typeof opts.profile === 'string' ? linearProfileError(opts.profile) : null;
+      if (invalidProfile) {
+        console.error(chalk.red(`Invalid --profile: ${invalidProfile}.`));
         process.exit(1);
       }
-      const profile = opts.profile ?? def.linear?.profile;
+      const profile = opts.profile === false ? undefined : opts.profile ?? def.linear?.profile;
       let list: ReturnType<typeof listLinearProjects>;
       try {
         list = listLinearProjects(profile);
@@ -1553,8 +1555,8 @@ async function runProjectCard(
       if (def.linear?.name && def.linear.name !== p.name) {
         console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
       }
-      if (def.linear?.profile && opts.profile && def.linear.profile !== opts.profile) {
-        console.log(chalk.gray(`  switching Linear profile "${def.linear.profile}" → "${opts.profile}"`));
+      if (def.linear?.profile && def.linear.profile !== profile) {
+        console.log(chalk.gray(`  switching Linear profile "${def.linear.profile}" → ${profile ? `"${profile}"` : 'the default workspace'}`));
       }
       def.linear = nextLinearLink(def.linear, p, opts.profile);
       writeProjectDef(def);

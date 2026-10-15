@@ -2,8 +2,9 @@ import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   LeadToolError, appendNote, assertSendText, dispatchPrompt, leadToolContext, linearCreateArgv, linearPickupArgv,
-  linearTasksArgv, linearViewArgv, runArgv, sendArgv, toolRemember,
+  linearTasksArgv, linearViewArgv, runArgv, sendArgv, toolLinearView, toolRemember, type LeadToolContext,
 } from './tools.js';
+import { installFakeLinear } from '../__tests__/fake-linear.js';
 import { ensureLeadDir } from './paths.js';
 
 const def = { name: 'demo', linear: { projectId: 'proj-uuid', name: 'Demo' } };
@@ -62,5 +63,19 @@ describe('Lead tool shapes', () => {
     const paths = ensureLeadDir('tools-demo');
     toolRemember({ project: 'tools-demo', def, paths }, 'PHNX-1 goes to Claude');
     expect(fs.readFileSync(paths.memory, 'utf-8')).toBe('- PHNX-1 goes to Claude\n');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('Lead linear calls', () => {
+  it('run linear in the project\'s workspace, and in the default one for an unprofiled project', async () => {
+    const linear = installFakeLinear({ 'tasks TAL-3 --json': '{"identifier":"TAL-3","title":"Ship"}', 'tasks PHNX-3 --json': '{"identifier":"PHNX-3","title":"Fix"}' });
+    const ctx = (d: LeadToolContext['def']) => ({ project: d.name, def: d, paths: {} as LeadToolContext['paths'] });
+    try {
+      expect(await toolLinearView(ctx({ name: 'talora', linear: { name: 'Talora', profile: 'personal' } }), 'TAL-3')).toBe('TAL-3 Ship');
+      expect(await toolLinearView(ctx(def), 'PHNX-3')).toBe('PHNX-3 Fix');
+      expect(linear.calls().map((c) => c.profile)).toEqual(['personal', 'default']);
+    } finally {
+      linear.restore();
+    }
   });
 });

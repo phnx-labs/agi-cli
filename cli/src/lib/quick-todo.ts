@@ -3,7 +3,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { ProjectDef } from './projects.js';
-import { linearSpawnEnv } from './linear-projects.js';
+import { linearSpawnEnv, profileForIssueId } from './linear-projects.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -266,15 +266,16 @@ export async function listQuickTodos(now: Date, opts: ListOptions = {}, linear: 
 
 export const DONE_PROOF = 'Checked off in AGI Menu';
 
-async function readStates(linear: LinearExec): Promise<Array<{ name?: string; type?: string }>> {
-  return JSON.parse((await linear(['states', '--json'])).stdout) as Array<{ name?: string; type?: string }>;
+async function readStates(linear: LinearExec, profile: string | undefined): Promise<Array<{ name?: string; type?: string }>> {
+  return JSON.parse((await linear(['states', '--json'], profile)).stdout) as Array<{ name?: string; type?: string }>;
 }
 
 export async function completeTodo(id: string, linear: LinearExec = linearExec): Promise<TodoResult> {
   try {
-    const update = await linear(['update', id, '--done', '--proof', DONE_PROOF]);
+    const profile = profileForIssueId(id);
+    const update = await linear(['update', id, '--done', '--proof', DONE_PROOF], profile);
 
-    const [raw, states] = await Promise.all([readIssue(id, linear), readStates(linear)]);
+    const [raw, states] = await Promise.all([readIssue(id, linear, profile), readStates(linear, profile)]);
     const todo = toQuickTodo(raw);
     if (states.find((s) => s.name === todo.state)?.type === 'completed') return { ok: true, todo, message: `${id} marked Done` };
     const said = update.stdout.trim().split('\n').at(-1) || `${id} is still ${todo.state}`;
@@ -293,8 +294,10 @@ export async function completeTodo(id: string, linear: LinearExec = linearExec):
 export async function undoTodo(id: string, now: Date, linear: LinearExec = linearExec): Promise<TodoResult> {
   let issue: QuickTodo;
   let states: Array<{ name?: string; type?: string }>;
+  let profile: string | undefined;
   try {
-    const [raw, read] = await Promise.all([readIssue(id, linear), readStates(linear)]);
+    profile = profileForIssueId(id);
+    const [raw, read] = await Promise.all([readIssue(id, linear, profile), readStates(linear, profile)]);
     issue = toQuickTodo(raw);
     states = read;
   } catch (err) {
@@ -304,15 +307,15 @@ export async function undoTodo(id: string, now: Date, linear: LinearExec = linea
   const type = states.find((s) => s.name === issue.state)?.type;
   try {
     if (type === 'completed') {
-      await linear(['update', id, '--todo']);
-      return { ok: true, todo: toQuickTodo(await readIssue(id, linear)), message: `${id} back to Todo` };
+      await linear(['update', id, '--todo'], profile);
+      return { ok: true, todo: toQuickTodo(await readIssue(id, linear, profile)), message: `${id} back to Todo` };
     }
     const age = now.getTime() - Date.parse(issue.createdAt);
     if (issue.quick && type !== 'canceled' && age >= -CLOCK_SKEW_MS && age <= UNDO_CREATE_WINDOW_MS) {
       const canceled = states.find((s) => s.type === 'canceled')?.name;
       if (!canceled) return { ok: false, todo: issue, message: 'The team has no canceled state to undo into' };
-      await linear(['update', id, '--status', canceled]);
-      return { ok: true, todo: toQuickTodo(await readIssue(id, linear)), message: `${id} canceled` };
+      await linear(['update', id, '--status', canceled], profile);
+      return { ok: true, todo: toQuickTodo(await readIssue(id, linear, profile)), message: `${id} canceled` };
     }
   } catch (err) {
     return { ok: false, todo: issue, message: linearFailure(err) };

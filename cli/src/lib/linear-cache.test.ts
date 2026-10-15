@@ -12,6 +12,7 @@ import {
   resolveLinearApiKey,
   writeCached,
 } from './linear-cache.js';
+import { installFakeBin } from './__tests__/fake-linear.js';
 
 let home: string;
 let cacheFile: string;
@@ -133,7 +134,25 @@ describe('resolveLinearApiKey', () => {
     expect(resolveLinearApiKey(profile)).toBe('lin_api_personal');
   });
 
-  it('refuses a profile name that could leave the profiles directory', () => {
+  it('refuses a profile name that could leave the profiles directory, and the reserved default', () => {
     expect(() => resolveLinearApiKey('../x')).toThrow(/Invalid linear-cli profile/);
+    expect(() => resolveLinearApiKey('default')).toThrow(/reserved for the default workspace/);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('looks a profile key up under its own Keychain service, never the default one', () => {
+    const security = installFakeBin('security', {
+      'find-generic-password -s linear-api-key -w': 'lin_api_default_keychain\n',
+      [`find-generic-password -s linear-api-key.${profile} -w`]: 'lin_api_profile_keychain\n',
+    });
+    try {
+      expect(resolveLinearApiKey()).toBe('lin_api_default_keychain');
+      expect(resolveLinearApiKey(profile)).toBe('lin_api_profile_keychain');
+      expect(security.calls().map((c) => c.argv)).toEqual([
+        'find-generic-password -s linear-api-key -w',
+        `find-generic-password -s linear-api-key.${profile} -w`,
+      ]);
+    } finally {
+      security.restore();
+    }
   });
 });

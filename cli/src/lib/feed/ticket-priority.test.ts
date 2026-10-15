@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { TICKET_PRIORITY_TTL_MS, cachedTicketPriority } from './ticket-priority.js';
+import { TICKET_PRIORITY_TTL_MS, cachedTicketPriority, refreshTicketPriority } from './ticket-priority.js';
+import { installFakeLinear } from '../__tests__/fake-linear.js';
 import type { LinearExec } from '../quick-todo.js';
 
 describe('cachedTicketPriority', () => {
@@ -43,5 +44,36 @@ describe('cachedTicketPriority', () => {
     expect(cachedTicketPriority('PHNX-2', 1_000, failing)).toBeUndefined();
     await settle();
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('refreshTicketPriority', () => {
+  const profileDir = path.join(os.homedir(), '.linear-cli', 'profiles', 'personal');
+  const prev = process.env.AGENTS_LINEAR_CACHE_PATH;
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ticket-priority-'));
+    process.env.AGENTS_LINEAR_CACHE_PATH = dir;
+    fs.mkdirSync(profileDir, { recursive: true });
+    fs.writeFileSync(path.join(profileDir, 'config.json'), JSON.stringify({ teamKey: 'TAL' }));
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AGENTS_LINEAR_CACHE_PATH; else process.env.AGENTS_LINEAR_CACHE_PATH = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(path.join(os.homedir(), '.linear-cli'), { recursive: true, force: true });
+  });
+
+  it('reads a ticket in the workspace its team key belongs to', async () => {
+    const linear = installFakeLinear({ 'tasks TAL-9 --json': '{"priority":1}', 'tasks PHNX-9 --json': '{"priority":3}' });
+    try {
+      expect(await refreshTicketPriority('TAL-9', 0)).toBe(1);
+      expect(await refreshTicketPriority('PHNX-9', 0)).toBe(3);
+      expect(linear.calls()).toEqual([
+        { profile: 'personal', argv: 'tasks TAL-9 --json' },
+        { profile: 'default', argv: 'tasks PHNX-9 --json' },
+      ]);
+    } finally {
+      linear.restore();
+    }
   });
 });

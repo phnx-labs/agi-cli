@@ -9129,6 +9129,15 @@
               "negate": false
             },
             {
+              "flags": "--no-profile",
+              "description": "Bind from the default workspace and remove a stored linear.profile",
+              "long": "--no-profile",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",

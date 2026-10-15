@@ -1,6 +1,7 @@
 // Synchronous disk read; a miss starts one background Linear read per ticket per TTL, failures cached as null.
 import { isRateLimited, readCached, writeCached } from '../linear-cache.js';
 import { linearExec, type LinearExec } from '../quick-todo.js';
+import { profileForIssueId } from '../linear-projects.js';
 
 export const TICKET_PRIORITY_TTL_MS = 30 * 60_000;
 
@@ -13,7 +14,7 @@ function cacheKey(ticketId: string): string {
 export async function refreshTicketPriority(ticketId: string, nowMs: number, linear: LinearExec = linearExec): Promise<number | null> {
   let priority: number | null = null;
   try {
-    const issue = JSON.parse((await linear(['tasks', ticketId, '--json'])).stdout) as { priority?: unknown };
+    const issue = JSON.parse((await linear(['tasks', ticketId, '--json'], profileForIssueId(ticketId))).stdout) as { priority?: unknown };
     priority = typeof issue.priority === 'number' ? issue.priority : null;
   } catch {
     priority = null;

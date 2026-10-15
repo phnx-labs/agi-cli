@@ -173,6 +173,7 @@ describe('write/load roundtrip', () => {
     expect(() => writeProjectDef({ name: 'talora', linear: { name: 'Talora', profile: '../turing' } })).toThrow(/linear\.profile/);
     fs.writeFileSync(path.join(dir, 'odd.yaml'), 'linear:\n  name: X\n  profile: 7\n', 'utf8');
     expect(() => loadProjectDef('odd')).toThrow(/linear\.profile/);
+    expect(() => writeProjectDef({ name: 'talora', linear: { name: 'Talora', profile: 'default' } })).toThrow(/reserved.*omit the profile/);
   });
 
   it('loadProjectDef returns undefined for an absent project', () => {

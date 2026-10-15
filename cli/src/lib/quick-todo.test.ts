@@ -1,6 +1,8 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { installFakeLinear, type FakeLinear } from './__tests__/fake-linear.js';
 import {
   addQuickTodo,
   completeTodo,
@@ -274,5 +276,38 @@ describe('undoTodo', () => {
     expect(await undoTodo('PHNX-4235', new Date(created + 60_000), late.linear))
       .toMatchObject({ ok: false, message: 'PHNX-4235 is Todo and was not just created here; change it in Linear' });
     expect(late.asked.some((a) => a[0] === 'update')).toBe(false);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('linearExec spawns linear in the right workspace', () => {
+  const profileDir = path.join(os.homedir(), '.linear-cli', 'profiles', 'personal');
+  let linear: FakeLinear;
+  beforeEach(() => {
+    fs.mkdirSync(profileDir, { recursive: true });
+    fs.writeFileSync(path.join(profileDir, 'config.json'), JSON.stringify({ teamKey: 'TAL' }));
+    linear = installFakeLinear({
+      'tasks --project Talora --status open --all --json': '{"issues":[]}',
+      'tasks --project AGI --status open --all --json': '{"issues":[]}',
+      [`update TAL-7 --done --proof ${DONE_PROOF}`]: 'Updated TAL-7\n',
+      'tasks TAL-7 --json': '{"identifier":"TAL-7","title":"Ship","state":{"name":"Done"}}',
+      'states --json': '[{"name":"Done","type":"completed"}]',
+    });
+  });
+  afterEach(() => {
+    linear.restore();
+    fs.rmSync(path.join(os.homedir(), '.linear-cli'), { recursive: true, force: true });
+  });
+
+  it('pins the project profile, pins default for an unprofiled project, and finds an issue\'s profile from its team key', async () => {
+    await listQuickTodos(NOW, { project: 'talora', defs: [talora] });
+    await listQuickTodos(NOW, { project: 'agi', defs: [agi] });
+    expect(await completeTodo('TAL-7')).toMatchObject({ ok: true, message: 'TAL-7 marked Done' });
+    expect(linear.calls().map((c) => `${c.profile} ${c.argv.split(' ').slice(0, 2).join(' ')}`)).toEqual([
+      'personal tasks --project',
+      'default tasks --project',
+      'personal update TAL-7',
+      'personal tasks TAL-7',
+      'personal states --json',
+    ]);
   });
 });

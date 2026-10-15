@@ -396,7 +396,7 @@ export class LeadHost {
     const child = spawn(launch.command, launch.args, {
       detached: true,
       stdio: ['ignore', fd, fd],
-      env: workerEnv(process.env, this.clientEnv, leadRoot()),
+      env: workerEnv(process.env, this.clientEnv, leadRoot(), this.opts.def.linear?.profile),
       cwd: os.homedir(),
     });
     fs.closeSync(fd);
