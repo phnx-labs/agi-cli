@@ -144,7 +144,6 @@ describe.skipIf(process.platform === 'win32')('listLinearProjects', () => {
   let priorPath: string | undefined;
   beforeEach(() => {
     bin = fs.mkdtempSync(path.join(os.tmpdir(), 'linear-bin-'));
-    // A real executable standing in for linear-cli: echoes its argv back as a project row.
     fs.writeFileSync(path.join(bin, 'linear'), [
       '#!/bin/sh',
       'if [ "$2" = "gone" ]; then echo "linear: error: unknown profile gone" >&2; exit 2; fi',

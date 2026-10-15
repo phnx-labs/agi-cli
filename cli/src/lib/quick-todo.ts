@@ -77,7 +77,6 @@ export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   return { title: words.join(' '), project, due, priority };
 }
 
-/** The Linear project a #token names, and the linear-cli profile (workspace) it lives in. */
 export function linearTargetFor(token: string, defs: readonly ProjectDef[]): { project: string; profile?: string } {
   const def = defs.find((d) => d.name.toLowerCase() === token.toLowerCase() || d.linear?.name?.toLowerCase() === token.toLowerCase());
   if (!def) return { project: token };
@@ -101,7 +100,6 @@ export interface QuickTodo {
   quick: boolean;
 }
 
-/** `profile` is the linear-cli profile of the project the call is for; absent = the default workspace. */
 export type LinearExec = (args: string[], profile?: string) => Promise<{ stdout: string; stderr: string }>;
 
 export const linearExec: LinearExec = async (args, profile) => {

@@ -8,12 +8,6 @@ import { isValidLinearProfile } from './linear-projects.js';
 
 export const LINEAR_CACHE_TTL_MS = 10 * 60_000;
 
-/**
- * The Linear API key for the default workspace ($LINEAR_API_KEY, then the
- * Keychain), or for a linear-cli profile: that profile's config.json `apiKey`,
- * then the Keychain entry for its account. The env belongs to the default
- * workspace, so a profile never reads it.
- */
 export function resolveLinearApiKey(profile?: string): string | null {
   if (profile) return resolveProfileApiKey(profile);
   const fromEnv = process.env.LINEAR_API_KEY?.trim();
