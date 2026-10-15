@@ -36,6 +36,12 @@ describe('Lead harness launch', () => {
     });
   });
 
+  it('points the Lead at its project\'s Linear workspace, and nothing from the host env decides it', () => {
+    expect(leadChildEnv('harness-demo', paths, { PATH: '/usr/bin', LINEAR_PROFILE: 'turing' }, 'personal').LINEAR_PROFILE).toBe('personal');
+    expect(leadChildEnv('harness-demo', paths, { PATH: '/usr/bin', LINEAR_PROFILE: 'turing' }).LINEAR_PROFILE).toBeUndefined();
+    expect(curatedClientEnv({ LINEAR_PROFILE: 'personal' })).toEqual({ LINEAR_PROFILE: 'personal' });
+  });
+
   it('writes an executable agents shim pinned to the host CLI', () => {
     const file = writeAgentsShim(paths, { command: '/usr/bin/node', args: ["/opt/it's/index.js"] });
     expect(fs.readFileSync(file, 'utf-8')).toBe(`#!/bin/sh\nexec '/usr/bin/node' '/opt/it'\\''s/index.js' "$@"\n`);

@@ -3,6 +3,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { ProjectDef } from './projects.js';
+import { linearSpawnEnv } from './linear-projects.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -76,13 +77,15 @@ export function parseQuickTodo(text: string, now: Date): ParsedTodo {
   return { title: words.join(' '), project, due, priority };
 }
 
-export function linearProjectFor(token: string, defs: readonly ProjectDef[]): string {
+/** The Linear project a #token names, and the linear-cli profile (workspace) it lives in. */
+export function linearTargetFor(token: string, defs: readonly ProjectDef[]): { project: string; profile?: string } {
   const def = defs.find((d) => d.name.toLowerCase() === token.toLowerCase() || d.linear?.name?.toLowerCase() === token.toLowerCase());
-  if (!def) return token;
+  if (!def) return { project: token };
   if (!def.linear?.name && !def.linear?.projectId) {
     throw new Error(`Project "${def.name}" has no Linear project; bind one with: agents projects link ${def.name}`);
   }
-  return def.linear.name ?? def.linear.projectId!;
+  const project = def.linear.name ?? def.linear.projectId!;
+  return def.linear.profile ? { project, profile: def.linear.profile } : { project };
 }
 
 export interface QuickTodo {
@@ -98,11 +101,14 @@ export interface QuickTodo {
   quick: boolean;
 }
 
-export type LinearExec = (args: string[]) => Promise<{ stdout: string; stderr: string }>;
+/** `profile` is the linear-cli profile of the project the call is for; absent = the default workspace. */
+export type LinearExec = (args: string[], profile?: string) => Promise<{ stdout: string; stderr: string }>;
 
-export const linearExec: LinearExec = async (args) => {
+export const linearExec: LinearExec = async (args, profile) => {
   try {
-    const { stdout, stderr } = await execFileAsync('linear', args, { timeout: 30_000, maxBuffer: 32 * 1024 * 1024, encoding: 'utf-8' });
+    const { stdout, stderr } = await execFileAsync('linear', args, {
+      timeout: 30_000, maxBuffer: 32 * 1024 * 1024, encoding: 'utf-8', env: linearSpawnEnv(profile),
+    });
     return { stdout, stderr };
   } catch (err) {
     if ((err as { code?: unknown })?.code === 'ENOENT') {
@@ -140,8 +146,8 @@ export function toQuickTodo(issue: RawIssue): QuickTodo {
   };
 }
 
-async function readIssue(id: string, linear: LinearExec): Promise<RawIssue> {
-  return JSON.parse((await linear(['tasks', id, '--json'])).stdout) as RawIssue;
+async function readIssue(id: string, linear: LinearExec, profile?: string): Promise<RawIssue> {
+  return JSON.parse((await linear(['tasks', id, '--json'], profile)).stdout) as RawIssue;
 }
 
 
@@ -192,8 +198,13 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   const token = opts.project ?? parsed.project ?? null;
   const args = ['create', '--description', description, '--status', 'Todo', '--cycle', 'active',
     '--skip-milestone', '--priority', priority];
+  let profile: string | undefined;
   try {
-    if (token) args.push('--project', linearProjectFor(token, opts.defs));
+    if (token) {
+      const target = linearTargetFor(token, opts.defs);
+      args.push('--project', target.project);
+      profile = target.profile;
+    }
   } catch (err) {
     return { ok: false, todo: null, message: (err as Error).message };
   }
@@ -204,7 +215,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
   args.push('--', parsed.title);
   let out: { stdout: string; stderr: string };
   try {
-    out = await linear(args);
+    out = await linear(args, profile);
   } catch (err) {
     return { ok: false, todo: null, message: linearFailure(err) };
   }
@@ -215,7 +226,7 @@ export async function addQuickTodo(text: string, opts: AddOptions, linear: Linea
     return { ok: false, todo: null, message: error ? error.replace(/^Error:\s*/i, '') : 'linear create did not report an issue' };
   }
   try {
-    return { ok: true, todo: toQuickTodo(await readIssue(id, linear)), message: `Created ${id}` };
+    return { ok: true, todo: toQuickTodo(await readIssue(id, linear, profile)), message: `Created ${id}` };
   } catch (err) {
 
     const todo: QuickTodo = {
@@ -233,8 +244,8 @@ export interface ListOptions {
 
 export async function listQuickTodos(now: Date, opts: ListOptions = {}, linear: LinearExec = linearExec): Promise<{ todos: QuickTodo[]; total: number }> {
   if (opts.project) {
-    const project = linearProjectFor(opts.project, opts.defs ?? []);
-    const parsed = JSON.parse((await linear(['tasks', '--project', project, '--status', 'open', '--all', '--json'])).stdout) as { issues?: RawIssue[] };
+    const { project, profile } = linearTargetFor(opts.project, opts.defs ?? []);
+    const parsed = JSON.parse((await linear(['tasks', '--project', project, '--status', 'open', '--all', '--json'], profile)).stdout) as { issues?: RawIssue[] };
     const all = (parsed.issues ?? []).map(toQuickTodo);
     all.sort((a, b) => {
       if ((a.due === null) !== (b.due === null)) return a.due !== null ? -1 : 1;

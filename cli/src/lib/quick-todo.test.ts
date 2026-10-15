@@ -5,7 +5,7 @@ import {
   addQuickTodo,
   completeTodo,
   DONE_PROOF,
-  linearProjectFor,
+  linearTargetFor,
   listQuickTodos,
   parseQuickTodo,
   QUICK_TODO_MARKER,
@@ -19,21 +19,24 @@ const testdata = (name: string) => fs.readFileSync(path.join(__dirname, 'testdat
 type Answer = string | Error | { stdout: string; stderr: string };
 function recordedLinear(routes: Record<string, Answer | Answer[]>) {
   const asked: string[][] = [];
-  const linear = async (args: string[]) => {
+  const profiles: Array<string | undefined> = [];
+  const linear = async (args: string[], profile?: string) => {
     asked.push(args);
+    profiles.push(profile);
     let hit = routes[args.join(' ')];
     if (Array.isArray(hit)) hit = hit.length > 1 ? hit.shift()! : hit[0];
     if (hit === undefined) throw new Error(`unexpected linear ${args.join(' ')}`);
     if (hit instanceof Error) throw hit;
     return typeof hit === 'string' ? { stdout: hit, stderr: '' } : hit;
   };
-  return { linear, asked };
+  return { linear, asked, profiles };
 }
 
 const linearError = (stderr: string) => Object.assign(new Error('Command failed: linear'), { stderr });
 
 const NOW = new Date(2026, 9, 4, 17, 32);
 const agi = { name: 'agi', linear: { projectId: '00000000', name: 'AGI' } } as ProjectDef;
+const talora = { name: 'talora', linear: { projectId: '11111111', name: 'Talora', profile: 'personal' } } as ProjectDef;
 
 describe('parseQuickTodo', () => {
   it('takes the #project, day word and priority out of the line', () => {
@@ -63,12 +66,16 @@ describe('parseQuickTodo', () => {
   });
 });
 
-describe('linearProjectFor', () => {
+describe('linearTargetFor', () => {
   it('maps an agents project to its Linear project, and passes anything else through', () => {
-    expect(linearProjectFor('AGI', [agi])).toBe('AGI');
-    expect(linearProjectFor('agi', [agi])).toBe('AGI');
-    expect(linearProjectFor('Atlas', [agi])).toBe('Atlas');
-    expect(() => linearProjectFor('solo', [{ name: 'solo' } as ProjectDef])).toThrow(/no Linear project/);
+    expect(linearTargetFor('AGI', [agi])).toEqual({ project: 'AGI' });
+    expect(linearTargetFor('agi', [agi])).toEqual({ project: 'AGI' });
+    expect(linearTargetFor('Atlas', [agi])).toEqual({ project: 'Atlas' });
+    expect(() => linearTargetFor('solo', [{ name: 'solo' } as ProjectDef])).toThrow(/no Linear project/);
+  });
+
+  it('carries the linear-cli profile of a project that lives in another workspace', () => {
+    expect(linearTargetFor('talora', [talora])).toEqual({ project: 'Talora', profile: 'personal' });
   });
 });
 
@@ -140,6 +147,20 @@ describe('addQuickTodo', () => {
     expect(asked[0]).toContain('2026-10-04');
   });
 
+  it('runs the create and the read-back in the profile of a project in another workspace', async () => {
+    const args = 'create --description Created from AGI Menu --status Todo --cycle active --skip-milestone --priority none --project Talora -- Call back';
+    const { linear, asked, profiles } = recordedLinear({
+      [args]: testdata('create.stdout'),
+      'tasks PHNX-4235 --json': testdata('tasks-PHNX-4235-created.json'),
+    });
+    expect(await addQuickTodo('Call back #talora', { defs: [agi, talora], now: NOW }, linear)).toMatchObject({ ok: true });
+    expect(asked.map((a) => a[0])).toEqual(['create', 'tasks']);
+    expect(profiles).toEqual(['personal', 'personal']);
+    const plain = recordedLinear({});
+    await addQuickTodo('Call back #agi', { defs: [agi, talora], now: NOW }, plain.linear);
+    expect(plain.profiles).toEqual([undefined]);
+  });
+
   it('reports a created issue as created even when reading it back fails, so a retry does not duplicate it', async () => {
     const { linear } = recordedLinear({ [createArgs]: testdata('create.stdout'), 'tasks PHNX-4235 --json': linearError('Error: timed out\n') });
     const result = await addQuickTodo('Scratch to-do for the undo check #agi fri !', { defs: [agi], now: NOW }, linear);
@@ -177,6 +198,14 @@ describe('listQuickTodos', () => {
       ['PHNX-9108', null],
       ['PHNX-9106', null],
     ]);
+  });
+
+  it('lists a project in another workspace through its profile', async () => {
+    const { linear, profiles } = recordedLinear({
+      'tasks --project Talora --status open --all --json': testdata('tasks-project-open.json'),
+    });
+    await listQuickTodos(NOW, { project: 'talora', defs: [talora] }, linear);
+    expect(profiles).toEqual(['personal']);
   });
 
   it('refuses an agents project with no Linear binding before calling linear', async () => {

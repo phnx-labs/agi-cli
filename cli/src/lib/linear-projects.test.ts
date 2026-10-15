@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   normalizeProjectKey,
+  linearSpawnEnv,
+  listLinearProjects,
   matchLinearProject,
   nextLinearLink,
   pickLinearProject,
@@ -112,5 +117,54 @@ describe('nextLinearLink', () => {
       name: 'Rush',
       url: 'https://linear.app/x/project/rush',
     });
+  });
+});
+
+describe('nextLinearLink profile', () => {
+  const talora = { id: 'lin_t', name: 'Talora' };
+  it('writes the profile it is given, and keeps a stored one when re-linked without it', () => {
+    expect(nextLinearLink(undefined, talora, 'personal')).toEqual({ projectId: 'lin_t', name: 'Talora', profile: 'personal' });
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora', profile: 'personal' }, talora)).toEqual({ projectId: 'lin_t', name: 'Talora', profile: 'personal' });
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora', profile: 'personal' }, talora, 'work').profile).toBe('work');
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora' }, talora)).toEqual({ projectId: 'lin_t', name: 'Talora' });
+  });
+});
+
+describe('linearSpawnEnv', () => {
+  it('returns the base env untouched without a profile, and adds LINEAR_PROFILE with one', () => {
+    const base = { PATH: '/usr/bin', LINEAR_API_KEY: 'k' };
+    expect(linearSpawnEnv(undefined, base)).toBe(base);
+    expect(linearSpawnEnv('personal', base)).toEqual({ PATH: '/usr/bin', LINEAR_API_KEY: 'k', LINEAR_PROFILE: 'personal' });
+    expect(base).toEqual({ PATH: '/usr/bin', LINEAR_API_KEY: 'k' });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('listLinearProjects', () => {
+  let bin: string;
+  let priorPath: string | undefined;
+  beforeEach(() => {
+    bin = fs.mkdtempSync(path.join(os.tmpdir(), 'linear-bin-'));
+    // A real executable standing in for linear-cli: echoes its argv back as a project row.
+    fs.writeFileSync(path.join(bin, 'linear'), [
+      '#!/bin/sh',
+      'if [ "$2" = "gone" ]; then echo "linear: error: unknown profile gone" >&2; exit 2; fi',
+      'printf \'[{"id":"%s","name":"Row"}]\' "$*"',
+      '',
+    ].join('\n'), { mode: 0o755 });
+    priorPath = process.env.PATH;
+    process.env.PATH = `${bin}${path.delimiter}${priorPath ?? ''}`;
+  });
+  afterEach(() => {
+    process.env.PATH = priorPath;
+    fs.rmSync(bin, { recursive: true, force: true });
+  });
+
+  it('asks the default workspace without a profile and the named one with it', () => {
+    expect(listLinearProjects()).toEqual([{ id: 'projects --json', name: 'Row' }]);
+    expect(listLinearProjects('personal')).toEqual([{ id: '--profile personal projects --json', name: 'Row' }]);
+  });
+
+  it('fails naming the profile and linear\'s own reason when the profile cannot be read', () => {
+    expect(() => listLinearProjects('gone')).toThrow(/profile "gone".*unknown profile gone/);
   });
 });

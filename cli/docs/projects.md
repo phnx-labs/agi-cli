@@ -64,6 +64,7 @@ integrations:                   # external context, surfaced in `projects view`
 linear:
   projectId: a1b2c3d4-…
   name: "Rush"                  # display name (used by Fleet / feeds)
+  profile: personal             # optional: linear-cli profile (workspace) the project lives in
 dispatch:
   enabled: true                 # opt into auto-dispatch from Linear
   maxAgents: 3                  # cap on concurrent auto-dispatched agents
@@ -81,7 +82,7 @@ dispatch:
 | `contexts[]` | `{path, purpose}` described starting points — indexed anchors for agents. |
 | `goals[]` | `{objective, measure}` the OKR-shaped outcomes a project serves — a project may have several. The objective is the "why"; `measure` is the optional key result. Milestones (pulled from Linear) are the dated checkpoints toward them. |
 | `integrations[]` | `{kind, url, label}` external context sources. |
-| `linear` | `{projectId, url, name}` — reuses the existing Linear path. All three are written by `agents projects link` and `projects import --from-linear`. `name` is the board's own display label (shown on the `status` card, in Fleet, and in the activity feed) and is **refreshed from Linear on every link**, so renaming a project on the board fixes the label here with one `agents projects link <name> --linear "<new name>"`. It is not the def's identity — the filename is (`agi.yaml` is the local id, `AGI` is what the board calls it). |
+| `linear` | `{projectId, url, name}` — reuses the existing Linear path. All three are written by `agents projects link` and `projects import --from-linear`. `name` is the board's own display label (shown on the `status` card, in Fleet, and in the activity feed) and is **refreshed from Linear on every link**, so renaming a project on the board fixes the label here with one `agents projects link <name> --linear "<new name>"`. It is not the def's identity — the filename is (`agi.yaml` is the local id, `AGI` is what the board calls it). Optional `profile` names the linear-cli profile (a slug matching `^[a-z0-9][a-z0-9._-]{0,63}$`) for a project whose board is in a different Linear workspace; see [Projects in another Linear workspace](#projects-in-another-linear-workspace). |
 | `dispatch` | `{enabled, maxAgents, provider, host}` — auto-dispatch settings, validated and preserved by this CLI (`lib/projects.ts`) for clients such as the AGI EXT Fleet dispatch panel; no `agents` command acts on them. All subfields are optional. `enabled: true` opts the project into auto-dispatch; `provider` optionally pins a `agents cloud` backend (`rush`, `codex`, `factory`, `host`, …), otherwise the delegated agent's native cloud backend is used; `host` selects a named fleet device when `provider: host`. |
 
 ## Resolution — definition first, convention fallback
@@ -339,7 +340,7 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects view <name>` | Alias of `status <name>`: full card, every milestone, stored definition. |
 | `agents projects edit <name>` | Open the YAML in `$EDITOR`. |
 | `agents projects status [nameOrPath] [--json] [--path [dir]] [--window N] [--no-remote] [--device name...] [--devices a,b,c]` (alias `view`) | Progress card for every project across the whole fleet (per-device workspace drift over SSH), or one named project. Named form also prints every milestone and the stored definition. `--device`/`--devices` scopes the fan-out to a subset. |
-| `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. |
+| `agents projects link <name> --linear [query] [--profile <p>]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. `--profile <p>` lists and binds from that linear-cli profile's workspace (`linear --profile <p> projects --json`) and records `linear.profile`; a re-link without `--profile` keeps the stored one. A linear CLI that cannot read the profile fails the command, naming the profile. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
 | `agents projects remove <name> [--json]` (alias `rm`) | Remove the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
@@ -438,6 +439,30 @@ boundary: `expectedSlug` is what makes the peer refuse a directory hosting a dif
 repo, and it is hashed into the target fingerprint the caller checks the peer's envelope
 against. A peer that cannot decode its targets exits non-zero rather than pulling a
 guessed subset.
+
+## Projects in another Linear workspace
+
+A Linear API key belongs to one workspace, so a project whose board lives in a
+different workspace names the linear-cli profile that holds that workspace's key:
+
+```bash
+agents projects link talora --linear Talora --profile personal
+```
+
+With `linear.profile` set, everything agents-cli does in Linear for that project
+targets that workspace; without it nothing changes.
+
+- Every `linear` spawn made for the project (`projects todo add/list --project`, the
+  Lead's tools and brief) runs with `LINEAR_PROFILE=<p>` in its env, and the Lead
+  process itself carries it. `todo done`/`undo` name only an issue id, so they use
+  the default workspace.
+- The `linear` card line's GraphQL read takes its key from the profile
+  (`~/.linear-cli/profiles/<p>/config.json` `apiKey`, then the Keychain item
+  `linear-api-key` for account `<p>`) and never from `$LINEAR_API_KEY`, which
+  belongs to the default workspace.
+- `agents projects list --json` and `agents projects status --path <dir> --json`
+  include `linear.profile`; the `--path` shape adds the key only when the def
+  sets it.
 
 ## Importing — from Linear
 

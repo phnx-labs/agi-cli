@@ -7,6 +7,7 @@ import { safeJoin } from './paths.js';
 import { toHomeRelative, expandLocalHome, localizeHome } from './project-root.js';
 import { resolveProjectKey } from './project-key.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
+import { LINEAR_PROFILE_PATTERN, isValidLinearProfile } from './linear-projects.js';
 
 export interface ProjectRepo {
   slug: string;
@@ -46,7 +47,7 @@ export interface ProjectDef {
   contexts?: ProjectContext[];
   goals?: ProjectGoal[];
   integrations?: ProjectIntegration[];
-  linear?: { projectId?: string; url?: string; name?: string };
+  linear?: { projectId?: string; url?: string; name?: string; profile?: string };
   docs?: string[];
   dispatch?: {
     enabled?: boolean;
@@ -168,6 +169,12 @@ export function validateProjectDef(raw: unknown, sourceName?: string): ProjectDe
     if (typeof l.projectId === 'string') def.linear.projectId = l.projectId;
     if (typeof l.url === 'string') def.linear.url = l.url;
     if (typeof l.name === 'string') def.linear.name = l.name;
+    if (l.profile !== undefined && l.profile !== null) {
+      if (typeof l.profile !== 'string' || !isValidLinearProfile(l.profile)) {
+        throw new Error(`Project ${name}: "linear.profile" must be a linear-cli profile name (${LINEAR_PROFILE_PATTERN}) (got ${JSON.stringify(l.profile)})`);
+      }
+      def.linear.profile = l.profile;
+    }
   }
   if (Array.isArray(o.docs)) def.docs = o.docs.filter((d): d is string => typeof d === 'string');
 

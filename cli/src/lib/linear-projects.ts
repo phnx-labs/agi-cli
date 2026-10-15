@@ -1,6 +1,19 @@
 
 import { execFileSync } from 'child_process';
 
+/** A linear-cli profile name: the workspace a project's tickets live in. */
+export const LINEAR_PROFILE_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+export function isValidLinearProfile(profile: string): boolean {
+  return LINEAR_PROFILE_PATTERN.test(profile);
+}
+
+/** The env for a `linear` spawn on behalf of a project: unchanged without a profile. */
+export function linearSpawnEnv(profile: string | undefined, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  if (!profile) return base;
+  return { ...base, LINEAR_PROFILE: profile };
+}
+
 export interface LinearProjectLite {
   id: string;
   name: string;
@@ -60,15 +73,25 @@ export function pickLinearProject(query: string, projects: LinearProjectLite[]):
   return containment.length > 0 ? { kind: 'candidates', projects: containment } : { kind: 'none' };
 }
 
-export function listLinearProjects(): LinearProjectLite[] {
+export function listLinearProjects(profile?: string): LinearProjectLite[] {
+  const args = profile ? ['--profile', profile, 'projects', '--json'] : ['projects', '--json'];
   let out: string;
   try {
-    out = execFileSync('linear', ['projects', '--json'], {
+    out = execFileSync('linear', args, {
       encoding: 'utf8',
       timeout: 8000,
       maxBuffer: 16 * 1024 * 1024,
+      // A profile failure names linear's own reason, so capture its stderr.
+      ...(profile ? { stdio: ['ignore', 'pipe', 'pipe'] as const } : {}),
     });
-  } catch {
+  } catch (err) {
+    if (profile) {
+      const stderr = String((err as { stderr?: unknown })?.stderr ?? '').trim().split('\n').filter(Boolean).pop();
+      throw new Error(
+        `Could not list Linear projects for profile "${profile}" (\`linear --profile ${profile} projects --json\` failed${stderr ? `: ${stderr}` : ''}). ` +
+          'The linear CLI needs profile support and an API key stored for that profile.',
+      );
+    }
     throw new Error(
       'Could not list Linear projects — is the `linear` CLI installed and logged in? (`brew install linear-cli`, `linear auth login`)',
     );
@@ -93,13 +116,23 @@ export function listLinearProjects(): LinearProjectLite[] {
   });
 }
 
-export function nextLinearLink(
-  prior: { projectId?: string; url?: string; name?: string } | undefined,
-  project: LinearProjectLite,
-): { projectId: string; url?: string; name: string } {
+export interface LinearLink {
+  projectId: string;
+  url?: string;
+  name: string;
+  profile?: string;
+}
 
-  const next: { projectId: string; url?: string; name: string } = { projectId: project.id, name: project.name };
+export function nextLinearLink(
+  prior: { projectId?: string; url?: string; name?: string; profile?: string } | undefined,
+  project: LinearProjectLite,
+  profile?: string,
+): LinearLink {
+
+  const next: LinearLink = { projectId: project.id, name: project.name };
   const url = project.url ?? (prior?.projectId === project.id ? prior?.url : undefined);
   if (url) next.url = url;
+  const keptProfile = profile ?? prior?.profile;
+  if (keptProfile) next.profile = keptProfile;
   return next;
 }

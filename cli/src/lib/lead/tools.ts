@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { getCliLaunch } from '../cli-entry.js';
 import { loadProjectDef, type ProjectDef } from '../projects.js';
+import { linearSpawnEnv } from '../linear-projects.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { connectHost, sendRequest } from './client.js';
 import {
@@ -28,9 +29,10 @@ export function leadToolContext(env: NodeJS.ProcessEnv = process.env): LeadToolC
   return { project, def, paths: ensureLeadDir(project) };
 }
 
-function runLinear(args: string[]): Promise<string> {
+function runLinear(def: ProjectDef, args: string[]): Promise<string> {
+  const env = linearSpawnEnv(def.linear?.profile);
   return new Promise((resolve, reject) => {
-    execFile('linear', args, { timeout: LINEAR_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('linear', args, { timeout: LINEAR_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024, env }, (err, stdout, stderr) => {
       if (err) reject(new LeadToolError(`linear ${args[0]} failed: ${String(stderr || err.message).trim().split('\n').pop()}`));
       else resolve(stdout);
     });
@@ -62,10 +64,10 @@ interface LinearIssue { identifier: string; title: string; state?: { name?: stri
 export async function toolDispatch(ctx: LeadToolContext, ticket: string, agent: string): Promise<string> {
   assertTicketId(ticket);
   assertAgent(agent);
-  const issue = JSON.parse(await runLinear(linearViewArgv(ticket))) as LinearIssue;
+  const issue = JSON.parse(await runLinear(ctx.def, linearViewArgv(ticket))) as LinearIssue;
   const prompt = dispatchPrompt(issue.identifier, issue.title);
   runArgv(agent, prompt, ctx.project);
-  await runLinear(linearPickupArgv(issue.identifier, agent));
+  await runLinear(ctx.def, linearPickupArgv(issue.identifier, agent));
   const log = await spawnWorker(ctx, agent, prompt);
   return `Dispatched ${agent} on ${issue.identifier}: ${issue.title}. ${issue.identifier} is In Progress, delegated to ${agent}. Log: ${log}`;
 }
@@ -99,20 +101,20 @@ export async function toolStop(ctx: LeadToolContext, session: string): Promise<s
 }
 
 export async function toolLinearTasks(ctx: LeadToolContext, status: string, limit: number): Promise<string> {
-  const raw = JSON.parse(await runLinear(linearTasksArgv(ctx.def, status, limit))) as { issues?: LinearIssue[] };
+  const raw = JSON.parse(await runLinear(ctx.def, linearTasksArgv(ctx.def, status, limit))) as { issues?: LinearIssue[] };
   const issues = raw.issues ?? [];
   if (issues.length === 0) return `No ${status} tickets.`;
   return issues.map((i) => `${i.identifier} ${i.title}${i.state?.name ? ` (${i.state.name})` : ''}`).join('\n');
 }
 
-export async function toolLinearView(id: string): Promise<string> {
-  const i = JSON.parse(await runLinear(linearViewArgv(id))) as LinearIssue;
+export async function toolLinearView(ctx: LeadToolContext, id: string): Promise<string> {
+  const i = JSON.parse(await runLinear(ctx.def, linearViewArgv(id))) as LinearIssue;
   const desc = (i.description ?? '').slice(0, 1_500);
   return [`${i.identifier} ${i.title}${i.state?.name ? ` (${i.state.name})` : ''}`, desc].filter(Boolean).join('\n');
 }
 
 export async function toolLinearCreate(ctx: LeadToolContext, title: string, description?: string): Promise<string> {
-  const out = await runLinear(linearCreateArgv(ctx.def, title, description));
+  const out = await runLinear(ctx.def, linearCreateArgv(ctx.def, title, description));
   return out.trim().split('\n').slice(-3).join('\n');
 }
 

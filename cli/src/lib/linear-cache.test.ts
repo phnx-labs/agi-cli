@@ -9,6 +9,7 @@ import {
   noteRateLimited,
   parseRateLimitReset,
   readCached,
+  resolveLinearApiKey,
   writeCached,
 } from './linear-cache.js';
 
@@ -112,5 +113,27 @@ describe('linear cache', () => {
     for (let i = 0; i < 40; i++) writeCached(`b-${i}`, i, T0);
     const survived = fs.readdirSync(cacheFile).filter((f) => f.endsWith('.json')).length;
     expect(survived).toBe(80);
+  });
+});
+
+describe('resolveLinearApiKey', () => {
+  const profile = `agents-test-${process.pid}-${Date.now()}`;
+  const profileDir = () => path.join(os.homedir(), '.linear-cli', 'profiles', profile);
+  afterEach(() => {
+    delete process.env.LINEAR_API_KEY;
+    fs.rmSync(profileDir(), { recursive: true, force: true });
+  });
+
+  it('reads a profile\'s own config and never the default workspace\'s env key', () => {
+    process.env.LINEAR_API_KEY = 'lin_api_default_workspace';
+    expect(resolveLinearApiKey()).toBe('lin_api_default_workspace');
+    expect(resolveLinearApiKey(profile)).toBeNull();
+    fs.mkdirSync(profileDir(), { recursive: true });
+    fs.writeFileSync(path.join(profileDir(), 'config.json'), JSON.stringify({ apiKey: ' lin_api_personal ' }));
+    expect(resolveLinearApiKey(profile)).toBe('lin_api_personal');
+  });
+
+  it('refuses a profile name that could leave the profiles directory', () => {
+    expect(() => resolveLinearApiKey('../x')).toThrow(/Invalid linear-cli profile/);
   });
 });

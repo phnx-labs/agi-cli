@@ -207,7 +207,7 @@ export class LeadHost {
   readonly closed = new Promise<void>((resolve) => { this.resolveClosed = resolve; });
 
   constructor(private readonly opts: LeadHostOptions) {
-    const key = opts.teamKey ?? linearTeamKey(os.homedir());
+    const key = opts.teamKey ?? linearTeamKey(os.homedir(), opts.def.linear?.profile);
     if (key) this.ticketPrefixes.add(key);
   }
 
@@ -459,7 +459,7 @@ export class LeadHost {
     const { paths, project } = this.opts;
     const launch = this.opts.harness(leadRunArgs(project, this.opts.model, start, paths));
     this.log(`spawn ${start.mode} ${start.sessionId}`);
-    const env = this.opts.childEnv ?? leadChildEnv(project, paths);
+    const env = this.opts.childEnv ?? leadChildEnv(project, paths, process.env, this.opts.def.linear?.profile);
     const child = spawn(launch.command, launch.args, { cwd: paths.dir, stdio: ['pipe', 'pipe', 'pipe'], env });
     this.child = child;
     this.childSessionId = start.sessionId;

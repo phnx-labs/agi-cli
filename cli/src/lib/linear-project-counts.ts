@@ -18,7 +18,10 @@
  * card simply omits the line — never a hang, never a throw. `--no-remote`
  * skips it (it's network). The API key resolves through the same chain the rest
  * of the stack uses: $LINEAR_API_KEY → macOS Keychain (`resolveLinearApiKey`)
- * → the linear-cli config (`~/.linear-cli/config.json` `apiKey`).
+ * → the linear-cli config (`~/.linear-cli/config.json` `apiKey`). A project whose
+ * def sets `linear.profile` lives in another workspace, so its key comes from that
+ * profile instead (`~/.linear-cli/profiles/<p>/config.json`, then the Keychain
+ * account `<p>`), never from the env.
  *
  * Paging is capped (10 × 250 issues) so a pathological project can't burn the
  * budget; a capped fetch reports `truncated: true` and the card renders the
@@ -136,7 +139,8 @@ export function nextMilestone(
   return open.find((m) => m.isNext) ?? open[0];
 }
 
-function resolveApiKey(): string | null {
+function resolveApiKey(profile: string | undefined): string | null {
+  if (profile) return resolveLinearApiKey(profile);
   const fromChain = resolveLinearApiKey();
   if (fromChain) return fromChain;
   try {
@@ -149,9 +153,16 @@ function resolveApiKey(): string | null {
   }
 }
 
+export type LinearIssuesPageFetcher = (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined>;
+
+/** The GraphQL page reader for a project, keyed to its linear-cli profile's workspace. */
+export function linearIssuesPageFetcher(profile: string | undefined): LinearIssuesPageFetcher {
+  return (projectId, after, signal) => fetchLinearIssuesPage(projectId, after, signal, profile);
+}
+
 export async function fetchLinearProjectCounts(
   projectId: string,
-  fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
+  fetchPage: LinearIssuesPageFetcher = linearIssuesPageFetcher(undefined),
   nowMs: number = Date.now(),
 ): Promise<LinearProjectCounts | undefined> {
   const cached = readCached<LinearProjectCounts>(projectId, nowMs);
@@ -198,8 +209,9 @@ async function fetchLinearIssuesPage(
   projectId: string,
   after: string | undefined,
   signal: AbortSignal,
+  profile: string | undefined,
 ): Promise<LinearIssuesResponse | undefined> {
-  const apiKey = resolveApiKey();
+  const apiKey = resolveApiKey(profile);
   if (!apiKey) return undefined;
   if (!reserveLinearRequest(apiKey)) return undefined;
   const issuesSelection =

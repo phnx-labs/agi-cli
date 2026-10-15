@@ -62,8 +62,8 @@ import {
   type ProjectRemoteSignals,
   type ProjectWarning,
 } from '../lib/project-status.js';
-import { fetchLinearProjectCounts, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
-import { listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
+import { fetchLinearProjectCounts, linearIssuesPageFetcher, type LinearMilestone, type LinearProjectCounts } from '../lib/linear-project-counts.js';
+import { LINEAR_PROFILE_PATTERN, isValidLinearProfile, listLinearProjects, nextLinearLink, pickLinearProject, type LinearPick, type LinearProjectLite } from '../lib/linear-projects.js';
 import { checkRepoSlug } from '../lib/project-doctor.js';
 import { formatFocusAreas, readFocusAreas, type FocusArea } from '../lib/project-focus.js';
 import { formatVerdict, scheduleVerdict } from '../lib/project-schedule.js';
@@ -109,7 +109,7 @@ export function looksLikePath(token: string): boolean {
 
 interface ViewDetection {
   name: string | null;
-  linear: { name: string | null; projectId: string | null };
+  linear: { name: string | null; projectId: string | null; profile?: string };
   root: string | null;
 }
 
@@ -122,6 +122,7 @@ export function detectProjectForPath(cwd: string, defs: ProjectDef[]): ViewDetec
     linear: {
       name: def?.linear?.name ?? null,
       projectId: def?.linear?.projectId ?? null,
+      ...(def?.linear?.profile ? { profile: def.linear.profile } : {}),
     },
     root: def?.root ?? null,
   };
@@ -336,7 +337,7 @@ async function enrichProjectsForRender(
       const [sig, counts] = await Promise.all([
         enrichProjectSignals(d, opts.windowDays, opts.nowMs, { skipRemote: opts.skipRemote }),
         !opts.skipRemote && d.linear?.projectId
-          ? fetchLinearProjectCounts(d.linear.projectId)
+          ? fetchLinearProjectCounts(d.linear.projectId, linearIssuesPageFetcher(d.linear.profile))
           : Promise.resolve(undefined),
       ]);
       remote.set(d.name, sig);
@@ -590,6 +591,7 @@ export function registerProjectsCommands(program: Command): void {
       agents projects view rush           # alias of status <name>
       agents projects status --device s0  # scope to one device (or --devices a,b,c)
       agents projects link rush --linear  # bind the Linear project (auto-suggest)
+      agents projects link talora --linear Talora --profile personal  # project in another Linear workspace
       agents run --project rush           # land an agent in the project
     `,
     notes: `
@@ -840,7 +842,7 @@ async function runProjectCard(
     .alias('view')
     .description('Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition. A path argument (., .., a ~-prefixed value, a /-containing value, or --path) auto-detects the project that CONTAINS that directory.')
     .option('--json', 'Machine-readable output')
-    .option('--path [dir]', 'Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId}, root}, all-null when nothing matches (fail-open, exit 0).')
+    .option('--path [dir]', 'Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId[,profile]}, root} (profile only when the def sets linear.profile), all-null when nothing matches (fail-open, exit 0).')
     .option('--window <days>', 'Window for merged PRs, artifacts, and focus areas', '7')
     .option('--no-remote', 'Skip the GitHub and Linear lookups; faster, offline')
     .option('--device <name...>', 'Scope fleet status to one or more devices (repeatable)')
@@ -1495,7 +1497,8 @@ async function runProjectCard(
     .command('link <name>')
     .description('Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).')
     .option('--linear [query]', 'Bind a Linear project by exact name or id; no value auto-suggests from the def name + repo')
-    .action((name: string, opts: { linear?: string | boolean }) => {
+    .option('--profile <name>', 'linear-cli profile (workspace) the project lives in; stored as linear.profile and kept on later re-links')
+    .action((name: string, opts: { linear?: string | boolean; profile?: string }) => {
       const def = loadProjectDef(name);
       if (!def) {
         console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
@@ -1505,9 +1508,14 @@ async function runProjectCard(
         console.error(chalk.red('Nothing to link. Pass a tracker flag, e.g. --linear [query].'));
         process.exit(1);
       }
+      if (opts.profile !== undefined && !isValidLinearProfile(opts.profile)) {
+        console.error(chalk.red(`Invalid --profile "${opts.profile}": a linear-cli profile name matches ${LINEAR_PROFILE_PATTERN}.`));
+        process.exit(1);
+      }
+      const profile = opts.profile ?? def.linear?.profile;
       let list: ReturnType<typeof listLinearProjects>;
       try {
-        list = listLinearProjects();
+        list = listLinearProjects(profile);
       } catch (e) {
         console.error(chalk.red(e instanceof Error ? e.message : String(e)));
         process.exit(1);
@@ -1545,9 +1553,12 @@ async function runProjectCard(
       if (def.linear?.name && def.linear.name !== p.name) {
         console.log(chalk.gray(`  renaming "${def.linear.name}" → "${p.name}" (Linear is authoritative)`));
       }
-      def.linear = nextLinearLink(def.linear, p);
+      if (def.linear?.profile && opts.profile && def.linear.profile !== opts.profile) {
+        console.log(chalk.gray(`  switching Linear profile "${def.linear.profile}" → "${opts.profile}"`));
+      }
+      def.linear = nextLinearLink(def.linear, p, opts.profile);
       writeProjectDef(def);
-      console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}`));
+      console.log(chalk.green(`${def.name} → Linear project "${p.name}" (${p.id})${p.url ? ` ${p.url}` : ''}${profile ? ` [profile ${profile}]` : ''}`));
     });
 
   projects

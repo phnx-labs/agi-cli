@@ -61,19 +61,25 @@ export function writeAgentsShim(paths: LeadPaths, launch: Launch = getCliLaunch(
   return file;
 }
 
-export function leadChildEnv(project: string, paths: LeadPaths, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function leadChildEnv(
+  project: string,
+  paths: LeadPaths,
+  source: NodeJS.ProcessEnv = process.env,
+  linearProfile?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of LEAD_ENV_PASSTHROUGH) if (source[key] !== undefined) env[key] = source[key];
   for (const [key, value] of Object.entries(source)) if (LEAD_ENV_AUTH.test(key) && value !== undefined) env[key] = value;
   env.PATH = [paths.bin, env.PATH].filter(Boolean).join(path.delimiter);
   env.AGENTS_LEAD_PROJECT = project;
   env.AGENTS_NO_AUTOPULL = '1';
+  if (linearProfile) env.LINEAR_PROFILE = linearProfile;
   return env;
 }
 
 export const WORKER_ENV_PASSTHROUGH = [
   ...LEAD_ENV_PASSTHROUGH,
-  'SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN', 'LINEAR_API_KEY', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY',
+  'SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN', 'LINEAR_API_KEY', 'LINEAR_PROFILE', 'DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY',
   'DBUS_SESSION_BUS_ADDRESS', 'COLORTERM', 'EDITOR', 'VISUAL',
 ] as const;
 
