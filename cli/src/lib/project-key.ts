@@ -9,6 +9,15 @@ export function claudeProjectDirName(cwd: string): string {
   return cwd.replace(/[/.]/g, '-');
 }
 
+/** The path Claude itself sees: it names a project dir after the cwd's real path. */
+export function realCwd(cwd: string): string {
+  try {
+    return fs.realpathSync(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
 export function projectKeyFromCwd(cwd?: string | null): string | undefined {
   if (!cwd) return undefined;
   const norm = cwd.replace(/\\/g, '/').replace(/\/+$/, '').trim();

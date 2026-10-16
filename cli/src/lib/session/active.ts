@@ -41,7 +41,7 @@ import { classifyHostLink, hostWindowLost, HOST_HEARTBEAT_STALE_MS, type HostLin
 import { mapBounded } from '../concurrency.js';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { viewingInLabel } from './viewing-in.js';
-import { claudeProjectDirName } from '../project-key.js';
+import { claudeProjectDirName, realCwd } from '../project-key.js';
 import { gatherRemoteActive, NO_FANOUT_ENV } from './remote-active.js';
 import { hostToken, remoteHostsToDial, shouldIncludeLocal } from './remote-list.js';
 
@@ -649,9 +649,11 @@ export function pickClaudeSessionFileAcrossRoots(
   cwd: string,
   sessionId?: string,
 ): string | undefined {
-  const enc = claudeProjectDirName(cwd);
+  // Claude names the project dir after the real path, so a cwd reached through a
+  // symlink (~/src/<org>/repo -> ~/src/<other-org>/repo) is looked up under both.
+  const encs = [...new Set([cwd, realCwd(cwd)].map(claudeProjectDirName))];
   let best: { path: string; mtime: number } | undefined;
-  for (const root of projectRoots) {
+  for (const root of projectRoots) for (const enc of encs) {
     const hit = pickSessionFile(path.join(root, enc), sessionId);
     if (!hit) continue;
     let mtime: number;
