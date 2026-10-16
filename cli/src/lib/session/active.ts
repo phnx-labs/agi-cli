@@ -649,8 +649,6 @@ export function pickClaudeSessionFileAcrossRoots(
   cwd: string,
   sessionId?: string,
 ): string | undefined {
-  // Claude names the project dir after the real path, so a cwd reached through a
-  // symlink (~/src/<org>/repo -> ~/src/<other-org>/repo) is looked up under both.
   const encs = [...new Set([cwd, realCwd(cwd)].map(claudeProjectDirName))];
   let best: { path: string; mtime: number } | undefined;
   for (const root of projectRoots) for (const enc of encs) {
