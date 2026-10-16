@@ -651,16 +651,18 @@ export function pickClaudeSessionFileAcrossRoots(
 ): string | undefined {
   const encs = [...new Set([cwd, realCwd(cwd)].map(claudeProjectDirName))];
   let best: { path: string; mtime: number } | undefined;
-  for (const root of projectRoots) for (const enc of encs) {
-    const hit = pickSessionFile(path.join(root, enc), sessionId);
-    if (!hit) continue;
-    let mtime: number;
-    try {
-      mtime = fs.statSync(hit).mtimeMs;
-    } catch {
-      continue;
+  for (const root of projectRoots) {
+    for (const enc of encs) {
+      const hit = pickSessionFile(path.join(root, enc), sessionId);
+      if (!hit) continue;
+      let mtime: number;
+      try {
+        mtime = fs.statSync(hit).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (!best || mtime > best.mtime) best = { path: hit, mtime };
     }
-    if (!best || mtime > best.mtime) best = { path: hit, mtime };
   }
   return best?.path;
 }

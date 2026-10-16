@@ -11,7 +11,7 @@ import {
 } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { supports } from './capabilities.js';
-import { claudeProjectDirName } from './project-key.js';
+import { claudeProjectDirName, realCwd } from './project-key.js';
 
 interface MemoryFact {
   name: string;
@@ -279,7 +279,7 @@ export function getClaudeProjectMemoryDir(cwd: string): string {
 export function syncClaudeProjectMemoryDir(versionHome: string, cwd: string = process.cwd()): void {
   const projectKey = claudeProjectDirName(path.resolve(cwd));
   const canonicalDir = path.join(getRuntimeStateDir(), 'claude-project-memory', projectKey);
-  const projectDir = path.join(versionHome, agentConfigDirName('claude'), 'projects', projectKey);
+  const projectDir = path.join(versionHome, agentConfigDirName('claude'), 'projects', claudeProjectDirName(realCwd(path.resolve(cwd))));
   const nativeMemoryDir = path.join(projectDir, 'memory');
 
   fs.mkdirSync(canonicalDir, { recursive: true, mode: 0o700 });
