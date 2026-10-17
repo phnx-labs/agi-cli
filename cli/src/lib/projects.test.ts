@@ -166,6 +166,16 @@ describe('write/load roundtrip', () => {
     ]);
   });
 
+  it('keeps linear.profile through a write and a load, and refuses a profile that is not a slug', () => {
+    writeProjectDef({ name: 'talora', linear: { projectId: 'lin_t', name: 'Talora', profile: 'personal' } });
+    expect(fs.readFileSync(path.join(dir, 'talora.yaml'), 'utf8')).toContain('profile: personal');
+    expect(loadProjectDef('talora')?.linear).toEqual({ projectId: 'lin_t', name: 'Talora', profile: 'personal' });
+    expect(() => writeProjectDef({ name: 'talora', linear: { name: 'Talora', profile: '../turing' } })).toThrow(/linear\.profile/);
+    fs.writeFileSync(path.join(dir, 'odd.yaml'), 'linear:\n  name: X\n  profile: 7\n', 'utf8');
+    expect(() => loadProjectDef('odd')).toThrow(/linear\.profile/);
+    expect(() => writeProjectDef({ name: 'talora', linear: { name: 'Talora', profile: 'default' } })).toThrow(/reserved.*omit the profile/);
+  });
+
   it('loadProjectDef returns undefined for an absent project', () => {
     expect(loadProjectDef('ghost')).toBeUndefined();
   });

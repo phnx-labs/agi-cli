@@ -32,8 +32,17 @@ describe('Lead harness launch', () => {
     });
     expect(env).toEqual({
       PATH: `${paths.bin}:/usr/bin`, HOME: '/home/u', ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't',
-      AGENTS_LEAD_PROJECT: 'harness-demo', AGENTS_NO_AUTOPULL: '1',
+      AGENTS_LEAD_PROJECT: 'harness-demo', AGENTS_NO_AUTOPULL: '1', LINEAR_PROFILE: 'default',
     });
+  });
+
+  it('points the Lead at its project\'s Linear workspace, and nothing from the host env decides it', () => {
+    expect(leadChildEnv('harness-demo', paths, { PATH: '/usr/bin', LINEAR_PROFILE: 'turing' }, 'personal').LINEAR_PROFILE).toBe('personal');
+    expect(leadChildEnv('harness-demo', paths, { PATH: '/usr/bin', LINEAR_PROFILE: 'turing' }).LINEAR_PROFILE).toBe('default');
+    expect(curatedClientEnv({ LINEAR_PROFILE: 'personal' })).toEqual({});
+    const shell = { PATH: '/usr/bin', LINEAR_PROFILE: 'turing' };
+    expect(workerEnv(shell, { LINEAR_PROFILE: 'turing' }, leadRoot(), 'personal').LINEAR_PROFILE).toBe('personal');
+    expect(workerEnv(shell, { LINEAR_PROFILE: 'turing' }, leadRoot()).LINEAR_PROFILE).toBe('default');
   });
 
   it('writes an executable agents shim pinned to the host CLI', () => {

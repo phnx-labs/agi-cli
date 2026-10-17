@@ -1,11 +1,19 @@
-import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   normalizeProjectKey,
+  linearProfileError,
+  linearSpawnEnv,
+  listLinearProjects,
   matchLinearProject,
   nextLinearLink,
   pickLinearProject,
+  profileForIssueId,
   type LinearProjectLite,
 } from './linear-projects.js';
+import { installFakeLinear, type FakeLinear } from './__tests__/fake-linear.js';
 
 
 describe('normalizeProjectKey', () => {
@@ -112,5 +120,87 @@ describe('nextLinearLink', () => {
       name: 'Rush',
       url: 'https://linear.app/x/project/rush',
     });
+  });
+});
+
+describe('nextLinearLink profile', () => {
+  const talora = { id: 'lin_t', name: 'Talora' };
+  it('writes the profile it is given, keeps a stored one when re-linked without it, and clears it on false', () => {
+    expect(nextLinearLink(undefined, talora, 'personal')).toEqual({ projectId: 'lin_t', name: 'Talora', profile: 'personal' });
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora', profile: 'personal' }, talora)).toEqual({ projectId: 'lin_t', name: 'Talora', profile: 'personal' });
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora', profile: 'personal' }, talora, 'work').profile).toBe('work');
+    expect(nextLinearLink({ projectId: 'lin_t', name: 'Talora', profile: 'personal' }, talora, false)).toEqual({ projectId: 'lin_t', name: 'Talora' });
+  });
+});
+
+describe('linearSpawnEnv', () => {
+  it('pins the default workspace without a profile, and the profile with one', () => {
+    const base = { PATH: '/usr/bin', LINEAR_API_KEY: 'k', LINEAR_PROFILE: 'exported-in-shell' };
+    expect(linearSpawnEnv(undefined, base)).toEqual({ PATH: '/usr/bin', LINEAR_API_KEY: 'k', LINEAR_PROFILE: 'default' });
+    expect(linearSpawnEnv('personal', base)).toEqual({ PATH: '/usr/bin', LINEAR_API_KEY: 'k', LINEAR_PROFILE: 'personal' });
+    expect(base.LINEAR_PROFILE).toBe('exported-in-shell');
+  });
+});
+
+describe('linearProfileError', () => {
+  it('reserves default and refuses a name that is not a slug', () => {
+    expect(linearProfileError('personal')).toBeNull();
+    expect(linearProfileError('default')).toMatch(/reserved.*omit the profile/);
+    expect(linearProfileError('../x')).toMatch(/profile name matches/);
+  });
+});
+
+describe('profileForIssueId', () => {
+  let home: string;
+  const config = (dir: string, teamKey: string) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ teamKey }));
+  };
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'linear-home-'));
+    config(path.join(home, '.linear-cli'), 'PHNX');
+    config(path.join(home, '.linear-cli', 'profiles', 'personal'), 'TAL');
+    config(path.join(home, '.linear-cli', 'profiles', 'client'), 'ACME');
+  });
+  afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
+
+  it('maps an issue to the profile whose team owns it, and everything else to the default workspace', () => {
+    expect(profileForIssueId('TAL-12', home)).toBe('personal');
+    expect(profileForIssueId('ACME-3', home)).toBe('client');
+    expect(profileForIssueId('PHNX-4235', home)).toBeUndefined();
+    expect(profileForIssueId('NOPE-1', home)).toBeUndefined();
+    expect(profileForIssueId('TAL-12', path.join(home, 'empty'))).toBeUndefined();
+  });
+
+  it('lets the default workspace win a team key it shares, and refuses a key two profiles claim', () => {
+    config(path.join(home, '.linear-cli', 'profiles', 'old'), 'PHNX');
+    expect(profileForIssueId('PHNX-1', home)).toBeUndefined();
+    config(path.join(home, '.linear-cli', 'profiles', 'twin'), 'TAL');
+    expect(() => profileForIssueId('TAL-1', home)).toThrow(/TAL is in more than one linear-cli profile/);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('listLinearProjects', () => {
+  let linear: FakeLinear;
+  beforeEach(() => {
+    linear = installFakeLinear({
+      'projects --json': '[{"id":"lin_d","name":"Default"}]',
+      '--profile personal projects --json': '[{"id":"lin_p","name":"Personal"}]',
+      '--profile gone projects --json': { stderr: 'linear: error: unknown profile gone\n', code: 2 },
+    });
+  });
+  afterEach(() => linear.restore());
+
+  it('asks the default workspace without a profile and the named one with it, pinning LINEAR_PROFILE', () => {
+    expect(listLinearProjects()).toEqual([{ id: 'lin_d', name: 'Default' }]);
+    expect(listLinearProjects('personal')).toEqual([{ id: 'lin_p', name: 'Personal' }]);
+    expect(linear.calls()).toEqual([
+      { profile: 'default', argv: 'projects --json' },
+      { profile: 'personal', argv: '--profile personal projects --json' },
+    ]);
+  });
+
+  it('fails naming the profile and linear\'s own reason when the profile cannot be read', () => {
+    expect(() => listLinearProjects('gone')).toThrow(/profile "gone".*unknown profile gone/);
   });
 });

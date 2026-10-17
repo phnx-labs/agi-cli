@@ -65,6 +65,7 @@ describe('detectProjectForPath', () => {
     },
     { name: 'umbrella', root: '/work/monorepo' },
     { name: 'nolinear', root: '/work/other' },
+    { name: 'talora', root: '/work/talora', linear: { name: 'Talora', projectId: 'lin_tal', profile: 'personal' } },
   ];
 
   it('returns name + Linear binding + root in ONE call for a cwd inside a project', () => {
@@ -72,6 +73,11 @@ describe('detectProjectForPath', () => {
     expect(d.name).toBe('prix');
     expect(d.linear).toEqual({ name: 'Prix', projectId: 'lin_prix_123' });
     expect(d.root).toBe('/work/monorepo');
+  });
+
+  it('carries linear.profile for a project in another Linear workspace, and only then', () => {
+    expect(detectProjectForPath('/work/talora/app', defs).linear).toEqual({ name: 'Talora', projectId: 'lin_tal', profile: 'personal' });
+    expect(Object.keys(detectProjectForPath('/work/monorepo/prix', defs).linear)).toEqual(['name', 'projectId']);
   });
 
   it('emits null Linear fields when the matched project has no Linear binding', () => {

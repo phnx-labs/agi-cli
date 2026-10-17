@@ -2,7 +2,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import type { ProjectDef } from '../projects.js';
+import { linearSpawnEnv } from '../linear-projects.js';
 import { formatRosterRow, type RosterSnapshot } from './roster.js';
+
+export { linearTeamKey } from '../linear-projects.js';
 
 export const BRIEF_FETCH_TIMEOUT_MS = 8_000;
 const DIGEST_MAX_CHARS = 2_500;
@@ -39,9 +42,9 @@ export const LEAD_RULES = [
   'Each later message starts with a [State delta] block: changes to this project\'s sessions since your last turn, then a fleet line counting live sessions by status. Answer "what is running" from it and the roster tool.',
 ];
 
-function run(command: string, args: string[], cwd: string | undefined): Promise<string> {
+function run(command: string, args: string[], cwd: string | undefined, env: NodeJS.ProcessEnv = process.env): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { cwd, timeout: BRIEF_FETCH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(command, args, { cwd, env, timeout: BRIEF_FETCH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const detail = String(stderr || err.message).trim().split('\n')[0];
         reject(new Error(`${command} ${args.slice(0, 2).join(' ')} failed: ${detail}`));
@@ -81,7 +84,8 @@ export function agentsMdDigest(root: string | undefined): string | null {
 export async function fetchOpenTickets(def: ProjectDef, cwd: string | undefined): Promise<BriefTicket[]> {
   const linearProject = def.linear?.projectId ?? def.linear?.name;
   if (!linearProject) throw new Error(`project '${def.name}' has no linear binding`);
-  const raw = JSON.parse(await run('linear', ['tasks', '--project', linearProject, '--status', 'open', '--limit', '20', '--json'], cwd)) as {
+  const args = ['tasks', '--project', linearProject, '--status', 'open', '--limit', '20', '--json'];
+  const raw = JSON.parse(await run('linear', args, cwd, linearSpawnEnv(def.linear?.profile))) as {
     issues?: Array<{ identifier: string; title: string; state?: { name?: string }; url?: string }>;
   };
   return (raw.issues ?? []).map((i) => ({ id: i.identifier, title: i.title, state: i.state?.name, url: i.url }));
@@ -93,18 +97,6 @@ export async function fetchRecentPrs(repo: string | undefined, cwd: string | und
     number: number; title: string; html_url: string; draft?: boolean; state: string;
   }>;
   return raw.map((p) => ({ number: p.number, title: p.title, url: p.html_url, draft: p.draft === true, open: p.state === 'open' }));
-}
-
-export function linearTeamKey(home: string): string | undefined {
-  let raw: string;
-  try {
-    raw = fs.readFileSync(path.join(home, '.linear-cli', 'config.json'), 'utf-8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw err;
-  }
-  const key = (JSON.parse(raw) as { teamKey?: unknown }).teamKey;
-  return typeof key === 'string' && key.length > 0 ? key : undefined;
 }
 
 export function quoteNotes(memory: string): string {

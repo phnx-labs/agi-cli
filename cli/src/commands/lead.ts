@@ -77,7 +77,7 @@ export function registerLeadToolCommands(lead: Command): void {
   strict(linear.command('view'))
     .description('Show one ticket')
     .argument('<id>', 'Ticket id')
-    .action(toolAction(async (id: string) => { leadToolContext(); return toolLinearView(id); }));
+    .action(toolAction(async (id: string) => toolLinearView(leadToolContext(), id)));
   strict(linear.command('create'))
     .description('Create a ticket in this project')
     .requiredOption('--title <title>', 'Title')
