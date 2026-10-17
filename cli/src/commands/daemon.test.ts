@@ -2,12 +2,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import {
   DAEMON_TESTS_SUPPORTED,
-  REPO_ROOT,
-  TSX_IMPORT,
-  CLI_ENTRYPOINT,
   makeHome,
   run,
   spawnFakeRegisteredDaemon,
@@ -62,19 +59,6 @@ describeDaemon('agents daemon — command surface, status, enable/disable', () =
     const status = run(home, ['status', '--json']);
     expect(JSON.parse(status.stdout).daemonEnabled).toBe(true);
     expect(JSON.parse(status.stdout).state).toBe('stopped');
-  });
-  it('a disabled device refuses `agents routines start` with a message naming the fix', () => {
-    const home = makeHome();
-    run(home, ['disable']);
-    const res = spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'routines', 'start'], {
-      cwd: REPO_ROOT,
-      env: { ...process.env, HOME: home, USERPROFILE: home, AGENTS_SKIP_MIGRATION: '1', AGENTS_NO_AUTOPULL: '1', AGENTS_CLI_DISABLE_AUTO_UPDATE: '1' },
-      encoding: 'utf-8',
-      timeout: 30_000,
-    });
-    expect(res.status).not.toBe(0);
-    expect(res.stderr + res.stdout).toContain('daemon.enabled=false');
-    expect(res.stderr + res.stdout).toContain('agents daemon enable');
   });
   it('a stale health.json is not trusted as live when the daemon is not running (RUSH-2368)', () => {
     const home = makeHome();

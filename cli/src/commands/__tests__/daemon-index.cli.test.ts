@@ -31,7 +31,8 @@ function json<T>(args: string[]): T {
 }
 
 const codexDir = path.join(home, '.codex', 'sessions', '2026', '10', '06');
-const routineDir = path.join(home, '.agents', '.history', 'runs', 'nightly', '2026-10-06T00-00', 'sessions', 'claude', 'projects');
+const claudeDir = path.join(home, '.claude', 'projects');
+const legacyRunArchiveDir = path.join(home, '.agents', '.history', 'runs', 'nightly', '2026-10-06T00-00', 'sessions', 'claude', 'projects');
 
 beforeAll(() => {
   fs.mkdirSync(codexDir, { recursive: true });
@@ -41,7 +42,8 @@ beforeAll(() => {
     { timestamp: '2026-10-06T00:00:02Z', type: 'response_item', payload: { type: 'function_call', name: 'exec_command', call_id: 'c1', arguments: JSON.stringify({ cmd: 'git status; git diff' }) } },
     { timestamp: '2026-10-06T00:00:03Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: 'clean' } },
   ].map((row) => JSON.stringify(row)).join('\n') + '\n');
-  fs.mkdirSync(routineDir, { recursive: true });
+  fs.mkdirSync(claudeDir, { recursive: true });
+  fs.mkdirSync(legacyRunArchiveDir, { recursive: true });
 });
 
 afterAll(() => {
@@ -79,10 +81,10 @@ describe('agents daemon index (real CLI parse, disposable HOME)', () => {
     expect(fs.existsSync(getSessionsDbPath())).toBe(false);
   });
 
-  it('prints the transcript roots, including routine archives', () => {
+  it('prints the transcript roots and skips legacy run archives', () => {
     const roots = json<Array<{ agent: string; dirs: string[] }>>(['daemon', 'index', 'roots']);
     expect(roots).toEqual([
-      { agent: 'claude', dirs: [routineDir] },
+      { agent: 'claude', dirs: [claudeDir] },
       { agent: 'codex', dirs: [path.join(home, '.codex', 'sessions')] },
     ]);
   });

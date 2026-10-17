@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agi-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagi--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents insights` (latency lives at `agents insights perf`), fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents insights` (latency lives at `agents insights perf`), fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with cron. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -101,7 +101,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Sign in](#sign-in)
 - [Accounts](#accounts)
 - [Secrets](#secrets)
-- [Routines](#routines)
+- [Daemon](#daemon)
 - [Share](#share)
 - [PTY](#pty)
 - [Portable setup](#portable-setup)
@@ -132,15 +132,14 @@ agents insights --since 30d        # friction, harness comparison, ranked action
 agents rules add ~/lessons/payments-review.md --agents claude
 agents skills add ~/skills/payments-review --agents claude
 
-# Put it on a schedule so it runs itself
-agents routines add nightly-payments-audit \
-  --schedule "0 2 * * *" --agent claude --prompt "Audit payments/* for regressions"
+# Put it on a schedule so it runs itself (crontab -e)
+# 0 2 * * * agents run claude "Audit payments/* for regressions" --mode auto
 
 # Check the fleet this loop runs on, AGI Menu included
 agents doctor
 ```
 
-`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
+`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Schedule any of this with OS cron, a systemd timer, or launchd calling `agents run`; the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
@@ -358,7 +357,6 @@ agents ps --json --local            # this machine only, machine-readable
 agents ps --json -D box-a           # one peer, over SSH
 agents ps --status waiting          # only agents waiting on you (exit 1 if any)
 agents ps --bookmarks               # only bookmarked sessions
-agents ps --routine nightly-review  # only one routine's runs (omit the name for all routines)
 agents ps stop|focus|detach|migrate <id>   # act on one running agent
 agents ps migrations                # where migrated sessions went
 agents ps --status working          # actively producing work (fleet-wide)
@@ -751,8 +749,7 @@ agents devices list --no-stats          # instant: names/addresses only, skip th
 agents devices describe mac-mini "signing + notarize box"   # one-line purpose, synced + shown in the list
 agents devices ignored                  # dismissed nodes — when, and which machine dismissed them
 agents devices config zion interactive.host zion   # the device agents show YOU artifacts on (★ in the list)
-agents devices config mac-mini agents.max-concurrent 4   # per-device settings (tracked devices/<name>/agents.yaml)
-agents devices config mac-mini scheduler.enabled off     # bare `devices config <name>` opens a settings menu (TTY)
+agents devices config mac-mini agents.max-concurrent 4   # per-device settings; bare `devices config <name>` opens a menu (TTY)
 agents devices config --fleet agents.max-concurrent 2    # fleet-wide default every device inherits
 agents devices config mac-mini notes "runs the releases — don't reboot"   # operator notes, repeat to append
 agents ssh mac-mini                     # hardened SSH: fails fast if offline,
@@ -762,9 +759,8 @@ agents ssh mac-mini                     # hardened SSH: fails fast if offline,
 scp mac-mini:/abs/log.json /tmp/        # fleet file transfer; host:path or abs local
 scp -r /tmp/src/ yosemite-s0:~/dst/     # ~ and $HOME expand on the REMOTE, never locally
 
-# Devices as a task backend + scheduled placement
+# Devices as a task backend
 agents cloud run "nightly benchmark" --device gpu-box --agent claude   # task in cloud list AND devices ps
-agents routines add nightly -s "0 2 * * *" -a claude -p "run the sweep" --run-on gpu-box
 ```
 
 `agents devices list` shows normalized load, memory pressure, and an
@@ -876,7 +872,7 @@ Five managed backends behind one interface (`agents cloud providers`):
 | `antigravity` | Gemini managed agents | Antigravity harness in a remote sandbox. |
 | `cursor` | Cursor Cloud Agents | v1 REST API with repo, status, SSE, cancel, and follow-up runs. |
 
-Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. Instead of dispatching now, register a run as an **event trigger** with `--on pull_request` (also `push`, `issue_comment`, `workflow_run`) -- it persists as a trigger-bound routine that fires on the event. `--json` on every subcommand for scripting.
+Auto-routes each `--agent` to its native cloud, or pin the backend with `--provider`. `--json` on every subcommand for scripting.
 
 The same dispatch is a placement on `agents run`: `agents run claude "fix the flaky e2e" --cloud --repo acme/api` routes through the identical provider registry and tracks in `agents cloud list/status/logs` alike. `--cloud` sits alongside `--device`/`--lease` as one of three placements (local, machine, cloud) and is mutually exclusive with them; `--where cloud[:provider]` is the one-door spelling. Agents without a native cloud fail loud unless `--provider` is given.
 
@@ -1318,53 +1314,10 @@ secrets list   # EXPIRING column flags secrets due in the next 30 days
 
 ---
 
-## Routines
+## Daemon
 
-```bash
-# Claude Code reviews PRs every weekday at 9 AM. Scheduler auto-starts.
-agents routines add daily-digest \
-  --schedule "0 9 * * 1-5" \
-  --agent claude \
-  --project-anchor agents-cli \
-  --cwd cli \
-  --prompt "Review yesterday's PRs and summarize key changes"
-
-agents routines list                   # All jobs + next run times
-agents routines status                 # Scheduler health + next fires (add --json for owner device, last fire, last error, in-flight run per routine)
-agents routines run daily-digest       # Test it now, ignore the schedule
-agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
-agents routines runs daily-digest      # Every attempt, including blocked/skipped pre-session runs
-agents routines doctor daily-digest    # Project/CWD/trust/write/auth readiness
-agents routines stats                  # Run count, failed, missed, avg/p50/p95 duration — per job or all
-
-# Definitions sync to every device; activation is stored per hostname
-agents routines add nightly-drain --schedule "0 3 * * *" --agent claude \
-  --cwd '~' \
-  --prompt "Drain the local work queue"
-
-agents routines devices nightly-drain --set yosemite-s0           # one schedule owner
-agents routines list --device yosemite-s0                            # query another device
-
-# Event trigger: a Linear issue labeled "agent" fires a routine
-agents routines add agent-labeled-issue --on linear:Issue --action update \
-  --team-key RUSH --label agent --agent claude \
-  --cwd '~' \
-  --prompt "Work the Linear issue that was just labeled agent"
-agents routines webhook --source linear --event Issue --file payload.json   # fire matches for one payload
-```
-
-Jobs run sandboxed -- agents only see directories and tools you explicitly allow.
-`--project` tags a routine into a project **group** for listings only -- it never
-decides where the body runs. The reliability contract (execution anchor + `--cwd`,
-readiness that saves a blocked routine paused, and the `blocked`/`skipped` run
-statuses) is specified in
-[docs/specifications.md §Routine execution & readiness](cli/docs/specifications.md#routine-execution--readiness);
-some of it is planned (RUSH-2290), and the section marks what is landed vs intended.
-
-### Daemon
-
-Routines, the watchdog pass, and the session index all run inside one always-on
-daemon per device. `agents daemon` is its runtime surface:
+The watchdog pass, the session index, the feed stream, and usage/auth sync all run
+inside one always-on daemon per device. `agents daemon` is its runtime surface:
 
 ```bash
 agents daemon                # identity + duplicates + per-service health (same as status)
@@ -1377,12 +1330,11 @@ agents daemon restart        # stop then start
 agents daemon disable        # persist daemon.enabled: false -- nothing auto-starts it
 agents daemon enable         # clear the kill switch
 
-agents daemon reload                        # SIGHUP -- reload jobs, re-evaluate scheduler.enabled, no restart
-agents daemon services                      # health of every hosted service (scheduler, watchdog, ...)
+agents daemon reload                        # SIGHUP -- reload service toggles and the log level, no restart
+agents daemon services                      # health of every hosted service (watchdog, session-index, ...)
 agents daemon services list                 # every toggleable service and its current on/off state
-agents daemon services enable scheduler
+agents daemon services enable recordings
 agents daemon services disable watchdog     # stop the watchdog pass without stopping the daemon
-agents routines stop                        # disable/reload only the scheduler service
 agents daemon logs -f --level warn --since 1h
 agents daemon logs --level error --since 1h # each restart, with what was running when it happened
 agents daemon logs level debug              # trace every tick and slow section, live; `level info` turns it off
@@ -1396,7 +1348,7 @@ agents daemon index backfill tools --fleet  # one-shot historical parse (also: r
 `agents daemon index` is foreground maintenance of the index the daemon's
 session-index service keeps current; it never starts or restarts the daemon.
 
-Each hosted responsibility (scheduler, watchdog, recordings, device probe,
+Each hosted responsibility (watchdog, recordings, device probe,
 self-heal, self-update, account-state refresh, state-dir checks) is an
 independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
@@ -1407,16 +1359,15 @@ with auto-update forced off and only picked up new code on a manual
 `agents daemon services list` shows every service; `enable|disable <id>` flips
 one. Missing keys default to enabled except the opt-in `recordings` service. Most services take
 effect on the next daemon start; recordings is registered while disabled
-so `agents recordings watch` can enable it live, while the scheduler
-re-evaluates on `SIGHUP reload`. Only `agents daemon start|stop|restart` owns the
-whole process lifecycle. The routines and recordings commands change their own
+so `agents recordings watch` can enable it live. Only `agents daemon start|stop|restart` owns the
+whole process lifecycle. The recordings commands change their own
 service state without evicting sibling work. Browser IPC is not a daemon service:
 the standalone `browser` CLI runs its own (`browser stop --service`).
 
-There is no `agents daemon jobs` -- scheduled work is always `agents routines`
-(see `agents routines stats` for per-routine failure detail). `disable` is a
-device-local kill switch: with it set, `routines add`/`routines start`/
-`routines catchup`/webhook triggers stop auto-starting the daemon, mirroring
+The CLI has no job scheduler: schedule recurring agent work with OS cron, a
+systemd timer, or launchd calling `agents run`. `disable` is a device-local kill
+switch: with it set, `agents feed watch`, `agents watchdog`, and
+`agents recordings` stop auto-starting the daemon, mirroring
 `systemctl disable` -- `agents daemon start` still works as the explicit
 override.
 
@@ -1513,7 +1464,7 @@ The helper itself is AGI Menu, developed in
 signed, notarized build on this repo's `menubar/v<x.y.z>` releases; the CLI
 downloads and verifies it on demand, so nothing is built on your machine.
 
-The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), the running roster, and a routines summary -- the same live state as `agents ps`, one click away.
+The dropdown surfaces a **NEEDS YOU** queue (agents waiting on a question, a plan review, or a permission prompt), and the running roster -- the same live state as `agents ps`, one click away.
 
 ### Quick-issue bar (⌘⇧O)
 
@@ -1550,7 +1501,7 @@ Extras clone into `~/.agents-<alias>/` and ship the same layout as the primary (
 
 ## Security & Privacy
 
-**The CLI binary has no built-in telemetry or phone-home path.** Routine commands run locally; explicit features such as cloud dispatch and secrets push/pull send only the data needed for the action you invoke. Here's exactly what `agi-cli` stores locally and why.
+**The CLI binary has no built-in telemetry or phone-home path.** Everyday commands run locally; explicit features such as cloud dispatch and secrets push/pull send only the data needed for the action you invoke. Here's exactly what `agi-cli` stores locally and why.
 
 ### Event log
 
@@ -1643,16 +1594,16 @@ Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/age
 
 ### agi-cli features (not agent-native resources)
 
-| Agent | Routines | Teams | Session index |
-|-------|----------|-------|---------------|
-| Claude Code | yes | yes | yes |
-| Codex CLI | yes | yes | yes |
-| Cursor | -- | yes | -- |
-| OpenCode | -- | yes | -- |
-| Grok Build | -- | yes | yes |
-| Antigravity | -- | yes | -- |
-| Copilot | -- | -- | yes |
-| OpenClaw, Amp, Goose | -- | -- | -- |
+| Agent | Teams | Session index |
+|-------|-------|---------------|
+| Claude Code | yes | yes |
+| Codex CLI | yes | yes |
+| Cursor | yes | -- |
+| OpenCode | yes | -- |
+| Grok Build | yes | yes |
+| Antigravity | yes | -- |
+| Copilot | -- | yes |
+| OpenClaw, Amp, Goose | -- | -- |
 
 ### Version-gated sync
 

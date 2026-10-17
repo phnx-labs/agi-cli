@@ -7,8 +7,6 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 import { LOG_LEVELS, parseLogLevel, type LogLevel } from './daemon/diagnostics.js';
 
 export type DaemonServiceId =
-  | 'scheduler'
-  | 'catchup'
   | 'self-heal'
   | 'self-update'
   | 'account-state'
@@ -37,17 +35,6 @@ interface DaemonServiceDef {
 }
 
 export const DAEMON_SERVICES: DaemonServiceDef[] = [
-  {
-    id: 'scheduler',
-    title: 'Routine scheduler',
-    description: 'Fires cron-scheduled routines and catches up missed fires.',
-  },
-  {
-    id: 'catchup',
-    title: 'Catch-up recovery',
-    description: 'Supervised pass that re-runs routines whose scheduled fire this device missed (sleep, wedge, or suspend). No-ops while the scheduler gate is off.',
-  },
-
   {
     id: 'self-heal',
     title: 'Self-heal registry',
@@ -86,7 +73,7 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
   {
     id: 'daemon-heartbeat',
     title: 'Daemon heartbeat',
-    description: 'Publishes daemon liveness and reconciles routine process state.',
+    description: 'Publishes daemon liveness.',
   },
   {
     id: 'tmux-reap',

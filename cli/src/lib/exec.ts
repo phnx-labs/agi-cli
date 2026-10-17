@@ -7,7 +7,6 @@ import type { AgentId, Mode, RunStrategy } from './types.js';
 import { ALL_MODES, PEER_HOP_ENV, REMOTE_INTERACTIVE_ENV } from './types.js';
 import { LAUNCH_LOG_ENV, markAgentStarted } from './launch-log.js';
 import { AGENTS, agentConfigDirName, findInPath } from './agents.js';
-import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
 import { resolveModel, buildReasoningFlags } from './models.js';
 import { isTierToken, resolveTier } from './model-tiers.js';
@@ -57,6 +56,24 @@ import { claudeProjectDirName, realCwd } from './project-key.js';
 import { bootMark, flushBootProfile } from './boot-profile.js';
 
 export type ExecMode = Mode;
+
+export function parseTimeout(timeout: string): number | null {
+  const match = timeout.match(/^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?$/);
+  if (!match) return null;
+
+  const weeks = parseInt(match[1] || '0', 10);
+  const days = parseInt(match[2] || '0', 10);
+  const hours = parseInt(match[3] || '0', 10);
+  const minutes = parseInt(match[4] || '0', 10);
+
+  const ms = ((weeks * 7 + days) * 24 * 60 + hours * 60 + minutes) * 60 * 1000;
+  if (ms <= 0) return null;
+
+  const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  if (ms > ONE_WEEK_MS) return null;
+
+  return ms;
+}
 
 export function normalizeMode(input: string | null | undefined): Mode {
   if (!input) {
@@ -112,7 +129,7 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * one-line stderr warning, mirroring the graceful plan→edit degrade antigravity
  * get for having no plan flag at all. Interactive runs are never
  * downgraded. This is the single source of truth shared by buildExecCommand
- * (agents run / teams) and the routine runner.
+ * (agents run / teams).
  */
 export function resolveHeadlessMode(
   agent: AgentId,
@@ -1706,7 +1723,7 @@ export function classifyCodexRunRefusal(
 /**
  * Patterns that indicate an authentication failure — the agent is logged out,
  * its token was revoked, or the session expired. These are the user-visible
- * strings a logged-out agent surfaces (observed across the routine-run corpus).
+ * strings a logged-out agent surfaces (observed across headless runs).
  * Unlike a rate limit, an auth failure is NOT self-healing by failover — every
  * chain entry on the same account fails identically — so it is classified
  * separately and never triggers a fallback attempt.
@@ -1765,24 +1782,6 @@ export function detectAuthFailureEvent(logText: string, agent: AgentId): boolean
       return true;
     }
   }
-  return false;
-}
-
-export function authFailureReason(text: string): string | null {
-  for (const pattern of AUTH_FAILURE_PATTERNS) {
-    const m = text.match(pattern);
-    if (m) return m[0];
-  }
-  return null;
-}
-
-export function isAuthFailureFromLog(
-  logText: string,
-  agent: AgentId,
-  opts: { processFailed: boolean },
-): boolean {
-  if (detectAuthFailureEvent(logText, agent)) return true;
-  if (opts.processFailed && detectAuthFailure(logText)) return true;
   return false;
 }
 

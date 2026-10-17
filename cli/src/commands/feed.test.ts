@@ -233,12 +233,11 @@ describe('formatOutcomeHeader', () => {
 });
 
 describe('formatFeedRuntime', () => {
-  it('uses the known host app instead of generic terminal and shows routine provenance', () => {
+  it('uses the known host app instead of generic terminal', () => {
     expect(formatFeedRuntime({ runtime: 'ghostty' })).toBe('Ghostty');
     expect(formatFeedRuntime({ runtime: 'code' })).toBe('VS Code');
     expect(formatFeedRuntime({ runtime: 'terminal' })).toBe('terminal');
-    expect(formatFeedRuntime({ runtime: 'codium', origin: 'routine', routineName: 'nightly-review' }))
-      .toBe('VSCodium · routine:nightly-review');
+    expect(formatFeedRuntime({ runtime: 'codium' })).toBe('VSCodium');
   });
 });
 

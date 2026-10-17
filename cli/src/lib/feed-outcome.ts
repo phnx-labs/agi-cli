@@ -203,8 +203,6 @@ export interface SessionOutcomeHint {
   branch?: string | null;
   project?: string | null;
   host?: string | null;
-  origin?: 'cli' | 'routine' | null;
-  routineName?: string | null;
 }
 
 export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHint): OpenBlock {
@@ -217,10 +215,6 @@ export function enrichBlockFromSession(block: OpenBlock, hint: SessionOutcomeHin
   if (!next.worktreeSlug && hint.worktreeSlug) next.worktreeSlug = hint.worktreeSlug;
   if (!next.project && hint.project) next.project = hint.project;
   if (hint.host && hint.host !== 'terminal' && next.runtime === 'terminal') next.runtime = hint.host;
-  if (hint.origin === 'routine') {
-    next.origin = 'routine';
-    if (hint.routineName) next.routineName = hint.routineName;
-  }
   return next;
 }
 

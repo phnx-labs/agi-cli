@@ -7,8 +7,6 @@ import { renderStream } from '../lib/cloud/stream.js';
 import type { CloudProviderId, CloudTaskStatus, DispatchOptions } from '../lib/cloud/types.js';
 import { MAX_IMAGES_PER_DISPATCH } from '../lib/cloud/types.js';
 import { resolveCloudPrompt, executeCloudDispatch } from '../lib/cloud/dispatch.js';
-import type { JobConfig, JobTrigger } from '../lib/scheduling/routines.js';
-import { normalizeTriggerEvent, validateTrigger, writeJob, setJobEnabled, jobExists, GITHUB_TRIGGER_EVENTS } from '../lib/scheduling/routines.js';
 import { emit } from '../lib/feed/events.js';
 import { registerCloudTranscriptsCommand } from './cloud-transcripts.js';
 
@@ -98,13 +96,6 @@ Examples:
       },
     )
     .option('--branch <name>', 'Target git branch')
-    .option(
-      '--on <event>',
-      'Register this run as an event trigger instead of dispatching now: pull_request (pr), push, issue_comment, workflow_run. Persists a trigger-bound routine.',
-    )
-    .option('--action <name>', 'GitHub webhook action filter for --on triggers (e.g. labeled)')
-    .option('--label <name>', 'GitHub label filter for --on triggers')
-    .option('--name <name>', 'Routine name to register under (with --on). Defaults to a generated name.')
     .option('-p, --prompt <text>', 'Inline prompt (alternative to positional argument)')
     .option('--timeout <duration>', 'Kill after duration (e.g., 30m, 2h)')
     .option('--model <model>', 'Model override')
@@ -204,57 +195,6 @@ Examples:
       if (options.mode) dispatchOptions.providerOptions!.mode = options.mode as string;
       if (options.balanced || (options.strategy as string) === 'balanced') {
         dispatchOptions.providerOptions!.strategy = 'balanced';
-      }
-
-      if (options.on) {
-        const event = normalizeTriggerEvent(options.on as string);
-        if (!event) {
-          die(`Unknown --on event "${options.on}". Use one of: ${GITHUB_TRIGGER_EVENTS.join(', ')} (aliases: pr, comment, workflow).`, 1, { json });
-        }
-        const trigger: JobTrigger = { type: 'github_event', event: event! };
-        if (repoValues[0]) trigger.repo = repoValues[0];
-        if (options.branch) trigger.branch = options.branch as string;
-        if (options.action) trigger.action = options.action as string;
-        if (options.label) trigger.label = options.label as string;
-
-        const triggerErrors = validateTrigger(trigger);
-        if (triggerErrors.length > 0) die(`Invalid trigger: ${triggerErrors.join(', ')}`, 1, { json });
-
-        dispatchOptions.trigger = trigger;
-
-        const routineName = (options.name as string | undefined)
-          || `cloud-${event}-${(repoValues[0] || 'any').replace(/[^a-z0-9]+/gi, '-')}`.toLowerCase();
-        if (jobExists(routineName)) {
-          die(`A routine named "${routineName}" already exists. Pass --name to register under a different name.`, 1, { json });
-        }
-
-        const routine: JobConfig = {
-          name: routineName,
-          trigger,
-          agent: (options.agent as string as JobConfig['agent']) || 'claude',
-          mode: 'plan',
-          effort: 'auto',
-          timeout: (options.timeout as string) || '10m',
-          enabled: true,
-          prompt,
-        };
-        if (repoValues[0]) routine.repo = repoValues[0];
-        if (options.device) {
-          routine.host = options.device as string;
-          if (options.remoteCwd) routine.remoteCwd = options.remoteCwd as string;
-        }
-        writeJob(routine);
-        setJobEnabled(routine.name, true);
-
-        if (json) {
-          console.log(JSON.stringify({ ok: true, registered: routineName, trigger }, null, 2));
-        } else {
-          console.log(chalk.green(`Registered trigger routine "${routineName}"`));
-          console.log(`  ${chalk.dim('on:')}    ${event}${trigger.repo ? ` (${trigger.repo}${trigger.branch ? `@${trigger.branch}` : ''})` : ''}`);
-          console.log(`  ${chalk.dim('agent:')} ${routine.agent}`);
-          console.log(chalk.dim(`\nFires when a matching GitHub webhook is delivered to the local receiver. Remote firing is a follow-up.`));
-        }
-        return;
       }
 
       await executeCloudDispatch({

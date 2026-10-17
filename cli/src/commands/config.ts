@@ -115,7 +115,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
             throw new Error(`Config key '${key}' expects an integer, got '${raw}'.`);
           }
           return Number.parseInt(raw.trim(), 10);
-        case 'scheduler':
         case 'daemon':
         case 'watchdog':
         case 'tmux':
@@ -423,9 +422,6 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
     switch (entry.spec.name) {
       case 'agents.max-concurrent':
         key = `${prefix}max-agents`;
-        break;
-      case 'scheduler.enabled':
-        key = `${prefix}scheduler`;
         break;
       case 'daemon.enabled':
         key = `${prefix}daemon`;

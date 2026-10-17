@@ -1,7 +1,7 @@
 # Agent runs and execution
 
 A run is an invocation of an agent harness with resolved identity, configuration, and
-execution context. Local commands, remote dispatch, team members, routines, and recovery
+execution context. Local commands, remote dispatch, team members, and recovery
 all converge on one execution engine. The callers decide intent; the engine owns the
 meaning of launching an agent.
 
@@ -51,7 +51,7 @@ identifier at process start.
 
 Environment assembly has a defined precedence and allowlist. Data intended for the
 harness must survive every boundary it crosses: local spawn, SSH dispatch, teams,
-routines, and recovery. A remote path that drops actor, credential, or lineage fields is
+and recovery. A remote path that drops actor, credential, or lineage fields is
 not a reduced mode; it is an incomplete execution path.
 
 ## Placement is transport, not a second engine
@@ -84,8 +84,8 @@ sequenceDiagram
 
 An execution record answers whether an attempted unit of work ran, failed, timed out,
 was skipped, or was blocked before a harness started. A session answers what happened in
-a conversation. A successful run commonly links to a session, but a failed prerequisite,
-command-only task, or missed routine may have no session at all. Neither record should be
+a conversation. A successful run commonly links to a session, but a failed prerequisite
+or command-only task may have no session at all. Neither record should be
 fabricated to stand in for the other.
 
 ## Recovery and fallback

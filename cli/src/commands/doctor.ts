@@ -27,7 +27,6 @@ import { hostIdentityArgs, sshTargetFor } from '../lib/hosts/types.js';
 import { deviceIdentityArgs } from '../lib/devices/connect.js';
 import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { machineId, normalizeHost } from '../lib/session/sync/config.js';
-import { findAmbiguousDevicePins } from '../lib/scheduling/routines.js';
 import { findLeakedDaemons } from '../lib/daemon/leaked-daemons.js';
 import chalk from 'chalk';
 import { checkAllClis, collectTeamsDoctorData, type TeamsDoctorEntry } from '../lib/teams/agents.js';
@@ -1335,7 +1334,6 @@ export function registerDoctorCommand(program: Command): void {
         const inventory = await collectLocalFleetInventory(cwd);
         const localName = machineId();
         const duplicateHooks = inspectDuplicateVersionHooks(cwd);
-        const ambiguousPins = findAmbiguousDevicePins(cwd);
         const menubar = process.platform === 'darwin'
           ? await import('../lib/menubar/install-menubar.js').then((m) => ({
               status: m.getMenubarStatus(),
@@ -1400,7 +1398,6 @@ export function registerDoctorCommand(program: Command): void {
             orphans: orphanRows,
             health: computeOverviewHealth(syncRows, orphanRows, repoBehindMarkers, duplicateHooks),
             duplicateHooks,
-            ambiguousDevicePins: ambiguousPins,
             findings,
             fleet: inventory,
             hostClis: {
@@ -1435,19 +1432,6 @@ export function registerDoctorCommand(program: Command): void {
         }
         if (syncRows.some((r) => r.status !== 'fresh' || (r.unwiredHooks ?? 0) > 0) || repoBehindMarkers.some((m) => m.behind > 0)) {
           console.log(chalk.gray('\nRun `agents sync status` to review and sync what has drifted.'));
-        }
-        if (ambiguousPins.length > 0) {
-          console.log();
-          console.log(chalk.yellow(`${ambiguousPins.length} routine(s) pin more than one device — a routine runs on exactly one:`));
-          for (const pin of ambiguousPins) {
-            console.log(
-              `  ${chalk.cyan(pin.name)} ${chalk.gray(`[${pin.devices.join(', ')}]`)} ` +
-              `${chalk.gray('→ fires only on')} ${pin.owner}`,
-            );
-            console.log(chalk.gray(
-              `      fix: agents routines devices ${pin.name} --set <${pin.devices.join('|')}>`,
-            ));
-          }
         }
         return;
       }

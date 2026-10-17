@@ -12,10 +12,7 @@ import { AGENTS, agentConfigDirName, findInPath } from '../agents.js';
 import { createLink } from '../platform/index.js';
 import { foldLegacySystemRepo, copyDirSkipExisting } from '../migrate-fold.js';
 export { foldLegacySystemRepo } from '../migrate-fold.js';
-import { migrateLegacyRoutineActivation, listJobs, validateJob } from '../scheduling/routines.js';
 import { setConfigValue } from '../device-config.js';
-import { enabledRoutineNames, replaceEnabledRoutines } from '../routine-activation.js';
-import { evaluateActivationReadiness } from '../routine-readiness.js';
 import { migrateDeviceConfigStores } from '../devices/config-migration.js';
 import { detrackViaGitExclude } from '../project-resources.js';
 import { META_HEADER as DEVICE_META_HEADER, commitCentralConfig } from '../state.js';
@@ -150,16 +147,6 @@ function migrateSystemVersionsToUser(): void {
   if (skippedCount > 0) {
     console.error(`Skipped ${skippedCount} version dir${skippedCount === 1 ? '' : 's'} already present in ~/.agents/versions/ (kept legacy copy at ~/.agents-system/versions/)`);
   }
-}
-
-function migrateRunsIntoRoutines(): void {
-  const src = path.join(USER_DIR, 'runs');
-  const dest = path.join(USER_DIR, 'routines', 'runs');
-  if (!fs.existsSync(src) || fs.existsSync(dest)) return;
-  try {
-    fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
-    fs.renameSync(src, dest);
-  } catch {  }
 }
 
 function migrateTrashToHidden(): void {
@@ -350,14 +337,6 @@ function cleanupUserConfigJson(): void {
   if (!fs.existsSync(legacy)) return;
   try {
     fs.unlinkSync(legacy);
-  } catch {  }
-}
-
-function cleanupEmptyTopLevelRuns(): void {
-  const dir = path.join(USER_DIR, 'runs');
-  if (!fs.existsSync(dir)) return;
-  try {
-    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
   } catch {  }
 }
 
@@ -614,7 +593,6 @@ function migrateRuntimeToHistory(): void {
   moveDirOnce(path.join(USER_DIR, '.trash'), path.join(HISTORY_DIR, 'trash'));
   moveDirOnce(path.join(USER_DIR, 'trash'), path.join(HISTORY_DIR, 'trash'));
   moveDirOnce(path.join(USER_DIR, '.backups'), path.join(HISTORY_DIR, 'backups'));
-  moveDirOnce(path.join(USER_DIR, 'routines', 'runs'), path.join(HISTORY_DIR, 'runs'));
   moveDirOnce(path.join(USER_DIR, 'teams', 'agents'), path.join(HISTORY_DIR, 'teams', 'agents'));
 
   rmEmptyDirTree(path.join(USER_DIR, 'versions'));
@@ -1329,121 +1307,6 @@ export function migrateExtrasExtrasToAgentsExtras(historyDir: string = HISTORY_D
   }
 }
 
-export function migrateRoutineDeviceToDevices(routinesDir?: string): void {
-  const dir = routinesDir ?? path.join(USER_DIR, 'routines');
-  if (!fs.existsSync(dir)) return;
-
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
-
-  let migrated = 0;
-  for (const file of files) {
-    const filePath = path.join(dir, file);
-    const raw = fs.readFileSync(filePath, 'utf-8');
-
-    let doc: Record<string, unknown>;
-    try {
-      doc = yaml.parse(raw) as Record<string, unknown>;
-      if (!doc || typeof doc !== 'object') continue;
-    } catch { continue; }
-
-    if (!('device' in doc)) continue;
-    if ('devices' in doc) {
-      delete doc.device;
-      atomicWriteFileSync(filePath, yaml.stringify(doc));
-      continue;
-    }
-
-    const val = doc.device;
-    if (typeof val !== 'string' || !val.trim()) {
-      throw new Error(`${file}: legacy 'device' field is not a valid device name — repair the file and retry`);
-    }
-    delete doc.device;
-    doc.devices = [val.trim()];
-
-    atomicWriteFileSync(filePath, yaml.stringify(doc));
-    migrated++;
-  }
-
-  if (migrated > 0) {
-    console.error(`Migrated ${migrated} routine${migrated === 1 ? '' : 's'}: device → devices`);
-  }
-}
-
-export function migrateRoutineRemoteCwdToCwd(routinesDir?: string): void {
-  const dir = routinesDir ?? path.join(USER_DIR, 'routines');
-  if (!fs.existsSync(dir)) return;
-
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
-
-  let migrated = 0;
-  let conflicts = 0;
-  for (const file of files) {
-    const filePath = path.join(dir, file);
-    const raw = fs.readFileSync(filePath, 'utf-8');
-
-    let doc: Record<string, unknown>;
-    try {
-      doc = yaml.parse(raw) as Record<string, unknown>;
-      if (!doc || typeof doc !== 'object') continue;
-    } catch { continue; }
-
-    if (!('remoteCwd' in doc)) continue;
-    const remote = doc.remoteCwd;
-    if (typeof remote !== 'string' || !remote.trim()) {
-      delete doc.remoteCwd;
-      atomicWriteFileSync(filePath, yaml.stringify(doc));
-      continue;
-    }
-
-    if ('cwd' in doc) {
-      if (doc.cwd === remote) {
-        delete doc.remoteCwd;
-        atomicWriteFileSync(filePath, yaml.stringify(doc));
-        migrated++;
-      } else {
-        conflicts++;
-      }
-      continue;
-    }
-
-    delete doc.remoteCwd;
-    doc.cwd = remote;
-    atomicWriteFileSync(filePath, yaml.stringify(doc));
-    migrated++;
-  }
-
-  if (migrated > 0) {
-    console.error(`Migrated ${migrated} routine${migrated === 1 ? '' : 's'}: remoteCwd → cwd`);
-  }
-  if (conflicts > 0) {
-    console.error(`${conflicts} routine${conflicts === 1 ? '' : 's'} have conflicting remoteCwd/cwd — left paused for manual repair (migration_conflict)`);
-  }
-}
-
-function pauseUnreadyEnabledRoutines(): void {
-  const enabled = enabledRoutineNames();
-  if (enabled === null) return;
-  const enabledSet = new Set(enabled);
-  const paused: string[] = [];
-  for (const job of listJobs()) {
-    if (!enabledSet.has(job.name)) continue;
-    let ready = true;
-    try {
-      ready = validateJob(job).length === 0 && evaluateActivationReadiness(job).ready;
-    } catch {
-      ready = true;
-    }
-    if (!ready) paused.push(job.name);
-  }
-  if (paused.length === 0) return;
-  const pausedSet = new Set(paused);
-  replaceEnabledRoutines(enabled.filter((name) => !pausedSet.has(name)));
-  console.error(
-    `Paused ${paused.length} routine${paused.length === 1 ? '' : 's'} with an unresolved execution context ` +
-    `(run 'agents routines doctor --all' to see why): ${paused.join(', ')}`,
-  );
-}
-
 export function migrateWatchdogSentinelToConfig(
   sentinelPath: string = path.join(CACHE_DIR, 'state', 'watchdog', 'enabled'),
   enable: (value: boolean) => void = (value) => setConfigValue('watchdog.enabled', value),
@@ -1699,7 +1562,6 @@ export async function runMigration(): Promise<void> {
   mergeOverlappingVersionHomes();
   seedActiveCursorLoginPerVersion();
   migrateKimiSubagentsToMarkdown();
-  migrateRunsIntoRoutines();
   migrateTrashToHidden();
   migrateBackupsToHidden();
   migrateAliasesToUser();
@@ -1709,7 +1571,6 @@ export async function runMigration(): Promise<void> {
   deleteTeamsConfigJson();
   moveTeamsRegistryToHistory();
   cleanupUserConfigJson();
-  cleanupEmptyTopLevelRuns();
   foldUserHooksYamlIntoAgentsYaml();
   foldBrowserProfilesIntoAgentsYaml();
   migrateVersionResourcesToPatterns();
@@ -1734,14 +1595,9 @@ export async function runMigration(): Promise<void> {
 
   migrateExtrasExtrasToAgentsExtras();
 
-  migrateRoutineDeviceToDevices();
-  migrateRoutineRemoteCwdToCwd();
-  migrateLegacyRoutineActivation();
-
   migrateWatchdogSentinelToConfig();
   migrateMenubarSentinelToConfig();
   removeHomeCompiledProjectRules();
-  pauseUnreadyEnabledRoutines();
 
   repairAgentConfigSymlinks();
   repairSelfReferentialBinShims();

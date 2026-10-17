@@ -21,13 +21,6 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
     expect(payload.daemonEnabled).toBe(true);
     expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
     expect(payload.services.browserIpc).toBeUndefined();
-    expect(payload.scheduler).toEqual(
-      expect.objectContaining({
-        routineCount: 0,
-        enabledCount: 0,
-        failingCount: 0,
-      }),
-    );
   });
   it('logs reports no matching lines when no daemon has ever logged', () => {
     const res = run(makeHome(), ['logs']);

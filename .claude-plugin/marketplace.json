@@ -12,7 +12,7 @@
     {
       "name": "agents-cli",
       "source": "./",
-      "description": "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI. Bundles the cross-harness `agents-cli` discovery skill plus per-command skills (run, teams, sessions, devices, secrets, browser, routines, workflows).",
+      "description": "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI. Bundles the cross-harness `agents-cli` discovery skill plus per-command skills (run, teams, sessions, devices, secrets, browser, workflows).",
       "version": "1.0.0",
       "author": {
         "name": "Phoenix Labs",

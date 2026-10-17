@@ -308,8 +308,8 @@ function renderBlock(b: OpenBlock, localHost: string, indent = ''): void {
   console.log();
 }
 
-export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 'routineName'>): string {
-  const host = ({
+export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime'>): string {
+  return ({
     ghostty: 'Ghostty',
     iterm: 'iTerm',
     terminal: 'terminal',
@@ -318,8 +318,6 @@ export function formatFeedRuntime(block: Pick<OpenBlock, 'runtime' | 'origin' | 
     code: 'VS Code',
     cursor: 'Cursor',
   } as Record<string, string>)[block.runtime.toLowerCase()] ?? block.runtime;
-  if (block.origin !== 'routine') return host;
-  return `${host} · routine${block.routineName ? `:${block.routineName}` : ''}`;
 }
 
 export function formatOutcomeHeader(group: OutcomeGroup): string {
@@ -353,8 +351,6 @@ export function sessionHintsFromActive(
     pr?: { url?: string; number?: number };
     worktree?: { slug?: string };
     host?: string;
-    origin?: 'cli' | 'routine';
-    routineName?: string;
   }>,
 ): SessionOutcomeHint[] {
   return sessions.map((s) => ({
@@ -367,8 +363,6 @@ export function sessionHintsFromActive(
     worktreeSlug: s.worktree?.slug,
     project: s.cwd ? projectKeyFromCwd(s.cwd) : undefined,
     host: s.host,
-    origin: s.origin,
-    routineName: s.routineName,
   }));
 }
 

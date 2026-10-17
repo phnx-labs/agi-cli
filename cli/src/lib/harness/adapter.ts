@@ -1,5 +1,4 @@
 import type { AgentId, Mode } from '../types.js';
-import type { JobConfig } from '../scheduling/routines.js';
 import type { ConfiguredDeviceRole } from '../device-config.js';
 
 export interface ExecConfigEnvCtx {
@@ -22,12 +21,6 @@ export interface ExecLaunchArgsCtx {
   addDirs: string[];
 }
 
-export interface RoutineLaunchCtx {
-  mode: Mode;
-  config: JobConfig;
-  resolveHeadlessMode: (agent: AgentId, mode: Mode, interactive: boolean) => void;
-}
-
 export interface HarnessAdapter {
   id: AgentId;
 
@@ -44,8 +37,6 @@ export interface HarnessAdapter {
   execPreModeArgs?(ctx: ExecLaunchArgsCtx): string[] | undefined;
 
   execModeArgs?(ctx: ExecLaunchArgsCtx): string[] | undefined;
-
-  routineModeArgs?(cmd: string[], ctx: RoutineLaunchCtx): void;
 }
 
 export const CONFIG_DIR_ENV_KEYS = [

@@ -18,9 +18,6 @@ import {
   getDaemonStatus,
 } from '../daemon/daemon.js';
 import { getDaemonDir } from '../state.js';
-import { writeRunMeta, type RunMeta } from '../scheduling/routines.js';
-import { getRunsDir } from '../state.js';
-import { monitorRunningJobs, reapExitedRunningJobs } from '../daemon/runner.js';
 
 let priorDaemonDir: string | undefined;
 beforeAll(() => {
@@ -162,118 +159,6 @@ describe('isDaemonRunning — pid-file/heartbeat desync', () => {
     } finally {
       child.kill('SIGKILL');
     }
-  });
-});
-
-
-describe('monitorRunningJobs — pid-reuse + max wall-clock', () => {
-  const cleanupDirs: string[] = [];
-  afterEach(() => {
-    for (const d of cleanupDirs.splice(0)) {
-      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
-    }
-  });
-
-  it('finalizes a run whose pid is dead (basic orphan reap)', () => {
-    const meta: RunMeta = {
-      jobName: '__selfheal-dead-pid__',
-      runId: 'test-dead-1',
-      agent: 'claude',
-      pid: 999999,
-      spawnedAt: Date.now() - 60_000,
-      status: 'running',
-      startedAt: new Date(Date.now() - 60_000).toISOString(),
-      completedAt: null,
-      exitCode: null,
-    };
-    writeRunMeta(meta);
-    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
-
-    monitorRunningJobs();
-
-    const metaPath = path.join(getRunsDir(), meta.jobName, meta.runId, 'meta.json');
-    const updated: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-    expect(updated.status).not.toBe('running');
-    expect(updated.completedAt).not.toBeNull();
-  });
-
-  it('finalizes an over-cap run without killing the reaping process itself', () => {
-    const meta: RunMeta = {
-      jobName: '__selfheal-wallclock__',
-      runId: 'test-wall-1',
-      agent: 'claude',
-      pid: process.pid,
-      spawnedAt: Date.now(),
-      status: 'running',
-      startedAt: new Date(Date.now() - 25 * 60 * 60_000).toISOString(),
-      completedAt: null,
-      exitCode: null,
-    };
-    writeRunMeta(meta);
-    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
-
-    monitorRunningJobs();
-
-    const metaPath = path.join(getRunsDir(), meta.jobName, meta.runId, 'meta.json');
-    const updated: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-    expect(updated.status).toBe('timeout');
-    expect(updated.completedAt).not.toBeNull();
-  });
-});
-
-describe('reapExitedRunningJobs — async daemon-tick reaper', () => {
-  const cleanupDirs: string[] = [];
-  afterEach(() => {
-    for (const d of cleanupDirs.splice(0)) {
-      try { fs.rmSync(d, { recursive: true, force: true }); } catch {}
-    }
-  });
-
-  it('finalizes a run whose pid is dead, same as the sync path', async () => {
-    const meta: RunMeta = {
-      jobName: '__reap-async-dead__',
-      runId: 'reap-async-1',
-      agent: 'claude',
-      pid: 999999,
-      spawnedAt: Date.now() - 60_000,
-      status: 'running',
-      startedAt: new Date(Date.now() - 60_000).toISOString(),
-      completedAt: null,
-      exitCode: null,
-    };
-    writeRunMeta(meta);
-    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
-
-    await reapExitedRunningJobs();
-
-    const metaPath = path.join(getRunsDir(), meta.jobName, meta.runId, 'meta.json');
-    const updated: RunMeta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-    expect(updated.status).not.toBe('running');
-    expect(updated.completedAt).not.toBeNull();
-  });
-
-  it('does not freeze the event loop while it reaps (a concurrent timer still fires)', async () => {
-    const meta: RunMeta = {
-      jobName: '__reap-async-live__',
-      runId: 'reap-async-2',
-      agent: 'claude',
-      pid: process.pid,
-      spawnedAt: Date.now(),
-      status: 'running',
-      startedAt: new Date().toISOString(),
-      completedAt: null,
-      exitCode: null,
-    };
-    writeRunMeta(meta);
-    cleanupDirs.push(path.join(getRunsDir(), meta.jobName));
-
-    let timerFired = false;
-    const t = setTimeout(() => { timerFired = true; }, 0);
-    const reap = reapExitedRunningJobs();
-    await new Promise((r) => setImmediate(r));
-    await reap;
-    clearTimeout(t);
-    expect(timerFired).toBe(true);
   });
 });
 

@@ -4,7 +4,6 @@ import {
   parseWhereSpec,
   placementFromRunFlags,
   expandPlacementToRunFlags,
-  placementFromHostStrategy,
   formatPlacement,
   PlacementError,
   hostFamilyTarget,
@@ -14,7 +13,6 @@ describe('parseWhereSpec', () => {
   it('parses reserved kinds', () => {
     expect(parseWhereSpec('local')).toEqual({ kind: 'local', source: '--where' });
     expect(parseWhereSpec('AUTO')).toEqual({ kind: 'device', target: 'auto', source: '--where' });
-    expect(parseWhereSpec('fleet')).toEqual({ kind: 'fleet', source: '--where' });
     expect(parseWhereSpec('cloud')).toEqual({ kind: 'cloud', source: '--where' });
     expect(parseWhereSpec('lease')).toEqual({ kind: 'lease', source: '--where' });
   });
@@ -138,24 +136,9 @@ describe('expandPlacementToRunFlags', () => {
       provider: 'codex',
     });
   });
-
-  it('rejects fleet on bare run', () => {
-    expect(() => expandPlacementToRunFlags(parseWhereSpec('fleet'))).toThrow(/routines/);
-  });
 });
 
-describe('placementFromHostStrategy / format / hostFamily', () => {
-  it('maps routine strategies', () => {
-    expect(placementFromHostStrategy('local')).toEqual({ kind: 'local', source: 'hostStrategy:local' });
-    expect(placementFromHostStrategy('host', 'mac-mini')).toEqual({
-      kind: 'device',
-      target: 'mac-mini',
-      source: 'hostStrategy:host',
-    });
-    expect(placementFromHostStrategy('fleet').kind).toBe('fleet');
-    expect(placementFromHostStrategy('cloud').kind).toBe('cloud');
-  });
-
+describe('format / hostFamily', () => {
   it('formats compactly', () => {
     expect(formatPlacement({ kind: 'local', source: 'x' })).toBe('local');
     expect(formatPlacement({ kind: 'device', target: 'auto', source: 'x' })).toBe('device:auto');

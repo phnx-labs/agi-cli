@@ -26,14 +26,4 @@ export const museAdapter: HarnessAdapter = {
 ${slotAwareConfigEnvBash([{ env: 'XDG_CONFIG_HOME', rel: '.config' }, { env: 'XDG_DATA_HOME', rel: '.local/share' }], '$VERSION_DIR/home')}
 `;
   },
-
-  routineModeArgs(cmd, ctx) {
-    if (ctx.mode === 'plan') {
-      cmd.push('--disable-write');
-    } else if (ctx.mode === 'auto') {
-      cmd.push('--disable-approval');
-    } else if (ctx.mode === 'skip') {
-      cmd.push('--yolo');
-    }
-  },
 };

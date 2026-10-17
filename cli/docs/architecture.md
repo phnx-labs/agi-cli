@@ -44,7 +44,7 @@ flowchart LR
   subgraph Portable
     DR[DotAgents repositories]
     DD[Device declarations]
-    TD[Team and routine definitions]
+    TD[Team definitions]
   end
   subgraph Machine-owned
     HT[Harness transcripts]
@@ -64,7 +64,7 @@ flowchart LR
 ```
 
 Durable transcripts remain harness-native. The session index is a rebuildable search
-projection. Run, team, and routine records own execution outcomes and link to sessions
+projection. Run and team records own execution outcomes and link to sessions
 instead of replacing them. Device declarations and resource repositories are portable;
 caches, credentials, browser identities, and live-process registries are machine-local.
 

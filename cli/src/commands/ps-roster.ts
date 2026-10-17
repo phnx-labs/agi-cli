@@ -18,7 +18,6 @@ import { machineId, normalizeHost } from '../lib/session/sync/config.js';
 import { stringWidth, truncateToWidth, padToWidth, terminalWidth } from '../lib/session/width.js';
 import { formatCompactAge } from '../lib/session/relative-time.js';
 import { colorAgent } from '../lib/agents.js';
-import { fuzzyMatch, FUZZY_PRESETS } from '../lib/fuzzy.js';
 import { listBookmarks } from '../lib/session/bookmarks.js';
 import { cleanPreview, formatTodoCompact, isAwaitingUser, shortCwd, signalBadges, statusColor } from '../lib/session/presentation.js';
 import { githubRepoUrlFromCwd } from './sessions-picker.js';
@@ -413,7 +412,6 @@ export async function renderActiveSessions(
     hosts?: string[];
     bookmarksOnly?: boolean;
     statuses?: LiveStatusFilter[];
-    routine?: boolean | string;
     includeLead?: boolean;
   } = {},
 ): Promise<void> {
@@ -425,11 +423,9 @@ export async function renderActiveSessions(
   const merged = opts.bookmarksOnly
     ? gathered.sessions.filter((s) => !!s.sessionId && listBookmarks().has(s.sessionId))
     : gathered.sessions;
-  const routineFiltered = filterActiveSessionsByRoutine(merged, opts.routine);
-
   const statusFiltered = opts.statuses?.length
-    ? routineFiltered.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
-    : routineFiltered.filter(isRunningLiveSession);
+    ? merged.filter((session) => opts.statuses!.some((status) => matchesLiveStatus(session, status)))
+    : merged.filter(isRunningLiveSession);
   const sessions = statusFiltered;
 
   if (asJson) {
@@ -472,24 +468,6 @@ export async function renderActiveSessions(
   if (waitingOnly && sessions.some(isAwaitingUser)) process.exitCode = 1;
 }
 
-export function filterActiveSessionsByRoutine(
-  sessions: ActiveSession[],
-  routine: boolean | string | undefined,
-): ActiveSession[] {
-  if (!routine) return sessions;
-  const routineSessions = sessions.filter((session) =>
-    session.origin === 'routine' || !!session.routineName,
-  );
-  if (typeof routine !== 'string') return routineSessions;
-  const names = [...new Set(
-    routineSessions.map((session) => session.routineName).filter((name): name is string => !!name),
-  )];
-  const selected = resolveRoutineName(routine, names);
-  return selected
-    ? routineSessions.filter((session) => session.routineName === selected)
-    : [];
-}
-
 export type LiveStatusFilter =
   | 'working'
   | 'idle'
@@ -526,16 +504,6 @@ function printCrossMachineTip(): void {
     "\nTip: include sessions from your other machines — register them with 'ag devices sync', then rerun. Use --local to skip.",
   ));
 }
-export function resolveRoutineName(query: string, names: readonly string[]): string | null {
-  const normalized = query.trim().toLowerCase();
-  if (!normalized) return null;
-  const exact = names.find((name) => name.toLowerCase() === normalized);
-  if (exact) return exact;
-  const containing = names.filter((name) => name.toLowerCase().includes(normalized));
-  if (containing.length === 1) return containing[0];
-  return fuzzyMatch(query, names, FUZZY_PRESETS.dynamic);
-}
-
 
 export interface LiveRosterOptions extends LiveStatusFlags {
   json?: boolean;
@@ -548,7 +516,6 @@ export interface LiveRosterOptions extends LiveStatusFlags {
   until?: string;
   all?: boolean;
   bookmarks?: boolean;
-  routine?: boolean | string;
   project?: string;
   includeLead?: boolean;
   sort?: string;
@@ -576,7 +543,6 @@ export async function runLiveRoster(options: LiveRosterOptions): Promise<void> {
         since: options.since,
         all: options.all,
         bookmarks: options.bookmarks,
-        routine: options.routine,
       }),
       { local: options.local === true, hosts },
     );
@@ -588,7 +554,6 @@ export async function runLiveRoster(options: LiveRosterOptions): Promise<void> {
     hosts,
     bookmarksOnly: options.bookmarks === true,
     statuses: liveStatuses,
-    routine: options.routine,
     includeLead: options.includeLead === true,
   });
 }

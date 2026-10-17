@@ -116,7 +116,7 @@ export function filterCachedUnattributed(
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
 >;
 
@@ -142,8 +142,6 @@ export function backfillActiveRowsFromMeta(
       const ts = new Date(m.timestamp).getTime();
       if (!Number.isNaN(ts)) s.startedAtMs = ts;
     }
-    if (!s.origin && m.origin) s.origin = m.origin;
-    if (!s.routineName && m.routineName) s.routineName = m.routineName;
     if (!s.harness && m.harness) s.harness = m.harness;
     if (s.tokenCount == null && m.tokenCount != null) s.tokenCount = m.tokenCount;
     if (s.durationMs == null && m.durationMs != null) s.durationMs = m.durationMs;
@@ -374,8 +372,6 @@ export interface ActiveSession {
   quietSinceMs?: number;
   status: ActiveStatus;
   phase?: SessionPhase;
-  origin?: 'cli' | 'routine';
-  routineName?: string;
   presence?: Presence;
   hostLink?: HostLink;
   pidAlive?: boolean;

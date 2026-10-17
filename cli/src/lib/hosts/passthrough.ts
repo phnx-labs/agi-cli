@@ -77,9 +77,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   update: {},
   teams: {},
   send: {},
-  routines: {},
-  jobs: {},
-  cron: {},
   prune: {},
   restore: {},
   worktree: {},
@@ -416,11 +413,7 @@ export async function maybeRunOnHost(
   }
 
   if (allArgs.includes('--hosts') && hostsFlag?.toLowerCase() !== 'all') return false;
-  if (allArgs.includes('--devices')) {
-    if (devicesFlag === undefined) return false;
-    const isAll = devicesFlag.toLowerCase() === 'all';
-    if (!isAll && command !== 'routines') return false;
-  }
+  if (allArgs.includes('--devices') && devicesFlag?.toLowerCase() !== 'all') return false;
 
   if (!isKnownTopLevelCommand(command)) return false;
 

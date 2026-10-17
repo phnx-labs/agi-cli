@@ -33,7 +33,7 @@ without pretending their underlying state has moved.
 
 ## Held worktrees — surface stranded work, don't just count it
 
-The nightly `worktree-sweep` routine (PHNX-3503, in `phnx-labs/.agents`) reclaims merged
+The nightly `worktree-sweep` job (PHNX-3503, in `phnx-labs/.agents`) reclaims merged
 agent worktrees and correctly **holds** anything dirty, unmerged, or undeterminable — a
 fail-closed bias that is right for a destructive job, but which left the held set a
 silent, growing residue that nothing resolved. `agents fleet worktrees` is the read-only

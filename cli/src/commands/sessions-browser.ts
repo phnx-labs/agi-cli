@@ -17,7 +17,7 @@ import { buildPreview, setRemotePreviewRepaint, LIVE_ROW_PREFIX, handlePickedSes
 import { gatherActiveSessions, isRunningLiveSession } from '../lib/session/active.js';
 import { cleanPreview, formatPickerLabel, pickerColumnsFor, type SshOriginTag, liveHostLabel, formatLiveStatusHeadline, type PickerColumns } from '../lib/session/presentation.js';
 import { matchesTeam, mergeLocalFirst, parseAgentFilter, sessionMatchesQuery } from '../lib/session/selection.js';
-import { matchesLiveStatus, resolveRoutineName, type LiveStatusFilter } from './ps-roster.js';
+import { matchesLiveStatus, type LiveStatusFilter } from './ps-roster.js';
 
 export interface BrowserFilter {
   running: boolean;
@@ -31,7 +31,6 @@ export interface BrowserFilter {
   statuses: LiveStatusFilter[];
   project?: string;
   until?: string;
-  routine: boolean | string;
   skill?: string;
   plugin?: string;
   limit: number;
@@ -52,7 +51,6 @@ export function buildInitialFilter(initial: Partial<BrowserFilter>): BrowserFilt
     statuses: initial.statuses ?? [],
     project: initial.project,
     until: initial.until,
-    routine: initial.routine ?? false,
     skill: initial.skill,
     plugin: initial.plugin,
     limit: initial.limit ?? 500,
@@ -65,7 +63,7 @@ function poolCacheKey(f: BrowserFilter): string {
   const versionScoped = f.agent?.includes('@') ? f.agent : '';
   return [
     f.window ?? 'all', f.until ?? '', f.teams, f.team ? 'team' : '', versionScoped,
-    f.project ?? '', f.routine, f.skill ?? '', f.plugin ?? '', f.limit, f.unmanaged, f.sort,
+    f.project ?? '', f.skill ?? '', f.plugin ?? '', f.limit, f.unmanaged, f.sort,
   ].join('|');
 }
 
@@ -96,10 +94,6 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
     if (f.statuses.length > 0) live.push('--status', f.statuses.join(','));
     if (f.device) live.push('-D', f.device);
     if (f.bookmarks) live.push('--bookmarks');
-    if (f.routine) {
-      live.push('--routine');
-      if (typeof f.routine === 'string') live.push(f.routine);
-    }
     return live;
   }
   const a = ['sessions'];
@@ -112,10 +106,6 @@ export function browserFilterToArgv(f: BrowserFilter, query = ''): string[] {
   if (f.window) a.push('--since', f.window);
   if (f.until) a.push('--until', f.until);
   if (f.project) a.push('--project', f.project);
-  if (f.routine) {
-    a.push('--routine');
-    if (typeof f.routine === 'string') a.push(f.routine);
-  }
   if (f.skill) a.push('--skill', f.skill);
   if (f.plugin) a.push('--plugin', f.plugin);
   if (f.sort !== 'timestamp') a.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
@@ -137,13 +127,11 @@ export function activeBrowserSeed(opts: {
   since?: string;
   all?: boolean;
   bookmarks?: boolean;
-  routine?: boolean | string;
 }): Partial<BrowserFilter> {
   return {
     running: true,
     teams: !!opts.teams,
     bookmarks: !!opts.bookmarks,
-    routine: opts.routine ?? false,
     agent: opts.agent,
     projectScope: 'all',
     device: normalizeDeviceSeed(opts.host?.[0]),
@@ -195,7 +183,6 @@ async function fetchRawPool(
         since,
         until: f.until,
         project: f.project,
-        origin: f.routine ? 'routine' : undefined,
         skill: f.skill,
         plugin: f.plugin,
         excludeTeamOrigin: !shouldShowTeamSessions(f),
@@ -233,10 +220,6 @@ export function remotePoolArgs(f: BrowserFilter, fixedFilters: boolean): string[
   if (f.window) forwarded.push('--since', f.window);
   if (f.until) forwarded.push('--until', f.until);
   if (f.project) forwarded.push('--project', f.project);
-  if (f.routine) {
-    forwarded.push('--routine');
-    if (typeof f.routine === 'string') forwarded.push(f.routine);
-  }
   if (f.skill) forwarded.push('--skill', f.skill);
   if (f.plugin) forwarded.push('--plugin', f.plugin);
   if (f.sort !== 'timestamp') forwarded.push('--sort', f.sort === 'cost' ? 'cost' : 'duration');
@@ -282,8 +265,6 @@ export function liveSessionToMeta(a: ActiveSession, self: string): SessionMeta {
     prNumber: a.pr?.number,
     ticketId: a.ticket?.id,
     worktreeSlug: a.worktree?.slug,
-    origin: a.origin,
-    routineName: a.routineName,
   };
 }
 
@@ -320,14 +301,6 @@ export function applyFilters(
 ): SessionMeta[] {
   let out = rows;
   if (f.bookmarks) out = out.filter((r) => bookmarks.has(r.id));
-  if (f.routine) {
-    out = out.filter((r) => r.origin === 'routine' || !!r.routineName);
-    if (typeof f.routine === 'string') {
-      const routineNames = distinct(out.map((r) => r.routineName));
-      const selected = resolveRoutineName(f.routine, routineNames);
-      out = selected ? out.filter((r) => r.routineName === selected) : [];
-    }
-  }
   if (f.agent) {
     const { agent, version: rawVersion } = parseAgentFilter(f.agent);
     const localVersion = agent && agent in AGENTS
@@ -404,7 +377,6 @@ function headerFor(f: BrowserFilter): string {
   ];
   if (f.running) bits.push('running');
   if (f.teams) bits.push('teams');
-  if (f.routine) bits.push(`routine:${typeof f.routine === 'string' ? f.routine : 'all'}`);
   if (f.bookmarks) bits.push('bookmarks');
   return bits.join(' · ');
 }

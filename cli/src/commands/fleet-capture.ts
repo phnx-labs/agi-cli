@@ -8,7 +8,6 @@ import { loadDevices } from '../lib/devices/registry.js';
 import { readMeta, updateMeta, getDevicePinsPath } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
 import { listBundles, SecretsClientError } from '../lib/secrets-client.js';
-import { listJobs } from '../lib/scheduling/routines.js';
 import { captureFleet, type CaptureInputs } from '../lib/fleet/capture.js';
 import type { FleetDefaults } from '../lib/fleet/types.js';
 
@@ -72,7 +71,6 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     defaults,
     agentsByDevice: opts.fromPins ? agentsFromPins(names) : undefined,
     secretsBundles: await captureSecretsBundleNames(),
-    routines: listJobs().map((j) => j.name),
   };
 
   const next = captureFleet(meta.fleet, inputs);
@@ -89,7 +87,7 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     chalk.green('Captured fleet profile') +
       chalk.gray(
         ` — ${deviceCount} device(s), ${defaults.agents?.length ?? 0} agent(s), ` +
-          `${inputs.secretsBundles?.length ?? 0} secret bundle(s), ${inputs.routines?.length ?? 0} routine(s).`,
+          `${inputs.secretsBundles?.length ?? 0} secret bundle(s).`,
       ),
   );
   console.log(chalk.gray('  Wrote agents.yaml → fleet:. Push it (`agents repo push`) and run `agents fleet apply` on any machine.'));
@@ -98,7 +96,7 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
 export function registerFleetCaptureCommand(devicesCmd: Command): void {
   devicesCmd
     .command('capture')
-    .description('Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.')
+    .description('Snapshot the live environment (roster names, agents, browser, secret-bundle names) into agents.yaml fleet:.')
     .option('--dry-run', 'print the fleet: block that would be written, and exit')
     .option('--from-pins', "record THIS machine's pinned agents (peer pins are machine-local and never sync)")
     .option('--device <name>', 'capture a single device')

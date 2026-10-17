@@ -431,11 +431,6 @@ export function teamBadge(session: SessionMeta): { plain: string; width: number 
   return { plain, width: stringWidth(plain) };
 }
 
-export function originTag(session: SessionMeta): string {
-  if (session.origin !== 'routine') return '';
-  return `[routine${session.routineName ? ` · ${session.routineName}` : ''}] `;
-}
-
 const MIN_TOPIC_W = 16;
 
 export function timeCell(age: SessionAgeParts, topicSlack: number): { plain: string; text: string; extraW: number } {
@@ -458,7 +453,7 @@ export function flatSessionRow(
   const agentColor = colorAgent(shown);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const project = session.project || '-';
-  const tag = originTag(session) || teamTag(session);
+  const tag = teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
   const restingTodo = !live ? formatTodoCompact(session.todos) : '';
@@ -516,7 +511,7 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
-  const tag = originTag(session) || teamTag(session);
+  const tag = teamTag(session);
   const label = (session as any).label;
   const { glyph, preview } = liveGlyphAndPreview(live);
   const restingTodo = !live ? formatTodoCompact(session.todos) : '';
@@ -721,7 +716,7 @@ export function formatPickerLabel(
   const sshW = sshPlain ? stringWidth(sshPlain) : 0;
   const team = teamBadge(s);
   const teamSeg = team.plain ? chalk.green(team.plain) : '';
-  const tag = originTag(s) || teamTag(s);
+  const tag = teamTag(s);
   const label = (s as any).label;
   const topic = tag ? `${tag}${s.topic ?? ''}` : s.topic;
   const versionStr = s.version || '-';

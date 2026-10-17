@@ -425,17 +425,17 @@ describe('daemon test-home tripwire (PHNX-2545)', () => {
   });
 
   it('passes when the daemon dir sits under the marked test home', () => {
-    const home = '/tmp/agents-routines-add-abc';
+    const home = '/tmp/agents-test-home-abc';
     const dir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
     expect(() => assertTestDaemonHome(dir, home)).not.toThrow();
     expect(() => assertTestDaemonHome(home, home)).not.toThrow();
   });
 
   it('throws when the daemon dir escapes the marked test home', () => {
-    const testHome = '/tmp/agents-routines-add-abc';
+    const testHome = '/tmp/agents-test-home-abc';
     const realDir = path.join(os.homedir(), '.agents', '.cache', 'helpers', 'daemon');
     expect(() => assertTestDaemonHome(realDir, testHome)).toThrow(/test-home tripwire/i);
-    expect(() => assertTestDaemonHome('/tmp/agents-routines-add-abc-evil/x', testHome)).toThrow(/test-home tripwire/i);
+    expect(() => assertTestDaemonHome('/tmp/agents-test-home-abc-evil/x', testHome)).toThrow(/test-home tripwire/i);
   });
 
   it.skipIf(process.platform === 'win32')(

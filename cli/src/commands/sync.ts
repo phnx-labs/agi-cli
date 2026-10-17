@@ -208,7 +208,7 @@ export function registerSyncCommand(program: Command): void {
     .option('--secrets', 'Umbrella: pull encrypted secret bundles from the remote', false)
     .option('--cloud', 'Umbrella: fetch all remote state but skip the local reconcile', false)
     .option('--local', "Umbrella: reconcile resources into installed agents only (no fetch)", false)
-    .option('--prune-clis', 'Umbrella: also purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper) when a fixed peer exists. DESTRUCTIVE and off by default — the purge never runs on a routine sync.', false)
+    .option('--prune-clis', 'Umbrella: also purge stale/legacy agents-cli installs (npx-cache, pre-1.22.30, unsafe helper) when a fixed peer exists. DESTRUCTIVE and off by default — the purge never runs on an ordinary sync.', false)
     .option('--delete', 'Also remove what a repo deleted: trash plugins, commands and skills that came from that repo and no longer exist in it. Needs a repo (agents sync <repo> --delete); resources from other repos or installed by hand are kept', false)
     .action(async (agentSpec: string | undefined, repo: string | undefined, opts: SyncOpts) => {
       await runSync(agentSpec, repo, opts);

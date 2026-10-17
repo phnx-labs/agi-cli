@@ -19,7 +19,6 @@ export interface FleetManifest {
   defaults?: FleetDefaults;
   devices: 'all' | Record<string, FleetDeviceOverride>;
   secrets?: { bundles?: string[] };
-  routines?: string[];
   discovery?: Record<string, 'approved' | 'ignored'>;
   ignored?: IgnoredDeviceEntry[];
 }

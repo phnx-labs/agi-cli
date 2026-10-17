@@ -44,24 +44,6 @@ import { countSessionsInScope } from '../lib/session/discover.js';
 import { isSessionTrackedAgent } from '@phnx-labs/sessions-cli/reader';
 import { damerauLevenshtein } from '../lib/fuzzy.js';
 import { terminalWidth, truncateToWidth, stringWidth, stripAnsi } from '../lib/session/width.js';
-import {
-  readJobFileResult,
-  getJobRunsDir,
-  readRunMeta,
-  isOneShotRoutine,
-  isPastOneShotRoutine,
-  listJobs,
-  type JobConfig,
-  type RunMeta,
-} from '../lib/scheduling/routines.js';
-import {
-  routineDeviceIndex,
-  currentRoutineDevice,
-  routineEnabledOnThisDevice,
-  type RoutineDeviceIndex,
-} from '../lib/routine-activation.js';
-import { humanizeCron } from '../lib/routines-format.js';
-
 const DRILLABLE_KINDS = [
   'commands',
   'skills',
@@ -71,12 +53,11 @@ const DRILLABLE_KINDS = [
   'plugins',
   'workflows',
   'subagents',
-  'routines',
 ] as const;
 type DrillableKind = typeof DRILLABLE_KINDS[number];
 
 const SIMPLE_KINDS = ['commands', 'skills', 'rules', 'subagents', 'workflows'] as const;
-const RICH_KINDS = ['hooks', 'plugins', 'mcp', 'routines'] as const;
+const RICH_KINDS = ['hooks', 'plugins', 'mcp'] as const;
 
 type _KindsPartitioned =
   Exclude<DrillableKind, typeof SIMPLE_KINDS[number] | typeof RICH_KINDS[number]> extends never
@@ -93,7 +74,6 @@ const SINGULAR_DRILL_ALIASES: Record<string, DrillableKind> = {
   plugin: 'plugins',
   workflow: 'workflows',
   subagent: 'subagents',
-  routine: 'routines',
 };
 
 const CAPABILITY_NAMES: readonly CapabilityName[] = [
@@ -159,7 +139,6 @@ export interface InspectOptions {
   plugins?: boolean | string;
   workflows?: boolean | string;
   subagents?: boolean | string;
-  routines?: boolean | string;
   command?: string;
   skill?: string;
   hook?: string;
@@ -167,7 +146,6 @@ export interface InspectOptions {
   plugin?: string;
   workflow?: string;
   subagent?: string;
-  routine?: string;
 }
 
 
@@ -311,7 +289,6 @@ function isDotAgentsRoot(dir: string): boolean {
     if (fs.existsSync(path.join(dir, marker))) return true;
   }
   for (const kind of DRILLABLE_KINDS) {
-    if (kind === 'routines') continue;
     if (safeStat(path.join(dir, kind))?.isDirectory()) return true;
   }
   return false;
@@ -322,18 +299,7 @@ export async function inspectRepo(repo: RepoTarget, options: InspectOptions): Pr
   const jsonHead = { repo: repo.label, root: repo.root };
 
   if (drill) {
-    let items: ResourceItem[];
-    if (drill.kind === 'routines') {
-      const provider = defaultRoutineLive();
-      items = collectRepoRoutines(repo, provider.live);
-      if (!options.json) {
-        for (const err of provider.errors) {
-          console.error(chalk.yellow(`device config unreadable — ${err}`));
-        }
-      }
-    } else {
-      items = collectRepoKind(repo, drill.kind);
-    }
+    const items = collectRepoKind(repo, drill.kind);
     if (drill.query === true || drill.query === undefined) {
       await renderItemList(repo.label, jsonHead, drill.kind, items, options,
         drill.kind === 'hooks'
@@ -362,254 +328,10 @@ export function collectRepoKind(repo: RepoTarget, kind: DrillableKind): Resource
     if (fs.existsSync(subrulesDir)) return readResourceDir(subrulesDir, kind, repo.label);
   }
 
-  if (kind === 'routines') return collectRepoRoutines(repo);
-
   return readResourceDir(path.join(repo.root, kind), kind, repo.label);
 }
 
-
-export interface RoutineLiveState {
-  devices: string[];
-  materialized: boolean;
-  thisDevice: string;
-  enabledHere: boolean | null;
-  lastStatus: RunMeta['status'] | null;
-  lastAt: string | null;
-}
-
-const NO_LIVE_STATE: RoutineLiveState = {
-  devices: [], materialized: false, thisDevice: '', enabledHere: null, lastStatus: null, lastAt: null,
-};
-
-function routineEnabledHere(config: JobConfig, live: RoutineLiveState): boolean {
-  return live.enabledHere === null ? config.enabled : live.enabledHere;
-}
-
-function latestRunOf(name: string, maxProbes = 20): RunMeta | null {
-  let runIds: string[];
-  try {
-    runIds = fs.readdirSync(getJobRunsDir(name), { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name)
-      .sort()
-      .reverse();
-  } catch { return null; }
-
-  for (const runId of runIds.slice(0, maxProbes)) {
-    const meta = readRunMeta(name, runId);
-    if (meta) return meta;
-  }
-  return null;
-}
-
-function defaultRoutineLive(): { live: (name: string) => RoutineLiveState; errors: string[] } {
-  let index: RoutineDeviceIndex;
-  try {
-    index = routineDeviceIndex();
-  } catch (err) {
-    return { live: () => NO_LIVE_STATE, errors: [(err as Error).message] };
-  }
-  const thisDevice = (() => { try { return currentRoutineDevice(); } catch { return ''; } })();
-  const errors = [...index.errors];
-
-  let ownDocError: string | null = null;
-  const enabledOnThisDevice = (name: string): boolean | null => {
-    try {
-      return routineEnabledOnThisDevice(name);
-    } catch (err) {
-      if (!ownDocError) {
-        ownDocError = `this device's own config is unreadable — ${(err as Error).message}`;
-        errors.push(ownDocError);
-      }
-      return null;
-    }
-  };
-
-  const live = (name: string): RoutineLiveState => {
-    const run = latestRunOf(name);
-    return {
-      devices: index.byRoutine.get(name) ?? [],
-      materialized: index.materialized,
-      thisDevice,
-      enabledHere: enabledOnThisDevice(name),
-      lastStatus: run?.status ?? null,
-      lastAt: run?.startedAt ?? null,
-    };
-  };
-  return { live, errors };
-}
-
-export function compactAge(iso: string | null, now: Date = new Date()): string {
-  if (!iso) return '';
-  const then = Date.parse(iso);
-  if (!Number.isFinite(then)) return '';
-  const mins = Math.floor((now.getTime() - then) / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
-  const days = Math.floor(hours / 24);
-  if (days < 365) return `${days}d`;
-  return `${Math.floor(days / 365)}y`;
-}
-
-export function routineFireLabel(job: JobConfig, now: Date = new Date()): string {
-  const parts: string[] = [];
-  if (job.schedule) parts.push(humanizeCron(job.schedule, job.timezone));
-  if (job.trigger) {
-    const t = job.trigger as { type?: unknown; event?: unknown; action?: unknown; label?: unknown };
-    const event = manifestText(t.event) || manifestText(t.type) || 'event';
-    const qualifier = [manifestText(t.action), manifestText(t.label)].filter(Boolean).join(' ');
-    parts.push(qualifier ? `on ${event} (${qualifier})` : `on ${event}`);
-  }
-  if (parts.length === 0) return 'no schedule or trigger';
-  if (isOneShotRoutine(job)) {
-    parts.push(isPastOneShotRoutine(job, now) ? '(one-shot, expired)' : '(one-shot)');
-  }
-  return parts.join(' · ');
-}
-
-export function routineTargetLabel(job: JobConfig): string {
-  const agent = manifestText(job.agent);
-  if (agent) return `agent ${agent}`;
-  const workflow = manifestText(job.workflow);
-  if (workflow) return `workflow ${workflow}`;
-  if (manifestText(job.command)) return 'command (shell)';
-  return 'nothing configured';
-}
-
-export function routineDescription(job: JobConfig | null, raw: string): string {
-  const prompt = job ? manifestText(job.prompt).trim() : '';
-  if (prompt) return summaryLine(truncate(prompt.replace(/\s+/g, ' '), 400));
-
-  const lines = raw.split('\n');
-  for (const line of lines) {
-    const comment = line.match(/^\s*#\s?(.+)$/);
-    if (!comment) { if (line.trim()) break; else continue; }
-    const text = comment[1].trim().replace(/^Routine:\s*/i, '');
-    if (!text || /^(yaml-language-server|Install:|Usage:)/i.test(text)) continue;
-    return summaryLine(text);
-  }
-
-  const command = job ? manifestText(job.command) : '';
-  for (const line of command.split('\n')) {
-    const text = line.trim();
-    if (!text || text.startsWith('#') || /^set\s+-/.test(text)) continue;
-    return truncate(text, 120);
-  }
-  return '';
-}
-
-export function collectRepoRoutines(
-  repo: RepoTarget,
-  live: (name: string) => RoutineLiveState = defaultRoutineLive().live,
-  now: Date = new Date(),
-): ResourceItem[] {
-  const dir = path.join(repo.root, 'routines');
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch { return []; }
-
-  const items: ResourceItem[] = [];
-  const seen = new Map<string, ResourceItem>();
-
-  const files = entries
-    .filter(e => e.isFile() && /\.ya?ml$/.test(e.name) && !e.name.startsWith('.'))
-    .map(e => e.name)
-    .sort((a, b) => {
-      const an = a.replace(/\.ya?ml$/, ''), bn = b.replace(/\.ya?ml$/, '');
-      if (an !== bn) return an.localeCompare(bn);
-      return (a.endsWith('.yml') ? 0 : 1) - (b.endsWith('.yml') ? 0 : 1);
-    });
-
-  for (const file of files) {
-    const filePath = path.join(dir, file);
-    const { config, problem } = readJobFileResult(filePath);
-    const basename = file.replace(/\.ya?ml$/, '');
-    const name = config?.name || basename;
-
-    const existing = seen.get(name);
-    if (existing) {
-      const collision = `both .yml and .yaml exist — ${file} is ignored; resolve before editing`;
-      existing.extra = [...(existing.extra ?? []), ['problem', collision]];
-      if (existing.json) existing.json.problem = collision;
-      continue;
-    }
-
-    const raw = (() => { try { return fs.readFileSync(filePath, 'utf-8'); } catch { return ''; } })();
-    const state = config ? live(name) : NO_LIVE_STATE;
-    const extra: Array<[string, string]> = [];
-
-    if (config) {
-      extra.push(['fires', routineFireLabel(config, now)]);
-      extra.push(['runs', routineTargetLabel(config)]);
-      extra.push(['devices', state.devices.length > 0
-        ? state.devices.join(', ')
-        : state.materialized ? 'no device — will not fire' : 'no device allowlist yet']);
-      extra.push(['last', state.lastStatus
-        ? `${state.lastStatus}${state.lastAt ? ` · ${compactAge(state.lastAt, now)} ago` : ''}`
-        : 'never run']);
-      extra.push(['enabled', routineEnabledHere(config, state)
-        ? `yes${state.thisDevice ? ` (on ${state.thisDevice})` : ''}`
-        : `no${state.thisDevice ? ` (on ${state.thisDevice})` : ''}`]);
-      const repoRef = manifestText(config.repo);
-      if (repoRef) extra.push(['repo', repoRef]);
-      const tz = manifestText(config.timezone);
-      if (tz) extra.push(['timezone', tz]);
-      if (config.catchup === false) extra.push(['catchup', 'off — a missed fire is lost']);
-      const host = manifestText(config.host);
-      if (host) extra.push(['host', host]);
-      const pinned = manifestList(config.devices);
-      if (pinned.length > 0) extra.push(['pinned', pinned.join(', ')]);
-      if (name !== basename) extra.push(['file', file]);
-    } else if (problem) {
-      extra.push(['problem', problem]);
-    }
-
-    const item: ResourceItem = {
-      name,
-      source: repo.label,
-      path: filePath,
-      linkTarget: filePath,
-      description: routineDescription(config, raw),
-      extra,
-      json: {
-        path: filePath,
-        schedule: config?.schedule ?? null,
-        scheduleHuman: config ? routineFireLabel(config, now) : null,
-        trigger: config?.trigger ?? null,
-        runs: config ? routineTargetLabel(config) : null,
-        agent: config?.agent ?? null,
-        workflow: config?.workflow ?? null,
-        command: config?.command ?? null,
-        timezone: config?.timezone ?? null,
-        repo: config?.repo ?? null,
-        enabled: config ? routineEnabledHere(config, state) : false,
-        enabledInFile: config?.enabled ?? false,
-        catchup: config ? config.catchup !== false : null,
-        devices: config ? manifestList(config.devices) : [],
-        enabledDevices: state.devices,
-        activationMaterialized: state.materialized,
-        oneShot: config ? isOneShotRoutine(config) : false,
-        expired: config ? isPastOneShotRoutine(config, now) : false,
-        lastStatus: state.lastStatus,
-        lastRunAt: state.lastAt,
-        problem,
-      },
-    };
-    seen.set(name, item);
-    items.push(item);
-  }
-
-  return items.sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function extraOf(item: ResourceItem, key: string): string {
-  return item.extra?.find(([k]) => k === key)?.[1] ?? '';
-}
-
-function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins' | 'routines'>, source: string): ResourceItem[] {
+function readResourceDir(dir: string, kind: Exclude<DrillableKind, 'plugins'>, source: string): ResourceItem[] {
   let entries: fs.Dirent[];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -656,15 +378,6 @@ export function pathSize(p: string): { bytes: number; files: number } {
   return { bytes, files };
 }
 
-function itemsSize(items: ResourceItem[]): { bytes: number; files: number } {
-  let bytes = 0, files = 0;
-  for (const item of items) {
-    const sub = pathSize(item.path);
-    bytes += sub.bytes; files += sub.files;
-  }
-  return { bytes, files };
-}
-
 interface ManifestSummary {
   strategies: Array<{ agent: string; strategy: string }>;
   versions: Array<{ agent: string; version: string }>;
@@ -706,18 +419,10 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
   let totalBytes = 0, totalFiles = 0;
   let repoHookByScript: Map<string, ManifestHook> = new Map();
   let repoMcpConfigs: Map<string, McpYamlConfig> = new Map();
-  let routineActivationErrors: string[] = [];
   if (!options.brief) {
     for (const kind of DRILLABLE_KINDS) {
-      let items: ResourceItem[];
-      if (kind === 'routines') {
-        const provider = defaultRoutineLive();
-        routineActivationErrors = provider.errors;
-        items = collectRepoRoutines(repo, provider.live);
-      } else {
-        items = collectRepoKind(repo, kind);
-      }
-      const size = kind === 'routines' ? itemsSize(items) : pathSize(path.join(repo.root, kind));
+      const items = collectRepoKind(repo, kind);
+      const size = pathSize(path.join(repo.root, kind));
       kindData[kind] = { items, size };
       totalBytes += size.bytes; totalFiles += size.files;
     }
@@ -755,11 +460,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
             name: i.name,
             version: i.extra?.find(([k]) => k === 'version')?.[1],
             groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
-          })) }];
-          if (kind === 'routines') return [kind, { ...base, items: items.map(i => ({
-            name: i.name,
-            description: i.description,
-            ...(i.json ?? {}),
           })) }];
           return [kind, base];
         }),
@@ -827,16 +527,6 @@ function renderRepoSummary(repo: RepoTarget, options: InspectOptions): void {
     printExpandedSection('Hooks', hookRows(kindData.hooks.items, repoHookByScript));
     printExpandedSection('Plugins', pluginRows(kindData.plugins.items));
     printExpandedSection('MCP', mcpRows(kindData.mcp.items, repoMcpConfigs));
-    printExpandedSection('Routines', routineRows(kindData.routines.items));
-    const dark = routineDarkWarning(kindData.routines.items);
-    if (dark) {
-      console.log('');
-      console.log(`  ${chalk.yellow('⚠')}  ${dark}`);
-      console.log(chalk.gray(`     Fix:  agents routines devices <name> --set <device>`));
-    }
-    for (const err of routineActivationErrors) {
-      console.log(chalk.gray(`  device config unreadable — ${err}`));
-    }
   }
 
   console.log('');
@@ -984,7 +674,6 @@ async function renderSummary(agent: AgentId, version: string, versionHome: strin
     printExpandedSection('Hook files', hookRows(itemsByKind.hooks, hookByScript!));
     printExpandedSection('Plugins', pluginRows(itemsByKind.plugins));
     printExpandedSection('MCP', mcpRows(itemsByKind.mcp, mcpConfigs!));
-    printExpandedSection('Routines', agentRoutineRows(itemsByKind.routines));
   }
 
   if (sessions) {
@@ -1032,13 +721,11 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
 
   const sources = new Set(items.map(i => i.source));
   const hookEvents = kind !== 'hooks' ? null : (hookManifest ?? hookManifestByScript(loadCentralHookManifest()));
-  const isRoutines = kind === 'routines';
-  const routineDevicesColumn = isRoutines && terminalWidth() >= 100;
   await showResourceList({
     resourcePlural: kind,
     resourceSingular: kind.replace(/s$/, ''),
-    extraLabel: isRoutines ? 'Last' : 'Size',
-    extra2Label: routineDevicesColumn ? 'Devices' : (isRoutines ? undefined : (sources.size > 1 ? 'Source' : undefined)),
+    extraLabel: 'Size',
+    extra2Label: sources.size > 1 ? 'Source' : undefined,
     showSync: false,
     nameCap: terminalWidth() >= 120 ? 40 : undefined,
     linkFor: row => items.find(i => i.name === row.name)?.linkTarget,
@@ -1048,21 +735,10 @@ async function renderItemList(header: string, jsonHead: Record<string, unknown>,
       description: (() => {
         const hook = hookEvents?.get(item.name);
         if (hook) return summarizeHook(hook);
-        if (isRoutines) {
-          const problem = extraOf(item, 'problem');
-          if (problem) return problem;
-          return [
-            extraOf(item, 'fires'),
-            routineDevicesColumn ? '' : compactDeviceCell(extraOf(item, 'devices')),
-            summaryLine(item.description),
-          ].filter(Boolean).join(' · ');
-        }
         return summaryLine(item.description);
       })(),
-      extra: isRoutines ? routineLastCell(item) : itemSizeLabel(item.path),
-      extra2: routineDevicesColumn
-        ? compactDeviceCell(extraOf(item, 'devices')) || 'none'
-        : (isRoutines ? undefined : (sources.size > 1 ? item.source : undefined)),
+      extra: itemSizeLabel(item.path),
+      extra2: sources.size > 1 ? item.source : undefined,
       targets: [],
       buildDetail: () => previewFor(kind, item, hookEvents ?? new Map()),
     })),
@@ -1220,12 +896,6 @@ function summaryResourcesJson(
         version: i.extra?.find(([k]) => k === 'version')?.[1],
         groups: Object.fromEntries((i.groups ?? []).map(g => [g.label, g.items.length])),
       })) };
-    } else if (kind === 'routines') {
-      out[kind] = { ...base, items: items.map(i => ({
-        name: i.name,
-        source: i.source,
-        ...Object.fromEntries(i.extra ?? []),
-      })) };
     } else {
       out[kind] = { ...base, names: items.map(i => i.name) };
     }
@@ -1260,40 +930,7 @@ function collectKind(agent: AgentId, versionHome: string, kind: DrillableKind): 
       }));
     case 'plugins':
       return pluginItems();
-    case 'routines':
-      return agentRoutineItems(agent);
   }
-}
-
-function agentRoutineItems(agent: AgentId): ResourceItem[] {
-  const { live } = defaultRoutineLive();
-  const now = new Date();
-  let jobs: JobConfig[];
-  try { jobs = listJobs(); } catch { return []; }
-
-  return jobs
-    .filter(job => job.agent === agent)
-    .map(job => {
-      const state = live(job.name);
-      return {
-        name: job.name,
-        source: 'user',
-        path: '',
-        linkTarget: '',
-        description: routineDescription(job, ''),
-        extra: [
-          ['fires', routineFireLabel(job, now)],
-          ['enabled', job.enabled ? 'yes' : 'no'],
-          ['devices', state.devices.length > 0
-            ? state.devices.join(', ')
-            : state.materialized ? 'no device — will not fire' : 'no device allowlist yet'],
-          ['last', state.lastStatus
-            ? `${state.lastStatus}${state.lastAt ? ` · ${compactAge(state.lastAt, now)} ago` : ''}`
-            : 'never run'],
-        ] as Array<[string, string]>,
-      };
-    })
-    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function pluginItems(): ResourceItem[] {
@@ -1612,102 +1249,6 @@ function pluginRows(items: ResourceItem[]): RichRow[] {
   });
 }
 
-const UNHEALTHY_RUN = new Set(['failed', 'timeout', 'missed', 'blocked']);
-
-export function routineHealthTier(item: ResourceItem): number {
-  if (extraOf(item, 'problem')) return 0;
-  const fires = extraOf(item, 'fires');
-  if (fires.includes('expired')) return 5;
-  const devices = extraOf(item, 'devices');
-  if (devices.startsWith('no device —')) return 1;
-  if (extraOf(item, 'enabled').startsWith('no')) return 2;
-  const last = extraOf(item, 'last').split(' ')[0];
-  if (UNHEALTHY_RUN.has(last)) return 3;
-  return 4;
-}
-
-function routineRows(items: ResourceItem[]): RichRow[] {
-  const ordered = [...items].sort((a, b) => {
-    const at = routineHealthTier(a), bt = routineHealthTier(b);
-    return at !== bt ? at - bt : a.name.localeCompare(b.name);
-  });
-  const nameW = ordered.length > 0 ? Math.max(...ordered.slice(0, 6).map(r => r.name.length)) : 0;
-  const budget = Math.max(30, terminalWidth() - nameW - 14);
-  const firesW = Math.min(21, Math.max(12, Math.floor(budget * 0.42)));
-  const devicesW = Math.min(14, Math.max(7, Math.floor(budget * 0.22)));
-
-  return ordered.map(item => {
-    const problem = extraOf(item, 'problem');
-    const fires = extraOf(item, 'fires');
-    if (problem && !fires) {
-      return { source: item.source, name: item.name, linkTarget: item.linkTarget, detail: chalk.red(problem) };
-    }
-    const devices = compactDeviceCell(extraOf(item, 'devices'));
-    const last = extraOf(item, 'last');
-    const problemW = Math.max(12, budget - firesW - devicesW - stringWidth(last) - 8);
-    const detail = [
-      chalk.gray(truncateToWidth(fires, firesW).padEnd(firesW)),
-      (devices === 'none ⚠' ? chalk.yellow : chalk.gray)(truncateToWidth(devices, devicesW).padEnd(devicesW)),
-      colorLast(last),
-      problem ? chalk.red(truncateToWidth(`  ⚠ ${problem}`, problemW)) : '',
-    ].join('  ').trimEnd();
-    return {
-      source: item.source,
-      name: item.name,
-      linkTarget: item.linkTarget,
-      detail,
-    };
-  });
-}
-
-function agentRoutineRows(items: ResourceItem[]): RichRow[] {
-  const ordered = [...items].sort((a, b) => {
-    const at = routineHealthTier(a), bt = routineHealthTier(b);
-    return at !== bt ? at - bt : a.name.localeCompare(b.name);
-  });
-  return ordered.map(item => ({
-    source: item.source,
-    name: item.name,
-    detail: `${extraOf(item, 'fires').padEnd(20)}  ${colorLast(extraOf(item, 'last'))}`,
-  }));
-}
-
-function routineLastCell(item: ResourceItem, width = 10): string {
-  const last = extraOf(item, 'last');
-  if (!last || last === 'never run') return 'never';
-  const [status, , age] = last.split(' ');
-  const word = status === 'completed' ? 'ok' : status === 'failed' ? 'fail' : status;
-  return truncateToWidth(age ? `${word} ${age}` : word, width);
-}
-
-function compactDeviceCell(devices: string): string {
-  if (devices.startsWith('no device —')) return 'none ⚠';
-  if (devices.startsWith('no device allowlist yet')) return 'unset';
-  const list = devices.split(', ').filter(Boolean);
-  return list.length > 1 ? `${list[0]} +${list.length - 1}` : (list[0] ?? '');
-}
-
-function colorLast(last: string): string {
-  if (!last || last === 'never run') return chalk.gray('never run');
-  const word = last.split(' ')[0];
-  if (word === 'completed') return chalk.green(last);
-  if (UNHEALTHY_RUN.has(word)) return chalk.red(last);
-  return chalk.gray(last);
-}
-
-export function routineDarkWarning(items: ResourceItem[]): string | null {
-  const materialized = items.some(i => {
-    const d = extraOf(i, 'devices');
-    return d !== '' && !d.startsWith('no device allowlist yet');
-  });
-  if (!materialized) return null;
-  const dark = items.filter(i => extraOf(i, 'devices').startsWith('no device —')).length;
-  if (dark === 0) return null;
-  const noun = items.length === 1 ? 'routine' : 'routines';
-  const verb = dark === 1 ? 'is' : 'are';
-  const pronoun = dark === 1 ? 'it' : 'they';
-  return `${dark} of ${items.length} ${noun} ${verb} on no device's allowlist — ${pronoun} will not fire.`;
-}
 
 function mcpRows(items: ResourceItem[], configs: Map<string, McpYamlConfig>): RichRow[] {
   return items.map(item => {

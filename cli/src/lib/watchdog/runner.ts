@@ -123,8 +123,6 @@ export interface SessionOutcome {
   status?: ActiveSession['status'];
   startedAtMs?: number;
   lastActivityMs?: number;
-  origin?: ActiveSession['origin'];
-  routineName?: string;
   machine?: string;
   owner?: string;
   stall: StallStatus['kind'];
@@ -500,8 +498,6 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       status: session.status,
       startedAtMs: session.startedAtMs,
       lastActivityMs: session.lastActivityMs,
-      origin: session.origin,
-      routineName: session.routineName,
       machine: session.machine ?? session.provenance?.host,
       owner: session.owner,
       policy,

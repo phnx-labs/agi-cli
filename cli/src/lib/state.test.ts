@@ -69,12 +69,24 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
     fs.writeFileSync(devicePath(), 'config:\n  maxAgents: 4\n');
 
-    updateMeta((m) => ({ ...m, deviceRoutines: ['watchdog'] }));
+    updateMeta((m) => ({ ...m, deviceFleet: { discovery: { 'mac-mini': 'approved' } } }));
 
     const doc = fs.readFileSync(devicePath(), 'utf-8');
     expect(doc).toContain('maxAgents: 4');
-    expect(doc).toContain('- watchdog');
-    expect(readMeta().deviceRoutines).toEqual(['watchdog']);
+    expect(readMeta().deviceFleet?.discovery).toEqual({ 'mac-mini': 'approved' });
+  });
+
+  it('a legacy routines: list in the device doc is ignored on read and left untouched on write', async () => {
+    const { updateMeta, readMeta } = await freshState();
+    fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
+    fs.writeFileSync(devicePath(), 'config:\n  maxAgents: 4\nroutines:\n  - nightly\n');
+
+    expect((readMeta() as Record<string, unknown>).routines).toBeUndefined();
+    updateMeta((m) => ({ ...m, deviceConfig: { ...m.deviceConfig, maxAgents: 5 } }));
+
+    const saved = yaml.parse(fs.readFileSync(devicePath(), 'utf-8'));
+    expect(saved.config).toEqual({ maxAgents: 5 });
+    expect(saved.routines).toEqual(['nightly']);
   });
 
   it('a partial writeMetaUnlocked call preserves omitted config and browser blocks', async () => {
@@ -82,12 +94,12 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
     fs.writeFileSync(devicePath(), 'config:\n  role: worker\nbrowser:\n  defaultProfile: work\n');
 
-    writeMetaUnlocked({ deviceRoutines: ['watchdog'] } as any);
+    writeMetaUnlocked({ deviceFleet: { discovery: { 'mac-mini': 'approved' } } } as any);
 
     const saved = yaml.parse(fs.readFileSync(devicePath(), 'utf-8'));
     expect(saved.config).toEqual({ role: 'worker' });
     expect(saved.browser).toEqual({ defaultProfile: 'work' });
-    expect(saved.routines).toEqual(['watchdog']);
+    expect(saved.fleet).toEqual({ discovery: { 'mac-mini': 'approved' } });
   });
 
   it('a deviceConfig-only write preserves every omitted device metadata block', async () => {

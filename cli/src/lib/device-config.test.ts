@@ -75,26 +75,26 @@ describe('device-scope keys (per-device doc config:)', () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
     setConfigValue('agents.max-concurrent', 4);
-    setConfigValue('scheduler.enabled', false);
+    setConfigValue('daemon.enabled', false);
     setConfigValue('notes', ['runs the releases']);
 
     const doc = readDoc();
     expect(doc).toContain('config:');
     expect(doc).toContain('maxAgents: 4');
-    expect(doc).toContain('schedulerEnabled: false');
+    expect(doc).toContain('daemonEnabled: false');
     expect(doc).toContain('- runs the releases');
 
     const central = readCentral();
     expect(central).not.toContain('maxAgents');
-    expect(central).not.toContain('schedulerEnabled');
+    expect(central).not.toContain('daemonEnabled');
 
     expect(getConfigValue('agents.max-concurrent')).toMatchObject({ value: 4, source: 'device' });
-    expect(getConfigValue('scheduler.enabled')).toMatchObject({ value: false, source: 'device' });
+    expect(getConfigValue('daemon.enabled')).toMatchObject({ value: false, source: 'device' });
     expect(getConfigValue('notes')).toMatchObject({ value: ['runs the releases'], source: 'device' });
 
     unsetConfigValue('agents.max-concurrent');
     expect(getConfigValue('agents.max-concurrent').value).toBeUndefined();
-    expect(getConfigValue('scheduler.enabled').value).toBe(false);
+    expect(getConfigValue('daemon.enabled').value).toBe(false);
     expect(readDoc()).not.toContain('maxAgents');
   });
 
@@ -117,7 +117,7 @@ describe('device-scope keys (per-device doc config:)', () => {
     expect(fs.existsSync(deviceDocPath('ghost'))).toBe(false);
   });
 
-  it('preserves a doc’s routines: list across a config write', async () => {
+  it('preserves a doc’s legacy routines: list across a config write', async () => {
     const { setConfigValue } = await freshModules();
     writeDoc('mac-mini', 'routines:\n  - watchdog\n');
 
@@ -187,19 +187,19 @@ describe('fleet-defaults layer (central fleet.defaults.config)', () => {
   it('--fleet writes land centrally under fleet.defaults.config', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
-    setConfigValue('scheduler.enabled', false, { fleet: true });
+    setConfigValue('daemon.enabled', false, { fleet: true });
 
     const central = readCentral();
     expect(central).toContain('fleet:');
     expect(central).toContain('defaults:');
-    expect(central).toContain('schedulerEnabled: false');
+    expect(central).toContain('daemonEnabled: false');
     const { readMeta } = await freshModules();
     expect(readMeta().fleet?.devices).toEqual({});
 
-    expect(getConfigValue('scheduler.enabled', { fleet: true })).toMatchObject({ value: false, source: 'fleet' });
+    expect(getConfigValue('daemon.enabled', { fleet: true })).toMatchObject({ value: false, source: 'fleet' });
 
-    unsetConfigValue('scheduler.enabled', { fleet: true });
-    expect(getConfigValue('scheduler.enabled', { fleet: true }).value).toBeUndefined();
+    unsetConfigValue('daemon.enabled', { fleet: true });
+    expect(getConfigValue('daemon.enabled', { fleet: true }).value).toBeUndefined();
     expect(readCentral()).not.toContain('fleet:');
   });
 
@@ -305,7 +305,7 @@ describe('validation', () => {
     const { setConfigValue } = await freshModules();
     expect(() => setConfigValue('agents.max-concurrent', 'four')).toThrow(/expects an integer/);
     expect(() => setConfigValue('agents.max-concurrent', 2.5)).toThrow(/expects an integer/);
-    expect(() => setConfigValue('scheduler.enabled', 'off')).toThrow(/expects a boolean/);
+    expect(() => setConfigValue('daemon.enabled', 'off')).toThrow(/expects a boolean/);
     expect(() => setConfigValue('notes', 'just a string')).toThrow(/expects a list of strings/);
     expect(() => setConfigValue('notes', ['ok', 7])).toThrow(/expects a list of strings/);
     expect(() => setConfigValue('interactive.host', '')).toThrow(/non-empty string/);
@@ -463,7 +463,7 @@ describe('listConfig', () => {
   it('reports every known key with its effective value and source layer', async () => {
     const { listConfig, setConfigValue } = await freshModules();
     setConfigValue('interactive.host', 'zion');
-    setConfigValue('scheduler.enabled', true);
+    setConfigValue('daemon.enabled', true);
     setConfigValue('watchdog.enabled', false, { fleet: true });
 
     const entries = listConfig();
@@ -528,7 +528,6 @@ describe('listConfig', () => {
       'notes',
       'platform',
       'role',
-      'scheduler.enabled',
       'ssh.auth',
       'ssh.bundle',
       'ssh.bundle-key',
@@ -542,47 +541,18 @@ describe('listConfig', () => {
       'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', source: 'user' });
-    expect(byName['scheduler.enabled']).toMatchObject({ value: true, source: 'device' });
+    expect(byName['daemon.enabled']).toMatchObject({ value: true, source: 'device' });
     expect(byName['watchdog.enabled']).toMatchObject({ value: false, source: 'fleet' });
     expect(byName['notes']).toMatchObject({ value: undefined, source: 'default' });
   });
 });
 
-describe('scheduler gate (scheduler.enabled=false on this device)', () => {
-  it('defaults to enabled when unset (unset = today’s behavior)', async () => {
-    const { isSchedulerEnabled, assertSchedulerEnabled } = await freshModules();
-    expect(isSchedulerEnabled()).toBe(true);
-    expect(() => assertSchedulerEnabled()).not.toThrow();
-  });
-
-  it('isSchedulerEnabled reflects the stored value', async () => {
-    const { isSchedulerEnabled, setConfigValue } = await freshModules();
-    setConfigValue('scheduler.enabled', false);
-    expect(isSchedulerEnabled()).toBe(false);
-    setConfigValue('scheduler.enabled', true);
-    expect(isSchedulerEnabled()).toBe(true);
-  });
-
-  it('a fleet-wide default gates this machine too', async () => {
-    const { isSchedulerEnabled, setConfigValue } = await freshModules();
-    setConfigValue('scheduler.enabled', false, { fleet: true });
-    expect(isSchedulerEnabled()).toBe(false);
-  });
-
-  it('assertSchedulerEnabled throws naming the setting and the fix', async () => {
-    const { assertSchedulerEnabled, setConfigValue } = await freshModules();
-    setConfigValue('scheduler.enabled', false);
-    expect(() => assertSchedulerEnabled()).toThrow(/scheduler\.enabled=false/);
-    expect(() => assertSchedulerEnabled()).toThrow(
-      /agents devices config testbox scheduler\.enabled on/,
-    );
-  });
-
-  it('a peer’s scheduler.enabled cannot be written — it is machine-local', async () => {
-    const { isSchedulerEnabled, setConfigValue } = await freshModules();
-    expect(() => setConfigValue('scheduler.enabled', false, { device: 'mac-mini' }))
+describe('machine-local keys', () => {
+  it('a peer’s daemon.enabled cannot be written — it is machine-local', async () => {
+    const { isDaemonEnabled, setConfigValue } = await freshModules();
+    expect(() => setConfigValue('daemon.enabled', false, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
-    expect(isSchedulerEnabled()).toBe(true);
+    expect(isDaemonEnabled()).toBe(true);
   });
 });
 

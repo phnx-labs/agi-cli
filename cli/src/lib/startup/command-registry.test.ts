@@ -27,7 +27,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   });
 
   it('includes the aliases and tombstones src/index.ts registers inline', () => {
-    for (const name of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', 'upgrade', '_internal']) {
+    for (const name of ['perms', 'exec', 'check', 'resources', 'hq', 'upgrade', '_internal']) {
       expect(isKnownTopLevelCommand(name)).toBe(true);
     }
   });

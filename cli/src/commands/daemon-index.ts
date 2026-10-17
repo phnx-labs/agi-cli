@@ -34,7 +34,7 @@ export function registerDaemonIndexCommand(daemonCmd: Command): void {
   });
   setHelpSections(roots, {
     examples: `
-      # Every existing transcript directory, including routine run archives
+      # Every existing transcript directory
       agents daemon index roots
     `,
     notes: `

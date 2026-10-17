@@ -193,9 +193,6 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
   const bookmarkedId = 'b0000001-1111-4111-8111-111111111111';
   const plainId = 'b0000002-2222-4222-8222-222222222222';
   const waitingId = 'b0000003-3333-4333-8333-333333333333';
-  const hookRoutineId = 'b0000004-4444-4444-8444-444444444444';
-  const indexedRoutineId = 'b0000005-5555-4555-8555-555555555555';
-  const otherRoutineId = 'b0000006-6666-4666-8666-666666666666';
 
   function ids(result: { stdout: string; stderr: string; status: number | null }): string[] {
     return (JSON.parse(result.stdout) as ActiveSession[]).map((row) => row.sessionId!).sort();
@@ -208,18 +205,6 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
     writeUpdateCache(tempHome);
     const sleeper = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 120_000)'], { stdio: 'ignore' });
 
-    const archiveDir = path.join(
-      tempHome, '.agents', '.history', 'runs', 'nightly-review', '2026-10-06T00-00-00-000Z',
-      'sessions', 'claude', 'projects', '-ps-parity',
-    );
-    fs.mkdirSync(archiveDir, { recursive: true });
-    fs.writeFileSync(path.join(archiveDir, `${indexedRoutineId}.jsonl`), [
-      { type: 'user', timestamp: '2026-10-06T00:00:00.000Z', cwd, version: '2.1.0', entrypoint: 'cli',
-        message: { role: 'user', content: 'run nightly review' } },
-      { type: 'assistant', timestamp: '2026-10-06T00:01:00.000Z', uuid: `${indexedRoutineId}-a1`,
-        message: { id: `${indexedRoutineId}-m1`, model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'done' }],
-          usage: { input_tokens: 10, output_tokens: 5 } } },
-    ].map((entry) => JSON.stringify(entry)).join('\n') + '\n');
     const inProcess = (code: string) => {
       const res = spawnSync(process.execPath, ['--import', tsxLoaderUrl, '-e', code], {
         cwd,
@@ -228,9 +213,6 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
       });
       expect(res.status, res.stderr).toBe(0);
     };
-    inProcess(`const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/discover.ts'))});
-      await m.discoverSessions({ all: true, cwd: process.cwd(), limit: 5000, waitForScan: true });`);
-
     const row = (sessionId: string, extra: Record<string, unknown> = {}) => ({
       context: 'terminal', kind: 'claude', status: 'running', sessionId, pid: sleeper.pid, pidAlive: true, cwd, ...extra,
     });
@@ -238,9 +220,6 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
       row(bookmarkedId),
       row(plainId),
       row(waitingId, { status: 'input_required', activity: 'waiting_input' }),
-      row(hookRoutineId, { origin: 'routine', routineName: 'nightly-review' }),
-      row(indexedRoutineId),
-      row(otherRoutineId, { origin: 'routine', routineName: 'weekly-audit' }),
     ];
     const publish = () => inProcess(`const m = await import(${JSON.stringify(path.join(repoRoot, 'src/lib/session/session-cache.ts'))});
       m.writeActiveSessionsCache('local', ${JSON.stringify(rows)}, { capturedAt: Date.now() });`);
@@ -251,7 +230,7 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
     return { tempHome, cwd, sleeper, publish };
   }
 
-  it('selects rows for --bookmarks, --routine [name], and --status waiting', () => {
+  it('selects rows for --bookmarks and --status waiting', () => {
     const { tempHome, cwd, sleeper, publish } = liveFixture();
     try {
       const pick = (flags: string[]) => {
@@ -261,23 +240,15 @@ describeLive('agents ps — roster filters and the migration ledger', () => {
       };
 
       const everyone = pick([]);
-      expect(everyone.ids).toEqual(
-        [bookmarkedId, plainId, waitingId, hookRoutineId, indexedRoutineId, otherRoutineId].sort(),
-      );
+      expect(everyone.ids).toEqual([bookmarkedId, plainId, waitingId].sort());
       expect(pick(['--bookmarks']).ids).toEqual([bookmarkedId, waitingId].sort());
-      expect(pick(['--routine']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
-      expect(pick(['--routines']).ids).toEqual([hookRoutineId, indexedRoutineId, otherRoutineId].sort());
-      expect(pick(['--routine', 'nightly']).ids).toEqual([hookRoutineId, indexedRoutineId].sort());
-      expect(pick(['--routine', 'weekly-audit']).ids).toEqual([otherRoutineId]);
 
       const waiting = pick(['--status', 'waiting']);
       expect(waiting).toEqual({ ids: [waitingId], status: 1 });
       expect(pick(['--bookmarks', '--status', 'waiting'])).toEqual({ ids: [waitingId], status: 1 });
-      expect(pick(['--routine', '--status', 'waiting'])).toEqual({ ids: [], status: 0 });
 
       const help = runAgents(['ps', '--help'], cwd, tempHome);
       expect(help.stdout).toContain('--bookmarks');
-      expect(help.stdout).toContain('--routine [name]');
     } finally {
       sleeper.kill('SIGTERM');
       fs.rmSync(tempHome, { recursive: true, force: true });

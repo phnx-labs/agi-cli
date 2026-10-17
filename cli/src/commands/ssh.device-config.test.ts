@@ -15,12 +15,12 @@ describe('devices config', () => {
     const set = run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '4']);
     expect(set.status, set.stderr).toBe(0);
     expect(set.stdout).toContain('agents.max-concurrent = 4');
-    expect(run(['devices', 'config', 'mac-mini', 'scheduler.enabled', 'off']).status).toBe(0);
+    expect(run(['devices', 'config', 'mac-mini', 'daemon.enabled', 'off']).status).toBe(0);
 
     const doc = deviceDoc('mac-mini');
     expect(doc).toContain('config:');
     expect(doc).toContain('maxAgents: 4');
-    expect(doc).toContain('schedulerEnabled: false');
+    expect(doc).toContain('daemonEnabled: false');
     expect(centralDoc()).not.toContain('maxAgents');
 
     const got = run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '--json']);
@@ -63,7 +63,7 @@ describe('devices config', () => {
     const parsed = JSON.parse(json.stdout);
     expect(parsed.device).toBe('mac-mini');
     expect(parsed.config['agents.max-concurrent']).toEqual({ value: 4, source: 'device' });
-    expect(parsed.config['scheduler.enabled']).toEqual({ value: null, source: 'default' });
+    expect(parsed.config['daemon.enabled']).toEqual({ value: null, source: 'default' });
   });
 
   it('rejects bad values and unknown keys loudly', () => {
@@ -72,13 +72,13 @@ describe('devices config', () => {
 
     expect(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', 'four']).status).toBe(1);
     expect(run(['devices', 'config', 'mac-mini', 'agents.max-concurrent', '0']).status).toBe(1);
-    const badBool = run(['devices', 'config', 'mac-mini', 'scheduler.enabled', 'maybe']);
+    const badBool = run(['devices', 'config', 'mac-mini', 'daemon.enabled', 'maybe']);
     expect(badBool.status).toBe(1);
     expect(badBool.stderr).toContain('on/off');
     const unknown = run(['devices', 'config', 'mac-mini', 'nope.nope', '1']);
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toContain("Unknown config key 'nope.nope'");
-    expect(unknown.stderr).toContain('scheduler.enabled');
+    expect(unknown.stderr).toContain('daemon.enabled');
     expect(run(['devices', 'config', 'ghost', 'agents.max-concurrent', '2']).status).toBe(1);
   });
 

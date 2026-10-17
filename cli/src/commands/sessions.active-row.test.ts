@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { backfillActiveRowsFromMeta } from '../lib/session/active.js';
-import { renderActiveRowLines, filterActiveSessionsByRoutine } from './ps-roster.js';
+import { renderActiveRowLines } from './ps-roster.js';
 import { stringWidth } from '../lib/session/width.js';
 import type { ActiveSession } from '../lib/session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
@@ -206,17 +206,6 @@ describe('backfillActiveRowsFromMeta', () => {
     expect(s.durationMs).toBe(90_000);
     expect(s.subAgentCount).toBe(3);
   });
-
-  it('backfills routine provenance for every active JSON consumer', () => {
-    const s = active({ sessionId: 'sid-routine', origin: undefined, routineName: undefined });
-    const byId = new Map<string, SessionMeta>([
-      ['sid-routine', meta({ id: 'sid-routine', origin: 'routine', routineName: 'nightly-review' })],
-    ]);
-    backfillActiveRowsFromMeta([s], byId);
-    expect(s.origin).toBe('routine');
-    expect(s.routineName).toBe('nightly-review');
-  });
-
   it('never overrides a value the live row already carries (live wins)', () => {
     const s = active({ sessionId: 'sid-2', version: '9.9.9', account: 'live@getrush.ai', ticket: { id: 'LIVE-1' }, startedAtMs: 111 });
     const byId = new Map<string, SessionMeta>([
@@ -236,24 +225,3 @@ describe('backfillActiveRowsFromMeta', () => {
   });
 });
 
-describe('filterActiveSessionsByRoutine', () => {
-  const sessions = [
-    active({ sessionId: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
-    active({ sessionId: 'release', origin: 'routine', routineName: 'release-notes' }),
-    active({ sessionId: 'manual', origin: 'cli', routineName: undefined }),
-  ];
-
-  it('keeps every routine and excludes manually-launched rows for --routine', () => {
-    expect(filterActiveSessionsByRoutine(sessions, true).map((session) => session.sessionId))
-      .toEqual(['nightly', 'release']);
-  });
-
-  it('fuzzy-resolves a named routine for non-browser active output', () => {
-    expect(filterActiveSessionsByRoutine(sessions, 'nightly').map((session) => session.sessionId))
-      .toEqual(['nightly']);
-  });
-
-  it('leaves active output unchanged when no routine filter was requested', () => {
-    expect(filterActiveSessionsByRoutine(sessions, undefined)).toBe(sessions);
-  });
-});

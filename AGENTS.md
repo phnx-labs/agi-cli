@@ -119,7 +119,7 @@ and [`architecture.md`](cli/docs/architecture.md).
   in the CLI and every consumer benefits.
 - **One scheduler, one executor — fleet-affecting features never run twice.** Anything
   that can *act* on this machine or another fleet device — launch/resume/kill a session,
-  fire a routine, inject into a terminal, rotate an account — has exactly ONE
+  inject into a terminal, rotate an account — has exactly ONE
   scheduler and ONE executor: the agents-cli daemon (`agents __daemon-run`) or a CLI
   command it drives. UI surfaces (the ext, the menubar) are **thin
   wrappers**: they render state and offer controls that call the CLI; they MUST NOT own
@@ -127,16 +127,15 @@ and [`architecture.md`](cli/docs/architecture.md).
   decision live in the CLI, which holds the first-party state (sessions.db, usage
   snapshots, the device registry). Where an action needs a UI-owned surface, the UI
   exposes a narrow endpoint the CLI drives (the `/inject` verb is the precedent) — the
-  trigger stays in the CLI. Routines are covered by the same rule: `agents routines` +
-  the daemon's pid-claimed scheduler (`cli/src/lib/daemon/daemon.ts`) are the only cron
-  that fires them; a UI button may *request* a run, never *schedule* one. **Multiple
-  devices are fine — shared queues are not.** Every device runs its own daemon, and
-  an unrestricted routine MAY fire on all of them when its input is the firing
-  device's own state (its repos, sessions, caches). But a job that consumes *shared*
-  input (a ticket tracker, a PR queue, the feed, a sync bucket) MUST have exactly
-  one executor per work item: an owner pin (`agents routines devices <name> --set
-  <one>`), an atomic claim per item (the feed's `O_EXCL` precedent), or verified
-  idempotency — otherwise two daemons pick the same task and run it twice.
+  trigger stays in the CLI. The daemon's pid-claimed timers
+  (`cli/src/lib/daemon/daemon.ts`) are the only loop that fires them; a UI button may
+  *request* an action, never *schedule* one. **Multiple devices are fine, shared
+  queues are not.** Every device runs its own daemon, and a daemon job MAY run on all
+  of them when its input is the firing device's own state (its repos, sessions,
+  caches). But a job that consumes *shared* input (a ticket tracker, a PR queue, the
+  feed, a sync bucket) MUST have exactly one executor per work item: a single owner
+  device, an atomic claim per item (the feed's `O_EXCL` precedent), or verified
+  idempotency, otherwise two daemons pick the same task and run it twice.
   Violations are
   the double-fire bug class — the 2026-08-03 incident (the ext's watchdog rotate loop
   racing the daemon, spawning resume-tabs every 120s into exhausted accounts) is the
@@ -350,8 +349,8 @@ Hard rules:
   dangling. `install.sh` publishes `agents-dev` / `ag-dev` instead, and removes
   any such shadow link an older revision of it left behind.
 - **The daemon is shared.** `install.sh` leaves it on production code; pass
-  `--bounce-daemon` only when you specifically need the routines scheduler, feed
-  stream, or session sync running your build — that affects the user's everyday
+  `--bounce-daemon` only when you specifically need the watchdog, feed stream, or
+  session sync running your build — that affects the user's everyday
   `agents`, not just `agents-dev`. (The secrets broker is a separate process the
   standalone `secrets` CLI owns, PHNX-3989, and the browser IPC service the
   standalone `browser` CLI owns, PHNX-4101 — this daemon hosts neither.)
@@ -485,7 +484,7 @@ the exception.
   that must ride the exec env or a spawn — actor/provenance, identity, session lineage,
   credentials — it must be wired through **every** exec boundary that data is meant to
   reach: the local spawn (`buildExecEnv`), `--device` SSH dispatch, `agents ssh`
-  passthrough, teams (local **and** remote teammates), and routines/cron — or the PR
+  passthrough, and teams (local **and** remote teammates) — or the PR
   states which boundaries are out of scope and why. The tell is an **absence** at a
   remote call site (no `SetEnv`/`--env` forwarding across the SSH hop), so check the
   remote dispatch builders (`cli/src/lib/hosts/dispatch.ts`, `hosts/remote-cmd.ts`),
@@ -525,7 +524,7 @@ the exception.
   default help instead of a workflow-first `setHelpSections` block.
 - **No second scheduler.** A PR that adds a timer, watcher, or polling loop in
   a UI surface (the AGI EXT repo, the menubar) that *acts* — spawns, resumes, kills, injects,
-  dispatches, rotates, fires a routine — rather than polling read-only state for
+  dispatches, rotates — rather than polling read-only state for
   rendering is a double-fire bug in waiting. Flag it with `file:line`. The action
   belongs in the CLI daemon or a CLI command; the UI may only render the state and wire
   controls to CLI calls. (Canonical incident: the ext watchdog rotate loop,

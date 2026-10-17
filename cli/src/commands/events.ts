@@ -157,7 +157,7 @@ export function addEventsReadOptions(command: Command): Command {
   command
     .option('--include <families>', `Only these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
     .option('--exclude <families>', `Drop these families (comma-sep): ${EVENT_FAMILIES.join(', ')}`)
-    .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)')
+    .option('--module <name>', 'Only events from this group (e.g. teams, secrets, activity, daemon, watchdog, browser)')
     .option('--command <path>', 'Only this command path — prefix match (e.g. "teams create")')
     .option('--event <type>', 'Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)', collect, [])
     .option('--agent <name>', 'Only events tagged with this agent')

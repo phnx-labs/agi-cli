@@ -40,36 +40,6 @@ export function getAgentsBinPath(
   }
 }
 
-export function getAgentsBinDir(): string {
-  const bin = getAgentsBinPath();
-  const base = path.basename(bin);
-  if (base === 'agents' || base === 'agents.exe' || base === 'agents.cmd') {
-    return path.dirname(bin);
-  }
-  const realBin = (() => {
-    try { return fs.realpathSync(bin); }
-    catch { return bin; }
-  })();
-  const home = os.homedir();
-  const candidates = [
-    path.join(home, '.local', 'bin'),
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-    path.join(home, '.npm-global', 'bin'),
-    path.join(home, '.bun', 'bin'),
-    path.dirname(process.execPath),
-  ];
-  for (const dir of candidates) {
-    for (const name of ['agents', 'agents.exe', 'agents.cmd']) {
-      const launcher = path.join(dir, name);
-      try {
-        if (fs.realpathSync(launcher) === realBin) return dir;
-      } catch {  }
-    }
-  }
-  return path.dirname(bin);
-}
-
 export function isNodeScriptEntry(agentsBin: string): boolean {
   let resolved = agentsBin;
   try {

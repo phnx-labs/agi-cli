@@ -33,14 +33,6 @@ export function buildProbeCommand(os?: string): string {
   return 'uname -s 2>/dev/null || echo unknown';
 }
 
-export function probeHost(target: string, os?: string, extraSshArgs: string[] = []): { reachable: boolean; os?: string } {
-  const r = sshExec(target, buildProbeCommand(os), { timeoutMs: 12000, extraSshArgs });
-  if (r.code !== 0) return { reachable: false };
-  if (remoteShellFor(os) === 'powershell') return { reachable: true, os };
-  const uname = r.stdout.trim();
-  return { reachable: true, os: uname && uname !== 'unknown' ? uname : undefined };
-}
-
 export function buildRemoteVersionCommand(os?: string): string {
   return remoteShellFor(os) === 'powershell'
     ? buildWindowsAgentsCommand({ args: ['--version'] })

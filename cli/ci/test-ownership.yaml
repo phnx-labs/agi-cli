@@ -129,19 +129,6 @@ groups:
     checks: [typecheck]
     budget_sec: 240
 
-  - id: scheduling
-    when:
-      - cli/src/lib/scheduling/**
-      - cli/src/commands/routines.ts
-      - cli/src/commands/routines.test.ts
-      - cli/src/commands/routines.*.test.ts
-      - cli/src/commands/routines.test-fixture.ts
-    tests:
-      - cli/src/commands/routines.add.test.ts
-      - cli/src/commands/routines.list.test.ts
-    checks: [typecheck]
-    budget_sec: 180
-
   - id: installations
     when:
       - cli/src/lib/installations/**
@@ -238,7 +225,6 @@ testless:
   - cli/menubar/**
   - cli/bin/**
   - cli/schema/**
-  - cli/routines/**
   - cli/bench/**
   - packages/agi-cli/**
   - packages/swarmify-mirror/**

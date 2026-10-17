@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://raw.githubusercontent.com/phnx-labs/agi-cli/main/cli/schema/agents-yaml.schema.json",
   "title": "agents-cli agents.yaml",
-  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. The per-device doc holds operator-owned fields (routines, device-scope config:) — conflict-free because each machine writes only its own folder. Agent pins (agents, isolatedAgents) live in neither: they are machine-local runtime state in the untracked ~/.agents/.history/devices/pins-<host>.json. Fleet-wide config defaults live centrally under fleet.defaults.config. Everything else is portable user config. Source of truth: cli/src/lib/types.ts (Meta).",
+  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. The per-device doc holds operator-owned fields (device-scope config:) — conflict-free because each machine writes only its own folder. Agent pins (agents, isolatedAgents) live in neither: they are machine-local runtime state in the untracked ~/.agents/.history/devices/pins-<host>.json. Fleet-wide config defaults live centrally under fleet.defaults.config. Everything else is portable user config. Source of truth: cli/src/lib/types.ts (Meta).",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -20,15 +20,9 @@
       "type": "string",
       "description": "LEGACY as a top-level key — folded into the doc's config: block (browser.profile) by the config migration. Current value home: config.defaultBrowserProfile (`agents devices config <name> browser.profile <profile>`)."
     },
-    "routines": {
-      "type": "array",
-      "description": "Enabled routine names on this device. Membership means enabled; device doc only.",
-      "items": { "type": "string", "minLength": 1 },
-      "uniqueItems": true
-    },
     "config": {
       "type": "object",
-      "description": "Typed config keys (registry: cli/src/lib/device-config.ts). In the CENTRAL file this holds user-scope keys (interactiveHost); in a per-device doc it holds device-scope keys (maxAgents, schedulerEnabled, notes, ssh*, autoLaunch*). Read order per device-scope key: built-in default < fleet.defaults.config < per-device config:. Unset keys keep default behavior.",
+      "description": "Typed config keys (registry: cli/src/lib/device-config.ts). In the CENTRAL file this holds user-scope keys (interactiveHost); in a per-device doc it holds device-scope keys (maxAgents, notes, ssh*, autoLaunch*). Read order per device-scope key: built-in default < fleet.defaults.config < per-device config:. Unset keys keep default behavior.",
       "additionalProperties": true,
       "properties": {
         "interactiveHost": {
@@ -44,10 +38,6 @@
           "type": "integer",
           "minimum": 1,
           "description": "Device scope. Cap on concurrent agents (agents.max-concurrent). AGI EXT auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
-        },
-        "schedulerEnabled": {
-          "type": "boolean",
-          "description": "Device scope. Whether the routines scheduler may fire here (scheduler.enabled)."
         },
         "daemonEnabled": {
           "type": "boolean",
@@ -220,7 +210,7 @@
           "properties": {
             "config": {
               "type": "object",
-              "description": "Fleet-wide config defaults (`agents devices config --fleet <key> <value>`). Every device inherits these unless its own devices/<name>/agents.yaml config: overrides the key. Inert to `agents apply` (the reconcile engine never pushes it). Keys: the device-scope entries of the top-level config property (maxAgents, schedulerEnabled, daemonEnabled, watchdogEnabled, tmuxEnabled, browserRemoteControl, defaultBrowserProfile, browserTaskIdleMinutes, notes, sshUser, sshAuth, sshBundle, sshBundleKey, sshIdentityFile, platform, role, autoLaunchEnabled, autoLaunchPreferred).",
+              "description": "Fleet-wide config defaults (`agents devices config --fleet <key> <value>`). Every device inherits these unless its own devices/<name>/agents.yaml config: overrides the key. Inert to `agents apply` (the reconcile engine never pushes it). Keys: the device-scope entries of the top-level config property (maxAgents, daemonEnabled, watchdogEnabled, tmuxEnabled, browserRemoteControl, defaultBrowserProfile, browserTaskIdleMinutes, notes, sshUser, sshAuth, sshBundle, sshBundleKey, sshIdentityFile, platform, role, autoLaunchEnabled, autoLaunchPreferred).",
               "additionalProperties": true
             }
           }
@@ -280,17 +270,6 @@
         "transports": {
           "type": "object",
           "additionalProperties": { "type": "string" }
-        }
-      }
-    },
-    "routines": {
-      "type": "object",
-      "description": "Routines daemon settings.",
-      "properties": {
-        "projects": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "Allowlist of project roots whose .agents/routines may fire."
         }
       }
     }

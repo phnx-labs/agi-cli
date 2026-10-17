@@ -38,8 +38,6 @@ export function activeSessionToSessionMeta(
     prNumber: active.pr?.number,
     worktreeSlug: active.worktree?.slug,
     gitBranch: active.worktree?.branch,
-    origin: active.origin,
-    routineName: active.routineName,
   };
 }
 

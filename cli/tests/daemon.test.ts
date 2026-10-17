@@ -24,7 +24,6 @@ beforeEach(() => {
   TEST_ROOT = mkdtempSync(join(tmpdir(), 'agents-cli-daemon-'));
   TEST_DAEMON_DIR = join(TEST_ROOT, 'daemon');
   mkdirSync(TEST_DAEMON_DIR, { recursive: true });
-  mkdirSync(join(TEST_ROOT, 'routines'), { recursive: true });
 });
 
 afterEach(() => {
@@ -90,7 +89,6 @@ describe('getDaemonStatus', () => {
     const status = getDaemonStatus();
     expect(status.running).toBe(false);
     expect(status.pid).toBeNull();
-    expect(typeof status.jobCount).toBe('number');
     expect(typeof status.logPath).toBe('string');
   });
 

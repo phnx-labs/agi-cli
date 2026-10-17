@@ -102,7 +102,7 @@ Session: 9f871e18-e430-47ec-b957-2ba195ee766d"><span class="metadata-value">Yose
 <li>installs agent harnesses into isolated version homes;</li>
 <li>syncs resources into each harness's native format;</li>
 <li>runs agents locally or over SSH;</li>
-<li>keeps a daemon that indexes sessions, schedules routines and watches for stalls.</li>
+<li>keeps a daemon that indexes sessions and watches for stalls.</li>
 </ul>
 <p>This assessment follows PHNX-4227, which removed <code>agents browser</code>, <code>computer</code>, <code>secrets</code> and <code>sessions</code> (released in 1.23.18).</p>
 <p>The shape problem in one sentence: <strong>removing whole command groups has made the CLI 8% smaller, but the code that remains is not organized by owner.</strong> The pieces of that:</p>

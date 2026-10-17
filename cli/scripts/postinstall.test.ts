@@ -324,7 +324,7 @@ describe('postinstall always-on daemon heal', () => {
       });
 
       expect(result.status, result.stderr).toBe(0);
-      expect(result.stdout).toContain('Restarted the routines daemon onto this version');
+      expect(result.stdout).toContain('Restarted the agents daemon onto this version');
       const log = fs.readFileSync(marker, 'utf-8').trim().split('\n');
       expect(log[0]).toBe('stop');
       expect(log[1]).toMatch(/^start:/);

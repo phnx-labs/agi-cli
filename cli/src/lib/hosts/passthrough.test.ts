@@ -205,43 +205,14 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
-  it('routes routines --device to a non-self target (rejected by assertValidSshTarget)', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    const result = await maybeRunOnHost('routines', ['routines', 'list', '--device', '--evil']);
-    expect(result).toBe(true);
-    expect(process.exitCode).toBeGreaterThan(0);
-    process.exitCode = 0;
-  });
-
-  it('routes routines --device alias to a non-self target', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    const result = await maybeRunOnHost('routines', ['routines', 'run', 'x', '--device', '--evil']);
-    expect(result).toBe(true);
-    expect(process.exitCode).toBeGreaterThan(0);
-    process.exitCode = 0;
-  });
-
-  it('does NOT bail on --devices for routines with --device (placement, not fan-out)', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    const result = await maybeRunOnHost('routines', ['routines', 'add', 'x', '--device', '--evil', '--devices', 'a,b']);
-    expect(result).toBe(true);
-    expect(process.exitCode).toBeGreaterThan(0);
-    process.exitCode = 0;
-  });
-
-  it('bails on --devices for non-routines commands (fan-out)', async () => {
+  it('bails on a non-all --devices list (fan-out)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(await maybeRunOnHost('list', ['list', '--device', '--evil', '--devices'])).toBe(false);
   });
 
-  it('bails on --hosts for non-routines commands (fan-out)', async () => {
+  it('bails on --hosts (fan-out)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(await maybeRunOnHost('list', ['list', '--device', '--evil', '--hosts'])).toBe(false);
-  });
-
-  it('bails on --hosts for routines too (generic fleet flag, not placement)', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(await maybeRunOnHost('routines', ['routines', 'list', '--device', '--evil', '--hosts'])).toBe(false);
   });
 
   it('rejects --device all on a non-routable command with a clear error', async () => {
@@ -380,28 +351,10 @@ describe('maybeRunOnHost — fleet `all` sentinel (injected runners)', () => {
     expect(parsed.zion).toEqual([]);
   });
 
-  it('still bails on non-all --devices for non-routines commands', async () => {
+  it('still bails on non-all --devices', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     expect(await maybeRunOnHost('view', ['view', '--devices', 'mac1,mac2'])).toBe(false);
   });
-
-  it('fans out --devices all on routines too', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'zion';
-    captureLogs();
-    const registry = fakeRegistry([fakeDevice('mac-mini', 'macos')]);
-    const runner = makeRunner({ 'mac-mini:agents routines': { code: 0, stdout: '[]', stderr: '' } });
-
-    const result = await maybeRunOnHost('routines', ['routines', 'list', '--devices', 'all'], {
-      self: 'zion',
-      loadDevices: async () => registry,
-      runner,
-      localRunner: makeLocalRunner({ code: 0, stdout: '[]', stderr: '' }),
-    });
-
-    expect(result).toBe(true);
-    expect(logs.join('\n')).toContain('mac-mini');
-  });
-
 });
 
 describe('runFleetPassthrough — direct unit tests', () => {

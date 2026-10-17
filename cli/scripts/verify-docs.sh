@@ -26,7 +26,7 @@ else
   fail "AGENTS.md should link to docs/README.md"
 fi
 
-for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity" "Routine execution & readiness" "Watchdog"; do
+for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity" "Watchdog"; do
   if grep -qF "## $heading" docs/specifications.md; then
     log "✓ specifications.md retains $heading"
   else
@@ -49,14 +49,13 @@ for doc in architecture concepts resources execution sessions fleet orchestratio
   fi
 done
 
-for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity routine-execution--readiness watchdog; do
+for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity watchdog; do
   case "$anchor" in
     coverage-inventory) heading='Coverage inventory' ;;
     sessions) heading='Sessions' ;;
     secrets) heading='Secrets' ;;
     agent-execution) heading='Agent execution' ;;
     scheduling--execution-singularity) heading='Scheduling & execution singularity' ;;
-    routine-execution--readiness) heading='Routine execution & readiness' ;;
     watchdog) heading='Watchdog' ;;
   esac
   if ! grep -qF "## $heading" docs/specifications.md; then

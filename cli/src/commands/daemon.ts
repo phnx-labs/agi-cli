@@ -36,8 +36,6 @@ import {
   writeDaemonLogLevel,
 } from '../lib/daemon-services.js';
 import { LOG_LEVELS, levelRank, parseLogLevel } from '../lib/daemon/diagnostics.js';
-import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
-import { JobScheduler } from '../lib/scheduler.js';
 import { followFile } from '../lib/log-follow.js';
 import { parseSince } from '../lib/hooks/cache.js';
 import { registerDaemonIndexCommand } from './daemon-index.js';
@@ -193,33 +191,6 @@ async function probeSecretsBroker(): Promise<SecretsBrokerHealth> {
 }
 
 
-interface SchedulerSummary {
-  routineCount: number;
-  enabledCount: number;
-  nextFire: Date | null;
-  failingCount: number;
-}
-
-function schedulerSummary(): SchedulerSummary {
-  const jobs = listJobs();
-  const enabled = jobs.filter((j) => j.enabled);
-  let nextFire: Date | null = null;
-  try {
-    const scheduler = new JobScheduler(async () => {});
-    scheduler.loadAll();
-    for (const job of scheduler.listScheduled()) {
-      if (job.nextRun && (!nextFire || job.nextRun < nextFire)) nextFire = job.nextRun;
-    }
-    scheduler.stopAll();
-  } catch {  }
-  const failingCount = enabled.filter((j) => {
-    const last = getLatestRun(j.name);
-    return last?.status === 'failed' || last?.status === 'timeout';
-  }).length;
-  return { routineCount: jobs.length, enabledCount: enabled.length, nextFire, failingCount };
-}
-
-
 function healthLine(label: string, live: boolean, record: SubsystemHealth | null): string {
   if (live) {
     const ok = record?.lastOkAt ? chalk.gray(`(last ok ${record.lastOkAt})`) : '';
@@ -261,7 +232,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   const ownerEntryGone = owner ? entryIsGone(owner) : false;
 
   const secrets = await probeSecretsBroker();
-  const scheduler = schedulerSummary();
 
   if (opts.json) {
     console.log(JSON.stringify({
@@ -291,13 +261,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
           heldBundles: secrets.heldBundles,
           health: secrets.record,
         },
-      },
-      scheduler: {
-        enabled: getConfigValue('scheduler.enabled').value !== false,
-        routineCount: scheduler.routineCount,
-        enabledCount: scheduler.enabledCount,
-        nextFire: scheduler.nextFire ? scheduler.nextFire.toISOString() : null,
-        failingCount: scheduler.failingCount,
       },
     }, null, 2));
     return;
@@ -354,13 +317,6 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
 
   console.log(chalk.bold('\nHealth\n'));
   console.log(secretsBrokerHealthLine(secrets));
-
-  const schedulerEnabled = getConfigValue('scheduler.enabled').value !== false;
-  console.log(`  ${schedulerEnabled ? chalk.green('enabled') : chalk.yellow('disabled')}  scheduler — ${scheduler.enabledCount}/${scheduler.routineCount} routine(s) enabled` +
-    (scheduler.nextFire ? `, next ${scheduler.nextFire.toLocaleString()}` : ''));
-  if (scheduler.failingCount > 0) {
-    console.log(chalk.red(`  ${scheduler.failingCount} routine(s) failing their last run — see: agents routines stats`));
-  }
 }
 
 
@@ -427,8 +383,7 @@ async function runServices(opts: { json?: boolean }): Promise<void> {
   }
   console.log(chalk.bold('\nHosted sockets\n'));
   console.log(secretsBrokerHealthLine(secrets));
-  console.log(chalk.gray('\nScheduled routines run through `agents routines` — see: agents routines stats'));
-  console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
+  console.log(chalk.gray('\nagents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
 
 
@@ -562,11 +517,6 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
     problems.push(`Secrets broker has ${secrets.record.consecutiveFailures} consecutive failure(s): ${secrets.record.lastError}`);
   }
 
-  const scheduler = schedulerSummary();
-  if (scheduler.failingCount > 0) {
-    problems.push(`${scheduler.failingCount} routine(s) failing their last run. See: agents routines stats`);
-  }
-
   if (opts.json) {
     console.log(JSON.stringify({ healthy: problems.length === 0, problems }));
     if (problems.length > 0) process.exitCode = 1;
@@ -586,7 +536,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
     .command('daemon')
-    .description('The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.')
+    .description('The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runStatus({ json: command.optsWithGlobals().json === true });
@@ -609,7 +559,7 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon disable
       agents daemon enable
 
-      # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes
+      # Reload config (SIGHUP) without restarting — picks up service toggles
       agents daemon reload
 
       # Every registered service — state, enabled, failures, last error
@@ -636,11 +586,8 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon index backfill tools --fleet
     `,
     notes: `
-      There is no 'agents daemon jobs' — scheduled work is 'agents routines',
-      always. Use 'agents routines stats' for per-routine failure detail.
-
-      'disable' is a persisted kill switch: it stops routines/add,
-      routines/start, and routines/catchup from auto-starting
+      'disable' is a persisted kill switch: it stops feed watch,
+      watchdog, and recordings from auto-starting
       the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).
       'agents daemon start' still starts it explicitly, same as
       'systemctl start' on a disabled unit.
@@ -656,8 +603,7 @@ export function registerDaemonCommand(program: Command): void {
 
       'agents daemon services enable|disable|restart <id>' applies live (no
       daemon restart) for supervisor-managed services that were registered at
-      boot. The inline scheduler re-evaluates its toggle on every reload as
-      well. Any other boot-disabled service still needs an operator
+      boot. Any other boot-disabled service still needs an operator
       'agents daemon restart'. 'agents
       daemon services' names which case you're in per row.
     `,
@@ -685,13 +631,13 @@ export function registerDaemonCommand(program: Command): void {
 
   cmd.command('stop')
     .description('Stop the daemon.')
-    .option('--json', 'Emit the structured stop result (released/surviving resources, detached children).')
+    .option('--json', 'Emit the structured stop result (released/surviving resources).')
     .action((_opts, command) => {
       const asJson = command.optsWithGlobals().json === true;
       if (!isDaemonRunning()) {
         if (asJson) {
           console.log(JSON.stringify(
-            { ok: true, stoppedPid: null, escalated: false, released: [], surviving: [], detachedChildren: [] },
+            { ok: true, stoppedPid: null, escalated: false, released: [], surviving: [] },
             null, 2));
         } else {
           console.log(chalk.yellow('Daemon is not running'));
@@ -705,9 +651,6 @@ export function registerDaemonCommand(program: Command): void {
         console.log(result.ok ? chalk.green('Daemon stopped') : chalk.red('Daemon stop incomplete'));
         for (const r of result.released) console.log(chalk.gray(`  released: ${r}`));
         for (const s of result.surviving) console.log(chalk.red(`  surviving: ${s}`));
-        if (result.detachedChildren.length > 0) {
-          console.log(chalk.gray(`  detached routine children left running (adopted on next daemon start): ${result.detachedChildren.join(', ')}`));
-        }
       }
       if (!result.ok) process.exitCode = 1;
     });
@@ -729,7 +672,7 @@ export function registerDaemonCommand(program: Command): void {
     .description('Clear the daemon.enabled kill switch. Does not start the daemon by itself.')
     .action(() => {
       setConfigValue('daemon.enabled', true);
-      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (routines add/start/catchup) may bring the daemon up again'));
+      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (feed watch, watchdog, recordings) may bring the daemon up again'));
     });
 
   cmd.command('disable')
@@ -741,7 +684,7 @@ export function registerDaemonCommand(program: Command): void {
     });
 
   cmd.command('reload')
-    .description('Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.')
+    .description('Send SIGHUP to reload service toggles and the log level, without a restart.')
     .action(() => {
       if (!isDaemonRunning()) {
         console.log(chalk.yellow('Daemon is not running — nothing to reload. Start it: agents daemon start'));
@@ -780,8 +723,7 @@ export function registerDaemonCommand(program: Command): void {
     `,
     notes: `
       A service disabled at daemon boot is normally not registered on the
-      supervisor, so enabling it needs an operator restart. The inline
-      scheduler applies enable/disable on reload. Each row in
+      supervisor, so enabling it needs an operator restart. Each row in
       the plain-text view names which case it is; 'supervised: true/false' does
       the same in --json.
     `,
@@ -868,7 +810,7 @@ export function registerDaemonCommand(program: Command): void {
   registerDaemonIndexCommand(cmd);
 
   const logsCmd = cmd.command('logs')
-    .description('Read the daemon\'s own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals (not routine run output).')
+    .description('Read the daemon\'s own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals.')
     .option('-n, --lines <number>', 'Show this many recent lines', '50')
     .option('-f, --follow', 'Stream new lines as they are written (like tail -f)')
     .option('--level <level>', 'Minimum level to show: debug | info | warn | error')
@@ -912,7 +854,7 @@ export function registerDaemonCommand(program: Command): void {
   });
 
   cmd.command('doctor')
-    .description('One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.')
+    .description('One-shot health check: identity, duplicates, hosted services. Non-zero exit on problems.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runDoctor({ json: command.optsWithGlobals().json === true });

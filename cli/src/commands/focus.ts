@@ -54,7 +54,6 @@ interface FocusOptions {
   all?: boolean;
   teams?: boolean;
   inTeam?: string;
-  routine?: boolean;
   project?: string;
   skill?: string;
   plugin?: string;
@@ -80,7 +79,7 @@ interface FocusOptions {
 const INHERITED_FOCUS_OPTIONS: Array<keyof FocusOptions> = [
   'local', 'device', 'active', 'agent',
   'claude', 'codex', 'kimi', 'antigravity', 'grok', 'opencode',
-  'all', 'teams', 'inTeam', 'routine', 'project', 'skill', 'plugin',
+  'all', 'teams', 'inTeam', 'project', 'skill', 'plugin',
   'since', 'until', 'limit', 'bookmarks', 'unmanaged', 'sort',
   'working', 'idle', 'waiting', 'orphan', 'orphaned', 'crashed',
   'closed', 'abandoned', 'queued', 'unknown',
@@ -133,7 +132,6 @@ export function registerFocusCommand(program: Command): void {
     .option('--all', 'Include every directory and all time')
     .option('--teams', 'Include team-spawned sessions')
     .option('--in-team <name>', 'Only one team lineage')
-    .option('--routine', 'Only routine-run sessions')
     .option('-p, --project <name>', 'Only a named project')
     .option('--skill <name>', 'Only sessions that invoked this skill')
     .option('--plugin <name>', 'Only sessions that used this plugin')
@@ -272,7 +270,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       project: opts.project,
       window: opts.since ?? (opts.all || idLookup ? undefined : '30d'),
       until: opts.until,
-      routine: opts.routine === true,
       skill: opts.skill,
       plugin: opts.plugin,
       limit: idLookup && limit === 500 ? 5000 : (Number.isFinite(limit) && limit > 0 ? limit : 500),
@@ -427,7 +424,7 @@ export function dedupeSessionsByLogicalId(rows: SessionMeta[], self?: string): S
 function hasFocusFilters(opts: FocusOptions, statuses: LiveStatusFilter[]): boolean {
   return statuses.length > 0 || !!(
     opts.active || opts.local || opts.device?.length || focusOptionAgent(opts) ||
-    opts.all || opts.teams || opts.inTeam || opts.routine || opts.project || opts.skill || opts.plugin ||
+    opts.all || opts.teams || opts.inTeam || opts.project || opts.skill || opts.plugin ||
     opts.since || opts.until || opts.bookmarks || opts.unmanaged || (opts.sort && opts.sort !== 'recent')
   );
 }

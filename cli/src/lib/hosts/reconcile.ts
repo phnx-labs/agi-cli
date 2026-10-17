@@ -47,13 +47,6 @@ export function reconcileTask(task: HostTask): HostTask {
   return updateTask(task.id, terminalPatch(st.code)) ?? task;
 }
 
-export async function reconcileTaskAsync(task: HostTask): Promise<HostTask> {
-  if (task.status !== 'running') return task;
-  const st = await readRemoteExitAsync(task.target, task.remoteExit, 6000, task.identityFile, task.remoteShell);
-  if (st.state !== 'done') return task;
-  return updateTask(task.id, terminalPatch(st.code)) ?? task;
-}
-
 export function reconcileRunningTasks(tasks: HostTask[]): HostTask[] {
   const running = tasks.filter((t) => t.status === 'running');
   if (running.length === 0) return tasks;

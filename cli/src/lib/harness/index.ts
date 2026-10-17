@@ -7,7 +7,6 @@ import { museAdapter } from './adapters/muse.js';
 import { cursorAdapter } from './adapters/cursor.js';
 import { grokAdapter } from './adapters/grok.js';
 import { opencodeAdapter } from './adapters/opencode.js';
-import { droidAdapter } from './adapters/droid.js';
 
 for (const adapter of [
   claudeAdapter,
@@ -18,7 +17,6 @@ for (const adapter of [
   cursorAdapter,
   grokAdapter,
   opencodeAdapter,
-  droidAdapter,
 ]) {
   registerHarnessAdapter(adapter);
 }
@@ -28,7 +26,6 @@ export {
   type ExecConfigEnvCtx,
   type ShimConfigEnvCtx,
   type ExecLaunchArgsCtx,
-  type RoutineLaunchCtx,
   CONFIG_DIR_ENV_KEYS,
   stripForeignConfigDir,
   registerHarnessAdapter,

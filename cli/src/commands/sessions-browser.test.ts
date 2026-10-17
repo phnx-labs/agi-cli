@@ -41,7 +41,6 @@ const base: BrowserFilter = {
   projectScope: 'repo',
   window: undefined,
   statuses: [],
-  routine: false,
   limit: 500,
   unmanaged: false,
   sort: 'timestamp',
@@ -74,7 +73,6 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       projectScope: 'all',
       window: '7d',
       statuses: [],
-      routine: false,
       bookmarks: false,
       limit: 500,
       unmanaged: false,
@@ -100,14 +98,6 @@ describe('browserFilterToArgv — the human↔agent contract', () => {
       'redesign',
     ]);
   });
-
-  it('round-trips all-routine and named-routine filters', () => {
-    expect(browserFilterToArgv({ ...base, routine: true })).toEqual(['sessions', '--routine']);
-    expect(browserFilterToArgv({ ...base, routine: 'nightly-review' })).toEqual([
-      'sessions', '--routine', 'nightly-review',
-    ]);
-  });
-
   it('appends a search query as a quoted positional', () => {
     expect(browserFilterToArgv({ ...base, agent: 'codex' }, 'auth bug')).toEqual([
       'sessions',
@@ -147,43 +137,9 @@ describe('remotePoolArgs — per-device version aliases', () => {
     expect(remotePoolArgs({ ...base, agent: 'claude' }, true)).toContain('claude');
     expect(remotePoolArgs({ ...base, agent: 'claude' }, false)).not.toContain('claude');
   });
-
-  it('preserves a named routine on the peer query', () => {
-    expect(remotePoolArgs({ ...base, routine: 'nightly-review' }, false)).toContain('nightly-review');
-  });
 });
 
 describe('applyFilters — shared browser/focus selection', () => {
-  it('keeps only routine rows for the all-routines filter', () => {
-    const rows = [
-      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
-      row({ id: 'manual', origin: 'cli' }),
-    ];
-    const result = applyFilters(
-      rows,
-      new Map(),
-      { ...base, routine: true, projectScope: 'all' },
-      'zion',
-      new Set(),
-    );
-    expect(result.map((session) => session.id)).toEqual(['nightly']);
-  });
-
-  it('narrows a named routine with the same fuzzy resolver as the flag path', () => {
-    const rows = [
-      row({ id: 'nightly', origin: 'routine', routineName: 'nightly-review' }),
-      row({ id: 'release', origin: 'routine', routineName: 'release-notes' }),
-    ];
-    const result = applyFilters(
-      rows,
-      new Map(),
-      { ...base, routine: 'nightly', projectScope: 'all' },
-      'zion',
-      new Set(),
-    );
-    expect(result.map((session) => session.id)).toEqual(['nightly']);
-  });
-
   it('filters historical versions even when that version is no longer installed', () => {
     const rows = [row({ id: 'old', version: '2.1.187' }), row({ id: 'new', version: '2.1.218' })];
     const result = applyFilters(
@@ -308,20 +264,14 @@ describe('activeBrowserSeed — the --active call-site filter (fleet-wide)', () 
     expect(activeBrowserSeed({ host: ['YOSEMITE-S1'] }).device).toBe('yosemite-s1');
     expect(activeBrowserSeed({}).device).toBeUndefined();
   });
-
-  it('carries routine filters into the shared browser', () => {
-    expect(activeBrowserSeed({ routine: 'nightly-review' }).routine).toBe('nightly-review');
-    expect(activeBrowserSeed({}).routine).toBe(false);
-  });
 });
 
 describe('buildInitialFilter — the seed must survive into the live filter', () => {
   it('carries every seeded field through, not just the ones with defaults', () => {
-    const seed = activeBrowserSeed({ agent: 'codex', host: ['zion'], all: true, routine: 'nightly-review' });
+    const seed = activeBrowserSeed({ agent: 'codex', host: ['zion'], all: true });
     const filter = buildInitialFilter(seed);
 
     expect(filter.running).toBe(true);
-    expect(filter.routine).toBe('nightly-review');
     expect(filter.agent).toBe('codex');
     expect(filter.device).toBe('zion');
     expect(filter.projectScope).toBe('all');
@@ -479,16 +429,6 @@ describe('liveSessionToMeta — the projected row', () => {
     expect(meta.prNumber).toBe(12);
     expect(meta.ticketId).toBe('RUSH-1');
   });
-
-  it('carries routine provenance so an unindexed live row obeys routine filters', () => {
-    const meta = liveSessionToMeta(
-      live({ origin: 'routine', routineName: 'nightly-review' }),
-      'zion',
-    );
-    expect(meta.origin).toBe('routine');
-    expect(meta.routineName).toBe('nightly-review');
-  });
-
   it('keeps an untracked agent kind off the typed agent field', () => {
     expect(liveSessionToMeta(live({ kind: 'cursor-agent' }), 'zion').agent).toBe('claude');
   });

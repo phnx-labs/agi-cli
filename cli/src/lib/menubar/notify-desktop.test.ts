@@ -22,7 +22,7 @@ describe('buildMenubarNotifyArgs', () => {
   it('includes subtitle and action when present', () => {
     expect(
       buildMenubarNotifyArgs({
-        title: 'Routine finished',
+        title: 'Run finished',
         body: 'Completed in 3s',
         subtitle: 'nightly',
         action: 'open:/tmp/report.md',
@@ -30,7 +30,7 @@ describe('buildMenubarNotifyArgs', () => {
     ).toEqual([
       '--notify',
       '--title',
-      'Routine finished',
+      'Run finished',
       '--body',
       'Completed in 3s',
       '--subtitle',
@@ -141,9 +141,9 @@ describe('buildMenubarWithdrawArgs', () => {
 
 describe('buildOsascriptNotifyArgs (degradation path)', () => {
   it('builds an AppleScript display-notification statement', () => {
-    expect(buildOsascriptNotifyArgs({ title: 'Routine overdue', body: 'catchup' })).toEqual([
+    expect(buildOsascriptNotifyArgs({ title: 'Run overdue', body: 'retry' })).toEqual([
       '-e',
-      'display notification "catchup" with title "Routine overdue"',
+      'display notification "retry" with title "Run overdue"',
     ]);
   });
 
@@ -169,7 +169,7 @@ describe('notifyDesktop — missing notifier must not crash the daemon', () => {
   it('swallows the notifier ENOENT and survives', async () => {
     process.env.PATH = '';
     expect(() =>
-      notifyDesktop({ title: 'T', body: 'B', action: 'routines:list' }),
+      notifyDesktop({ title: 'T', body: 'B', action: 'open:/tmp/report.md' }),
     ).not.toThrow();
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(true).toBe(true);

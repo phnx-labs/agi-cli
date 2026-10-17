@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { AgentId } from '../types.js';
 import type { SessionAgentId, SessionMeta } from '@phnx-labs/sessions-cli/reader';
-import { SESSION_AGENTS, isAgentTmuxAlias, resolveRoutineName, safeTeamText } from '@phnx-labs/sessions-cli/reader';
+import { SESSION_AGENTS, isAgentTmuxAlias, safeTeamText } from '@phnx-labs/sessions-cli/reader';
 import { shortIdFromName, type ActiveSession } from './active.js';
 import { machineId } from './sync/config.js';
 import { loadLocalActiveSessions, readActiveSessionsCache } from './session-cache.js';
@@ -31,7 +31,6 @@ interface SessionFilterOptions {
   all?: boolean;
   teams?: boolean;
   inTeam?: string;
-  routine?: boolean | string;
   since?: string;
   until?: string;
 }
@@ -152,7 +151,6 @@ export function parseAgentFilter(agentName?: string): AgentFilter {
 export type SessionSearchScope = {
   agent?: string;
   project?: string;
-  routine?: boolean | string;
 };
 
 interface SessionQueryResolution {
@@ -297,19 +295,6 @@ export function applyScopeFilters(
     });
   }
 
-  if (scope.routine) {
-    filtered = filtered.filter((session) => session.origin === 'routine');
-    if (typeof scope.routine === 'string') {
-      const names = [...new Set(
-        filtered.map((session) => session.routineName).filter((name): name is string => !!name),
-      )];
-      const selected = resolveRoutineName(scope.routine, names);
-      filtered = selected
-        ? filtered.filter((session) => session.routineName === selected)
-        : [];
-    }
-  }
-
   return filtered;
 }
 
@@ -319,7 +304,7 @@ function scopedContentIndex(
   scope?: SessionSearchScope,
 ): Map<string, SessionMeta> {
   const hits = searchContentIndex(sessions, query);
-  if (!scope || (!scope.agent && !scope.project && !scope.routine)) return hits;
+  if (!scope || (!scope.agent && !scope.project)) return hits;
   const kept = new Map<string, SessionMeta>();
   for (const [id, session] of hits) {
     if (applyScopeFilters([session], scope).length > 0) kept.set(id, session);

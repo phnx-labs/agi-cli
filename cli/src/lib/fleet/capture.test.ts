@@ -9,7 +9,6 @@ describe('captureFleet', () => {
     defaults: { agents: ['claude@latest', 'codex@latest'], sync: ['user'], login: 'sync' as const },
     agentsByDevice: { 'mac-mini': ['claude@latest', 'droid@latest'] },
     secretsBundles: ['ssh-keys', 'attio'],
-    routines: ['review-open-prs', 'cycle-hygiene'],
   };
 
   it('serializes device names + desired state (no connection details)', () => {
@@ -21,7 +20,6 @@ describe('captureFleet', () => {
     expect(map['yosemite-s0'].agents).toBeUndefined();
     expect(m.defaults?.agents).toEqual(['claude@latest', 'codex@latest']);
     expect(m.secrets?.bundles).toEqual(['attio', 'ssh-keys']);
-    expect(m.routines).toEqual(['cycle-hygiene', 'review-open-prs']);
   });
 
   it('PRIVACY: the serialized fleet: block carries no IP, username, host, or browser endpoint', () => {
@@ -54,9 +52,8 @@ describe('captureFleet', () => {
   });
 
   it('omits empty extras rather than writing empty keys', () => {
-    const m = captureFleet(undefined, { devices: ['s0'], secretsBundles: [], routines: [] });
+    const m = captureFleet(undefined, { devices: ['s0'], secretsBundles: [] });
     expect(m.secrets).toBeUndefined();
-    expect(m.routines).toBeUndefined();
   });
 
   it('keeps the config of a device missing from the captured roster', () => {

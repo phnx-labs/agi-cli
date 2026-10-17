@@ -1,5 +1,4 @@
 
-import type { JobTrigger } from '../scheduling/routines.js';
 
 export type CloudProviderId = 'rush' | 'codex' | 'factory' | 'antigravity' | 'cursor' | 'host';
 
@@ -121,7 +120,6 @@ export const MAX_IMAGES_PER_DISPATCH = 5;
 export interface DispatchOptions {
   prompt: string;
   agent?: string;
-  trigger?: JobTrigger;
   repo?: string;
   repos?: string[];
   branch?: string;

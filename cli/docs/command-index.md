@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_46 command groups · 355 commands._
+_45 command groups · 332 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -85,12 +85,12 @@ agents config set <key> <value>          Set a config key
 agents config unset <key>                Unset a config key (restore default behavior)
 ```
 
-## daemon: The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.
+## daemon: The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.
 
 ```
-agents daemon                             The always-on daemon: watchdog, session/usage sync, and the routines scheduler. Bare `agents daemon` shows status.
+agents daemon                             The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.
 agents daemon disable                     Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
-agents daemon doctor                      One-shot health check: identity, duplicates, hosted services, scheduler. Non-zero exit on problems.
+agents daemon doctor                      One-shot health check: identity, duplicates, hosted services. Non-zero exit on problems.
 agents daemon enable                      Clear the daemon.enabled kill switch. Does not start the daemon by itself.
 agents daemon index                       Maintain the session index the daemon keeps: transcript roots, FTS compaction, historical backfills. Runs in the foreground; never starts or restarts the daemon.
 agents daemon index backfill              Populate derived session data explicitly.
@@ -99,9 +99,9 @@ agents daemon index backfill titles       Generate the session-row headline (a s
 agents daemon index backfill tools        Parse historical tool calls once into the local SQLite index.
 agents daemon index optimize              Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents daemon index roots                 Print the on-disk directories scanned for session transcripts, per agent, as JSON (for external watchers)
-agents daemon logs                        Read the daemon's own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals (not routine run output).
+agents daemon logs                        Read the daemon's own log: lifecycle, every service tick, slow sections, event-loop stalls, and per-minute vitals.
 agents daemon logs level [level]          Show or set what the daemon writes: debug (every tick and span) | info (default) | warn | error. Applies live.
-agents daemon reload                      Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
+agents daemon reload                      Send SIGHUP to reload service toggles and the log level, without a restart.
 agents daemon restart                     Stop then start the daemon.
 agents daemon services                    Every registered daemon service: live health, enabled state, and live enable/disable/restart.
 agents daemon services disable <service>  Disable a daemon service. Applies live for supervised services; a legacy service needs a restart.
@@ -121,8 +121,8 @@ agents devices                                 Registry of SSH device profiles (
 agents devices accounts                        Per device, one row per account: which harnesses share it, signed-in, quota, and ready. The identity lens on `agents devices harnesses`.
 agents devices add <name> <target>             Add a device manually (target is user@host or host).
 agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
-agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
-agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
+agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names) into agents.yaml fleet:.
+agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
 agents devices describe <name> [text...]       Show or set the one-line description of what a device is FOR ("gpu box — cuda 12.4"). Rendered as the tail column of `agents devices list` and synced fleet-wide. Same key as `agents devices config <name> description` — one store, two names.
 agents devices disable <name>                  Drop a device from every automatic-placement path (sets auto-launch.enabled off)
 agents devices enable <name>                   Put a device back in the automatic-placement pool (clears auto-launch.enabled)
@@ -357,7 +357,7 @@ agents projects todo undo <id>        Undo the last to-do action: reopen a Done 
 
 ```
 agents prune <specs...>              Uninstall agent CLI versions. Moves version data to trash for recovery.
-agents prune cleanup [target]        Remove orphan resources, old versions, or routine runs
+agents prune cleanup [target]        Remove orphan resources or old versions
 agents prune trash                   Inspect, restore, and empty soft-deleted agent versions and resources
 agents prune trash empty             Permanently delete trashed items, optionally only those trashed before a cutoff
 agents prune trash list [agent]      List soft-deleted version directories (optionally filtered to one agent)
@@ -402,34 +402,6 @@ agents repos push [alias]        Commit and push the user repo or a user-owned e
 agents repos remove <alias>      Unregister an extra repo. Managed clones are deleted; external paths are kept.
 agents repos sync <alias>        Git-sync a repo: pull (and push for user/extras). Aliases: "system", "user", or a registered extra.
 agents repos view [name]         Show one repo's contents: git state and per-kind resource counts. Omit the name for an interactive picker.
-```
-
-## routines: Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
-
-```
-agents routines                   Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
-agents routines add [nameOrPath]  Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.
-agents routines catchup           Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.
-agents routines devices [name]    View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
-agents routines disable [name]    Disable a routine. Stops scheduling future runs; turn it back on with: agents routines enable <name>.
-agents routines doctor [name]     Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
-agents routines edit [name]       Edit a prefilled routine transactionally; invalid YAML never replaces the live definition.
-agents routines enable [name]     Enable a routine so the daemon schedules it. Also materialises a project routine (from the current project or a registered one) on first enable — one step, no separate opt-in.
-agents routines list              See all scheduled jobs, when they run next, and their last execution status
-agents routines logs [name]       Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
-agents routines prune             Remove expired one-shot routines that already fired and still have a user-layer YAML file.
-agents routines remove [name]     Delete a routine. Stops scheduling future runs; past execution logs remain on disk.
-agents routines report [name]     Show the extracted report from the most recent execution. Reports are parsed from agent output on completion.
-agents routines run [name]        Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.
-agents routines runs [name]       See execution history: run IDs, completion status, and start times (up to last 10 runs)
-agents routines scheduler-logs    Read scheduler log output (for debugging why a routine did not fire). Use --follow to stream.
-agents routines start             Enable and reload the scheduler service. Usually unnecessary — it auto-starts when you add your first routine.
-agents routines stats [name]      Duration + outcome rollup per job: run count, failed, missed, avg/p50/p95 duration
-agents routines status            Show scheduler service state, shared-daemon state, enabled routines, and upcoming runs.
-agents routines stop              Stop only the scheduler service. The shared daemon and its other services (usage sync, session index, watchdog, and the rest) stay running.
-agents routines sync [path]       Refresh materialised project routines from their .agents/routines/*.yml sources. Definition-only — never changes what is enabled. With no path, refreshes every project you have enabled a routine from. Also runs automatically on daemon reload (SIGHUP).
-agents routines view [name]       Show the full YAML configuration for a routine
-agents routines webhook           Fire trigger-based routines from a single webhook payload (read from --file or stdin). One-shot: matches and fires, then exits.
 ```
 
 ## rules: Control agent behavior by installing persistent instructions and rules

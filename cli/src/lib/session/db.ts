@@ -568,7 +568,6 @@ export interface ScanStamp {
 export interface QueryOptions {
   agent?: SessionAgentId;
   agents?: SessionAgentId[];
-  origin?: 'cli' | 'routine';
   version?: string;
   cwd?: string;
   cwdPrefix?: string;
@@ -2520,11 +2519,6 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
     params.push(options.version);
   }
 
-  if (options.origin) {
-    where.push("IFNULL(origin, 'cli') = ?");
-    params.push(options.origin);
-  }
-
   if (options.cwd) {
     where.push('cwd = ?');
     params.push(options.cwd);
@@ -2546,12 +2540,12 @@ function buildSessionWhere(options: QueryOptions): { clause: string; params: any
   }
 
   if (options.idExact) {
-    where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE OR routine_run_id = ? COLLATE NOCASE)');
-    params.push(options.idExact, options.idExact, options.idExact);
+    where.push('(id = ? COLLATE NOCASE OR short_id = ? COLLATE NOCASE)');
+    params.push(options.idExact, options.idExact);
   }
   if (options.idPrefix) {
-    where.push('(id LIKE ? OR short_id LIKE ? OR routine_run_id LIKE ?)');
-    params.push(`${options.idPrefix}%`, `${options.idPrefix}%`, `${options.idPrefix}%`);
+    where.push('(id LIKE ? OR short_id LIKE ?)');
+    params.push(`${options.idPrefix}%`, `${options.idPrefix}%`);
   }
 
   if (typeof options.sinceMs === 'number') {

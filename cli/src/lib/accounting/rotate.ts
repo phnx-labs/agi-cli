@@ -704,21 +704,13 @@ export function matchAccountVersion(
   return matchAccountCandidate(candidates, account, preferredLabel)?.version ?? null;
 }
 
-export async function resolveAccountCandidate(
+async function resolveAccountCandidate(
   agent: AgentId,
   account: string,
   preferredLabel?: string | null,
 ): Promise<RotateCandidate | null> {
   const candidates = await collectRunCandidates(agent);
   return matchAccountCandidate(candidates, account, preferredLabel);
-}
-
-export async function resolveAccountVersion(
-  agent: AgentId,
-  account: string,
-  preferredLabel?: string | null,
-): Promise<string | null> {
-  return (await resolveAccountCandidate(agent, account, preferredLabel))?.version ?? null;
 }
 
 export async function selectBalancedVersion(agent: AgentId): Promise<RotateResult | null> {

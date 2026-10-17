@@ -25,7 +25,7 @@ watchdog's #1 dependency: it must reliably tell `idle` (its job) from `waiting_i
 
 ## The loop
 
-The watchdog is owned by the agents daemon, not a UI poller or cron routine. When
+The watchdog is owned by the agents daemon, not a UI poller or cron job. When
 `watchdog.enabled` is true in this device's config, the daemon runs one bounded pass
 every three minutes. `agents watchdog --nudge` remains the explicit one-shot command:
 

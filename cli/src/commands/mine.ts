@@ -18,7 +18,7 @@ type ToggleKind = 'plugins' | 'skills' | 'commands' | 'mcp' | 'hooks' | 'subagen
 
 function knownCommandNames(): Set<string> {
   const names = new Set<string>(KNOWN_TOP_LEVEL_COMMANDS);
-  for (const n of ['perms', 'exec', 'jobs', 'cron', 'upgrade']) names.add(n);
+  for (const n of ['perms', 'exec', 'upgrade']) names.add(n);
   return names;
 }
 

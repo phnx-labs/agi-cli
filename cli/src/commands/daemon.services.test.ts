@@ -61,7 +61,7 @@ describeDaemon('agents daemon — services, broker', () => {
     expect(res.status).toBe(0);
     expect(res.stdout).toContain('watchdog');
     expect(res.stdout).not.toContain('monitors');
-    expect(res.stdout).toContain('scheduler');
+    expect(res.stdout).toContain('daemon-heartbeat');
     expect(res.stdout).toContain('enabled');
   });
 

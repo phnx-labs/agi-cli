@@ -947,7 +947,6 @@ function registerDevicesCommands(program: Command): void {
       Configure a device:
         agents devices config mac-mini                       # settings menu (TTY) / print (piped)
         agents devices config mac-mini agents.max-concurrent 4
-        agents devices config mac-mini scheduler.enabled off
         agents devices config mac-mini notes "runs the releases"
         agents devices config win-mini ssh.auth password
         agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
@@ -1389,7 +1388,7 @@ function registerDevicesCommands(program: Command): void {
   const configCmd = devicesCmd
     .command('config [name] [key] [value...]')
     .description(
-      'Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). ' +
+      'Get, set, or unset a device’s settings (agent cap, ssh overrides, auto-launch, notes). ' +
         'Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). ' +
         'Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the ' +
         'fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.',
@@ -1417,10 +1416,10 @@ function registerDevicesCommands(program: Command): void {
     examples: `
       agents devices config mac-mini                            # settings menu (TTY) / print config (piped)
       agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents on mac-mini
-      agents devices config mac-mini scheduler.enabled off      # no routines firing there
-      agents devices config mac-mini scheduler.enabled          # read the effective value back
-      agents devices config mac-mini scheduler.enabled --unset  # inherit the fleet default again
-      agents devices config --fleet scheduler.enabled off       # fleet-wide default (all devices)
+      agents devices config mac-mini watchdog.enabled on        # nudge stalled sessions there
+      agents devices config mac-mini watchdog.enabled           # read the effective value back
+      agents devices config mac-mini watchdog.enabled --unset   # inherit the fleet default again
+      agents devices config --fleet watchdog.enabled on         # fleet-wide default (all devices)
       agents devices config --fleet agents.max-concurrent 2     # every box caps at 2 unless it overrides
       agents devices config --fleet                             # print the fleet defaults layer
       agents devices config mac-mini notes "runs the releases"  # append an operator note
@@ -1437,7 +1436,7 @@ function registerDevicesCommands(program: Command): void {
       Keys: role (worker|personal), see 'agents devices role',
       description (one line saying what the box is for — see
       'agents devices describe'; renders in the devices list tail),
-      agents.max-concurrent, scheduler.enabled, daemon.enabled,
+      agents.max-concurrent, daemon.enabled,
       watchdog.enabled, tmux.enabled, browser.remote-control,
       browser.task-idle-minutes, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
@@ -1454,9 +1453,9 @@ function registerDevicesCommands(program: Command): void {
 
       Booleans take on/off (or true/false). 'notes' appends one entry per
       invocation. ssh.* / platform / user overlay the discovered registry
-      profile at dial time. scheduler.enabled / daemon.enabled take effect
+      profile at dial time. daemon.enabled takes effect
       when the daemon reloads or restarts on that device. Machine-local keys
-      (scheduler.enabled, daemon.enabled, tmux.enabled, browser.remote-control,
+      (daemon.enabled, tmux.enabled, browser.remote-control,
       browser.task-idle-minutes, browser.profile) can only be read or set on
       the device itself; --fleet still writes a fleet-wide default those boxes
       inherit until they override.

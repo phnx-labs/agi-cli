@@ -5,7 +5,6 @@ import * as path from 'path';
 import { httpsUrl } from '../actor.js';
 import { cachedViewer, emailDigest, type GithubViewer } from '../github/viewer.js';
 import { readSession, type PhoenixSession } from '../identity/client.js';
-import { buildRoutineListJson } from '../scheduling/routines.js';
 import { backfillActiveRowsFromIndex, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson } from '../session/active.js';
 import { getConfigValue, listConfiguredDeviceRoles, loadAutoLaunchPreferences } from '../device-config.js';
 import { filterAutoPool } from '../devices/pool.js';
@@ -80,7 +79,6 @@ interface MenubarSnapshot {
   capturedAt: string;
   cliVersion: string;
   menubarUpdate: MenubarUpdateResult;
-  routines: Record<string, unknown>[];
   recentSessions: Record<string, unknown>[];
   activeSessions: Record<string, unknown>[];
   devices: MenubarDevice[];
@@ -179,8 +177,7 @@ export function readLastWatchdogTick(
 export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
   migrateMenubarPreferencesFromUserDefaults();
   const viewerRead = cachedViewer();
-  const [routines, recent, devices, viewer] = await Promise.all([
-    Promise.resolve(buildRoutineListJson()),
+  const [recent, devices, viewer] = await Promise.all([
     Promise.resolve(querySessions({ limit: 40, skipExistenceCheck: true })),
     buildMenubarDevices(),
     viewerRead,
@@ -196,7 +193,6 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     capturedAt: new Date().toISOString(),
     cliVersion: getCliVersion(),
     menubarUpdate: getMenubarUpdateStatus(),
-    routines,
     recentSessions: JSON.parse(serializeSessionsJson(recent)) as Record<string, unknown>[],
     activeSessions: serializeActiveSessionsForJson(activeSessions) as Record<string, unknown>[],
     devices,

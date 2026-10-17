@@ -44,15 +44,15 @@ describe('daemon-services', () => {
 
     const cfg = readDaemonServicesConfig();
     expect(cfg.services['watchdog']).toBe(false);
-    expect(cfg.services['scheduler']).toBe(true);
+    expect(cfg.services['session-index']).toBe(true);
   });
 
   it('listDaemonServiceStates reflects current toggles', () => {
-    setDaemonServiceEnabled('scheduler', false);
+    setDaemonServiceEnabled('session-index', false);
     const states = listDaemonServiceStates();
-    const scheduler = states.find((s) => s.id === 'scheduler');
-    expect(scheduler).toBeDefined();
-    expect(scheduler!.enabled).toBe(false);
+    const sessionIndex = states.find((s) => s.id === 'session-index');
+    expect(sessionIndex).toBeDefined();
+    expect(sessionIndex!.enabled).toBe(false);
 
     const watchdog = states.find((s) => s.id === 'watchdog');
     expect(watchdog!.enabled).toBe(true);
@@ -60,12 +60,14 @@ describe('daemon-services', () => {
 
   it('ignores unknown service ids without throwing', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'services:\n  watchdog: false\n  monitors: false\n  browser-ipc: false\n  unknown-service: false\n', 'utf-8');
+    fs.writeFileSync(filePath, 'services:\n  watchdog: false\n  monitors: false\n  browser-ipc: false\n  scheduler: false\n  catchup: false\n  unknown-service: false\n', 'utf-8');
     const cfg = readDaemonServicesConfig();
     expect(cfg.services['watchdog']).toBe(false);
     expect((cfg.services as Record<string, boolean>)['monitors']).toBeUndefined();
     expect((cfg.services as Record<string, boolean>)['browser-ipc']).toBeUndefined();
-    expect(cfg.services['scheduler']).toBe(true);
+    expect((cfg.services as Record<string, boolean>)['scheduler']).toBeUndefined();
+    expect((cfg.services as Record<string, boolean>)['catchup']).toBeUndefined();
+    expect(cfg.services['session-index']).toBe(true);
   });
 
   it('writeDaemonServicesConfig preserves extra top-level fields', () => {

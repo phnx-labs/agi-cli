@@ -1,9 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
-import { applyScopeFilters, matchesTeam } from '../../lib/session/selection.js';
+import { matchesTeam } from '../../lib/session/selection.js';
 import { formatPickerLabel, teamBadge } from '../../lib/session/presentation.js';
-import { resolveRoutineName } from '../ps-roster.js';
-import { resolveSessionById } from '../../lib/session/discover.js';
 import { formatTeamLineage } from '../sessions-picker.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
@@ -19,29 +17,6 @@ function meta(over: Partial<SessionMeta> = {}): SessionMeta {
     ...over,
   };
 }
-
-describe('resolveRoutineName', () => {
-  const names = ['nightly-review', 'release-notes', 'security-scan'];
-
-  it('resolves exact, unique substring, and unambiguous typo matches', () => {
-    expect(resolveRoutineName('NIGHTLY-REVIEW', names)).toBe('nightly-review');
-    expect(resolveRoutineName('release', names)).toBe('release-notes');
-    expect(resolveRoutineName('securty-scan', names)).toBe('security-scan');
-  });
-
-  it('rejects missing and ambiguous selectors', () => {
-    expect(resolveRoutineName('missing', names)).toBeNull();
-    expect(resolveRoutineName('notes', ['release-notes', 'meeting-notes'])).toBeNull();
-  });
-
-  it('removes another routine before a positional session ID can resolve', () => {
-    const wanted = meta({ id: 'wanted-id', shortId: 'wanted', origin: 'routine', routineName: 'nightly-review' });
-    const other = meta({ id: 'other-id', shortId: 'other', origin: 'routine', routineName: 'security-scan' });
-    const globallyScoped = applyScopeFilters([wanted, other], { routine: 'nightly' });
-    expect(resolveSessionById(globallyScoped, 'other-id')).toEqual([]);
-    expect(resolveSessionById(globallyScoped, 'wanted-id')).toEqual([wanted]);
-  });
-});
 
 describe('matchesTeam — --in-team spans both ends of the lineage', () => {
   it('matches the session that spawned the team', () => {
