@@ -91,6 +91,7 @@ import { ghExec, canonicalizeRepo } from '../lib/github/pr-mergeable.js';
 import { buildOpenPrs, type OpenPrsEnvelope } from '../lib/github/open-prs.js';
 import { readCiFailure, rerunFailedJobs } from '../lib/github/ci-failure.js';
 import { registerProjectTodoCommands } from './projects-todo.js';
+import { runLinearFor, type TicketsVerb } from '../lib/project-tickets.js';
 
 function ciMark(state: CiState | null): string {
   if (state === 'SUCCESS') return chalk.green('✓');
@@ -1271,6 +1272,46 @@ async function runProjectCard(
       partial (JSON reports errors per repository; text mode exits non-zero).
     `,
   });
+
+  const linearFor = (name: string, verb: TicketsVerb, json: boolean): void => {
+    const def = loadProjectDef(name);
+    if (!def) {
+      console.error(chalk.red(`No project named "${name}". List them: agents projects list`));
+      process.exit(1);
+    }
+    let run;
+    try {
+      run = runLinearFor(def, verb, json);
+    } catch (e) {
+      console.error(chalk.red(e instanceof Error ? e.message : String(e)));
+      process.exit(1);
+    }
+    process.stdout.write(run.stdout);
+    process.stderr.write(run.stderr);
+    if (run.status !== 0) process.exit(run.status);
+  };
+  const ticketsCmd = projects
+    .command('tickets')
+    .description("A project's Linear issues through linear-cli, scoped by the project's recorded Linear project id (list, the default); read one (view) or comment on it (comment).");
+  ticketsCmd
+    .command('list <name>', { isDefault: true })
+    .description("The project's Linear issues: `linear tasks --project <linear.projectId>`. A recorded id Linear no longer has fails with the relink command.")
+    .option('--json', "linear-cli's JSON, unchanged")
+    .action((name: string, opts: { json?: boolean }) => linearFor(name, { kind: 'list' }, !!opts.json));
+  ticketsCmd
+    .command('view <name> <id>')
+    .description('One issue with its description and comments: `linear tasks <id>`.')
+    .option('--json', "linear-cli's JSON, unchanged")
+    .action((name: string, id: string, opts: { json?: boolean }) => linearFor(name, { kind: 'view', id }, !!opts.json));
+  ticketsCmd
+    .command('comment <name> <id> <text>')
+    .description('Comment on one issue: `linear update <id> --comment=<text>`.')
+    .action((name: string, id: string, text: string) => linearFor(name, { kind: 'comment', id, text }, false));
+  projects
+    .command('goals <name>')
+    .description("The company, week and day goals of the project's Linear workspace: `linear goals`.")
+    .option('--json', "linear-cli's JSON, unchanged")
+    .action((name: string, opts: { json?: boolean }) => linearFor(name, { kind: 'goals' }, !!opts.json));
 
   registerProjectTodoCommands(projects);
 

@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 46,
-  "commands": 355,
+  "commands": 360,
   "root": {
     "name": "agents",
     "path": "",
@@ -9059,6 +9059,42 @@
           "subcommands": []
         },
         {
+          "name": "goals",
+          "path": "projects goals",
+          "aliases": [],
+          "description": "The company, week and day goals of the project's Linear workspace: `linear goals`.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "linear-cli's JSON, unchanged",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "import",
           "path": "projects import",
           "aliases": [],
@@ -10064,6 +10100,144 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "tickets",
+          "path": "projects tickets",
+          "aliases": [],
+          "description": "A project's Linear issues through linear-cli, scoped by the project's recorded Linear project id (list, the default); read one (view) or comment on it (comment).",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "comment",
+              "path": "projects tickets comment",
+              "aliases": [],
+              "description": "Comment on one issue: `linear update <id> --comment=<text>`.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "id",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "text",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "projects tickets list",
+              "aliases": [],
+              "description": "The project's Linear issues: `linear tasks --project <linear.projectId>`. A recorded id Linear no longer has fails with the relink command.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "linear-cli's JSON, unchanged",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "view",
+              "path": "projects tickets view",
+              "aliases": [],
+              "description": "One issue with its description and comments: `linear tasks <id>`.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "id",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "linear-cli's JSON, unchanged",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "todo",
