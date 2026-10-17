@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.27
+
+- **A Claude session started in a symlinked folder shows its real state (PHNX-4387).** `agents ps` and the session feed looked for the transcript under the folder's path as typed, while Claude stores it under the folder's real path, so such a session showed "Running · no transcript" forever. They now look under both and take the newest; `agents run` and project memory sync use the real path too. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/project-key.ts`, `cli/src/lib/exec.ts`, `cli/src/lib/memory.ts`.
+
 ## 1.23.26
 
 - **`agents ps` says how long a working Claude turn has been quiet (PHNX-4387).** The list row shows `quiet Nm` where it showed `idle Nm` for a turn Claude reports busy, including one whose transcript tail holds only request records (Claude 2.1.261 appends 100+ KB of them after a step), where no quiet time was shown. `agents ps --json` carries `quietSinceMs`, when the turn went silent, in place of `quietMs`: a timestamp is stable across polls, so a quiet row no longer rewrites the active-sessions journal on every poll, and the age is computed when it is shown. Source: `cli/src/lib/session/active.ts`, `cli/src/commands/ps-roster.ts`, `cli/src/lib/session/presentation.ts`.
