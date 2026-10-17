@@ -414,11 +414,25 @@ describe('projectNameForCwd — monorepo subprojects', () => {
     ];
     expect(projectNameForCwd(path.join(mono, 'infra', 'deploy', 'k8s'), withRepos)).toBe('infra');
     expect(projectNameForCwd(path.join(mono, 'infra'), withRepos)).toBe('infra');
-    expect(projectNameForCwd(path.join(mono, 'docs'), withRepos)).toBe('umbrella');
+    // Both claim ~/src/rush as a plain root: no project, in either order.
+    expect(projectNameForCwd(path.join(mono, 'docs'), withRepos)).toBeUndefined();
+    expect(projectNameForCwd(path.join(mono, 'docs'), [...withRepos].reverse())).toBeUndefined();
   });
 
   it('matches nothing outside every anchor', () => {
     expect(projectNameForCwd(path.join(HOME_, 'src', 'elsewhere'), defs)).toBeUndefined();
+  });
+
+  it('two projects sharing a root give no project there, not the first listed', () => {
+    const shared: ProjectDef[] = [
+      { name: 'prix', root: '~/src/rush', defaultPath: '~/src/rush/prix' },
+      { name: 'rush', root: '~/src/rush', defaultPath: '~/src/rush/rush' },
+    ];
+    expect(projectNameForCwd(mono, shared)).toBeUndefined();
+    expect(projectNameForCwd(path.join(mono, 'infra'), shared)).toBeUndefined();
+    expect(projectNameForCwd(mono, [...shared].reverse())).toBeUndefined();
+    expect(projectNameForCwd(path.join(mono, 'rush', 'cli'), shared)).toBe('rush');
+    expect(projectNameForCwd(path.join(mono, 'prix'), shared)).toBe('prix');
   });
 
   it('a lone narrowed project still owns the rest of its own checkout', () => {
