@@ -8,7 +8,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 
 - Full option lists live in [`command-index.json`](command-index.json); the searchable page is [`command-reference.html`](command-reference.html).
 - `agents <command> --help` shows the help for one command.
-- Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
+- Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).
 
 _45 command groups · 332 commands._
 

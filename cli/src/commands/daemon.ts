@@ -18,7 +18,7 @@ import {
   RedirectedHomeDaemonError,
 } from '../lib/daemon/daemon.js';
 import { listDaemonRunProcesses } from '../lib/daemon/leaked-daemons.js';
-import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
+import { setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
   readSubsystemHealth,
   readAllSubsystemHealth,

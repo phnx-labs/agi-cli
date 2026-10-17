@@ -15,7 +15,7 @@ import { isDaemonEnabled } from '../device-config.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, readRecentDaemonRestarts, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
 import type { ServiceHealth } from './service.js';
-import { emit, emitAsync } from '../feed/events.js';
+import { emitAsync } from '../feed/events.js';
 import { readDaemonServicesConfig, readDaemonLogLevel, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 import { sleepSync } from '../fs-atomic.js';
 import { DaemonVitals, installSpanLog, levelEnabled, topSpansSinceReport, type LogFields, type LogLevel } from './diagnostics.js';

@@ -156,14 +156,6 @@ export type EventType =
   | 'perf.timing'
   | 'session.start'
   | 'session.end'
-  | 'webhook.received'
-  | 'webhook.authorized'
-  | 'webhook.rejected'
-  | 'webhook.matched'
-  | 'webhook.fired'
-  | 'webhook.failed'
-  | 'webhook.handler.start'
-  | 'webhook.handler.end'
   | 'plan.created'
   | 'pr.opened'
   | 'pr.merged'
@@ -208,8 +200,6 @@ const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'command.start': true, 'command.end': true,
   'perf.timing': true,
   'session.start': true, 'session.end': true,
-  'webhook.received': true, 'webhook.authorized': true, 'webhook.rejected': true, 'webhook.matched': true,
-  'webhook.fired': true, 'webhook.failed': true, 'webhook.handler.start': true, 'webhook.handler.end': true,
   'plan.created': true, 'pr.opened': true, 'pr.merged': true, 'worktree.created': true,
   'worktree.removed': true, 'commit.created': true, 'pushed': true, 'subagent.spawned': true,
   'artifact.created': true, 'task.completed': true, 'checklist.created': true, 'status.posted': true,

@@ -10,7 +10,7 @@ export const AGENTS_REFERENCE: ReferenceOptions = {
   bin: 'agents',
   description: 'Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.',
   helpSections: getHelpSections,
-  excluded: 'commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).',
+  excluded: 'commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).',
   regenerate: 'scripts/generate-reference.sh',
 };
 
