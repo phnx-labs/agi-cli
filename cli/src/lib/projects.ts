@@ -386,23 +386,19 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
 
   if (!cwd) return undefined;
   const abs = path.resolve(localizeHome(expandLocalHome(cwd)));
-  let best: string | undefined;
-  let bestLen = -1;
-  let weakBest: string | undefined;
-  let weakLen = -1;
-  for (const { name, abs: root, weak } of projectRootsAbs(defs)) {
-    if (!isUnder(abs, root)) continue;
-    if (weak) {
-      if (root.length > weakLen) {
-        weakBest = name;
-        weakLen = root.length;
-      }
-    } else if (root.length > bestLen) {
-      best = name;
-      bestLen = root.length;
+  // Deepest anchor wins; two projects tied at it is no answer, never the first listed.
+  const deepest = (weak: boolean): { name: string | undefined; len: number } => {
+    let name: string | undefined;
+    let len = -1;
+    for (const r of projectRootsAbs(defs)) {
+      if (!!r.weak !== weak || !isUnder(abs, r.abs)) continue;
+      if (r.abs.length > len) { name = r.name; len = r.abs.length; }
+      else if (r.abs.length === len && r.name !== name) name = undefined;
     }
-  }
-  return best ?? weakBest;
+    return { name, len };
+  };
+  const strong = deepest(false);
+  return strong.len >= 0 ? strong.name : deepest(true).name;
 }
 
 let projectDefsMemo: { stamp: string; defs: ProjectDef[] } | null = null;
