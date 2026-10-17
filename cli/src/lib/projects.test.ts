@@ -414,7 +414,6 @@ describe('projectNameForCwd — monorepo subprojects', () => {
     ];
     expect(projectNameForCwd(path.join(mono, 'infra', 'deploy', 'k8s'), withRepos)).toBe('infra');
     expect(projectNameForCwd(path.join(mono, 'infra'), withRepos)).toBe('infra');
-    // Both claim ~/src/rush as a plain root: no project, in either order.
     expect(projectNameForCwd(path.join(mono, 'docs'), withRepos)).toBeUndefined();
     expect(projectNameForCwd(path.join(mono, 'docs'), [...withRepos].reverse())).toBeUndefined();
   });
