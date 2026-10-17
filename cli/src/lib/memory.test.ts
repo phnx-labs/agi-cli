@@ -33,6 +33,7 @@ function runMemory(home: string, expression: string): unknown {
   const child = spawnSync(
     tsxBin,
     [
+      '--input-type=module',
       '-e',
       `
       import * as memory from ${JSON.stringify(memoryModuleUrl)};
@@ -135,7 +136,7 @@ describe('memory resource (RUSH-1330)', () => {
 
     const child = spawnSync(
       tsxBin,
-      ['-e', `
+      ['--input-type=module', '-e', `
         import * as memory from ${JSON.stringify(memoryModuleUrl)};
         const facts = memory.listMemoryFacts(${JSON.stringify(home)});
         console.log(JSON.stringify(facts.map(f => f.name)));
