@@ -166,7 +166,7 @@ boundary seen from two sides.
   it before resolving anything and refuse outright when it is set. This is what
   makes Path B a human-only path rather than an advisory one.
 - **Headless no-prompt.** Where nobody could answer a sheet — an unattended launch
-  (`AGENTS_RUNTIME=headless`: routines, fleet workers) or a process outside the GUI
+  (`AGENTS_RUNTIME=headless`: cron jobs, fleet workers) or a process outside the GUI
   login session (SSH, launchd, CI) — resolution takes the `agentOnly` /
   `isHeadlessSecretsContext()` path (secrets-cli `src/lib/secrets/headless.ts`,
   0.1.4+). It reads from the broker or fails loudly; it does not prompt behind the

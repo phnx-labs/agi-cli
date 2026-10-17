@@ -96,7 +96,7 @@ function printOutcome(outcome: UpdateOutcome, json: boolean): void {
     return;
   }
   console.log(chalk.green(`Updated ${name}: release ${outcome.fromRelease} -> ${outcome.toRelease}`));
-  console.log(chalk.gray(`Its name is unchanged, so every default, project pin, and routine that names ${name} still resolves to it.`));
+  console.log(chalk.gray(`Its name is unchanged, so every default, project pin, and profile that names ${name} still resolves to it.`));
   for (const other of outcome.alsoUpdated) {
     console.log(chalk.gray(`  ${other.agent}@${other.label} shares the same binary and now also reports release ${other.releaseVersion}.`));
   }
@@ -309,7 +309,7 @@ agents update claude --check --json
 agents update --auto`,
     notes:
       'One managed installation per harness: a bare `<agent>` updates that installation, keeping its name and every '
-      + 'reference to it. That is why a default, a project pin, a routine version, or a profile that names claude@main '
+      + 'reference to it. That is why a default, a project pin, or a profile that names claude@main '
       + 'keeps working after you update it. '
       + '`--to <release>` pins the installation to a concrete release (excluded from the automatic pass), `--to latest` '
       + 'unpins it. The legacy `agents update <agent>@<label>` selector still addresses a specific installation by its '

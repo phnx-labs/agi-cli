@@ -1,7 +1,6 @@
 import * as fs from 'fs';
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { formatBytes } from '../lib/format.js';
 import { confirm } from '@inquirer/prompts';
 import type { AgentId } from '../lib/types.js';
 import {
@@ -33,15 +32,14 @@ import { getGlobalDefault } from '../lib/installations/versions.js';
 import { resolveAgentName, formatAgentError } from '../lib/agents.js';
 import { pruneDuplicates } from './view.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
-import { previewRunsPrune, pruneRuns, countAllRuns } from '../lib/scheduling/routines.js';
 import { registerPruneTrashCommands } from './prune-trash.js';
 
 type ResourceType = 'commands' | 'skills' | 'hooks' | 'plugins' | 'subagents';
-type StateType = 'sessions' | 'runs';
+type StateType = 'sessions';
 type PruneType = ResourceType | 'versions' | StateType;
 
 const RESOURCE_TYPES: ResourceType[] = ['commands', 'skills', 'hooks', 'plugins', 'subagents'];
-const STATE_TYPES: StateType[] = ['sessions', 'runs'];
+const STATE_TYPES: StateType[] = ['sessions'];
 const ALL_TYPES: PruneType[] = [...RESOURCE_TYPES, 'versions', ...STATE_TYPES];
 
 interface PruneOptions {
@@ -49,7 +47,6 @@ interface PruneOptions {
   dryRun?: boolean;
   yes?: boolean;
   olderThan?: string;
-  keep?: string;
 }
 
 interface OrphanGroup {
@@ -172,55 +169,6 @@ async function runSessionsPrune(options: PruneOptions): Promise<void> {
   console.log(chalk.gray('Browse sessions with: sessions'));
 }
 
-async function runRunsPrune(options: PruneOptions): Promise<void> {
-  const keep = options.keep ? parseInt(options.keep, 10) : 10;
-  if (isNaN(keep) || keep < 0) {
-    console.log(chalk.red('--keep must be a non-negative integer'));
-    process.exit(1);
-  }
-
-  const preview = previewRunsPrune(keep);
-  const total = countAllRuns();
-
-  if (preview.length === 0) {
-    console.log(chalk.green(`All jobs have ${keep} or fewer runs. Nothing to prune.`));
-    return;
-  }
-
-  console.log(chalk.bold(`Routine runs to prune (keeping last ${keep} per job)\n`));
-  const byJob = new Map<string, number>();
-  for (const run of preview) {
-    byJob.set(run.jobName, (byJob.get(run.jobName) || 0) + 1);
-  }
-  for (const [job, count] of byJob) {
-    console.log(`  ${chalk.cyan(job)}: ${count} old runs`);
-  }
-  console.log();
-
-  if (options.dryRun) {
-    console.log(chalk.gray(`${preview.length} of ${total} runs would be deleted. Run without --dry-run to delete.`));
-    return;
-  }
-
-  if (!options.yes) {
-    if (!isInteractiveTerminal()) {
-      console.log(chalk.yellow('Non-interactive shell: pass -y to confirm, or --dry-run to preview.'));
-      process.exit(1);
-    }
-    let ok = false;
-    try {
-      ok = await confirm({ message: `Delete ${preview.length} old runs?`, default: false });
-    } catch (err) {
-      if (isPromptCancelled(err)) { console.log(chalk.gray('Cancelled')); return; }
-      throw err;
-    }
-    if (!ok) { console.log(chalk.gray('Cancelled')); return; }
-  }
-
-  const { deleted, bytesFreed } = pruneRuns(keep);
-  console.log(chalk.green(`Pruned ${deleted} runs (${formatBytes(bytesFreed)}).`));
-}
-
 async function runOrphanPrune(
   resourceTypes: ResourceType[],
   options: PruneOptions,
@@ -295,12 +243,11 @@ export function registerPruneCommand(program: Command): void {
 
   pruneCmd
     .command('cleanup [target]')
-    .description('Remove orphan resources, old versions, or routine runs')
+    .description('Remove orphan resources or old versions')
     .option('--all', 'For orphan cleanup: sweep every installed version (default: current default version per agent)')
     .option('--dry-run', 'Show what would be removed without deleting (default for state targets)')
     .option('-y, --yes', 'Skip confirmation prompt')
     .option('--older-than <days>', 'Deprecated for sessions; accepted but no data is deleted')
-    .option('--keep <n>', 'For runs: keep the last N runs per job (default: 10)')
     .addHelpText('after', `
 Targets:
   (none)     Orphans across commands, skills, hooks + duplicate versions
@@ -310,7 +257,6 @@ Targets:
   versions   Older duplicate version installs only
   <agent>    Older duplicate versions for one agent (e.g. 'claude')
   sessions   No-op compatibility target; session history is durable
-  runs       Routine execution logs, keeping only --keep per job (default 10)
 
 Examples:
   # Full sweep: orphan resources + duplicate versions for current defaults
@@ -334,12 +280,6 @@ Examples:
   # Show the durable-session notice
   agents prune cleanup sessions --dry-run
 
-  # Preview runs cleanup (keeping last 10)
-  agents prune cleanup runs --dry-run
-
-  # Keep only the last 5 runs per job
-  agents prune cleanup runs --keep 5 -y
-
 What's an orphan?
   A command, skill, or hook present inside a version home but missing from every
   configured source (project .agents/, central ~/.agents/, and any enabled extra
@@ -359,9 +299,6 @@ Durability:
         switch (parsed.stateType) {
           case 'sessions':
             await runSessionsPrune(options);
-            break;
-          case 'runs':
-            await runRunsPrune(options);
             break;
         }
         return;

@@ -216,21 +216,6 @@ describe('runMigration', () => {
       expect(fs.existsSync(path.join(userDir, 'prompts.json'))).toBe(false);
     });
 
-    it('removes empty ~/.agents/runs/ leftover dir', () => {
-      fs.mkdirSync(path.join(userDir, 'runs'));
-      runRealMigration();
-      expect(fs.existsSync(path.join(userDir, 'runs'))).toBe(false);
-    });
-
-    it('preserves ~/.agents/runs/ if it has contents (legacy not yet migrated)', () => {
-      const runsDir = path.join(userDir, 'runs');
-      fs.mkdirSync(path.join(runsDir, 'old-job'), { recursive: true });
-      fs.writeFileSync(path.join(runsDir, 'old-job', 'meta.json'), '{}');
-      runRealMigration();
-      expect(fs.existsSync(path.join(userDir, '.history', 'runs', 'old-job', 'meta.json'))).toBe(true);
-      expect(fs.existsSync(runsDir)).toBe(false);
-    });
-
     it('deletes legacy ~/.agents/config.json and ~/.agents/teams/config.json (no longer used)', () => {
       fs.writeFileSync(path.join(userDir, 'config.json'), '{"agents":{"claude":{"enabled":true}}}');
       fs.mkdirSync(path.join(userDir, 'teams'), { recursive: true });

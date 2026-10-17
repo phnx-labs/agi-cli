@@ -311,9 +311,9 @@ async function healLongRunningProcesses() {
       d.stopDaemon?.();
       if (enabled) {
         d.startDaemon?.(AGENTS_BIN);
-        console.log('  Restarted the routines daemon onto this version.');
+        console.log('  Restarted the agents daemon onto this version.');
       } else {
-        console.log('  Stopped the routines daemon (daemon.enabled=false — not restarted).');
+        console.log('  Stopped the agents daemon (daemon.enabled=false — not restarted).');
       }
     } else if (enabled) {
       d.startDaemon?.(AGENTS_BIN);

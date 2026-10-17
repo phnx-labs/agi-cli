@@ -539,7 +539,6 @@ export interface Meta {
   hooks?: Record<string, ManifestHook>;
   deviceBrowser?: Record<string, BrowserProfileConfig>;
   config?: Record<string, unknown>;
-  deviceRoutines?: string[];
   deviceConfig?: Record<string, unknown>;
   hosts?: Record<string, HostEntry>;
   deviceHosts?: Record<string, HostEntry>;

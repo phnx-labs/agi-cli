@@ -485,18 +485,6 @@ function registerExecAliasCommand(p: Command): void {
     });
 }
 
-function registerJobsCronAliasCommand(p: Command, alias: string): void {
-  p.command(alias, { hidden: true })
-    .allowUnknownOption()
-    .allowExcessArguments()
-    .action(async () => {
-      console.log(chalk.yellow(`Deprecated: Use "agents routines" instead of "agents ${alias}"\n`));
-      const args = process.argv.slice(2);
-      args[0] = 'routines';
-      await program.parseAsync(['node', 'agents', ...args]);
-    });
-}
-
 function registerCheckTombstoneCommand(p: Command): void {
   p.command('check', { hidden: true })
     .allowUnknownOption()
@@ -652,11 +640,6 @@ async function registerEagerForRequest(name: string): Promise<boolean> {
     case 'exec':
       registerExecAliasCommand(program);
       for (const loader of COMMAND_LOADERS['run'] ?? []) await reg(loader);
-      return true;
-    case 'jobs':
-    case 'cron':
-      registerJobsCronAliasCommand(program, name);
-      for (const loader of COMMAND_LOADERS['routines'] ?? []) await reg(loader);
       return true;
     case 'check':
       registerCheckTombstoneCommand(program);

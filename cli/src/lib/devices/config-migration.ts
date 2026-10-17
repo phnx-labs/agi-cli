@@ -218,7 +218,6 @@ export function migrateDeviceConfigStores(): void {
         Object.keys(nextDevices).length === 0 &&
         !fleet.defaults &&
         !fleet.secrets &&
-        !fleet.routines &&
         !fleet.discovery &&
         !(fleet.ignored && fleet.ignored.length > 0);
       if (fleetIsEmpty) {
@@ -286,8 +285,7 @@ export function migrateDeviceConfigStores(): void {
         ((fleet.devices === undefined ||
           (fleet.devices !== 'all' && Object.keys(fleet.devices).length === 0)) &&
           !fleet.defaults &&
-          !fleet.secrets &&
-          !fleet.routines);
+          !fleet.secrets);
       if (fleetEmpty) {
         const { fleet: _drop, ...rest } = m;
         void _drop;

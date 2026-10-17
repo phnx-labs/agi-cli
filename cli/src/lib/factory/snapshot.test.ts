@@ -79,7 +79,7 @@ describe('factory snapshot', () => {
         return args.includes('todo') ? '{"count":1,"issues":[]}' : '{"count":0,"issues":[]}';
       },
     });
-    expect(Object.keys(snapshot)).toEqual(['generatedAt', 'sessions', 'queues', 'prs', 'devices', 'recentRuns', 'auth', 'config']);
+    expect(Object.keys(snapshot)).toEqual(['generatedAt', 'sessions', 'queues', 'prs', 'devices', 'auth', 'config']);
     expect(Object.keys(snapshot.queues)).toEqual(FACTORY_PROJECTS.map((project) => project.name));
     expect(snapshot.auth).toEqual({ claude: 'live' });
     expect(snapshot.devices).toEqual([{ name: 'box', load: 10, idle: true }]);

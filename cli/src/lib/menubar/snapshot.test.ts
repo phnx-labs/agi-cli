@@ -275,8 +275,6 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
   let prevImm: string | null;
   let prevMachineId: string | undefined;
   let prevSessionsDb: string | undefined;
-  let prevRoutinesDir: string | undefined;
-  let prevSystemRoutinesDir: string | undefined;
 
   beforeEach(() => {
     snapDir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-active-'));
@@ -288,10 +286,6 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
     prevSessionsDb = process.env.AGENTS_SESSIONS_DB;
     process.env.AGENTS_SESSIONS_DB = path.join(snapDir, 'sessions.db');
     closeDB();
-    prevRoutinesDir = process.env.AGENTS_ROUTINES_DIR;
-    process.env.AGENTS_ROUTINES_DIR = path.join(snapDir, 'routines');
-    prevSystemRoutinesDir = process.env.AGENTS_SYSTEM_ROUTINES_DIR;
-    process.env.AGENTS_SYSTEM_ROUTINES_DIR = path.join(snapDir, 'system-routines');
   });
 
   afterEach(() => {
@@ -302,10 +296,6 @@ describe('computeMenubarSnapshot — active-session selector (RUSH-2336)', () =>
     else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
     if (prevSessionsDb === undefined) delete process.env.AGENTS_SESSIONS_DB;
     else process.env.AGENTS_SESSIONS_DB = prevSessionsDb;
-    if (prevRoutinesDir === undefined) delete process.env.AGENTS_ROUTINES_DIR;
-    else process.env.AGENTS_ROUTINES_DIR = prevRoutinesDir;
-    if (prevSystemRoutinesDir === undefined) delete process.env.AGENTS_SYSTEM_ROUTINES_DIR;
-    else process.env.AGENTS_SYSTEM_ROUTINES_DIR = prevSystemRoutinesDir;
   });
 
   function row(partial: Partial<ActiveSession>): ActiveSession {

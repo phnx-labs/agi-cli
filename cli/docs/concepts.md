@@ -10,7 +10,7 @@ flowchart LR
   E --> S[Sessions and history]
   F[Fleet and placement] --> E
   T[Teams and workflows] --> E
-  A[Routines and watchdog] --> E
+  A[Watchdog] --> E
   S --> A
 ```
 
@@ -39,10 +39,9 @@ launch targets.
 ## Runs and sessions
 
 A run is an attempted execution. A session is a conversation. An execution may create a
-session; failed prerequisites, skipped work, missed schedules, and command-only
-executions may not. The records link when both exist but retain different ownership.
+session; failed prerequisites and command-only executions may not. The records link when both exist but retain different ownership.
 
-This distinction is central to teams and routines: an orchestrator needs a truthful
+This distinction is central to teams: an orchestrator needs a truthful
 record that work was blocked before launch, while session history cannot contain a
 conversation that never existed.
 
@@ -62,18 +61,19 @@ can instantiate work. A subagent is a portable role definition that a capable ha
 can invoke. Separating them prevents declarative resources from becoming process
 supervisors and keeps every launched agent on the same execution path.
 
-## Routines and watchdog
+## Watchdog and scheduled work
 
-A routine starts work on a schedule. The watchdog advances unfinished sessions that have
-stopped progressing. Both are daemon-owned decision loops and submit work through the ordinary
-execution engine. Their triggers differ; their scheduler and executor ownership does not.
+The watchdog advances unfinished sessions that have stopped progressing. It is a
+daemon-owned decision loop and submits work through the ordinary execution engine.
+The CLI does not schedule agent runs itself: recurring work is an OS cron job, systemd
+timer, or launchd agent that calls `agents run`.
 
 ## Owners and projections
 
 | Concept | Durable owner | Derived projections |
 |---|---|---|
 | Conversation | Harness transcript | Session index, rendered view, UI stream |
-| Attempt | Run/team/routine record | Status summaries, feed events |
+| Attempt | Run/team record | Status summaries, feed events |
 | Resource intent | Layered DotAgents repositories | Harness-native files |
 | Credential value | Platform or encrypted secret store | Child environment |
 | Live process | Owning device registry | Fleet and UI status |

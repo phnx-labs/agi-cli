@@ -99,13 +99,13 @@ function deriveAlias(source: string): string {
 
 type RepoResourceKind =
   | 'skill' | 'command' | 'plugin' | 'hook' | 'mcp' | 'subagent'
-  | 'rule' | 'workflow' | 'routine' | 'profile' | 'permission'
+  | 'rule' | 'workflow' | 'profile' | 'permission'
   | 'clis' | 'config' | 'other';
 
 const RESOURCE_DIRS: Record<string, RepoResourceKind> = {
   skills: 'skill', commands: 'command', prompts: 'command', plugins: 'plugin',
   hooks: 'hook', mcp: 'mcp', subagents: 'subagent', rules: 'rule',
-  workflows: 'workflow', routines: 'routine', profiles: 'profile',
+  workflows: 'workflow', profiles: 'profile',
   permissions: 'permission', clis: 'clis',
 };
 
@@ -113,7 +113,7 @@ const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
   skill: ['skill', 'skills'], command: ['command', 'commands'],
   plugin: ['plugin', 'plugins'], hook: ['hook', 'hooks'], mcp: ['MCP', 'MCPs'],
   subagent: ['subagent', 'subagents'], rule: ['rule', 'rules'],
-  workflow: ['workflow', 'workflows'], routine: ['routine', 'routines'],
+  workflow: ['workflow', 'workflows'],
   profile: ['profile', 'profiles'], permission: ['permission', 'permissions'],
   clis: ['CLI', 'CLIs'], config: ['config file', 'config files'],
   other: ['other file', 'other files'],
@@ -121,7 +121,7 @@ const RESOURCE_LABELS: Record<RepoResourceKind, [string, string]> = {
 
 const RESOURCE_ORDER: RepoResourceKind[] = [
   'skill', 'command', 'plugin', 'hook', 'mcp', 'subagent', 'rule',
-  'workflow', 'routine', 'profile', 'permission', 'clis', 'config', 'other',
+  'workflow', 'profile', 'permission', 'clis', 'config', 'other',
 ];
 
 export type ChangeAction = 'new' | 'changed' | 'removed';
@@ -1017,7 +1017,7 @@ export function registerRepoCommands(program: Command): void {
       if (anyPulled) {
         const { isDaemonRunning, signalDaemonReload } = await import('../lib/daemon/daemon.js');
         if (isDaemonRunning() && signalDaemonReload()) {
-          console.log(chalk.gray('Reloaded the routines daemon (device pins refreshed).'));
+          console.log(chalk.gray('Reloaded the daemon (service config refreshed).'));
         }
       }
       if (userPulled) {

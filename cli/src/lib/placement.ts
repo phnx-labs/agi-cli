@@ -1,5 +1,5 @@
 
-type PlacementKind = 'local' | 'device' | 'fleet' | 'cloud' | 'lease';
+type PlacementKind = 'local' | 'device' | 'cloud' | 'lease';
 
 export interface Placement {
   kind: PlacementKind;
@@ -27,18 +27,17 @@ export class PlacementError extends Error {
   }
 }
 
-const KINDS: ReadonlySet<string> = new Set(['local', 'device', 'fleet', 'cloud', 'lease', 'host']);
+const KINDS: ReadonlySet<string> = new Set(['local', 'device', 'cloud', 'lease', 'host']);
 
 export function parseWhereSpec(raw: string, source = '--where'): Placement {
   const spec = raw.trim();
   if (!spec) {
-    throw new PlacementError(`${source} requires a value (local | device:<name> | auto | lease | cloud | fleet)`);
+    throw new PlacementError(`${source} requires a value (local | device:<name> | auto | lease | cloud)`);
   }
 
   const lower = spec.toLowerCase();
   if (lower === 'local') return { kind: 'local', source };
   if (lower === 'auto') return { kind: 'device', target: 'auto', source };
-  if (lower === 'fleet') return { kind: 'fleet', source };
   if (lower === 'cloud') return { kind: 'cloud', source };
   if (lower === 'lease') return { kind: 'lease', source };
 
@@ -46,7 +45,7 @@ export function parseWhereSpec(raw: string, source = '--where'): Placement {
   if (colon === -1) {
     if (KINDS.has(lower)) {
       throw new PlacementError(
-        `${source} ${spec}: name a target (device:<name>, device:auto) or use local|lease|cloud|fleet`,
+        `${source} ${spec}: name a target (device:<name>, device:auto) or use local|lease|cloud`,
       );
     }
     return { kind: 'device', target: spec, source };
@@ -67,12 +66,9 @@ export function parseWhereSpec(raw: string, source = '--where'): Placement {
   if (head === 'cloud') {
     return { kind: 'cloud', target: tail, source };
   }
-  if (head === 'fleet') {
-    return { kind: 'fleet', target: tail, source };
-  }
 
   throw new PlacementError(
-    `${source} ${spec}: unknown kind '${head}' (use local | device:<name> | auto | lease[:backend] | cloud | fleet)`,
+    `${source} ${spec}: unknown kind '${head}' (use local | device:<name> | auto | lease[:backend] | cloud)`,
   );
 }
 
@@ -134,27 +130,6 @@ export function expandPlacementToRunFlags(
       return placement.target ? { lease: placement.target } : { lease: true };
     case 'cloud':
       return placement.target ? { cloud: true, provider: placement.target } : { cloud: true };
-    case 'fleet':
-      throw new PlacementError(
-        `fleet placement is for routines (agents routines add … --placement fleet), not agents run. ` +
-          `Use --where device:auto for an affinity pick, or --where device:<name>.`,
-      );
-  }
-}
-
-export function placementFromHostStrategy(
-  strategy: 'local' | 'host' | 'fleet' | 'cloud',
-  host?: string,
-): Placement {
-  switch (strategy) {
-    case 'local':
-      return { kind: 'local', source: 'hostStrategy:local' };
-    case 'host':
-      return { kind: 'device', target: host, source: 'hostStrategy:host' };
-    case 'fleet':
-      return { kind: 'fleet', source: 'hostStrategy:fleet' };
-    case 'cloud':
-      return { kind: 'cloud', source: 'hostStrategy:cloud' };
   }
 }
 

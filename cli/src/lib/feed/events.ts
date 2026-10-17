@@ -111,8 +111,6 @@ export type EventType =
   | 'daemon.stop'
   | 'daemon.error'
   | 'daemon.info'
-  | 'routine.start'
-  | 'routine.end'
   | 'watchdog.action'
   | 'version.install'
   | 'version.switch'
@@ -194,7 +192,6 @@ const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'run.dispatched': true,
   'run.launch': true,
   'daemon.start': true, 'daemon.stop': true, 'daemon.error': true, 'daemon.info': true,
-  'routine.start': true, 'routine.end': true,
   'watchdog.action': true,
   'version.install': true, 'version.switch': true, 'version.remove': true,
   'skill.install': true, 'skill.remove': true,
@@ -655,36 +652,6 @@ export function emitStart(
     );
   };
 }
-
-interface RoutineEndMeta {
-  jobName: string;
-  runId?: string;
-  status: string;
-  duration?: number;
-  exitCode?: number | null;
-  detail?: string;
-}
-
-function routineEndPayload(meta: RoutineEndMeta): EventPayload {
-  return {
-    module: 'routine',
-    name: meta.jobName,
-    status: meta.status,
-    ...(meta.runId ? { runId: meta.runId } : {}),
-    ...(meta.duration != null ? { durationMs: meta.duration } : {}),
-    ...(meta.exitCode != null ? { exitCode: meta.exitCode } : {}),
-    ...(meta.detail ? { detail: meta.detail } : {}),
-  };
-}
-
-export function emitRoutineEnd(meta: RoutineEndMeta): void {
-  emit('routine.end', routineEndPayload(meta));
-}
-
-export async function emitRoutineEndAsync(meta: RoutineEndMeta): Promise<void> {
-  await emitAsync('routine.end', routineEndPayload(meta));
-}
-
 
 export function time<T>(label: string, fn: () => T, payload: EventPayload = {}): T {
   const start = Date.now();

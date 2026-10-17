@@ -164,7 +164,6 @@ interface DiscoverOptions {
   until?: string;
   excludeTeamOrigin?: boolean;
   onlyTeamOrigin?: boolean;
-  origin?: 'cli' | 'routine';
   sortBy?: 'timestamp' | 'cost' | 'duration';
   skipExistenceCheck?: boolean;
   onProgress?: (progress: ScanProgress) => void;
@@ -293,8 +292,7 @@ export async function findLocalSessionTranscripts(selector: string, agent?: Sess
   for (const harness of ['claude', 'codex'] as const) {
     if (agent && agent !== harness) continue;
     const subdir = harness === 'claude' ? 'projects' : 'sessions';
-    const roots = [...getAgentSessionDirs(harness, subdir), ...getRoutineArchiveSessionDirs(harness, subdir)];
-    for (const root of roots) {
+    for (const root of getAgentSessionDirs(harness, subdir)) {
       for (const file of walkForFilesWithStat(root, '.jsonl', Number.MAX_SAFE_INTEGER)) {
         const name = path.basename(file.path, '.jsonl');
         const id = harness === 'claude' ? name : name.match(/([0-9a-f]{8}-[0-9a-f-]{27})$/i)?.[1];
@@ -366,7 +364,6 @@ export async function scanSessionsIncremental(options?: {
 
   try {
     await scanAgentsBounded(agents, agent => dispatchAgentScan(agent, track('dotfiles')));
-    await scanAgentsBounded(agents, agent => scanRoutineArchivesIncremental(agent, track('routines')));
     seedLabelsFromNames(buildRunNameMap());
   } finally {
     releaseScan(process.pid);
@@ -579,7 +576,6 @@ function buildQueryOptions(
     limit: opts.includeLimit && !options?.unbounded ? (options?.limit ?? 50) : undefined,
     excludeTeamOrigin: options?.excludeTeamOrigin,
     onlyTeamOrigin: options?.onlyTeamOrigin,
-    origin: options?.origin,
     sortBy: options?.sortBy,
     skipExistenceCheck: options?.skipExistenceCheck,
     skill: options?.skill,
@@ -628,14 +624,12 @@ export function resolveSessionById(sessions: SessionMeta[], idQuery: string): Se
   const query = idQuery.toLowerCase();
   const exact = sessions.filter(s =>
     s.id.toLowerCase() === query ||
-    s.shortId.toLowerCase() === query ||
-    s.routineRunId?.toLowerCase() === query,
+    s.shortId.toLowerCase() === query,
   );
   if (exact.length > 0) return exact;
   return sessions.filter(s =>
     s.id.toLowerCase().startsWith(query) ||
-    s.shortId.toLowerCase().startsWith(query) ||
-    s.routineRunId?.toLowerCase().startsWith(query),
+    s.shortId.toLowerCase().startsWith(query),
   );
 }
 
@@ -870,149 +864,10 @@ export function getSessionRoots(): SessionRoots[] {
   const out: SessionRoots[] = [];
   for (const { agent, subdir } of SESSION_ROOT_SPECS) {
     const dirs = getAgentSessionDirs(agent, subdir);
-    dirs.push(...getRoutineArchiveSessionDirs(agent, subdir));
     if (dirs.length > 0) out.push({ agent, dirs });
   }
   return out;
 }
-
-function getRoutineArchiveSessionDirs(agent: SessionAgentId, subdir: string): string[] {
-  const runsDir = getRunsDir();
-  if (!fs.existsSync(runsDir)) return [];
-  const dirs: string[] = [];
-
-  let jobDirs: fs.Dirent[];
-  try {
-    jobDirs = fs.readdirSync(runsDir, { withFileTypes: true });
-  } catch {
-    return dirs;
-  }
-
-  for (const jobDir of jobDirs) {
-    if (!jobDir.isDirectory()) continue;
-    const jobRunsDir = path.join(runsDir, jobDir.name);
-    let runDirs: fs.Dirent[];
-    try {
-      runDirs = fs.readdirSync(jobRunsDir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const runDir of runDirs) {
-      if (!runDir.isDirectory()) continue;
-      const dir = path.join(jobRunsDir, runDir.name, 'sessions', agent, subdir);
-      if (fs.existsSync(dir)) dirs.push(dir);
-    }
-  }
-
-  return dirs;
-}
-
-function routineArchiveInfo(filePath: string): { jobName: string; runId: string } | null {
-  const rel = path.relative(getRunsDir(), filePath);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
-  const parts = rel.split(path.sep);
-  if (parts.length < 6 || parts[2] !== 'sessions') return null;
-  return { jobName: parts[0], runId: parts[1] };
-}
-
-function decorateRoutineSession(
-  meta: SessionMeta,
-  info: { jobName: string; runId: string },
-): SessionMeta {
-  return {
-    ...meta,
-    origin: 'routine',
-    routineName: info.jobName,
-    routineRunId: info.runId,
-    project: info.jobName,
-    label: info.jobName,
-  };
-}
-
-async function readRoutineArchiveMeta(
-  agent: SessionAgentId,
-  filePath: string,
-): Promise<{
-  meta: SessionMeta;
-  content: string;
-  assistantContent?: string;
-  events?: SessionEvent[];
-  toolCalls?: IndexedToolCall[];
-  toolIndexMode?: 'replace' | 'append';
-} | null> {
-  const info = routineArchiveInfo(filePath);
-  if (!info) return null;
-
-  if (agent === 'claude') {
-    const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
-    const stat = safeStatSync(filePath);
-    if (!stat) return null;
-    const scanStamp: ScanStamp = { fileMtimeMs: Math.floor(stat.mtimeMs), fileSize: stat.size };
-    const result = await readClaudeMeta(filePath, sessionId, scanStamp, undefined);
-    return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
-  }
-
-  if (agent === 'codex') {
-    const result = await readCodexMeta(filePath);
-    return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
-  }
-
-  if (agent === 'cursor') {
-    const currentVersion = await getCurrentAgentVersion('cursor');
-    const result = readCursorMeta(filePath, currentVersion);
-    return result ? { ...result, meta: decorateRoutineSession(result.meta, info) } : null;
-  }
-
-  return null;
-}
-
-async function scanRoutineArchivesIncremental(
-  agent: SessionAgentId,
-  onProgress?: (p: ScanProgress) => void,
-): Promise<void> {
-  const subdir = sessionRootSubdir(agent);
-  if (!subdir) return;
-
-  const ext = '.jsonl';
-  const prestat: PreStatEntry[] = [];
-  for (const sessionsDir of getRoutineArchiveSessionDirs(agent, subdir)) {
-    for (const f of walkForFilesWithStat(sessionsDir, ext, 100_000)) {
-      prestat.push({ filePath: f.path, fileMtimeMs: f.mtimeMs, fileSize: f.size });
-    }
-  }
-
-  const changed = filterChangedEntries(prestat);
-  if (changed.length === 0) return;
-
-  onProgress?.({ agent, parsed: 0, total: changed.length });
-
-  const entries: ScanEntry[] = [];
-  const touched: Array<{ filePath: string; scan: ScanStamp }> = [];
-  let parsed = 0;
-  for (const { filePath, scan } of changed) {
-    try {
-      const result = await readRoutineArchiveMeta(agent, filePath);
-      if (result) entries.push({
-        meta: result.meta,
-        content: result.content,
-        assistantContent: result.assistantContent,
-        scan,
-        events: result.events,
-        toolCalls: result.toolCalls,
-        toolIndexMode: result.toolIndexMode,
-      });
-      else touched.push({ filePath, scan });
-    } catch {
-      touched.push({ filePath, scan });
-    }
-    parsed++;
-    onProgress?.({ agent, parsed, total: changed.length });
-  }
-
-  upsertSessionsBatch(entries);
-  recordScans(touched);
-}
-
 
 let cachedClaudeAccountIndex: ClaudeAccountIndex | undefined;
 

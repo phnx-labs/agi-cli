@@ -231,8 +231,7 @@ silently drops at the SSH boundary:
   --cwd/--project/--remote-cwd --device/--any --lease`.
 
 Hosts are also a task backend (`agents cloud run "…" --device <name>` — see the
-`cloud` skill) and a routines placement target (`agents routines add …
---run-on <name>` — see the `routines` skill).
+`cloud` skill).
 
 `agents events logs <id>` shows a dispatched run's output or a session transcript; `agents events` is the timeline.
 `agents devices stop <id>` (alias `kill`) terminates the remote process group from

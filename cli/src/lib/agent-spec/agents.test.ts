@@ -1306,7 +1306,7 @@ describe('accountOrgBadge', () => {
   });
 });
 
-describe('parseAgentVersionSpec — the agents run launch-target split at the routines boundary (RUSH-2719)', () => {
+describe('parseAgentVersionSpec — the agents run launch-target split (RUSH-2719)', () => {
   it('splits agent@version into bare agent + exact version', () => {
     expect(parseAgentVersionSpec('claude@2.1.207')).toEqual({ agent: 'claude', version: '2.1.207' });
   });

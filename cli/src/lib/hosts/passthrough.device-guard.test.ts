@@ -53,7 +53,6 @@ describe('every command that declares --device gets past the fleet router (PHNX-
   });
 
   it.each([
-    [['routines', 'add', 'nightly', '--device', 'mac', '--devices', 'a,b']],
     [['repos', 'status', '--device', 'mac']],
     [['view', '--device', 'mac']],
   ])('%j keeps the router --device: a leaf --devices or the addHostOption --device is not ownership', (args) => {
@@ -61,8 +60,6 @@ describe('every command that declares --device gets past the fleet router (PHNX-
   });
 
   it.each([
-    [['routines', 'add', 'nightly', '--device', 'all', '--devices', 'a,b']],
-    [['routines', 'add', 'nightly', '--devices', 'all']],
     [['repos', 'status', '--devices', 'all']],
   ])('%j is still forwarded to every device', async (args) => {
     const peer: DeviceProfile = {

@@ -20,14 +20,4 @@ export const cursorAdapter: HarnessAdapter = {
   execModeArgs(ctx) {
     return ctx.resolvedMode === 'plan' && !ctx.interactive ? ['--mode', 'ask'] : undefined;
   },
-
-  routineModeArgs(cmd, ctx) {
-    if (ctx.mode === 'plan') {
-      cmd.push('--mode', 'ask', '--trust');
-    } else if (ctx.mode === 'skip') {
-      cmd.push('-f');
-    } else {
-      cmd.push('--trust');
-    }
-  },
 };

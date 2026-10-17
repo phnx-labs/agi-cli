@@ -744,12 +744,10 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(isEventType('Factory.Command')).toBe(false);
   });
 
-  it('registers routine.start/end and watchdog.action as info (daemon scheduler coverage)', () => {
-    for (const kind of ['routine.start', 'routine.end', 'watchdog.action'] as const) {
-      expect(EVENT_TYPES).toContain(kind);
-      expect(isEventType(kind)).toBe(true);
-      expect(levelFor(kind)).toBe('info');
-    }
+  it('registers watchdog.action as info', () => {
+    expect(EVENT_TYPES).toContain('watchdog.action');
+    expect(isEventType('watchdog.action')).toBe(true);
+    expect(levelFor('watchdog.action')).toBe('info');
     expect(levelFor('daemon.start')).toBe('audit');
     expect(levelFor('daemon.info')).toBe('info');
   });
@@ -768,23 +766,12 @@ describeEvents('event-kind table (the drift guard for out-of-process producers)'
     expect(levelFor('factory.launch')).toBe('info');
   });
 
-  it('writes routine and watchdog events onto the unified stream with filterable modules', () => {
+  it('writes watchdog events onto the unified stream with a filterable module', () => {
     setupLogsDir();
-    emit('routine.start', { module: 'routine', name: 'check-updates', kind: 'command' });
-    emit('routine.end', { module: 'routine', name: 'check-updates', status: 'completed', durationMs: 12 });
+    emit('daemon.info', { module: 'daemon', message: 'tick' });
     emit('watchdog.action', { module: 'watchdog', total: 3, stalled: 1, nudged: 1 });
 
-    const records = query({});
-    expect(records.map((r) => r.event)).toEqual([
-      'watchdog.action',
-      'routine.end',
-      'routine.start',
-    ]);
-    expect(records.every((r) => r.level === 'info')).toBe(true);
-    expect(query({ module: 'routine' }).map((r) => r.event)).toEqual([
-      'routine.end',
-      'routine.start',
-    ]);
+    expect(query({}).map((r) => r.event)).toEqual(['watchdog.action', 'daemon.info']);
     expect(query({ module: 'watchdog' })).toHaveLength(1);
     expect(query({ module: 'watchdog' })[0]).toMatchObject({
       event: 'watchdog.action',

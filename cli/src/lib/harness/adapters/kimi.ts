@@ -32,8 +32,4 @@ ${slotAwareConfigEnvBash([{ env: 'KIMI_CODE_HOME', rel: ctx.configDirName }], '$
     }
     return [];
   },
-
-  routineModeArgs(_cmd, ctx) {
-    ctx.resolveHeadlessMode('kimi', ctx.mode, false);
-  },
 };

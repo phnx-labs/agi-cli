@@ -25,7 +25,7 @@ guarantee, the reference for the mechanism.
   [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), and only when capitalized.
 - **Requirement id families are section-namespaced** so an id is globally unique.
   Each family is prefixed with its section (`SES` sessions, `SEC` secrets, `EXEC`
-  agent execution, `SING` scheduling singularity, `RT` routines, `WD` watchdog):
+  agent execution, `SING` scheduling singularity, `WD` watchdog):
   - `<SEC>-<n>` — a normative behavioral requirement (e.g. `SES-8`, `SEC-13`, `EXEC-1`).
   - `<SEC>-IF-<n>` — an interface / output / exit-code contract.
   - `<SEC>-CROSS-<n>` — a cross-platform parity requirement.
@@ -54,7 +54,6 @@ guarantee, the reference for the mechanism.
 - [Secrets](#secrets) — `agents run --secrets` and the standalone `secrets` CLI: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
-- [Routine execution & readiness](#routine-execution--readiness) — `agents routines`: context resolution on the target, readiness/pause, single-fire, run history
 - [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ## Coverage inventory
@@ -65,12 +64,12 @@ loaders** — the difference is aliases and multi-command modules (`ssh`/`device
 share one; `add`/`use`/`remove`/`rm`/`purge` another) — in `COMMAND_LOADERS`
 (`cli/command-registry.ts:81`); retired names are refused through
 `RETIRED_TOP_LEVEL_COMMANDS` (`lib/startup/command-registry.ts:25`).
-Six subsystems have a normative contract. Before relying on a behavior, check which
+Five subsystems have a normative contract. Before relying on a behavior, check which
 row its surface sits in.
 
 | Coverage | Surfaces | What that means |
 |---|---|---|
-| **Specified here** | sessions (index, `ps`, resume), secrets (`run --secrets`, reserved stores), `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
+| **Specified here** | sessions (index, `ps`, resume), secrets (`run --secrets`, reserved stores), `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `doctor`, `daemon` | One requirement reaches them, no command contract does. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `feed`, `send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
@@ -355,9 +354,9 @@ SSH access (§7); rendering sessions that no harness produced.
     `headless` means neither (`unattributedContext`; enforced:
     `lib/session/active.context.test.ts`). `presence: attached` follows from
     `terminal` in `foldPresence`, so it needs no rule of its own.
-  - The adjacent `SessionMeta.origin` (`cli`|`routine`,
-    `sessions-cli/src/lib/session/types.ts:411`) is *row provenance* (live scan vs archived routine
-    run), not launch location; `isTeamOrigin` (`:595`) flags a teams-spawned
+  - The adjacent `SessionMeta.origin`
+    (`sessions-cli/src/lib/session/types.ts:411`) is *row provenance*, not launch
+    location; `isTeamOrigin` (`:595`) flags a teams-spawned
     session.
   Published editor-terminal rows retain the shell PID and tab metadata, but use
   a live agent descendant's verified by-pid session identity and transcript after
@@ -540,8 +539,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `accountId` (an id no longer registered resolves to `unattributed:recorded account <id>`);
   the path names a version home (including a retired `trash/` snapshot, which keeps its
   `.claude.json`); the path is under the mutable `~/.claude` symlink and the row
-  records a version, which resolves to that version's own home (this covers the
-  `runs/` routine archives too); neither. A path naming a home that exists but is
+  records a version, which resolves to that version's own home; neither. A path naming a home that exists but is
   signed out MUST resolve dark against that home rather than fall through to its
   recorded version — the file's location is what proves which config dir was used.
   Attribution is implemented for Claude only; other harnesses MUST report a NULL
@@ -1283,7 +1281,7 @@ storage-boundary half of SES-51 and all of SES-52), the `r2.backups` bundle conv
   default-capped at 50) and is a minority of indexed transcripts, so
   intersecting FTS hits with it dropped grep-visible sessions the index already
   matched (PHNX-2767). Hits the pool missed MUST be hydrated from the index and
-  unioned into the result. Explicit `--project` / `--agent` / `--routine`
+  unioned into the result. Explicit `--project` / `--agent`
   flags MUST still exclude a hydrated hit that fails them — those are filters,
   not a page of the index, and the union MUST NOT undo them (otherwise a
   `--project foo "phrase"` query reports a multi-match ambiguity against a session
@@ -1424,7 +1422,7 @@ storage-boundary half of SES-51 and all of SES-52), the `r2.backups` bundle conv
   prefix MAY focus directly; an agent/version or text selector MUST show the
   preview picker even when exactly one row matches. Agent version aliases
   `latest` and `oldest` MUST resolve on each queried device, not on the caller.
-  Device, project/time, team/routine, skill/plugin, bookmarks, and live-state
+  Device, project/time, team, skill/plugin, bookmarks, and live-state
   flags MUST compose, and several live states MUST form the same OR-union as
   `agents ps --status <state...>` (`commands/sessions-browser.ts` `BrowserFilter`,
   `collectSessionCandidates`, `applyFilters`; `commands/focus.ts` `focusAction`;
@@ -1438,8 +1436,7 @@ storage-boundary half of SES-51 and all of SES-52), the `r2.backups` bundle conv
   MUST submit the selected row through the same attach/recover decision as
   `agents ps focus`. Enter MUST retain its resume behavior. These bindings MUST
   apply to every preview rendered by that browser: ordinary listings, active
-  `--teams`, named `--in-team` views (with or without `--teams`), and routine
-  listings. The bare grouped `--teams` report MUST remain non-interactive because
+  `--teams`, and named `--in-team` views (with or without `--teams`). The bare grouped `--teams` report MUST remain non-interactive because
   its nested shape is not representable by the flat browser
   (`commands/sessions-browser.ts` `runSessionBrowser`; tests
   `lib/picker.test.ts`, `commands/sessions-browser.test.ts`,
@@ -1777,7 +1774,7 @@ normative — a change that widens/narrows a cell is a spec change.
   against `SSH_TARGET_RE` to block argv-flag smuggling (`lib/ssh-exec.ts:10-17`,
   asserted in `lib/remote-agents-json.ts:128`). The picker's history pool rebuilds each
   peer's argv from its own filter state, the standalone `sessions --all --json --local
-  --limit <n>` plus `--since`/`--until`/`--project`/`--routine`/`--skill`/`--plugin`/
+  --limit <n>` plus `--since`/`--until`/`--project`/`--skill`/`--plugin`/
   `--sort`/`--teams` (and `--agent` when fixed or version-pinned), so no other flag
   reaches the peer (`commands/sessions-browser.ts:222` `remotePoolArgs`).
 
@@ -2256,7 +2253,7 @@ and the policy layered on top of it in this repo.
 ## Agent execution
 
 This is the **contract** for `agents run`: what a human, an agent, or a
-downstream tool (`agents teams`, routines, `--device` dispatch) is entitled to
+downstream tool (`agents teams`, `--device` dispatch) is entitled to
 rely on when a run is dispatched, stated as testable requirements. It exists
 because "one execution engine" is a real architectural claim
 (`cli/AGENTS.md` / repo `CLAUDE.md`, §Core concepts) that code can
@@ -2287,15 +2284,11 @@ Credential account selection adds three requirements to that funnel:
   `driveSetupTokenMint`). Interactive mint is Claude-only; any other harness
   MUST fail loud with the path that actually provisions it (a token-less
   harness's per-box native login, or `agents accounts add`).
-- **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
-  and a routine `account:` that names a provider bundle MUST use the same provider
-  adapter and fail before spawn when the provider cannot authenticate the host or
-  the credential is absent on the execution device. A routine `account:` that
-  names a harness-native identity MUST instead pin the installed version home that
-  owns it and fail before spawn when that identity is unavailable; it MUST NOT
-  rotate or forward the native identity through the provider-account path
-  (`lib/account-registry.ts`; `commands/exec.ts`; `lib/profiles.ts`;
-  `lib/daemon/runner.ts`). Explicit `--env` remains the final env override. Cloud and
+- **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>` and a profile `account:`
+  that names a provider bundle MUST use the same provider adapter and fail before
+  spawn when the provider cannot authenticate the host or the credential is absent
+  on the execution device (`lib/account-registry.ts`; `commands/exec.ts`;
+  `lib/profiles.ts`). Explicit `--env` remains the final env override. Cloud and
   lease placement MUST reject device-local accounts.
 - **EXEC-ACCOUNT-5 (MUST).** Unpinned version selection (`resolveRunVersion`) MUST
   consult **this device's** per-version auth state. A logged-out (or revoked)
@@ -2408,10 +2401,7 @@ schema (`--json` passes through each agent's native stream format).
   delete an INHERITED `CLAUDE_CODE_OAUTH_TOKEN` whose value equals this account's
   resolved setup-token, so a launch from inside a headless agent's shell does not
   keep authenticating as it; a value the caller set itself MUST survive, and
-  `options.env` still overrides last (EXEC-5). The routines path
-  (`buildRoutineSpawnEnv`, `lib/daemon/runner.ts`) applies the SAME role gate: a
-  routine on a headed device (personal or desktop) defers to the login, a worker
-  routine keeps the setup-token. `undefined`/unmarked role is treated as non-headed
+  `options.env` still overrides last (EXEC-5). `undefined`/unmarked role is treated as non-headed
   (worker-equivalent) — an unmarked box has no login to defer to.
   Note this MUST NOT be read as "a login-deferring run never carries a token": no
   requirement yet strips an ambient value on that path when NO per-account token
@@ -2565,11 +2555,7 @@ schema (`--json` passes through each agent's native stream format).
   HOME swap and file-store export (`CONFIG_ENV_ISOLATED_AGENTS` includes cursor).
   Because Cursor keeps `auth.json`, `cli-config.json`, chats, and preferences in
   the HOME-relative `~/.cursor` tree, that entire tree is version-local for
-  managed runs and direct version aliases. Routine sandboxes are the deliberate
-  exception: `prepareJobHome` creates a disposable HOME and
-  `generateCursorConfig` links the daemon host's active `~/.cursor/auth.json`
-  and `cli-config.json` into it. Routines therefore use the active host login by
-  design; they do not select a managed version account through this overlay.
+  managed runs and direct version aliases.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:872`) — so on Windows the isolated-agent
@@ -2621,7 +2607,7 @@ schema (`--json` passes through each agent's native stream format).
   answer. Autonomy is the approval axis only: `auto` MUST NOT widen the sandbox
   beyond `edit`, and only explicit `skip` may emit
   `--dangerously-bypass-approvals-and-sandbox`. Fresh runs, native resumes,
-  routines, POSIX shims, versioned aliases, and the Windows shim delegate MUST
+  POSIX shims, versioned aliases, and the Windows shim delegate MUST
   consume the same policy builder. Two paths deliberately pin `edit` -- the
   direct-binary launch (`lib/exec.ts` `execShimPassthrough`) and the shim launch
   args (`harness/adapters/codex.ts` `shimLaunchArgs`, consumed by the POSIX shim
@@ -3187,8 +3173,8 @@ so refusal-eligible, only past `USAGE_STALE_REFUSAL_MAX_AGE_MS` (40 min,
 that only ever sees poller-pushed rows MUST still auto-pick (D8).
 An INTERACTIVE run (TTY, not `--json`/`--headless`) MUST then show the account
 picker; an UNATTENDED run MUST fail loud with an error containing the literal
-`NO_VERIFIED_USAGE` (`formatNoVerifiedUsageError`), for both `agents run`
-(`commands/exec.ts`) and a daemon routine (`lib/daemon/runner.ts`). The stale
+`NO_VERIFIED_USAGE` (`formatNoVerifiedUsageError`), for `agents run`
+(`commands/exec.ts`). The stale
 candidates MUST remain in `rotation.healthy` so bounded post-rejection failover
 (`rotationFailoverChain`) still cascades across them — refusing to PICK a stale
 account and refusing to FAIL OVER to it after a real 429 are different calls.
@@ -3257,10 +3243,10 @@ the CLI daemon and the commands it drives — never a UI surface. Requirement ke
 ### 1. Purpose & scope
 
 A fleet-affecting feature that runs on a timer or watcher in two places fires twice:
-two resume-tabs for one exhausted session, two executions of one cron job, two
+two resume-tabs for one exhausted session, two dispatches of one tracker item, two
 injected nudges racing the same agent. This section makes that class of bug
 unrepresentable. In scope: every capability that can **act** — launch, resume, kill,
-or rotate a session; fire a routine; inject into a terminal; dispatch to
+or rotate a session; inject into a terminal; dispatch to
 a host or the cloud. Out of scope: read-only polling that renders state for a human
 (panels refreshing, presence heartbeats), which MAY live anywhere provided it writes
 nothing but its own view cache.
@@ -3269,10 +3255,8 @@ nothing but its own view cache.
 
 - **Fleet-affecting action** — any operation that mutates state on this machine or
   another fleet device: spawning or killing processes/sessions, injecting keystrokes,
-  writing shared state (sessions.db, the device registry, agents.yaml), firing a
-  scheduled job, SSH dispatch.
-- **Scheduler** — whatever decides *when* to act: a cron routine, a daemon tick, a
-  `setInterval`, a file watcher, an event subscriber acting autonomously.
+  writing shared state (sessions.db, the device registry, agents.yaml), SSH dispatch.
+- **Scheduler** — whatever decides *when* to act: a daemon tick, a `setInterval`, a file watcher, an event subscriber acting autonomously.
 - **Executor** — whatever performs the action once decided.
 - **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
   capability are (a) rendering its state, and (b) invoking the CLI command that
@@ -3283,8 +3267,7 @@ nothing but its own view cache.
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `cli/src/lib/daemon/daemon.ts`) or a CLI command the daemon or the user drives.
-  Status: **Current** for routines (`lib/scheduler.ts`) and rotate
-  (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
+  Status: **Current** for rotate (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
   `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
   controls the one daemon SING-1 requires, never a second one. Usage and
@@ -3296,23 +3279,13 @@ nothing but its own view cache.
   exits the daemon for a supervised systemd/launchd restart instead of latching
   forever (PHNX-4116 — no `parked` state, no in-process backoff); explicit CLI refreshes
   enter the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
-  watchdog, device-probe, session-cache-warm, and auto-dispatch ticks
-  (RUSH-2353) were briefly promoted to **daemon-owned built-in routines**
-  (`lib/builtin-routines.ts`, RUSH-2465) — declarations injected as the lowest
-  layer of `listJobs()` so `agents routines list`/`pause`/`devices` could manage
-  them like any other routine, each `command:` invoking the migrated tick body
-  via `agents __daemon-tick <name>`. That registry was **reverted** (RUSH-2495):
-  `builtin-routines.ts`, the `__daemon-tick` entrypoint, and `JobConfig.builtin`
-  are gone. `watchdog` and `device-probe` reverted to plain hardcoded
-  `setInterval`s inside `runDaemon()` at the time, then moved onto
-  `ServiceSupervisor` as `WatchdogService`/`DeviceProbeService`
-  (`lib/daemon/watchdog-service.ts`, `device-probe-service.ts`, RUSH-3193 P3);
-  `session-cache-warm` now runs as the supervised `session-state` service
-  (`lib/daemon/session-state-service.ts`, PHNX-3265): it owns the 15-second
+  watchdog and device-probe ticks run as supervised `WatchdogService`/
+  `DeviceProbeService` (`lib/daemon/watchdog-service.ts`, `device-probe-service.ts`,
+  RUSH-3193 P3), and `session-cache-warm` runs as the supervised `session-state`
+  service (`lib/daemon/session-state-service.ts`, PHNX-3265): it owns the 15-second
   publish cadence and the reader-presence edge that requests an immediate
-  supervised tick. All three are invisible to `agents routines`, but still the
-  single daemon-owned scheduler/executor SING-1 requires, since nothing else
-  calls them. `auto-dispatch` and `launch-health`
+  supervised tick. Nothing else calls them, so each is the single daemon-owned
+  scheduler/executor SING-1 requires. `auto-dispatch` and `launch-health`
   were deleted outright with no replacement. **`tmux-reconcile`** (the 5-minute
   poll that retrofitted a stale `pane-died` hook onto managed tmux sessions) was
   also deleted, but — unlike `auto-dispatch`/`launch-health` — its job is
@@ -3346,56 +3319,21 @@ nothing but its own view cache.
   terminal engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
   or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
-  `agents routines`), so every surface observes one truth. A UI-local toggle that
+  `agents daemon services enable|disable`), so every surface observes one truth. A UI-local toggle that
   gates only the UI's view of an action MUST NOT exist.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
-  daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`), every `routines`
-  auto-start call site (`add`, `start`, `catchup`, `routines webhook`,
-  `commands/routines.ts`). It MUST NOT
+  daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`) and every call site
+  that goes through it (`agents feed watch`, `agents watchdog`, `agents recordings`).
+  It MUST NOT
   stop an already-running daemon and MUST NOT block the explicit override
   (`agents daemon start`), mirroring `systemctl disable` — a disabled unit still
-  starts on a direct `systemctl start`. This is the daemon-wide sibling of
-  `scheduler.enabled`: `scheduler.enabled` gates only the routines `JobScheduler`
-  inside a running daemon (SING-5), while `daemon.enabled` gates whether the
+  starts on a direct `systemctl start`. `daemon.enabled` gates whether the
   daemon itself may be auto-started at all (the watchdog and every other hosted service
   with it — never a secrets broker or the browser IPC service, which the standalone
   `secrets` (OWN-1) and `browser` (PHNX-4101) CLIs own).
-- **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
-  `JobScheduler` (`lib/daemon/daemon.ts` — the pid-file claim exists precisely so a second
-  scheduler cannot double-fire). A UI MAY request an immediate run
-  (`agents routines run <name>` or equivalent) but MUST NOT hold its own cron,
-  countdown, or "run every N" for a routine.
-- **SING-5a (MUST).** A routine definition MUST describe only what runs and when.
-  Per-device activation MUST be represented by membership in the top-level
-  `routines:` list at `~/.agents/devices/<hostname>/agents.yaml`; membership means
-  enabled and absence means disabled. A host MUST mutate only its own manifest,
-  and fleet controls MUST execute the mutation on the target host. Definitions
-  introduced as replacements for previously always-on daemon work MUST be added
-  once to an existing device activation manifest during the upgrade migration.
-  Routine definitions MUST NOT carry mutable `enabled:` or `devices:` activation fields. The same
-  definition MAY be active on multiple devices when its input is device-local;
-  shared-input work still requires the single-executor safeguards in SING-7.
-- **SING-5b (MUST).** Every scheduled occurrence MUST have a deterministic UTC
-  slot identity and MUST be atomically claimed before dispatch. Redelivery of the
-  same `(routine, scheduledFor)` slot MUST resolve to the existing attempt and
-  MUST NOT spawn a second process. Catch-up claims protect missed-fire recovery;
-  they do not replace the ordinary scheduled-slot claim.
-- **SING-5c (MUST).** A routine MUST NOT overlap itself across any entry point,
-  including manual foreground, detached, cron, catch-up, webhook, host, fleet,
-  and cloud execution. A losing request MUST produce an inspectable skipped result
-  linked to the active run and MUST NOT spawn.
-- **SING-5d (MUST).** Routine execution context MUST be resolved on the eventual
-  execution target from the singular project anchor and portable `cwd`. Plural
-  `projects` metadata and external `repo` identity MUST NOT affect the working
-  directory. A proven path, trust, write, authentication, reachability, or
-  placement blocker MUST leave the definition paused rather than defer failure to
-  its next schedule.
-- **SING-5e (MUST).** Run metadata MUST be allocated before pre-spawn work so every
-  blocked, skipped, failed, timed-out, missed, and completed attempt remains
-  inspectable without requiring an archived session transcript.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
-  `cli` (daemon routine and/or command) first; the UI PR adds rendering and
+  `cli` (daemon service and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3
   applies — the UI grows an endpoint, the CLI keeps the trigger.
 - **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
@@ -3403,39 +3341,6 @@ nothing but its own view cache.
   election with lease handoff for any remaining UI-side coordination protocol
   (agi-ext `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
-- **SING-15 (MUST).** A single scheduled fire MUST launch a routine at most once,
-  even when the same UTC occurrence is evaluated by more than one timer callback,
-  a restart replays `loadAll()` (`lib/scheduler.ts`), or a manual `catchup` overlaps
-  the daemon pass. Uniqueness MUST be a structural claim on the occurrence identity
-  `(routine, scheduledFor)`, not a soft in-memory guard. The **landed** precedent is
-  the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
-  with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
-  `already claimed by the scheduler` and never spawns a second agent
-  (see [`automation.md`](automation.md)). Status: **Current** (PHNX-3215). The
-  forward-timer path now claims the same way: the scheduler floors croner's jittered
-  `currentRun()` to the aligned occurrence boundary (`fireSlot` → `alignedSlotForFire`,
-  `lib/scheduler.ts`, `lib/scheduling/routines.ts`) and `allocateRoutineAttempt`
-  (`lib/daemon/runner.ts:253-261`) atomically claims the run dir via `claimRunSlot` keyed on
-  that `(routine, scheduledFor)`. Forward dispatch and catch-up share one derivation
-  (`alignedSlotForFire`, which `previousExpectedFire` also delegates to), so a live fire
-  and its missed twin for one UTC slot collide by construction. Before the fix the
-  forward key was the jittered fire instant, so two deliveries of one occurrence minted
-  distinct ids and both launched.
-- **SING-16 (MUST).** The slot claim (SING-15 — "may this occurrence dispatch?") and
-  the active-run claim (SING-13 — "is an instance of this routine already running?")
-  MUST be distinct guards: a routine that overlaps itself (a long run still executing
-  when the next slot arrives) is a different condition from one occurrence firing
-  twice, and collapsing them into one lock makes each failure mode mask the other.
-  Status: **Current** (PHNX-3215). `allocateRoutineAttempt` (`lib/daemon/runner.ts`)
-  evaluates the slot claim (`claimRunSlot`, `:261`) and the active-run claim
-  (`activeRoutineRun`, `:115`/`:278`) as two sequential, distinct guards.
-- **SING-13 (MUST).** A routine MUST NOT overlap itself: while one run of a routine is
-  in a non-terminal state (`running`), a newly-arriving occurrence MUST record a
-  terminal `skipped` run linked to the active run (its `activeRunId`) rather than
-  spawning a concurrent second instance, across every placement (`local`, `host`,
-  `fleet`, `cloud`). Status: **Current** (PHNX-3215). `allocateRoutineAttempt`
-  (`lib/daemon/runner.ts:278-286`) records a `skipped` run with `skipReason: 'active_run'`
-  and `activeRunId` when `activeRoutineRun` finds a live prior run, spawning nothing.
 
 #### 3.1 Multi-device — parallel daemons are fine, shared queues are not
 
@@ -3443,24 +3348,19 @@ Every fleet device runs its own daemon, and that is by design: scheduling fans o
 across devices whenever the *work* is partitioned by device. The duplication hazard
 is not two daemons existing — it is two daemons consuming the **same** input.
 
-- **SING-8 (MUST).** An unrestricted routine (no `devices` allowlist) fires on every
-  device running the scheduler (`jobRunsOnThisDevice`, `lib/scheduling/routines.ts:476-484`) and therefore MUST
-  be per-device in scope: its input MUST be the firing device's own state (its
-  repos, sessions, caches, accounts). `git-hygiene` on each device's own checkout is
-  the canonical legal shape; the watchdog rotating its own machine's sessions is
-  another.
-- **SING-9 (MUST).** A routine that consumes **shared** input — a ticket
-  tracker, a PR queue, the feed, an R2/sync bucket, another device's sessions —
-  MUST have exactly one executor per work item, achieved one of three ways:
-  (a) **owner pin** — the routine is activated on exactly one device
-  (`agents routines devices <name> --set <one>`, SING-5a), so `jobRunsOnThisDevice`
-  (`lib/scheduling/routines.ts`) lets only that daemon fire; a legacy multi-device `devices:`
-  pin fires only on `routineOwnerDevice` with a fix hint (`lib/scheduler.ts`); or (b) **atomic claim** — each item is claimed with an
-  atomic primitive before work begins (precedent: the feed's `O_EXCL` block claim,
-  `lib/feed/feed.ts:257` — two concurrent claimers cannot both succeed); or
-  (c) **idempotency** — a concurrent second execution of the same item is a
-  verified no-op. `hostStrategy: fleet` (one online device picked per run,
-  `lib/scheduling/routines.ts`) satisfies (a) for dispatch targets.
+- **SING-8 (MUST).** Daemon work that runs on every device MUST be per-device in
+  scope: its input MUST be the firing device's own state (its repos, sessions,
+  caches, accounts). The watchdog rotating its own machine's sessions and
+  `tmux-reap` sweeping its own panes are the canonical legal shapes.
+- **SING-9 (MUST).** Work that consumes **shared** input — a ticket tracker, a PR
+  queue, the feed, an R2/sync bucket, another device's sessions — MUST have exactly
+  one executor per work item, achieved one of three ways: (a) **owner pin** — the
+  work runs on exactly one designated device; or (b) **atomic claim** — each item
+  is claimed with an atomic primitive before work begins (precedent: the feed's
+  `O_EXCL` block claim, `lib/feed/feed.ts:257` — two concurrent claimers cannot both
+  succeed); or (c) **idempotency** — a concurrent second execution of the same item
+  is a verified no-op. An external scheduler (cron, a systemd timer, launchd) that
+  invokes `agents run` on several devices is bound by the same rule.
 - **SING-10 (MUST).** Where (b) or (c) is chosen, the claim or idempotency check
   MUST be part of the implementation, not a comment — shared-queue consumers
   without an owner pin ship with a test that two concurrent fires cannot process
@@ -3475,7 +3375,7 @@ own `HOME`), and none of them contend. One state dir maps 1:1 to one logical dae
 one user/configuration. Consequently, the casual product phrase "one daemon per device"
 means one daemon for the state dir a human normally uses on that device, not literally
 one `__daemon-run` process across every user, installation, or test fixture on the
-machine. Within ONE state dir, the pid-file claim in SING-5 guarantees one scheduler;
+machine. Within ONE state dir, the pid-file claim guarantees one daemon;
 SING-11/SING-12 fix *which* daemon survives and how the loser is torn down, so a second
 install sharing that state dir can never leave two daemons. (RUSH-2352 originally read
 four `__daemon-run` on one box as four duplicate schedulers; adversarial verification
@@ -3494,8 +3394,8 @@ a machine-wide process sweep.)
   wait for it to be provably dead — its graceful `handleShutdown` (stopping every
   supervised service and releasing its lifetime marker, pid file, heartbeat, and registry
   entry), or a `killTree` escalation
-  (POSITIVE pid, so the kill never
-  reaches the incumbent's detached job children) after the grace window —
+  (POSITIVE pid, so the kill reaches only the incumbent, never its process group)
+  after the grace window —
   **before binding any of its own resources**. (The daemon no longer hosts a
   secrets broker socket to release — the standalone `secrets` CLI owns its own
   broker lifecycle, OWN-1; the historical two-brokers-on-one-socket takeover
@@ -3511,19 +3411,11 @@ a machine-wide process sweep.)
   reap. This INVERTS the historical first-wins behavior, where
   the incoming daemon logged `Another daemon already owns the pid file` and exited,
   leaving the incumbent (however stale) running.
-- **SING-11a (MUST).** In-flight detached routine children (`runner.ts`'s `unref`'d
-  spawns, which run in their own process group and survive daemon death) MUST NOT
-  be killed by takeover — severing a live agent mid-run is worse than a daemon
-  restart. The evicting SIGTERM/`killTree` reaches only the incumbent daemon's pid,
-  never those children, and the new daemon adopts them by construction: its
-  `monitorRunningJobs` (`runner.ts`) reconciles every `running` on-disk run record
-  by pid liveness (`isPidOurs`), never by which daemon spawned it, so a live child
-  is picked back up on the next tick.
 - **SING-11b (MUST).** Every daemon-owned process MUST be leak-free across every
   daemon death mode, including graceful shutdown, takeover, SIGKILL, OOM-kill, and
   machine restart. A later daemon invocation MUST either prove the recorded pid is
   still the intended live process and adopt it, or reap the dangling daemon process without
-  targeting an unrelated or detached routine process. The recovery layers are the
+  targeting an unrelated process. The recovery layers are the
   state-directory lifetime self-check (`StateDirCheckService`,
   `lib/daemon/state-dir-check-service.ts`, registered at `lib/daemon/daemon.ts:908-913`) and the
   state-directory-scoped daemon registry and `reapStrayDaemons` (`lib/daemon/daemon.ts:330-391`).
@@ -3531,28 +3423,26 @@ a machine-wide process sweep.)
   the keychain helper and its `watch-lock` watcher left with the standalone `secrets` CLI
   (PHNX-3989); each engine owns its own process recovery, so the daemon no longer spawns or
   reaps them.
-- **SING-11c (MUST).** A daemon spawned by the test suite MUST NOT run its scheduler
+- **SING-11c (MUST).** A daemon spawned by the test suite MUST NOT run its services
   against the operator's real state. Where SING-11b reaps a leaked test daemon *after
   the fact*, this is the *boot-time* preventive guard for the same class (PHNX-2545,
-  the routines suite leaving real `__daemon-run` processes alive on a fleet box): the
+  a test suite leaving real `__daemon-run` processes alive on a fleet box): the
   test-daemon spawn sets `AGENTS_DAEMON_TEST_HOME` to the isolated home it provisioned,
   and `runDaemon` (`lib/daemon/daemon.ts`, `assertTestDaemonHome`) MUST — before it
   claims an instance, writes a pid, or fires any tick — refuse to boot when its resolved
   state dir does not sit under that home, i.e. when the isolated `HOME` override failed
   to reach the child and the daemon would otherwise schedule against the real host. The
-  marker is never set in production, so the guard is a no-op there. The routines
-  daemon-spawn helper (`commands/routines.test-fixture.ts`, `startIsolatedDaemon`) sets
-  the marker, and the per-file leak detector it registers (`registerLeakDetector`)
-  remains the after-the-fact backstop for a worker killed before its own `finally`.
+  marker is never set in production, so the guard is a no-op there. The daemon
+  test spawns (`lib/daemon/daemon.lifecycle.test.ts`, `daemon.process-view.test.ts`)
+  set the marker.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon/daemon.ts`) MUST assert its postcondition,
   not assume it. The full read → signal → verify → cleanup transaction MUST hold the
   same `<daemonDir>/daemon.lock` used by start/claim, and every direct signal MUST
   revalidate that the pid is a live `__daemon-run`. After the SIGTERM → grace → `killTree` sequence it MUST verify that no `__daemon-run`
   registered for THIS state dir survives and reclaim the residue an ungraceful exit left
   behind (`stopResidueArtifacts`). (The daemon binds no secrets broker or browser IPC socket —
-  the standalone `secrets` (OWN-1) and `browser` (PHNX-4101) CLIs own those.) It MUST return a structured result naming what released, what
-  survived, and any detached children (which survive deliberately per SING-11a and are
-  reported, never killed). `agents daemon stop` MUST surface that result (human summary
+  the standalone `secrets` (OWN-1) and `browser` (PHNX-4101) CLIs own those.) It MUST return a structured result naming what released and what
+  survived. `agents daemon stop` MUST surface that result (human summary
   plus `--json`) and exit non-zero when a resource could not be released. It MUST NOT
   report success on an unverified stop (RUSH-2355). PID and residue cleanup is
   ownership-checked: a successor's pid value, lifetime marker, or heartbeat is left untouched
@@ -3575,9 +3465,8 @@ a machine-wide process sweep.)
   daemon. A short-lived client for one hosted capability MUST change only its own
   service state and signal reload; it MUST NOT call `stopDaemon` or restart the
   process to reconcile its client version, recover a socket, or implement a
-  feature-scoped `start|stop`. Routines `start|stop` toggles only `scheduler` and
-  `agents daemon services enable|disable <id>` only that service; each preserves the daemon
-  PID and all sibling services (PHNX-3605). The browser IPC service is no longer
+  feature-scoped `start|stop`. `agents daemon services enable|disable <id>` toggles
+  only that service and preserves the daemon PID and all sibling services (PHNX-3605). The browser IPC service is no longer
   daemon-hosted: `browser stop --service` stops the standalone `browser` CLI's own service
   (PHNX-4101).
 - **SING-14 (MUST).** Supervised daemon restart MUST be PACED but MUST NOT be abandoned
@@ -3614,23 +3503,17 @@ a machine-wide process sweep.)
   makes the newcomer the survivor: `claimDaemonInstance` SIGTERMs the incumbent,
   waits for it to be provably dead (its graceful shutdown releasing its pid, lifetime marker,
   heartbeat and registry entry), then binds,
-  so exactly one daemon is ever alive and no two `JobScheduler`s run concurrently
+  so exactly one daemon is ever alive
   (`lib/daemon/daemon.ts`, SING-11). The first-wins path where the newcomer exited and left
   the incumbent running is gone.
-- **GIVEN** the incumbent daemon has an in-flight detached routine child running,
-  **WHEN** takeover evicts that daemon, **THEN** the child survives (a different
-  process in its own group) and the new daemon adopts it via `monitorRunningJobs`
-  pid-liveness reconciliation — takeover never kills a live agent mid-run
-  (SING-11a).
 - **GIVEN** a daemon is killed by SIGKILL or the OOM killer, or its machine restarts,
   **WHEN** the next daemon invocation starts, **THEN** SING-11b requires it to adopt
   live intended children and reap stale daemon processes by recorded identity, leaving no dangling pid or orphaned process.
 - **GIVEN** a wedged daemon that ignores SIGTERM, **WHEN** `agents daemon stop` runs,
   **THEN** stop escalates to `killTree` after the grace window, then VERIFIES that no
   `__daemon-run` survives and the pid, lifetime, heartbeat and registry residue is released, and
-  returns a structured result (exit non-zero if any resource could not be released),
-  reporting surviving detached children rather than pretending the tree is clean
-  (SING-12).
+  returns a structured result (exit non-zero if any resource could not be released)
+  rather than pretending the tree is clean (SING-12).
 - **GIVEN** a daemon owns all four state-directory resources, **WHEN** graceful shutdown
   completes, **THEN** the pid registration, lifetime marker, heartbeat, and
   instance-registry entry are all absent or released;
@@ -3653,15 +3536,13 @@ a machine-wide process sweep.)
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
   scheduler") and the action MUST move to the CLI before merge.
-- **GIVEN** a routine like `git-hygiene` that sweeps each device's own checkout,
-  **WHEN** it is left unrestricted, **THEN** every device's daemon fires it and
-  each fire touches only its own machine — legal fan-out under SING-8, no
-  coordination needed.
-- **GIVEN** a routine that drains a shared tracker (e.g. `drain-linear-cli`),
-  **WHEN** two devices' daemons both fire it, **THEN** SING-9 requires exactly one
-  executor per item: the routine is owner-pinned to one device (the current
-  configuration), or each ticket is claimed atomically before work, or processing
-  the same ticket twice is a verified no-op — never "both daemons pick the same
+- **GIVEN** a daemon service like `tmux-reap` that sweeps each device's own panes,
+  **WHEN** every device's daemon runs it, **THEN** each tick touches only its own
+  machine — legal fan-out under SING-8, no coordination needed.
+- **GIVEN** a cron job that drains a shared tracker, **WHEN** it is installed on two
+  devices, **THEN** SING-9 requires exactly one executor per item: the job runs on
+  one device only, or each ticket is claimed atomically before work, or processing
+  the same ticket twice is a verified no-op — never "both devices pick the same
   ticket and run it twice."
 
 ### 5. Known gaps
@@ -3670,9 +3551,8 @@ a machine-wide process sweep.)
   for delegated tickets and dispatches an agent — was a hardcoded daemon
   `setInterval` with no `devices` allowlist, so it violated SING-9: every daemon on
   a fleet running the same opted-in project independently polled and could dispatch
-  the same ticket. It became an owner-pinned system routine (SING-9(a)), and that routine
-  was later deleted outright (RUSH-2495, see [`routines.md`](routines.md)), so no
-  auto-dispatch executor remains to double-fire.
+  the same ticket. It was deleted outright (RUSH-2495), so no auto-dispatch executor
+  remains to double-fire.
 - **SING-GAP-1.** The AGI EXT monitor leader/follower protocol
   (agi-ext `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
@@ -3680,19 +3560,6 @@ a machine-wide process sweep.)
   it is a second coordination fabric where the daemon's presence tracking
   (`lib/session/presence.ts`) would be the singular home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
-- **SING-GAP-3 (resolved, PHNX-3215).** The primary scheduled-dispatch path now carries
-  a durable per-occurrence claim of its own (SING-15 Current), the slot claim and the
-  active-run claim are separated (SING-16 Current), and self-overlap records a `skipped`
-  run (SING-13 Current). The forward-timer path floors croner's jittered `currentRun()`
-  to the aligned boundary (`fireSlot` → `alignedSlotForFire`, `lib/scheduler.ts`) and
-  claims the run dir atomically (`claimRunSlot`, `lib/scheduling/routines.ts:1411`, from
-  `allocateRoutineAttempt`, `lib/daemon/runner.ts:253`) keyed on
-  `(routine, scheduledFor)` — the same derivation catch-up's `missedRunId` uses (both via
-  `alignedSlotForFire`), so a live fire and its missed twin for one UTC slot collide by
-  construction. Before the fix, two timer callbacks for one occurrence — or a live fire
-  and its catch-up twin — were keyed on the jittered instant and did not collide; the
-  guard was in-memory only. The run-status contract for the `skipped` overlap record is
-  RT-6/RT-7 below.
 - **SING-GAP-4 (resolved, RUSH-2419; moved out, PHNX-3989).** SING-11b's leak-freedom guarantee
   once had one hole: the keychain `watch-lock` watcher was excluded from the periodic keychain
   reaper, so an OOM-kill, a raw SIGKILL, or a `killTree` escalation of a wedged daemon left it
@@ -3730,206 +3597,6 @@ a machine-wide process sweep.)
   keeping the pacing interval and the `ensureDaemonStarted` breaker: a wedged daemon
   must always recover on its own, so the OS unit restart is paced but unbounded (see
   SING-14).
-
----
-
-## Routine execution & readiness
-
-The normative contract for **how a routine resolves its execution context, proves it
-is runnable, and records what happened** — the reliability half of routines, distinct
-from the scheduling-singularity half above (who may fire them). The how-it-works
-companion is [automation.md](automation.md). Requirement keywords
-**MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
-
-This section began as the target contract of the routine reliability plan (RUSH-2290). Each
-requirement is marked **Current** or **[Intended]** with a `-GAP-` reference. A routine's YAML
-carries `agent`/`workflow`/`command`, `schedule`/`trigger`, `projects` (grouping), the singular
-`project` anchor and `cwd` (execution context), `devices` (activation), `source` (provenance),
-and `catchup` (`lib/scheduling/routines.ts:284` `JobConfig`). `RunMeta`
-(`lib/scheduling/routines.ts:423`) carries the `blocked`/`skipped` statuses and the
-`project`/`requestedCwd`/`resolvedCwd`/`readiness` fields.
-
-### 1. Grouping vs anchor — two different `project` concepts
-
-- **RT-1 (MUST).** `projects` (plural) is **grouping metadata only**: it organises a
-  routine under a project group in `agents routines list` and the menu bar and MUST
-  NOT affect scheduling or execution — the special value `["*"]` means "all defined
-  projects" (`lib/scheduling/routines.ts:324` `normalizeProjects`; see
-  [`automation.md`](automation.md)). `projects[]` MUST NOT be silently promoted
-  into an execution context. Status: **Current**.
-- **RT-2 (MUST).** A routine's **execution anchor** is a distinct singular
-  concept — a `project` field (one named `agents projects` entry) resolved to a base
-  directory on the execution target, surfaced on the CLI as `--project-anchor <name>`
-  so it can never be confused with the repeatable grouping flag `--project`. The
-  plural grouping list and the singular anchor MUST remain separate fields with
-  separate flags. Status: **Current** (`--project-anchor` on `add`/`edit`, `commands/routines.ts:1009`,
-  `:1409`; `JobConfig.project`, `lib/scheduling/routines.ts:298`).
-
-### 2. Context resolution happens on the execution target
-
-- **RT-3 (MUST).** The working directory a routine's body runs in MUST be
-  resolved **on the device that will execute it**, never from the daemon that fired it
-  — a `fleet`/`host`/`cloud`-placed run resolves against the *target's* filesystem and
-  `$HOME`, so a path that exists on the firing box but not the target is caught as a
-  readiness blocker, not a silent wrong-directory launch. Resolution MUST follow this
-  table, and a configuration with no usable directory MUST pause rather than fall back
-  to an implicit home for an agent/workflow body (RT-5):
-
-  | Configuration | Resolved directory | Readiness |
-  |---|---|---|
-  | `project` anchor with a usable base, no `cwd` | project base path | continue |
-  | `project` anchor + relative `cwd` | base joined with `cwd`, if inside the base | continue |
-  | Rootless `project` (e.g. a Linear-imported project with no local checkout) + relative `cwd` | target `$HOME` joined with `cwd`, if it exists | continue |
-  | No `project` + relative `cwd` | target `$HOME` joined with `cwd`, if it exists | continue |
-  | Absolute `cwd` outside `$HOME`, non-`local` placement | — | **pause** (`cwd_not_portable`) for portability |
-
-  Status: **Current** (`resolveRoutineExecutionContext`, `lib/routine-context.ts:100`). Resolution
-  yields a target-portable `~/…` path. Add/enable probes a `host` target over SSH
-  (`evaluateHostActivationReadiness`, `lib/routine-readiness.ts:191`), and a fire whose context does
-  not resolve records a terminal `blocked` run (`allocateRoutineAttempt`, `lib/daemon/runner.ts:325-344`).
-  A `fleet` target is not probed at add time (RT-GAP-2). `remoteCwd`
-  (`lib/scheduling/routines.ts:306`) is the legacy form of `cwd`.
-- **RT-4 (MUST).** A **`command`** routine (a plain shell body, no agent,
-  no sandbox — `lib/scheduling/routines.ts:290`) MAY default to the target `$HOME` when it has no
-  anchor or `cwd`: deterministic housekeeping (`git pull`, `npm i -g`, a notify) is
-  home-relative by nature. An **`agent`** or **`workflow`** routine MUST NOT — see
-  RT-5. Status: **Current** (`lib/routine-context.ts:206-213`).
-
-### 3. Readiness — a proven blocker saves the routine paused
-
-- **RT-5 (MUST).** `agents routines add` and `edit` MUST verify readiness
-  before activating a routine, and a **proven** blocker MUST save the definition in the
-  **paused** state carrying the exact failing check, rather than activating a routine
-  that will fail at fire time. Readiness codes MUST be machine-readable and stable —
-  at minimum `project_not_found`, `project_path_missing`, `cwd_missing`,
-  `cwd_not_portable`, `codex_workspace_untrusted`, `agent_auth_failed`, and
-  `execution_context_missing` (an `agent`/`workflow` routine with no anchor and no
-  `cwd`). Auth readiness MUST be a real headless authenticated smoke, not a cache read
-  (the cache-only check is why a dead account passed add-time and failed at fire —
-  RUSH-2290 findings). A readiness check MUST NOT introduce a sandbox bypass or an
-  automatic login. Status: **Current** for verification and pause-on-blocker
-  (`evaluateActivationReadinessLive`, `lib/routine-readiness.ts:165`; `add`,
-  `commands/routines.ts:1198`). **[Drift]** for auth: only a host-placed `codex` routine runs a
-  headless `agents run` smoke; other auth checks read fresh usage or the provider status probe
-  (`probeLocalFleetAuth`).
-- **RT-9 (MUST).** `agents routines resume <name>` MUST re-run the readiness
-  checks and refuse to activate a routine whose blocker is still present — resume MUST
-  NOT be a way to bypass readiness. Status: **Current** (`resume` aliases `enable`;
-  `enableRoutineAction`, `commands/routines.ts:531-540`).
-- **RT-10 (MUST).** A raw edit of the routine YAML (hand-editing the file,
-  or `agents routines edit`) MUST be atomic against the live definition: parse and
-  validate a temporary copy, then atomically replace, so an invalid edit leaves the
-  prior bytes untouched and a valid-but-unready edit replaces the definition **and**
-  pauses it. Status: **Current** for `agents routines edit` in the editor
-  (`commands/routines.ts:1482-1517`). **[Drift]** for the flag form of `edit`, which saves an
-  unready routine without pausing it, and for a raw hand edit of the file (RT-GAP-1).
-- **RT-12 (MUST).** At **fire** time, before spawning a routine's body, the daemon MUST
-  preflight the resolved account's sign-in and, when it is **provably** signed out
-  (auth-health verdict `revoked` or `unconfigured` for the rotation-resolved
-  `(agent, version)`), record a terminal **`blocked`** run with readiness
-  `agent_auth_failed` and a version-targeted re-login repair — never a spawned run that
-  401s and lands as `failed` (RT-7: a dead account is a different operational state from
-  a body that ran and threw). Unlike the add-time smoke (RT-5), the fire-time check is
-  **cache-only** (the daemon-warmed auth-health cache, `readAuthHealth`): a live network
-  smoke on every fire would risk a 429 storm and add latency to every tick. It MUST fail
-  **open** on any non-blocking or missing verdict (`live`/`rate_limited`/`unverified`/
-  `expired`/`error`/absent), so a stale or absent probe never wedges a routine.
-  Implemented in `fireTimeAuthReadiness` (`lib/routine-readiness.ts`), called from
-  `executeJob`/`executeJobDetached` after rotation resolves the account
-  (`lib/daemon/runner.ts`). Status: **Current** (PHNX-3415).
-
-### 4. Run history owns attempts; statuses distinguish outcomes
-
-- **RT-6 (MUST).** Every routine attempt MUST be recorded as a `RunMeta` under
-  `.history/runs/<routine>/<run>/` (`writeRunMeta`, `lib/scheduling/routines.ts:1361`), and that run
-  history — not the session transcript index — MUST be the canonical record of what a
-  routine did. Sessions, logs, reports, and artifacts are **optional linked children**
-  of a run: a routine that failed before any agent session started (bad placement,
-  untrusted sandbox, dead account, dispatch failure) still owns a terminal run that is
-  visible in `agents routines runs`, even though it has no session. Status: **Current**
-  for run-first history (`missed`/`failed` runs exist with no session,
-  see [`automation.md`](automation.md)); **Current** for pre-session `blocked` runs
-  (`allocateRoutineAttempt`, `lib/daemon/runner.ts:253`); the menu History surface lives in
-  phnx-labs/agi-menu.
-- **RT-7 (MUST).** `RunMeta.status` MUST distinguish, at minimum:
-  `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
-  (a scheduled fire the daemon never got to — SING-15), `blocked` (readiness failed,
-  no body ran — RT-5), and `skipped` (the routine was already running, self-overlap —
-  SING-13). `blocked` and `failed` MUST NOT be collapsed: a routine that never ran
-  because its account was dead is a different operational state from one whose body
-  ran and threw. Status: **Current** (PHNX-3215). The full union — including `blocked`
-  and `skipped` (with `skipReason` ∈ `duplicate_slot`/`active_run`/`wrong_owner` and
-  `activeRunId`) — is on `RunMeta` (`lib/scheduling/routines.ts:423-441`) and written by
-  `allocateRoutineAttempt`/`writeTerminalRecord` (`lib/daemon/runner.ts`).
-- **RT-8 (MUST).** `repo` on a routine is an **external identity** — the GitHub
-  `owner/repo` a webhook trigger filters on (`GithubJobTrigger.repo`, `lib/scheduling/routines.ts:266`),
-  the repository a cloud-placed run dispatches against (`JobConfig.repo`,
-  `lib/scheduling/routines.ts:297`), and the origin remote recorded as provenance when a routine is
-  materialised from a project (`JobSource.repo`, `lib/scheduling/routines.ts:223`) — and MUST NOT be treated as a local
-  working directory. The local execution directory is the anchor/`cwd` of RT-3; the
-  Git/cloud/webhook `repo` identity is separate and MUST stay separate. Status:
-  **Current**.
-
-### 5. Menu bar stays read-only for scheduling
-
-- **RT-11 (MUST).** The menu-bar helper MUST consume routine and run state as JSON for
-  display only and MUST NOT own any scheduling: it renders `agents routines`/run
-  history and MAY offer a control that *requests* an immediate run or a pause
-  (a user click invoking the CLI), but it MUST NOT hold a cron, countdown, or
-  readiness loop of its own. This is SING-2/SING-5 applied to the menu bar; the timer
-  bound in the helper is a cached *refresher* of read-only views, never an executor
-  (`ChildProcess` cached refreshers in phnx-labs/agi-menu, the helper's own repo
-  since PHNX-4036; `cli/docs/menubar.md` is the contract). Status: **Current**.
-
-### 6. Given/When/Then scenarios
-
-- **GIVEN** a routine tagged `projects: [myapp, billing]` and no `project` anchor,
-  **WHEN** it fires, **THEN** the grouping list changes nothing about where it runs
-  (RT-1) — placement follows `devices`/`hostStrategy`/anchor, never the grouping tags.
-- **GIVEN** a Linear-imported (rootless) project anchor plus a relative `cwd` of
-  `checkouts/app`, **WHEN** the routine is added on a target whose `$HOME/checkouts/app`
-  exists, **THEN** readiness resolves the cwd under the target `$HOME` and activates;
-  **WHEN** that directory does not exist, **THEN** add saves the routine **paused** with
-  `cwd_missing` (RT-3, RT-5).
-- **GIVEN** an `agent` routine with neither a `project` anchor nor a `cwd`, **WHEN** it
-  is added, **THEN** it saves **paused** with `execution_context_missing` — there is no
-  implicit home launch for an agent body (RT-4, RT-5). **GIVEN** the same shape as a
-  `command` routine, **THEN** it activates and runs from the target `$HOME` (RT-4).
-- **GIVEN** a routine whose pinned account is dead, **WHEN** it is added, **THEN** the
-  headless auth smoke fails and it saves **paused** with `agent_auth_failed`, and a
-  terminal `blocked` run is visible in `agents routines runs` before any session exists
-  (RT-5, RT-6, RT-7).
-- **GIVEN** an active routine whose rotation-resolved account is `revoked`/`unconfigured`
-  in the auth-health cache, **WHEN** the daemon fires it, **THEN** it records a terminal
-  `blocked`/`agent_auth_failed` run with the re-login repair and spawns nothing — not a
-  `failed` run that burned a session (RT-12, RT-7); **GIVEN** the cache verdict is
-  `rate_limited`/`unverified`/`expired`/`error` or absent, **THEN** the fire proceeds
-  (fail open, RT-12).
-- **GIVEN** a routine still executing when its next slot arrives, **WHEN** the slot
-  fires, **THEN** exactly one instance runs and the new occurrence records a `skipped`
-  run linked to the active run — not a second concurrent launch (SING-13, RT-7).
-- **GIVEN** a hand-edit that makes the YAML invalid, **WHEN** it is written, **THEN**
-  the prior definition bytes are untouched (RT-10); **GIVEN** a valid edit that
-  introduces a blocker, **THEN** the definition is replaced and paused (RT-10, RT-5).
-
-### 7. Known gaps
-
-- **RT-GAP-1 (RUSH-2290, mostly closed).** The execution-context resolver, readiness codes,
-  pause-on-blocker at `add`, the `enable`/`resume` recheck, `routines doctor [--fix]`
-  (`commands/routines.ts:1927`), and the atomic editor `edit` landed (77d5af491). Still open: an
-  `edit` flag change or a raw hand edit saves an unready routine without pausing it (RT-10), and the
-  auth check is a headless smoke only for a host-placed `codex` routine (RT-5). A change that closes
-  either MUST flip its `Status:` in the same PR and MUST NOT widen this gap.
-- **RT-GAP-2 (RUSH-2719).** Launch-target readiness is validated on the LOCAL box
-  only: a pinned `version:` absent locally saves the routine paused with
-  `agent_unavailable` (`lib/routine-readiness.ts:60` probes `isVersionInstalled`),
-  and `strategy:` resolution runs on the firing box. A `host:` target is probed over SSH at
-  add/enable for reachability, project/cwd, writability and sign-in
-  (`evaluateHostActivationReadiness`, `lib/routine-readiness.ts:191`), but not for the pinned
-  version. A `fleet` target is not probed at add time. Either case fails loud on the target at fire.
-  `host: auto` placement
-  (`--run-on auto`) does probe target health/install/sign-in at each fire via
-  `resolveDeviceAuto` (`lib/routines-placement.ts`).
 
 ---
 

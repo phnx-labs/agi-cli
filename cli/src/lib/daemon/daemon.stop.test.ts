@@ -219,47 +219,6 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
 
 
   it.skipIf(process.platform === 'win32')(
-    'clean stop: releases the daemon, exits 0, and REPORTS an in-flight detached child rather than killing it',
-    async () => {
-      if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
-      const home = mkHome();
-      let daemonPid: number | null = null;
-      const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { detached: true, stdio: 'ignore' });
-      child.unref();
-      try {
-        expect(child.pid).toBeTruthy();
-        daemonPid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(home, 'd.log'), env: envFor(home) }).pid!;
-        expect(await waitFor(() => readDaemonPidOf(home) === daemonPid, 20_000)).toBe(true);
-
-        const runDir = path.join(home, '.agents', '.history', 'runs', 'testjob', 'run-1');
-        fs.mkdirSync(runDir, { recursive: true });
-        fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify({
-          status: 'running', pid: child.pid, agent: 'claude',
-          startedAt: new Date().toISOString(), spawnedAt: Date.now(),
-        }));
-
-        const { status, result } = runStop(home);
-        expect(result).toBeTruthy();
-        expect(result.ok).toBe(true);
-        expect(status).toBe(0);
-        expect(result.stoppedPid).toBe(daemonPid);
-        expect(result.surviving).toEqual([]);
-        expect(result.released).toContain('daemon process');
-        expect(result.detachedChildren).toContain(child.pid);
-
-        expect(await waitFor(() => !alive(daemonPid!), 10_000)).toBe(true);
-        expect(alive(child.pid!)).toBe(true);
-      } finally {
-        try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch {  }
-        try { if (daemonPid) process.kill(daemonPid, 'SIGKILL'); } catch {  }
-        for (const p of [child.pid, daemonPid]) { if (p) await waitFor(() => !alive(p), 5_000); }
-        await rmHome(home);
-      }
-    },
-    60_000,
-  );
-
-  it.skipIf(process.platform === 'win32')(
     'wedged daemon: escalates past the grace window to killTree, then still verifies nothing survives',
     async () => {
       const home = mkHome();

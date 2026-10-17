@@ -762,15 +762,6 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
 
 export const ALL_AGENT_IDS: AgentId[] = Object.keys(AGENTS) as AgentId[];
 
-export const ROUTINE_AGENT_IDS: readonly string[] = Object.freeze([
-  'claude',
-  'codex',
-  'cursor',
-  'kimi',
-  'droid',
-  'muse',
-]);
-
 export const MANAGED_AGENT_IDS: AgentId[] = ALL_AGENT_IDS.filter((id) => !AGENTS[id].deprecated?.hard);
 
 export function isSelfUpdatingAgent(agent: AgentId): boolean {

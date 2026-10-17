@@ -122,7 +122,7 @@ runs the stage on its selected signing Mac and pulls the result back.
   with the asset names above, the bundle folder `MenubarHelper.app`, the
   executable `AGI Menu`, the bundle id, the Team, and a notarized + stapled
   Developer ID signature. It must keep the helper read-only with respect to
-  scheduling (spec RT-11): it renders CLI state and requests actions through
+  scheduling (spec SING-2): it renders CLI state and requests actions through
   the CLI; it owns no cron, countdown, or readiness loop.
 - **agents-cli** must keep resolving exactly that address from the floor, keep
   `agents menubar snapshot --json` and the `agents feed` / `sessions` JSON shapes

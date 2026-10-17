@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, classifyCodexRunRefusal, parseCodexUsageLimitReset, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, ensureVendorHomeDir, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, classifyCodexRunRefusal, parseCodexUsageLimitReset, detectAuthFailure, detectAuthFailureEvent, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -92,40 +92,6 @@ describe('rate-limit vs auth precedence', () => {
   it('a logged-out log is auth true, rate-limit false', () => {
     expect(detectAuthFailureEvent(LOGGED_OUT_CLAUDE_LOG, 'claude')).toBe(true);
     expect(detectRateLimit(LOGGED_OUT_CLAUDE_LOG)).toBe(false);
-  });
-});
-
-describe('isAuthFailureFromLog — the shared foreground/detached decision', () => {
-  it('classifies a real Cursor plain-text auth failure after a failed process', () => {
-    expect(isAuthFailureFromLog(LOGGED_OUT_CURSOR_LOG, 'cursor', { processFailed: true })).toBe(true);
-  });
-  it('classifies a real logged-out log regardless of process exit code', () => {
-    expect(isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: false })).toBe(true);
-    expect(isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: true })).toBe(true);
-  });
-
-  it('does NOT classify a completed run that merely mentions an auth phrase (the false-positive bug)', () => {
-    expect(isAuthFailureFromLog(HEALTHY_LOG_MENTIONING_LOGIN, 'claude', { processFailed: false })).toBe(false);
-  });
-
-  it('falls back to raw text ONLY when the process actually failed (died mid-stream, no result event)', () => {
-    const midStreamDeath = '{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401 OAuth access token has been revoked."}]}}';
-    expect(isAuthFailureFromLog(midStreamDeath, 'claude', { processFailed: false })).toBe(false);
-    expect(isAuthFailureFromLog(midStreamDeath, 'claude', { processFailed: true })).toBe(true);
-  });
-
-  it('never classifies a rate-limit failure as auth', () => {
-    expect(isAuthFailureFromLog(RATE_LIMITED_CLAUDE_LOG, 'claude', { processFailed: true })).toBe(false);
-  });
-});
-
-describe('authFailureReason', () => {
-  it('extracts a short human phrase from the log (most specific match wins)', () => {
-    expect(authFailureReason(LOGGED_OUT_CLAUDE_LOG)).toBe('OAuth access token has been revoked');
-  });
-
-  it('returns null when no user-visible phrase is present', () => {
-    expect(authFailureReason('all good here')).toBeNull();
   });
 });
 

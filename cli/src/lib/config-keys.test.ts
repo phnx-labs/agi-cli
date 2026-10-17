@@ -75,10 +75,10 @@ describe('config-keys', () => {
         device: 'mac-mini',
         property: 'max-agents',
       });
-      expect(parseConfigKey('devices.mac-mini.scheduler')).toEqual({
+      expect(parseConfigKey('devices.mac-mini.daemon')).toEqual({
         scope: 'device',
         device: 'mac-mini',
-        property: 'scheduler',
+        property: 'daemon',
       });
       expect(parseConfigKey('devices.mac-mini.browser.remote-control')).toEqual({
         scope: 'device',
@@ -193,7 +193,6 @@ describe('config-keys', () => {
   describe('devicePropertyToConfigName', () => {
     it('maps friendly names to internal config keys', () => {
       expect(devicePropertyToConfigName('max-agents')).toBe('agents.max-concurrent');
-      expect(devicePropertyToConfigName('scheduler')).toBe('scheduler.enabled');
       expect(devicePropertyToConfigName('daemon')).toBe('daemon.enabled');
       expect(devicePropertyToConfigName('watchdog')).toBe('watchdog.enabled');
       expect(devicePropertyToConfigName('tmux')).toBe('tmux.enabled');

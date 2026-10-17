@@ -13,18 +13,18 @@ describe('devices config --fleet (fleet-wide defaults layer)', () => {
     addDevice('mac-mini', 'muqsit@192.0.2.2');
     addDevice('zion', 'muqsit@192.0.2.1');
 
-    const set = run(['devices', 'config', '--fleet', 'scheduler.enabled', 'off']);
+    const set = run(['devices', 'config', '--fleet', 'daemon.enabled', 'off']);
     expect(set.status, set.stderr).toBe(0);
-    expect(set.stdout).toContain('scheduler.enabled = false');
+    expect(set.stdout).toContain('daemon.enabled = false');
 
     const central = centralDoc();
     expect(central).toContain('defaults:');
-    expect(central).toContain('schedulerEnabled: false');
-    expect(deviceDoc('mac-mini')).not.toContain('schedulerEnabled');
+    expect(central).toContain('daemonEnabled: false');
+    expect(deviceDoc('mac-mini')).not.toContain('daemonEnabled');
 
-    const self = JSON.parse(run(['devices', 'config', 'mac-mini', 'scheduler.enabled', '--json']).stdout);
-    expect(self).toEqual({ device: 'mac-mini', key: 'scheduler.enabled', value: false, source: 'fleet' });
-    const peer = run(['devices', 'config', 'zion', 'scheduler.enabled', '--json']);
+    const self = JSON.parse(run(['devices', 'config', 'mac-mini', 'daemon.enabled', '--json']).stdout);
+    expect(self).toEqual({ device: 'mac-mini', key: 'daemon.enabled', value: false, source: 'fleet' });
+    const peer = run(['devices', 'config', 'zion', 'daemon.enabled', '--json']);
     expect(peer.status).toBe(1);
     expect(peer.stderr).toContain('machine-local');
   });

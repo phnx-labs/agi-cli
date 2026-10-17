@@ -305,11 +305,9 @@ describe('runWatchdogTick — active / not-yet-stalled', () => {
       lastActivityMs: NOW - 5_000,
       project: 'agents-cli',
       name: 'watchdog-check',
-      topic: 'Explain a stalled routine',
+      topic: 'Explain a stalled session',
       preview: 'Reading the session tail',
       activity: 'working',
-      origin: 'routine',
-      routineName: 'session-health',
       machine: 'zion',
       owner: 'muqsit@example.com',
     });
@@ -317,14 +315,12 @@ describe('runWatchdogTick — active / not-yet-stalled', () => {
     expect(result.outcomes[0]).toMatchObject({
       project: 'agents-cli',
       name: 'watchdog-check',
-      topic: 'Explain a stalled routine',
+      topic: 'Explain a stalled session',
       preview: 'Reading the session tail',
       activity: 'working',
       status: 'idle',
       startedAtMs: NOW - 60_000,
       lastActivityMs: NOW - 5_000,
-      origin: 'routine',
-      routineName: 'session-health',
       machine: 'zion',
       owner: 'muqsit@example.com',
     });

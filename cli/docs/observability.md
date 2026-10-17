@@ -95,10 +95,10 @@ dump they sent before (`ownerMessageNotification` → `sendToOwner` →
 `postOwnerNotification`). A non-owner `agents send` (explicit `--channel`/`--to`)
 is delivered verbatim.
 
-**Reaching the owner needs a sign-in.** The owner sink, `send --to owner`, urgent
-feed blocks and failed routines all post to your account; your notification
+**Reaching the owner needs a sign-in.** The owner sink, `send --to owner`, and urgent
+feed blocks all post to your account; your notification
 preferences and iMessage number live in the console Settings page. A
-block posts `needs_you`, a failed routine `failed`, and
+block posts `needs_you` and
 everything else `message`. A box with no Phoenix session (`agents auth login`) and,
 on a worker, no device token cannot reach the owner: the sink reports a failure and
 `agents doctor` shows `owner-not-signed-in`. Workers receive a `notify`-scoped

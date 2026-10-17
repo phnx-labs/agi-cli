@@ -4,7 +4,7 @@
 > **Status:** Implemented. The `-D, --device` flag
 > ships today across virtually every first-class group (`repos`, `view`, `inspect`,
 > `doctor`, `sync`, `plugins`, `skills`,
-> `teams`, `routines`, …), on `agents run`, and on multi-host aggregators
+> `teams`, …), on `agents run`, and on multi-host aggregators
 > (`ps`, `feed`, `logs`). Groups with no remote semantics reject the flag
 > with a clear message — never a raw commander `unknown option`.  Every `agents run` option is classified
 > by the forwarding contract (`RUN_OPTION_FORWARDING`,
@@ -23,8 +23,8 @@
 by name from a local registry, over plain SSH, with no central service to
 run or pay for.
 
-**Placement** (where the body runs) is one model shared with lease, cloud, and
-routines — see [concepts.md § Devices, placement, and projects](concepts.md#devices-placement-and-projects). On
+**Placement** (where the body runs) is one model shared with lease and cloud
+— see [concepts.md § Devices, placement, and projects](concepts.md#devices-placement-and-projects). On
 `agents run`, prefer `--where`; the older flags remain aliases:
 
 ```
@@ -328,8 +328,7 @@ whenever the resolved (sub)command registers `--device` itself: `agents fork <id
 --device <box>` targets a host, `agents projects status|pull --device <box>` scopes
 the fleet read. Only the `--device` that `addHostOption`
 ([`src/lib/hosts/option.ts`](../src/lib/hosts/option.ts)) declares is the router's
-own, and `--devices`/`--hosts` are always the router's (a `routines add --devices a,b
---device mac` still forwards to `mac`). Before PHNX-4387 the router consulted a hand-kept list of top-level names, so a
+own, and `--devices`/`--hosts` are always the router's. Before PHNX-4387 the router consulted a hand-kept list of top-level names, so a
 command that moved (`agents sessions fork` became `agents fork`) lost `--device`
 without any error at build time. `passthrough.device-guard.test.ts` walks the full
 command tree and fails if any command that declares `--device` is rejected.
@@ -836,14 +835,12 @@ the dispatched run's per-task log on the host (`<id>.log` beside its `.exit`
 marker) rather than to the harness transcript; see
 [ssh-transport.md §3](ssh-transport.md#3-the-follow-loop-one-persistent-stream-p1).
 
-### 5. Scheduling — falls out of the existing daemon
+### 5. Scheduling — the OS scheduler, not agents-cli
 
-Scheduled fleet dispatch needs **no new machinery**: the routines scheduler
-(`src/lib/daemon/daemon.ts`) fires jobs on cron; a job whose command is `agents run …
---device <host>` is a scheduled remote dispatch. Online-gating is the same lazy SSH
-probe `ensureHostReady` already does (skip/retry if the one targeted host is
-unreachable) — no fleet poll. (We do **not** turn the scheduler into an RPC
-server — see Non-goals.)
+Scheduled fleet dispatch needs **no new machinery**: an OS cron job, systemd timer,
+or launchd agent whose command is `agents run … --device <host>` is a scheduled remote
+dispatch. Online-gating is the same lazy SSH probe `ensureHostReady` already does
+(the run fails loud if the one targeted host is unreachable) — no fleet poll.
 
 ### 6. Tracking — a local task store
 
@@ -965,7 +962,7 @@ implementation.
   e2b/modal/… `agents run --lease` shells out to crabbox for lease/release and
   runs on the leased box without registering it. We do not reimplement multi-cloud
   provisioning, cost, or lifecycle.
-- **No new daemon.** Phase 2 relay/attach expands the existing routines daemon;
+- **No new daemon.** Phase 2 relay/attach expands the existing agents daemon;
   it does not add a second long-running process.
 - **No custom wire protocol.** SSH + on-disk transcript are the protocol.
 - **No VM snapshots.** `rsync` over SSH replaces Devin-style block-diff for our
@@ -1082,7 +1079,7 @@ Resolved decisions.
 | Incremental offset read | `src/lib/hosts/progress.ts` (`followHostTask`) |
 | Per-agent transcript dirs | `src/lib/session/discover.ts:getAgentSessionDirs` |
 | Cross-machine transcript transport | `src/commands/sessions-migrate.ts` (direct SSH, shipped) — the CRDT G-Set / R2 background-sync substrate this row originally named has been removed |
-| Scheduling | `src/lib/daemon/daemon.ts` (routines scheduler) |
+| Scheduling | the OS scheduler (cron, systemd timers, launchd) invoking `agents run` |
 | Task tracking store | `src/lib/hosts/tasks.ts` (local dispatch records behind `agents devices ps`) |
 | Config schema | `src/lib/types.ts` (`Meta`) + `src/lib/state.ts` (`readMeta`) |
 | Config bootstrap on host | `agents repo pull user` (git-backed) |

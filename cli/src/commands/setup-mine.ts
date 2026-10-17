@@ -13,7 +13,6 @@ const DISABLEABLE_FEATURES: Array<{ name: string; hint: string }> = [
   { name: 'browser', hint: 'automate a browser' },
   { name: 'computer', hint: 'drive native desktop apps' },
   { name: 'secrets', hint: 'keychain-backed env bundles' },
-  { name: 'routines', hint: 'run agents on a cron schedule' },
 ];
 
 async function runMineWizard(): Promise<boolean> {

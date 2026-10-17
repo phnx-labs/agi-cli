@@ -5,7 +5,7 @@ import * as path from 'path';
 import Database from '../../sqlite.js';
 import { buildFtsQuery, getDB } from '../db.js';
 import { resolveSessionName } from '../title.js';
-import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, resolveSessionById, isCompleteSessionId, looksLikeSessionId, readGrokMeta } from '../discover.js';
+import { scanClaudeSession, parseCodexThreadNameIndex, shouldDeferRecentAppend, machineForSessionFile, discoverSessions, isCompleteSessionId, looksLikeSessionId, readGrokMeta } from '../discover.js';
 import { machineId } from '../sync/config.js';
 import { getHistoryDir } from '../../state.js';
 
@@ -23,62 +23,6 @@ describe('machineForSessionFile', () => {
   it('falls back to the local machine for live-home (non-mirror) files', () => {
     const p = path.join(os.homedir(), '.claude', 'projects', 'foo', 'sess.jsonl');
     expect(machineForSessionFile(p, 'claude')).toBe(machineId());
-  });
-});
-
-describe('routine archive discovery', () => {
-  const jobName = '__test_routine_sessions__';
-  const runId = '2026-07-21T10-30-00-000Z';
-  const sessionId = '11111111-2222-4333-8444-555555555555';
-  const runDir = path.join(getHistoryDir(), 'runs', jobName, runId);
-
-  afterEach(() => {
-    fs.rmSync(path.join(getHistoryDir(), 'runs', jobName), { recursive: true, force: true });
-    const db = getDB();
-    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
-    db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(sessionId);
-    db.prepare(`DELETE FROM scan_ledger WHERE file_path LIKE ?`).run(`${runDir}%`);
-  });
-
-  it('indexes archived routine transcripts and resolves them by routine run id', async () => {
-    const transcriptDir = path.join(runDir, 'sessions', 'claude', 'projects', 'routine-project');
-    fs.mkdirSync(transcriptDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(transcriptDir, `${sessionId}.jsonl`),
-      [
-        JSON.stringify({
-          type: 'user',
-          timestamp: '2026-07-21T10:30:00.000Z',
-          cwd: '/tmp/routine-project',
-          sessionId,
-          message: { role: 'user', content: 'summarize routine result' },
-        }),
-        JSON.stringify({
-          type: 'assistant',
-          timestamp: '2026-07-21T10:31:00.000Z',
-          cwd: '/tmp/routine-project',
-          sessionId,
-          message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] },
-        }),
-      ].join('\n') + '\n',
-      'utf-8',
-    );
-
-    const sessions = await discoverSessions({
-      agent: 'claude',
-      origin: 'routine',
-      all: true,
-      limit: 100,
-    });
-    const hit = sessions.find((s) => s.id === sessionId);
-
-    expect(hit).toBeDefined();
-    expect(hit!.origin).toBe('routine');
-    expect(hit!.routineName).toBe(jobName);
-    expect(hit!.routineRunId).toBe(runId);
-    expect(hit!.project).toBe(jobName);
-    expect(hit!.label).toBe(jobName);
-    expect(resolveSessionById(sessions, runId).map((s) => s.id)).toContain(sessionId);
   });
 });
 

@@ -119,7 +119,7 @@ describe('selectOrphanProcesses', () => {
     expect(picked).toEqual([]);
   });
 
-  it('NEVER reaps the routines daemon or the secrets broker, marker or not', () => {
+  it('NEVER reaps the agents daemon or the secrets broker, marker or not', () => {
     const table = [
       proc(600, 1, 'node dist/index.js __daemon-run', 'ag-claude-gone'),
       proc(601, 1, 'node dist/index.js secrets _agent-run', 'ag-claude-gone'),

@@ -2,7 +2,7 @@ const LOADED_COMMAND_NAMES = [
   'accounts', 'auth', 'view', 'inspect', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use',
   'remove', 'rm', 'purge', 'update', 'prune', 'import',
-  'routines', 'projects', 'run', '_callback', 'open', 'fork', 'config',
+  'projects', 'run', '_callback', 'open', 'fork', 'config',
   'models', 'doctor',
   'harness', 'harnesses', 'menubar', 'sync',
   'refresh-rules', 'factory', 'insights', 'trace',
@@ -13,7 +13,7 @@ const LOADED_COMMAND_NAMES = [
 ] as const;
 
 const INLINE_COMMAND_NAMES = [
-  'perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', '_internal',
+  'perms', 'exec', 'check', 'resources', 'hq', '_internal',
 ] as const;
 
 export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
@@ -23,6 +23,9 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
 
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
 
+  'routines',
+  'jobs',
+  'cron',
   'webhook',
   'org',
   'serve',

@@ -1,4 +1,3 @@
-import * as os from 'os';
 import * as path from 'path';
 import { getHistoryDir } from '../../state.js';
 import { codexHomeShimBash, codexShortKey, resolveCodexHome } from '../../codex-home.js';
@@ -64,15 +63,5 @@ exec "$BINARY"${launchArgs} "$@"`;
       ...ctx.addDirs,
     ];
     return codexPolicyArgs(ctx.resolvedMode, writableRoots);
-  },
-
-  routineModeArgs(cmd, ctx) {
-    const routineRoots = (ctx.config.allow?.dirs ?? []).map((dir) => {
-      if (dir.startsWith('-')) {
-        throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
-      }
-      return dir.replace(/^~/, os.homedir());
-    });
-    cmd.push(...codexPolicyArgs(ctx.mode, [...codexEditWritableRoots(), ...routineRoots]));
   },
 };

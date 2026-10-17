@@ -534,7 +534,7 @@ describe('version resource sync path handling', () => {
   it('sweeps a flattened plugin skill out of a Claude home and keeps only the marketplace copy', async () => {
     const home = makeTempHome();
     const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
-    const pluginSkillDir = path.join(pluginRoot, 'skills', 'routines');
+    const pluginSkillDir = path.join(pluginRoot, 'skills', 'reviews');
     const versionSkillRoot = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'home', '.claude', 'skills');
 
     fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
@@ -545,8 +545,8 @@ describe('version resource sync path handling', () => {
     );
     fs.mkdirSync(pluginSkillDir, { recursive: true });
     fs.writeFileSync(path.join(pluginSkillDir, 'SKILL.md'), 'fresh continuous ticket drain recipe\n', 'utf-8');
-    fs.mkdirSync(path.join(versionSkillRoot, 'routines'), { recursive: true });
-    fs.writeFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'stale routines body\n', 'utf-8');
+    fs.mkdirSync(path.join(versionSkillRoot, 'reviews'), { recursive: true });
+    fs.writeFileSync(path.join(versionSkillRoot, 'reviews', 'SKILL.md'), 'stale reviews body\n', 'utf-8');
     fs.mkdirSync(path.join(versionSkillRoot, 'old-shadow'), { recursive: true });
     fs.writeFileSync(path.join(versionSkillRoot, 'old-shadow', 'SKILL.md'), 'orphaned body\n', 'utf-8');
     fs.mkdirSync(path.join(versionSkillRoot, 'synced', 'bucket'), { recursive: true });
@@ -571,13 +571,13 @@ describe('version resource sync path handling', () => {
       'plugins',
       'agents',
       'skills',
-      'routines',
+      'reviews',
       'SKILL.md'
     );
 
     expect(result.skills).toBe(false);
     expect(result.plugins).toEqual(['agents']);
-    expect(fs.existsSync(path.join(versionSkillRoot, 'routines'))).toBe(false);
+    expect(fs.existsSync(path.join(versionSkillRoot, 'reviews'))).toBe(false);
     expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(false);
     expect(fs.existsSync(path.join(versionSkillRoot, 'synced', 'bucket'))).toBe(true);
     expect(fs.existsSync(marketplaceSkill)).toBe(true);
@@ -586,7 +586,7 @@ describe('version resource sync path handling', () => {
   it('still force-refreshes plugin-only skills into the top-level skill home of a flattening harness', async () => {
     const home = makeTempHome();
     const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
-    const pluginSkillDir = path.join(pluginRoot, 'skills', 'routines');
+    const pluginSkillDir = path.join(pluginRoot, 'skills', 'reviews');
     const versionSkillRoot = path.join(home, '.agents', '.history', 'versions', 'codex', '0.150.0', 'home', '.codex', 'skills');
 
     fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
@@ -597,19 +597,19 @@ describe('version resource sync path handling', () => {
     );
     fs.mkdirSync(pluginSkillDir, { recursive: true });
     fs.writeFileSync(path.join(pluginSkillDir, 'SKILL.md'), 'fresh continuous ticket drain recipe\n', 'utf-8');
-    fs.mkdirSync(path.join(versionSkillRoot, 'routines'), { recursive: true });
-    fs.writeFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'stale routines body\n', 'utf-8');
+    fs.mkdirSync(path.join(versionSkillRoot, 'reviews'), { recursive: true });
+    fs.writeFileSync(path.join(versionSkillRoot, 'reviews', 'SKILL.md'), 'stale reviews body\n', 'utf-8');
 
     const result = runVersionSync(
       home,
       "syncResourcesToVersion('codex', '0.150.0', undefined, { cwd: home, force: true })"
     ) as { skills: boolean; plugins: string[] };
 
-    const refreshed = fs.readFileSync(path.join(versionSkillRoot, 'routines', 'SKILL.md'), 'utf-8');
+    const refreshed = fs.readFileSync(path.join(versionSkillRoot, 'reviews', 'SKILL.md'), 'utf-8');
     expect(result.skills).toBe(true);
     expect(result.plugins).toEqual(['agents']);
     expect(refreshed).toContain('fresh continuous ticket drain recipe');
-    expect(refreshed).not.toContain('stale routines body');
+    expect(refreshed).not.toContain('stale reviews body');
   });
 
   it('filters plugin-bundled skills through the active resource profile', () => {
@@ -626,7 +626,7 @@ describe('version resource sync path handling', () => {
       fs.writeFileSync(path.join(pluginRoot, 'skills', skill, 'SKILL.md'), `${skill} body\n`, 'utf-8');
     };
 
-    makePluginSkill('agents', 'routines');
+    makePluginSkill('agents', 'reviews');
     makePluginSkill('agents', 'debug');
     makePluginSkill('blocked', 'secret');
 
@@ -645,7 +645,7 @@ describe('version resource sync path handling', () => {
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
     expect(result.plugins).toEqual(['agents']);
-    expect(result.skills).toEqual(['routines']);
+    expect(result.skills).toEqual(['reviews']);
   });
 
   it('filters plugin-bundled skills through source-qualified resource profile selectors', () => {
@@ -657,8 +657,8 @@ describe('version resource sync path handling', () => {
       JSON.stringify({ name: 'agents', version: '1.0.0', description: 'Fixture plugin' }),
       'utf-8'
     );
-    fs.mkdirSync(path.join(pluginRoot, 'skills', 'routines'), { recursive: true });
-    fs.writeFileSync(path.join(pluginRoot, 'skills', 'routines', 'SKILL.md'), 'routines body\n', 'utf-8');
+    fs.mkdirSync(path.join(pluginRoot, 'skills', 'reviews'), { recursive: true });
+    fs.writeFileSync(path.join(pluginRoot, 'skills', 'reviews', 'SKILL.md'), 'reviews body\n', 'utf-8');
 
     const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
     const profilesUrl = pathToFileURL(path.resolve('src/lib/resource-profiles.ts')).href;
@@ -666,7 +666,7 @@ describe('version resource sync path handling', () => {
     const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
       import { getAvailableResources } from ${JSON.stringify(versionsUrl)};
       import { setActiveResourceProfile, upsertResourceProfilePreset } from ${JSON.stringify(profilesUrl)};
-      upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['user:routines'] });
+      upsertResourceProfilePreset('work', { plugins: ['agents'], skills: ['user:reviews'] });
       setActiveResourceProfile('work');
       console.log(JSON.stringify(getAvailableResources(${JSON.stringify(home)})));
     `], { env: { ...process.env, HOME: home }, encoding: 'utf-8' });
@@ -674,7 +674,7 @@ describe('version resource sync path handling', () => {
     expect(child.status, child.stderr).toBe(0);
     const result = JSON.parse(child.stdout.trim()) as { plugins: string[]; skills: string[] };
     expect(result.plugins).toEqual(['agents']);
-    expect(result.skills).toEqual(['routines']);
+    expect(result.skills).toEqual(['reviews']);
   });
 
   it('attributes permission groups and workflows to their real layers under resource profiles', () => {

@@ -8,23 +8,14 @@ import * as os from 'os';
 import { getDaemonDir } from '../state.js';
 import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from '../platform/index.js';
-import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.js';
-import { syncAllProjectRoutines } from '../routines-project.js';
-import { JobScheduler } from '../scheduler.js';
-import { executeJobDetached, listLiveRoutineChildren } from './runner.js';
-import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
-import { runCatchup } from '../catchup.js';
-import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
-import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
-import { describeOwnerResult } from '../owner-notify.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
-import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../device-config.js';
+import { isDaemonEnabled } from '../device-config.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, readRecentDaemonRestarts, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { ServiceSupervisor } from './supervisor.js';
 import type { ServiceHealth } from './service.js';
-import { emit, emitAsync, emitRoutineEnd } from '../feed/events.js';
+import { emit, emitAsync } from '../feed/events.js';
 import { readDaemonServicesConfig, readDaemonLogLevel, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 import { sleepSync } from '../fs-atomic.js';
 import { DaemonVitals, installSpanLog, levelEnabled, topSpansSinceReport, type LogFields, type LogLevel } from './diagnostics.js';
@@ -68,14 +59,6 @@ const DAEMON_HEARTBEAT_TICK_MS = 60_000;
 const DAEMON_THROTTLE_SECONDS = 30;
 
 export const DAEMON_AUTOSTART_FAILURE_LIMIT = 5;
-
-// A scheduler gate reload has exactly four truthful outcomes: boot, reload, stop, or remain dark.
-type SchedulerGateTransition = 'reload' | 'stop' | 'boot' | 'none';
-
-export function schedulerGateTransition(running: boolean, enabled: boolean): SchedulerGateTransition {
-  if (running) return enabled ? 'reload' : 'stop';
-  return enabled ? 'boot' : 'none';
-}
 
 // Latch before the first await and never retry after rejection: daemon shutdown is single-shot.
 export function singleShot(fn: () => Promise<void>): () => Promise<void> {
@@ -511,7 +494,7 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
     if (!ephemeralRoot) return null;
     const message =
       `Daemon launched from ${ephemeralRoot} (${bin}); if that directory is removed, ` +
-      `every routine will fail with ENOENT on its module imports. Run the daemon from the ` +
+      `every daemon service will fail with ENOENT on its module imports. Run the daemon from the ` +
       `globally installed binary instead (npm i -g @phnx-labs/agents-cli), then restart it.`;
     log('WARN', message);
     return message;
@@ -547,7 +530,6 @@ export async function runDaemon(): Promise<void> {
     { SessionSummarizerService },
     { SessionTitleService },
     { AccountUsageService, AccountAuthService },
-    { CatchupService },
     { WatchdogService },
     { DeviceProbeService },
     { SelfHealService },
@@ -567,7 +549,6 @@ export async function runDaemon(): Promise<void> {
     import('./session-summarizer-service.js'),
     import('./session-title-service.js'),
     import('./account-state-daemon-service.js'),
-    import('./catchup-service.js'),
     import('./watchdog-service.js'),
     import('./device-probe-service.js'),
     import('./self-heal-service.js'),
@@ -673,18 +654,6 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('account-auth')) supervisor.register(new AccountAuthService());
   else log('INFO', 'Account-auth service disabled');
 
-  let scheduler: JobScheduler | null = null;
-
-  if (isEnabled('catchup')) {
-    supervisor.register(new CatchupService({
-      isSchedulerBooted: () => scheduler !== null,
-      runPass: (signal) => catchupPass(signal),
-    }));
-  } else {
-    log('INFO', 'Catch-up recovery service disabled');
-  }
-
-
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
 
@@ -727,143 +696,11 @@ export async function runDaemon(): Promise<void> {
   await supervisor.startAll({ log });
   activeServiceSupervisor = supervisor;
 
-  const schedulerEnabledAtBoot = isSchedulerEnabled() && isEnabled('scheduler');
-  if (!schedulerEnabledAtBoot) {
-    try {
-      assertSchedulerEnabled();
-    } catch (err) {
-      log('WARN', (err as Error).message);
-    }
-    if (!isEnabled('scheduler')) log('INFO', 'Scheduler service disabled; no routines will fire');
-  }
-
-  const triggerJob = async (config: JobConfig, ctx?: { scheduledFor?: Date }) => {
-    const jobLabel = config.command
-      ? 'command'
-      : config.workflow
-        ? `workflow: ${config.workflow}`
-        : `agent: ${config.agent}`;
-    log('INFO', `Triggering job '${config.name}' (${jobLabel})`);
-    emit('routine.start', {
-      module: 'routine',
-      name: config.name,
-      kind: config.command ? 'command' : config.workflow ? 'workflow' : 'agent',
-      ...(config.agent ? { agent: config.agent } : {}),
-      ...(config.workflow ? { workflow: config.workflow } : {}),
-    });
-    try { notifyRoutineStart(config); } catch {  }
-    try {
-      const meta = await executeJobDetached(config, {
-        onFinish: (final) => {
-          emitRoutineEnd(final);
-          try { notifyRoutineFinish(final); } catch {  }
-          void notifyOwnerRoutineFinish(final)
-            .then((r) => {
-              if (r && r.suppressed === null && r.delivered.length + r.queued.length === 0)
-                log('WARN', `Owner failure-notify for '${config.name}' reached no channel: ${describeOwnerResult(r)}`);
-            })
-            .catch((err: Error) => log('WARN', `Owner failure-notify for '${config.name}' failed: ${err.message}`));
-        },
-      }, { kind: 'schedule', scheduledFor: ctx?.scheduledFor });
-      log('INFO', `Job '${config.name}' spawned (run: ${meta.runId}, PID: ${meta.pid})`);
-    } catch (err) {
-      const message = (err as Error).message;
-      log('ERROR', `Job '${config.name}' failed to spawn: ${message}`);
-      emitRoutineEnd({
-        jobName: config.name,
-        status: 'failed',
-        detail: redactSecrets(message).slice(0, 500),
-      });
-      try { notifyRoutineStartFailed(config, message); } catch {  }
-      void notifyOwnerRoutineStartFailed(config, message, ctx?.scheduledFor)
-        .then((r) => {
-          if (r.suppressed === null && r.delivered.length + r.queued.length === 0)
-            log('WARN', `Owner start-failure notify for '${config.name}' reached no channel: ${describeOwnerResult(r)}`);
-        })
-        .catch((err: Error) => log('WARN', `Owner start-failure notify for '${config.name}' failed: ${err.message}`));
-    }
-  };
-
-
-  function bootScheduler(): void {
-    scheduler = new JobScheduler(triggerJob);
-    scheduler.loadAll();
-    const scheduled = scheduler.listScheduled();
-    log('INFO', `Loaded ${scheduled.length} jobs`);
-    for (const job of scheduled) {
-      log('INFO', `  ${job.name} -> next: ${job.nextRun?.toISOString() || 'unknown'}`);
-    }
-    if (supervisor.isRegistered('catchup')) supervisor.runNow('catchup');
-  }
-
-  function stopScheduler(): void {
-    scheduler?.stopAll();
-    scheduler = null;
-  }
-
-  try {
-    const result = syncAllProjectRoutines();
-    const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
-    if (n > 0) log('INFO', `Project routines sync: ${n} job(s) from ${result.projects.length} project(s)`);
-  } catch (err) {
-    log('WARN', `Project routines sync failed: ${(err as Error).message}`);
-  }
-
-  if (schedulerEnabledAtBoot) bootScheduler();
-
-
-
-
-
-  async function catchupPass(signal?: AbortSignal): Promise<void> {
-    try {
-      const overdue = detectOverdueJobs();
-      if (overdue.length === 0) return;
-      log('WARN', `${overdue.length} routine(s) missed their fire:`);
-      for (const job of overdue) {
-        const last = job.lastRanAt ? job.lastRanAt.toISOString() : 'never';
-        log('WARN', `  ${job.name} -- expected ${job.expectedAt.toISOString()}, last ran ${last}`);
-      }
-      if (signal?.aborted) return;
-      notifyOverdue(overdue);
-      const outcomes = await runCatchup({ overdue });
-      for (const o of outcomes) {
-        switch (o.result) {
-          case 'ran':
-            log('INFO', `Caught up '${o.name}' (run: ${o.runId})`);
-            break;
-          case 'recorded':
-            log('INFO', `Recorded missed fire for '${o.name}' (catchup disabled)`);
-            break;
-          case 'claimed-elsewhere':
-            log('INFO', `Missed fire for '${o.name}' already claimed by another catchup`);
-            break;
-          case 'error':
-            log('ERROR', `Catchup for '${o.name}' failed: ${o.error}`);
-            break;
-          default: {
-            const unhandled: never = o.result;
-            log('ERROR', `Catchup for '${o.name}' returned an unhandled result: ${String(unhandled)}`);
-          }
-        }
-      }
-    } catch (err) {
-      log('ERROR', `Catchup pass failed: ${(err as Error).message}`);
-    }
-  }
-
-
-
-
-
-
-
-
   // Clear the start-failure streak only after every startup subsystem is live.
   recordSubsystemOk(SUBSYSTEM_DAEMON_START);
 
   const handleReload = () => {
-    log('INFO', 'Reloading jobs (SIGHUP)');
+    log('INFO', 'Reloading services (SIGHUP)');
     applyConfiguredLogLevel();
     const reloadedConfig = readDaemonServicesConfig();
     const reloadedEnabled = (id: DaemonServiceId): boolean => reloadedConfig.services[id] !== false;
@@ -871,9 +708,6 @@ export async function runDaemon(): Promise<void> {
       const was = servicesConfig.services[id] !== false;
       const now = reloadedEnabled(id);
       if (was !== now) {
-        if (id === 'scheduler') {
-          continue;
-        }
         if (supervisor.isRegistered(id)) {
           const action = supervisor.awaitIdle(id).then(() => now ? supervisor.start(id) : supervisor.stop(id));
           void action
@@ -896,28 +730,6 @@ export async function runDaemon(): Promise<void> {
       }
     }
 
-    try {
-      const result = syncAllProjectRoutines();
-      const n = result.projects.reduce((acc, p) => acc + p.synced.length, 0);
-      if (n > 0 || result.missing.length > 0) {
-        log('INFO', `Project routines sync: ${n} updated, ${result.missing.length} missing roots`);
-      }
-    } catch (err) {
-      log('WARN', `Project routines sync failed: ${(err as Error).message}`);
-    }
-    const schedulerEnabledNow = isSchedulerEnabled() && reloadedEnabled('scheduler');
-    const transition = schedulerGateTransition(scheduler !== null, schedulerEnabledNow);
-    if (transition === 'boot') {
-      log('INFO', 'scheduler.enabled is now on — booting the scheduler');
-      bootScheduler();
-    } else if (transition === 'stop') {
-      log('WARN', 'scheduler.enabled is now off — stopping the scheduler; no routines will fire on this device');
-      stopScheduler();
-    } else if (transition === 'reload') {
-      scheduler!.reloadAll();
-      const reloaded = scheduler!.listScheduled();
-      log('INFO', `Reloaded ${reloaded.length} jobs`);
-    }
   };
 
   // Cleanup removes lifetime, pid, heartbeat, and registry state only when each still belongs to this instance.
@@ -927,7 +739,6 @@ export async function runDaemon(): Promise<void> {
     vitals.stop();
     await supervisor.stopAll();
     activeServiceSupervisor = null;
-    stopScheduler();
     try {
       if (fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken) fs.unlinkSync(lifetimePath);
     } catch {
@@ -1032,7 +843,7 @@ export function generateSystemdUnit(
   const { HOME: home, AGENTS_REAL_HOME: realHome } = serviceManifestHomeEnv();
 
   return `[Unit]
-Description=Agents Daemon - Scheduled Job Runner
+Description=Agents Daemon
 After=network.target
 StartLimitIntervalSec=0
 
@@ -1378,7 +1189,6 @@ interface DaemonStopResult {
   escalated: boolean;
   released: string[];
   surviving: string[];
-  detachedChildren: number[];
 }
 
 function findStateDirDaemonProcesses(exclude: Set<number>): { live: number[]; unverified: number[] } {
@@ -1413,7 +1223,6 @@ export function stopDaemon(): DaemonStopResult {
       escalated: false,
       released: [],
       surviving: [`daemon lifecycle lock remained held for ${STOP_LOCK_WAIT_MS}ms`],
-      detachedChildren: listLiveRoutineChildren(),
     };
   }
   try {
@@ -1458,7 +1267,6 @@ function stopDaemonLocked(): DaemonStopResult {
       escalated: false,
       released,
       surviving: [`daemon pid ${unverifiedPid} is live but its __daemon-run identity could not be verified`],
-      detachedChildren: listLiveRoutineChildren(),
     };
   }
 
@@ -1563,15 +1371,12 @@ function stopDaemonLocked(): DaemonStopResult {
     else released.push(`${artifact.label} (reclaimed)`);
   }
 
-  const detachedChildren = listLiveRoutineChildren();
-
   return {
     ok: surviving.length === 0,
     stoppedPid: pid,
     escalated,
     released,
     surviving,
-    detachedChildren,
   };
 }
 
@@ -1579,7 +1384,6 @@ export function getDaemonStatus(): {
   state: 'running' | 'stopped';
   running: boolean;
   pid: number | null;
-  jobCount: number;
   logPath: string;
   binaryPath: string | null;
   heartbeat: DaemonHeartbeat | null;
@@ -1589,11 +1393,6 @@ export function getDaemonStatus(): {
 } {
   const running = isDaemonRunning();
   const pid = readDaemonPid();
-
-  let jobCount = 0;
-  try {
-    jobCount = listAllJobs().filter((j) => j.enabled).length;
-  } catch {  }
 
   let binaryPath: string | null = null;
   try {
@@ -1607,7 +1406,6 @@ export function getDaemonStatus(): {
     state: running ? 'running' : 'stopped',
     running,
     pid,
-    jobCount,
     logPath: getDaemonLogPath(),
     binaryPath,
     heartbeat: readHeartbeat(),

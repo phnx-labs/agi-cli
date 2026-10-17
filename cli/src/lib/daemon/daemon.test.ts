@@ -399,7 +399,7 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     return m[1].split(':');
   };
 
-  it('pins the agents shim dir first on PATH so routines resolve the same binary (RUSH-2431)', () => {
+  it('pins the agents shim dir first on PATH so daemon children resolve the same binary (RUSH-2431)', () => {
     const segs = systemdPath(generateSystemdUnit());
     expect(segs[0]).toBe(path.dirname(getAgentsBinPath()));
     expect(segs).toEqual(expect.arrayContaining(['/usr/local/bin', '/usr/bin', '/bin']));

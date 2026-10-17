@@ -155,7 +155,7 @@ describe('resolveClaudeAccount', () => {
     expect(new Set([backup.key, unknown.key, signedOut.key]).size).toBe(3);
   });
 
-  it('attributes a routine archive outside every home by its recorded version', () => {
+  it('attributes a transcript outside every home by its recorded version', () => {
     const index = buildClaudeAccountIndex();
     const archive = path.join(historyDir(), 'runs', 'job-1', 'transcript.jsonl');
     const bucket = resolveClaudeAccount(index, archive, '2.1.220');

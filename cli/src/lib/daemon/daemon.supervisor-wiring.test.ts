@@ -102,12 +102,11 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   const PERIODIC_SERVICE_IDS = [
     'watchdog', 'device-probe', 'self-heal', 'state-dir-check',
     'session-state', 'daemon-heartbeat', 'tmux-reap',
-    'catchup',
   ] as const;
 
   const ALL_SUPERVISED_SERVICE_IDS = [
     'session-state', 'account-state',
-    'account-auth', 'catchup', 'session-index', 'watchdog',
+    'account-auth', 'session-index', 'watchdog',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'daemon-heartbeat', 'tmux-reap',
     'state-dir-check', 'attention-notify',
@@ -206,7 +205,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
         'Live session-state service disabled',
         'Daemon heartbeat service disabled',
         'Tmux reap service disabled',
-        'Catch-up recovery service disabled',
       ];
       let sawAll = false;
       for (let i = 0; i < 100 && !sawAll; i++) {

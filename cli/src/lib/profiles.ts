@@ -81,11 +81,6 @@ export function profileExists(name: string): boolean {
   return fs.existsSync(profilePath(name));
 }
 
-export function isCustomHarnessName(name: string): boolean {
-  if (!PROFILE_NAME_PATTERN.test(name)) return false;
-  return !(ALL_AGENT_IDS as readonly string[]).includes(name) && profileExists(name);
-}
-
 export function readProfile(name: string): Profile {
   validateProfileName(name);
   const file = profilePath(name);

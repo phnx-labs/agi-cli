@@ -53,19 +53,6 @@ fi
   },
 
 
-  routineModeArgs(cmd, ctx) {
-    const mode = ctx.mode;
-    if (mode === 'edit') {
-      const planIndex = cmd.indexOf('plan');
-      if (planIndex !== -1) cmd[planIndex] = 'acceptEdits';
-    } else if (mode === 'auto') {
-      const planIndex = cmd.indexOf('plan');
-      if (planIndex !== -1) cmd[planIndex] = 'auto';
-    } else if (mode === 'skip') {
-      const pmIndex = cmd.indexOf('--permission-mode');
-      if (pmIndex !== -1) cmd.splice(pmIndex, 2, '--dangerously-skip-permissions');
-    }
-  },
 };
 
 /**

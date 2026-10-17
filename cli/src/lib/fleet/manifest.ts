@@ -95,12 +95,6 @@ export function parseFleetManifest(raw: unknown): FleetManifest {
     }
     manifest.secrets = { bundles: bundles as string[] | undefined };
   }
-  if (o.routines !== undefined) {
-    if (!isStringArray(o.routines)) {
-      throw new Error('fleet: routines must be a list of routine names.');
-    }
-    manifest.routines = o.routines;
-  }
 
   return manifest;
 }

@@ -25,7 +25,6 @@ const loadWorkflows: ModuleLoader = async () => (await import('../commands/workf
 export const loadVersions: ModuleLoader = async () => (await import('../commands/versions.js')).registerVersionsCommands;
 export const loadUpdate: ModuleLoader = async () => (await import('../commands/update.js')).registerUpdateCommand;
 const loadImport: ModuleLoader = async () => (await import('../commands/import.js')).registerImportCommand;
-const loadRoutines: ModuleLoader = async () => (await import('../commands/routines.js')).registerRoutinesCommands;
 const loadProjects: ModuleLoader = async () => (await import('../commands/projects.js')).registerProjectsCommands;
 export const loadRun: ModuleLoader = async () => (await import('../commands/exec.js')).registerRunCommand;
 const loadOpen: ModuleLoader = async () => (await import('../commands/open.js')).registerOpenCommand;
@@ -87,7 +86,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   update: [loadUpdate],
   prune: [loadVersions, loadPrune],
   import: [loadImport],
-  routines: [loadRoutines],
   projects: [loadProjects],
   run: [loadRun],
   _callback: [loadOpen],

@@ -13,7 +13,7 @@ commit: 0c730d78b5653fae11dfc5c24543bc9788de5c61
 - installs agent harnesses into isolated version homes;
 - syncs resources into each harness's native format;
 - runs agents locally or over SSH;
-- keeps a daemon that indexes sessions, schedules routines and watches for stalls.
+- keeps a daemon that indexes sessions and watches for stalls.
 
 This assessment follows PHNX-4227, which removed `agents browser`, `computer`, `secrets` and `sessions` (released in 1.23.18).
 

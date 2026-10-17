@@ -45,7 +45,6 @@ const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
-const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
 const SYSTEM_PROMPTCUTS_FILE = path.join(SYSTEM_AGENTS_DIR, 'hooks', 'promptcuts.yaml');
 const SYSTEM_MCP_CONFIG_FILE = path.join(SYSTEM_AGENTS_DIR, 'mcp.json');
 const SYSTEM_INSTRUCTIONS_FILE = path.join(SYSTEM_AGENTS_DIR, 'instructions.md');
@@ -55,7 +54,6 @@ const HISTORY_DIR = path.join(USER_AGENTS_DIR, '.history');
 
 const CACHE_DIR = path.join(USER_AGENTS_DIR, '.cache');
 
-const ROUTINES_DIR = path.join(USER_AGENTS_DIR, 'routines');
 const TEAMS_DIR = path.join(USER_AGENTS_DIR, 'teams');
 const PROJECTS_DIR = path.join(USER_AGENTS_DIR, 'projects');
 const DAEMON_CONFIG_DIR = path.join(USER_AGENTS_DIR, 'daemon');
@@ -303,19 +301,9 @@ export function getHistoryDir(): string { return HISTORY_DIR; }
 
 export function getCacheDir(): string { return CACHE_DIR; }
 
-export function getRoutinesDir(): string { return process.env.AGENTS_ROUTINES_DIR ?? ROUTINES_DIR; }
-
 export function getProjectsDir(): string { return process.env.AGENTS_PROJECTS_DIR ?? PROJECTS_DIR; }
 
 export function getDaemonConfigDir(): string { return process.env.AGENTS_DAEMON_CONFIG_DIR ?? DAEMON_CONFIG_DIR; }
-
-export function getSystemRoutinesDir(): string { return process.env.AGENTS_SYSTEM_ROUTINES_DIR ?? SYSTEM_ROUTINES_DIR; }
-
-export function getProjectRoutinesDir(cwd: string = process.cwd()): string | null {
-  const projectAgentsDir = getProjectAgentsDir(cwd);
-  if (!projectAgentsDir) return null;
-  return path.join(projectAgentsDir, 'routines');
-}
 
 export function getRunsDir(): string { return RUNS_DIR; }
 
@@ -474,7 +462,6 @@ export function ensureAgentsDir(): void {
   if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, opts);
   if (!fs.existsSync(CACHE_DIR)) fs.mkdirSync(CACHE_DIR, opts);
   if (!fs.existsSync(PACKAGES_DIR)) fs.mkdirSync(PACKAGES_DIR, opts);
-  if (!fs.existsSync(ROUTINES_DIR)) fs.mkdirSync(ROUTINES_DIR, opts);
   if (!fs.existsSync(RUNS_DIR)) fs.mkdirSync(RUNS_DIR, opts);
   if (!fs.existsSync(VERSIONS_DIR)) fs.mkdirSync(VERSIONS_DIR, opts);
   if (!fs.existsSync(SHIMS_DIR)) fs.mkdirSync(SHIMS_DIR, opts);
@@ -610,7 +597,6 @@ const BESPOKE_DEVICE_KEYS = [
   'agents',
   'isolatedAgents',
   'versions',
-  'deviceRoutines',
   'deviceConfig',
   'deviceBrowser',
   'deviceFleet',
@@ -638,6 +624,7 @@ const BESPOKE_DEVICE_KEY_SET: ReadonlySet<string> = new Set<string>([
 const BESPOKE_DEVICE_DOC_KEYS: ReadonlySet<string> = new Set<string>([
   'agents',
   'isolatedAgents',
+  // A device doc written before routines were removed may still carry `routines:`; skip it rather than merge it into meta.
   'routines',
   'config',
   'browser',
@@ -716,14 +703,13 @@ function serializeCentral(central: Record<string, unknown>): string {
 }
 
 export function writeMetaUnlocked(meta: Meta): boolean {
-  const writesDeviceRoutines = Object.prototype.hasOwnProperty.call(meta, 'deviceRoutines');
   const writesDeviceConfig = Object.prototype.hasOwnProperty.call(meta, 'deviceConfig');
   const writesDeviceBrowser = Object.prototype.hasOwnProperty.call(meta, 'deviceBrowser');
   const writesDeviceFleet = Object.prototype.hasOwnProperty.call(meta, 'deviceFleet');
   const writesDeviceHosts = Object.prototype.hasOwnProperty.call(meta, 'deviceHosts');
   const writesDeviceAccounts = Object.prototype.hasOwnProperty.call(meta, 'deviceAccounts');
   const writesProjectRoot = Object.prototype.hasOwnProperty.call(meta, 'projectRoot');
-  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, deviceFleet, deviceHosts, deviceAccounts, projectRoot, ...central } = meta;
+  const { agents, isolatedAgents, versions, deviceConfig, deviceBrowser, deviceFleet, deviceHosts, deviceAccounts, projectRoot, ...central } = meta;
 
   const hasAgents = !!agents && Object.keys(agents).length > 0;
   const hasIsolatedAgents = !!isolatedAgents && Object.keys(isolatedAgents).length > 0;
@@ -750,8 +736,6 @@ export function writeMetaUnlocked(meta: Meta): boolean {
   }
   delete doc.agents;
   delete doc.isolatedAgents;
-  if (Array.isArray(deviceRoutines)) doc.routines = deviceRoutines;
-  else if (writesDeviceRoutines) delete doc.routines;
   const hasDeviceConfig = !!deviceConfig && Object.keys(deviceConfig).length > 0;
   if (hasDeviceConfig) doc.config = deviceConfig;
   else if (writesDeviceConfig) delete doc.config;
@@ -839,10 +823,9 @@ function overlayMachineLocal(meta: Meta): Meta {
   }
   const devicePath = getDeviceMetaPath();
   if (fs.existsSync(devicePath)) {
-    let dm: (Meta & { routines?: unknown; browser?: unknown }) | null = null;
+    let dm: (Meta & { browser?: unknown }) | null = null;
     try {
       dm = yaml.parse(fs.readFileSync(devicePath, 'utf-8')) as Meta & {
-        routines?: unknown;
         browser?: unknown;
       };
     } catch {  }
@@ -900,12 +883,6 @@ function overlayMachineLocal(meta: Meta): Meta {
         const pendingConnects = acc.pendingConnects as NonNullable<Meta['deviceAccounts']>['pendingConnects'] | undefined;
         const slots = acc.slots as NonNullable<Meta['deviceAccounts']>['slots'] | undefined;
         if (native || bindings || homes || pendingConnects || slots) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}), ...(homes ? { homes } : {}), ...(pendingConnects ? { pendingConnects } : {}), ...(slots ? { slots } : {}) };
-      }
-      if (Object.prototype.hasOwnProperty.call(dm, 'routines')) {
-        if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {
-          throw new Error(`Device config corrupted at ${devicePath}: routines must be a string list.`);
-        }
-        meta.deviceRoutines = dm.routines;
       }
       for (const [k, v] of Object.entries(dm as Record<string, unknown>)) {
         if (BESPOKE_DEVICE_DOC_KEYS.has(k)) continue;

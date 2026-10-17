@@ -14,7 +14,7 @@ Named bundles of host CLI, endpoint, model, and a durable account reference — 
 
 A profile pins a host agent binary to a non-default API endpoint and model. Its `account:` field stores the durable account **name** — portable across devices, since profiles sync fleet-wide with `agents repo push` while account ids are minted per-machine; the credential stays in the device keychain. Running `agents run <profile>` resolves the account at spawn time, injects the provider-specific environment, and fails before spawning if the credential is absent. A dangling ref (the account doesn't exist on this device) names the harness and the `agents harness edit <name> --account <name>` repair.
 
-A custom harness runs anywhere an agent name is accepted, not just `agents run`: as a teammate (`agents teams add <team> deepseek "…"`), in a routine (`agents routines add --agent deepseek`), and on another machine (`agents run deepseek --device <box>` — the profile must exist on the target, which `agents repo push user` handles). Routines delegate the job to `agents run <name>`; the profile pins its own host version and auth, so `@version` pins, balanced rotation, and account failover don't apply to those jobs.
+A custom harness runs anywhere an agent name is accepted, not just `agents run`: as a teammate (`agents teams add <team> deepseek "…"`) and on another machine (`agents run deepseek --device <box>` — the profile must exist on the target, which `agents repo push user` handles). The profile pins its own host version and auth, so `@version` pins, balanced rotation, and account failover don't apply to it.
 
 Built-in presets cover the top open-weight models via OpenRouter (one shared key) and native CLI providers (xAI, Google). Custom profiles work with any OpenAI-compatible endpoint: Ollama, vLLM, LiteLLM Proxy. Profile YAML files live under `~/.agents/profiles/` and are resolved by name at `agents run` time.
 
@@ -77,7 +77,7 @@ agents harness edit spark --version ""
 agents harness edit deepseek --fallback-model deepseek/deepseek-chat-v3
 ```
 
-`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--account`, `--version`, `--description`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see [`routines.md`](routines.md) and the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
+`edit` takes the same override flags as `fork` (`--model`, `--base-url`, `--account`, `--version`, `--description`) plus one edit-only flag, `--fallback-model`, for `Profile.fallback_model` (see the fallback cascade in `runWithFallback`). Unlike `fork`, `edit` never rewrites `forkedFrom` to point at itself.
 
 Giving zero flags **in a terminal** now opens the same interactive wizard `add`/`fork` use, pre-filled with the harness's current values (`agents harness edit deepseek` with no flags). It walks each editable field — model, endpoint, auth, version, fallback, description — and writes only what you change; leaving every prompt at its default is a no-op. Fields the host can't carry are shown disabled with a reason: a host with no custom-endpoint slot (anything but claude/codex) skips the base-URL prompt, and a self-updating host (grok/droid/antigravity/cursor/hermes/muse/goose) skips the version pin, rather than silently accepting a value a run would drop. Giving zero flags **without** a terminal stays a no-op error naming the available ones, so scripts are unchanged.
 

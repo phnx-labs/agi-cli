@@ -184,7 +184,7 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
   });
 });
 
-describe('matchAccountVersion (RUSH-1957 — pin a routine to an account by identity)', () => {
+describe('matchAccountVersion (RUSH-1957 — pin a run to an account by identity)', () => {
   it('prefers the recorded account home only when that home still has the same connected identity', () => {
     const homes = [
       candidate({ version: 'legacy', accountKey: 'identity-a', signedIn: true }),

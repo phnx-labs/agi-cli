@@ -34,12 +34,3 @@ describe('session lifecycle verbs are grouped under `ps`', () => {
     expect(migrate!.aliases()).not.toContain('detach');
   });
 });
-
-describe('ps routine discovery surface', () => {
-  it('registers --routines as an alias and accepts an optional routine name', () => {
-    const routine = psGroup().options.find((option) => option.long === '--routine');
-    expect(routine).toBeDefined();
-    expect(routine!.short).toBe('--routines');
-    expect(routine!.optional).toBe(true);
-  });
-});

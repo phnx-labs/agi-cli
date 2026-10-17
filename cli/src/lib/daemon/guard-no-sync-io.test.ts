@@ -115,17 +115,7 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
     expect(body).not.toMatch(/\bwithFileLock\(/);
   });
 
-  it('heartbeat tick uses the async run reaper, not the sync monitorRunningJobs', () => {
-    const src = read('heartbeat-service.ts');
-    expect(src).toMatch(/await reapExitedRunningJobs\(/);
-    expect(src).not.toMatch(/\bmonitorRunningJobs\(/);
-  });
-
   it("daemon log()'s event-stream mirror is fire-and-forget async (emitAsync)", () => {
     expect(read('daemon.ts')).toMatch(/void emitAsync\(/);
-  });
-
-  it('host-run async finalize (tick path) emits through the async lock, not sync emitRoutineEnd (PHNX-3727)', () => {
-    expect(read('runner.ts')).toMatch(/reconcileHostTaskAsync\(task\), \(m\) => \{ void emitRoutineEndAsync\(m\)/);
   });
 });

@@ -279,10 +279,6 @@ export function readAuthHealthCache(): Record<string, AuthHealth> {
   return {};
 }
 
-export function readAuthHealth(host: string, agent: AgentId | string, version: string): AuthHealth | null {
-  return readAuthHealthCache()[authCacheKey(host, agent, version)] ?? null;
-}
-
 function parseAuthCacheKey(key: string, host: string): { agent: AgentId; version: string } | null {
   const prefix = `${host}:`;
   if (!key.startsWith(prefix)) return null;

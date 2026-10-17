@@ -10,7 +10,6 @@ export interface CaptureInputs {
   agentsByDevice?: Record<string, string[]>;
   defaults?: FleetDefaults;
   secretsBundles?: string[];
-  routines?: string[];
 }
 
 export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInputs): FleetManifest {
@@ -50,9 +49,6 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
 
   const bundles = inputs.secretsBundles ?? prev?.secrets?.bundles;
   if (bundles && bundles.length > 0) manifest.secrets = { bundles: [...bundles].sort() };
-
-  const routines = inputs.routines ?? prev?.routines;
-  if (routines && routines.length > 0) manifest.routines = [...routines].sort();
 
   return manifest;
 }

@@ -25,7 +25,7 @@ function stateDir(): string {
   return path.join(getRuntimeStateDir(), 'watchdog');
 }
 
-async function reloadDaemonForRoutine(startIfStopped: boolean): Promise<void> {
+async function reloadDaemonForWatchdog(startIfStopped: boolean): Promise<void> {
   // Keep daemon dependencies off startup. If running, reload it; enable additionally starts it when stopped.
   const { isDaemonRunning, ensureDaemonStarted, signalDaemonReload } = await import('../lib/daemon/daemon.js');
   if (isDaemonRunning()) {
@@ -98,7 +98,6 @@ export function formatWatchdogTickLines(
       o.machine ?? 'local',
       o.project ?? (o.cwd ? path.basename(o.cwd) : undefined),
       o.activity ?? o.status,
-      o.origin === 'routine' ? `routine ${o.routineName ?? 'unknown'}` : undefined,
       o.owner ? `owner ${o.owner}` : undefined,
       o.startedAtMs ? `started ${elapsedLabel(result.atMs, o.startedAtMs)}` : undefined,
       o.lastActivityMs ? `activity ${elapsedLabel(result.atMs, o.lastActivityMs)}` : undefined,
@@ -259,12 +258,12 @@ export function registerWatchdogCommand(program: Command): void {
 
   const turnOn = async (): Promise<void> => {
       setConfigValue('watchdog.enabled', true);
-      await reloadDaemonForRoutine(true);
+      await reloadDaemonForWatchdog(true);
       console.log(chalk.green('watchdog: ON on this device (every 3 minutes)'));
   };
   const turnOff = async (): Promise<void> => {
       setConfigValue('watchdog.enabled', false);
-      await reloadDaemonForRoutine(false);
+      await reloadDaemonForWatchdog(false);
       console.log(chalk.yellow('watchdog: OFF on this device'));
   };
 

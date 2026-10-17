@@ -40,7 +40,6 @@ interface PsOptions {
   status?: string[];
   interactive?: boolean;
   bookmarks?: boolean;
-  routine?: boolean | string;
   includeLead?: boolean;
 }
 
@@ -73,7 +72,6 @@ export function registerPsCommand(program: Command): void {
     .option('-D, --device <target...>', 'Only these devices (alias from `agents devices`, user@host, or `all`; repeatable)')
     .option('--status <state...>', `Only these live states: ${PS_STATUSES.join(', ')} (repeatable or comma-separated)`)
     .option('--bookmarks', 'Only bookmarked sessions (bookmark one with `sessions bookmark <id>`)')
-    .option('--routines, --routine [name]', 'Only routine-run sessions; pass a name to narrow to one routine (fuzzy name matching)')
     .option('--no-interactive', 'Print the roster instead of opening the picker on a TTY')
     .option('--include-lead', 'Also list project Lead sessions (agents lead), which are hidden by default');
 
@@ -91,9 +89,8 @@ export function registerPsCommand(program: Command): void {
       # Only agents waiting on you (exits 1 when any are waiting)
       agents ps --status waiting
 
-      # Only bookmarked sessions, or the runs of one routine
+      # Only bookmarked sessions
       agents ps --bookmarks
-      agents ps --routine nightly-review
 
       # Act on one row by its 8-character id
       agents ps focus 4b2f1a9c
@@ -134,7 +131,6 @@ export function registerPsCommand(program: Command): void {
       host: deviceScope(opts.device),
       interactive: opts.interactive,
       bookmarks: opts.bookmarks,
-      routine: opts.routine,
       includeLead: opts.includeLead,
     });
   });

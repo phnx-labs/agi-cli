@@ -131,8 +131,7 @@ and join capability routing once tagged (`agents hosts add <device> --cap gpu`
 enrolls straight from the device profile — no target needed). Password-auth
 devices are listed but can't carry a dispatch (BatchMode ssh); switch them with
 `agents devices set <name> --auth key`. Devices also work as cloud task targets
-(`agents cloud run "…" --device <device>`) and routines placement
-(`agents routines add … --run-on <device>`).
+(`agents cloud run "…" --device <device>`).
 
 ## Tips
 

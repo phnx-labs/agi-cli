@@ -9,7 +9,7 @@ OpenCode, OpenClaw, Grok, Droid, …).
 
 This is the **internal architecture** map. The user-facing feature tour is
 [README.md](../README.md) (pin versions, run, sessions, devices, teams, workflows,
-plugins, browser, secrets, routines). This file covers the design choices,
+plugins, browser, secrets). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
 > Phoenix Labs · FSL-1.1-Apache-2.0. Repo-wide policy (conventions, code review, security)
@@ -552,13 +552,12 @@ JSON and returning `undefined` (→ `skipped`) on any error.
 
 **Owner notifications have one path: the account (PHNX-4267).** Every owner-bound
 event (`agents send --to owner`, a `--blocked` or important `feed post`, an urgent
-feed block, a failed routine) is one `POST /me/notifications` to rush/api through
+feed block) is one `POST /me/notifications` to rush/api through
 [`src/lib/owner-notify.ts`](src/lib/owner-notify.ts) `postOwnerNotification`.
 rush/api owns the preferences (edited in the console Settings page),
 dedup on `(event, dedupKey)` (`postOwnerNotification` prefixes every producer key with `owner:` so it can never collide with a cloud-run key), and delivery: email, Slack and iMessage all go out
 server-side, iMessage from Rush's SendBlue number. Event mapping: a block is
-`needs_you`, a failed routine is
-`failed`, everything else is `message`; a green routine stays silent. The bearer is
+`needs_you`, everything else is `message`. The bearer is
 this box's Phoenix session, else the `notify`-scoped device token in this worker's
 reserved store `__notify-<device>__`. Neither is an `OwnerNotSignedInError`, never
 a local fallback; `agents doctor` reports it as `owner-not-signed-in` (critical).
@@ -901,7 +900,7 @@ fixers or escalates to a human — there is no merge action); the teammate's own
 ### 7. Every agent conversation is a session; execution ledgers link to it
 
 **An agent conversation from a session-capable harness MUST remain a session,
-whether launched interactively, headlessly, as a teammate, or by a routine.** A
+whether launched interactively, headlessly, or as a teammate.** A
 caller MUST preserve the harness transcript and make it discoverable by
 `sessions`; it MUST NOT replace or hide that conversation record with its own
 execution metadata. This applies to `SESSION_AGENTS`, not a harness such as Warp
@@ -912,20 +911,12 @@ when the harness and launch path provide one:
 |---|---|---|
 | `agents run`, including headless and `--device` | Ordinary indexed session for a session-capable harness; when its SessionStart hook records an id, the launch id joins a remotely coined session back to the dispatch. A hookless run remains unmapped rather than receiving a fabricated id. | Dispatch/audit events |
 | `agents teams` teammate | Its **own** session id plus `teamOrigin`; `parentSessionId` links the orchestrator when the teammate was spawned inside an identified agent session | Team registry + teammate `meta.json` own DAG/task/process state |
-| Agent/workflow routine | The transcript is archived under the run; supported archive readers index it with `origin: routine`, `routineName`, and `routineRunId` | `.history/runs/<routine>/<run>/meta.json` owns the attempt outcome |
-| Command-only, `missed`, `blocked`, or `skipped` routine | No session is synthesized because no agent conversation occurred | The routine run record is the complete canonical record |
 
 Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
-[`src/lib/exec.ts`](src/lib/exec.ts), `listTeamsActive` in
-[`src/lib/session/active.ts`](src/lib/session/active.ts),
-`archiveRoutineTranscripts` in [`src/lib/daemon/runner.ts`](src/lib/daemon/runner.ts), and
-`decorateRoutineSession` in [`src/lib/session/discover.ts`](src/lib/session/discover.ts).
+[`src/lib/exec.ts`](src/lib/exec.ts), and `listTeamsActive` in
+[`src/lib/session/active.ts`](src/lib/session/active.ts).
 Enforced by [`sessions-cli/src/lib/session/team-filter.test.ts`](https://github.com/phnx-labs/sessions-cli/blob/main/src/lib/session/team-filter.test.ts)
-(`--teams includes team sessions with teamOrigin populated`),
-[`src/lib/daemon/runner.test.ts`](src/lib/daemon/runner.test.ts) (routine transcript archival), and
-[`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) +
-[`src/commands/sessions.cli-live.test.ts`](src/commands/sessions.cli-live.test.ts)
-(routine run history plus linked sessions, with no fake session for command-only runs).
+(`--teams includes team sessions with teamOrigin populated`).
 
 Team-origin sessions are durable session rows but are excluded from the ordinary
 historical listing by default to keep an orchestrator's fan-out from flooding it;
@@ -933,46 +924,7 @@ historical listing by default to keep an orchestrator's fan-out from flooding it
 `agents ps` with `context: teams`. That is a presentation filter,
 never permission to omit the transcript from the session index.
 
-**Current routine-archive gap:** `readRoutineArchiveMeta` indexes Claude, Codex,
-and Cursor routine archives. Kimi's `state.json` + `wire.jsonl` are archived by
-`archiveRoutineTranscripts` but do not yet have a routine-archive reader, so they
-are not session rows today. Treat that as named drift from the invariant, never as
-precedent for a second run-only conversation model; adding another routine harness
-requires both archival and a parser in `readRoutineArchiveMeta` plus an indexing
-test.
-
-### 8. Routine definitions and device activation are separate
-
-Routine YAML under project, user, or system `routines/` describes what runs and
-when. Whether it runs on one host is membership in that host's top-level
-`devices/<hostname>/agents.yaml` `routines:` list. Pause/resume and setup MUST
-write only the target host's device file; they MUST NOT rewrite a definition with
-`enabled`, `devices`, or runtime metadata. Run history belongs in
-`.history/runs/<routine>/<run>/`, and that run history — not the session index — is
-the canonical record of an attempt; sessions/logs/reports are optional children of a
-run (so a `missed`/`blocked`/`skipped` attempt is visible with no session).
-
-**`projects` (plural) is grouping metadata only; the singular `project` anchor is a
-separate concept.** The plural list organises a routine in `list`/the menu bar and
-MUST NOT affect execution; the (planned) singular `project`/`--project-anchor` plus a
-routine-level `cwd` is the execution anchor, resolved on the *execution target*. A
-routine's `repo` is an external Git/cloud/webhook identity, never a local cwd. The
-reliability contract — context resolution, readiness/pause-on-blocker, single-fire
-`(routine, scheduledFor)` claim distinct from the active-run claim, and the
-`blocked`/`skipped` run statuses — is normative in
-[`docs/specifications.md` §Routine execution & readiness](docs/specifications.md#routine-execution--readiness)
-(RT-1..RT-11) and §Scheduling & execution singularity (SING-13, SING-15, SING-16); much of it
-is `[Intended]` (RUSH-2290), and each requirement marks landed vs intended.
-
-Routine execution context is separate from grouping and repository identity.
-Plural `projects` is metadata-only; singular `project` selects one `ProjectDef`
-execution base; `cwd` is resolved on the eventual execution device. A rootless
-Linear project may still use a relative `cwd`, which anchors at that target user's
-home. `repo` remains GitHub/cloud/webhook identity and MUST NOT be used to infer a
-local checkout. Readiness failures save valid definitions paused through device
-activation; they never write mutable activation into routine YAML.
-
-### 9. Self-updating agents are ONE binary, not fictional version-homes
+### 8. Self-updating agents are ONE binary, not fictional version-homes
 
 Some harnesses (droid, grok, antigravity, cursor, hermes, muse, goose) install
 via an official `curl … | sh` / `brew install` script that carries no version token —
@@ -998,7 +950,7 @@ and removing an isolated installation must never target the managed install mere
 because their releases match. `@latest` keeps the probed release as its convenient label; concrete labels stay
 exactly addressable.
 
-### 10. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
+### 9. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
 
 Three diagnostics, distinct scopes. Don't blur them — each answers a different
 question, and a new health check goes in the one whose scope it matches.
@@ -1309,7 +1261,7 @@ overwrites a genuine local transcript row), and the inline render in
 `buildPreview` ([`src/commands/sessions-picker.ts`](src/commands/sessions-picker.ts)),
 which still falls back to the live SSH digest fetch for a never-synced session.
 
-### 11. Session recovery is one decision on the origin device
+### 10. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in [`src/lib/session/recovery.ts`](src/lib/session/recovery.ts)
 chooses native resume versus an explicitly approved context replay. The account and
@@ -1370,7 +1322,6 @@ agents config set browser.profile work
 agents config set auto.pool workers
 agents config set devices.mac-mini.role worker
 agents config set devices.mac-mini.max-agents 4
-agents config set devices.mac-mini.scheduler off
 agents config set devices.mac-mini.tmux off
 agents config set devices.linux-desk.computer.host vnc://10.0.0.5:5901
 agents config set summarizer.enabled on
@@ -2035,8 +1986,8 @@ which is what a cleaned dev prefix leaves behind). A dev build that answered to
 `agents` made PATH order decide which code ran — see the root
 [AGENTS.md](../AGENTS.md) §Never install a dev build over the user's `agents`.
 
-The routines daemon is **shared** (scheduler, feed stream, session/usage sync,
-and more), so the install leaves it on production code. `--bounce-daemon`
+The daemon is **shared** (watchdog, feed stream, session/usage sync, and
+more), so the install leaves it on production code. `--bounce-daemon`
 restarts it onto the dev build when you need that, and says plainly that it
 changes what the user's everyday `agents` talks to. (The secrets broker is a
 separate process the standalone `secrets` CLI owns, PHNX-3989, and the browser

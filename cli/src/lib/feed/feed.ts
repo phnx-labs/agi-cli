@@ -68,8 +68,6 @@ export interface OpenBlock {
   source?: AttentionSource;
   state?: AttentionState;
   sourceCursor?: SourceCursor;
-  origin?: 'cli' | 'routine';
-  routineName?: string;
   project?: string;
   ts: string;
   questions: BlockQuestion[];

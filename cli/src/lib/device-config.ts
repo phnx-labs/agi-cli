@@ -211,15 +211,6 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     validate: (v) => ((v as number) >= 1 ? null : 'agents.max-concurrent must be >= 1.'),
   },
   {
-    name: 'scheduler.enabled',
-    yamlKey: 'schedulerEnabled',
-    scope: 'device',
-    visibility: 'machine',
-    type: 'bool',
-    defaultValue: true,
-    description: 'Whether the routines scheduler (daemon) may fire on this device.',
-  },
-  {
     name: 'daemon.enabled',
     yamlKey: 'daemonEnabled',
     scope: 'device',
@@ -227,9 +218,9 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'bool',
     defaultValue: true,
     description:
-      'Whether the daemon may run on this device at all (browser IPC, watchdog, and the ' +
-      'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
-      'is set, including `routines add`/`routines start`/`routines catchup`/`routines webhook`. ' +
+      'Whether the daemon may run on this device at all (watchdog, session/usage sync, and the ' +
+      'other daemon services). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
+      'is set, including `feed watch`, `watchdog`, and `recordings`. ' +
       '`agents daemon start` still starts it explicitly.',
   },
   {
@@ -1102,7 +1093,7 @@ function unsetInFleetDefaults(spec: ConfigKeySpec): void {
     const devicesEmpty = fleet.devices == null || fleet.devices === 'all'
       ? false
       : Object.keys(fleet.devices).length === 0;
-    if (devicesEmpty && !fleet.defaults && !fleet.secrets && !fleet.routines) {
+    if (devicesEmpty && !fleet.defaults && !fleet.secrets) {
       const { fleet: _, ...rest } = m;
       void _;
       return rest;
@@ -1282,18 +1273,6 @@ export function loadAutoLaunchPreferences(roster?: string[]): Record<string, Aut
   return out;
 }
 
-
-export function isSchedulerEnabled(): boolean {
-  return getConfigValue('scheduler.enabled').value !== false;
-}
-
-export function assertSchedulerEnabled(): void {
-  if (isSchedulerEnabled()) return;
-  throw new Error(
-    `The routines scheduler is disabled on this device (scheduler.enabled=false in ~/.agents/devices/${machineId()}/agents.yaml). ` +
-      `Re-enable with: agents devices config ${machineId()} scheduler.enabled on`,
-  );
-}
 
 export function isTmuxEnabled(): boolean {
 

@@ -10,7 +10,6 @@ import {
   getCommandsDir,
   getHooksDir,
   getPluginsDir,
-  getRoutinesDir,
   getRunsDir,
   getShimsDir,
   getSkillsDir,
@@ -48,7 +47,6 @@ describe('state paths', () => {
 
   it('keeps definitions/configs at the top of ~/.agents', () => {
     const userRoot = path.join(os.homedir(), '.agents');
-    expect(getRoutinesDir()).toBe(path.join(userRoot, 'routines'));
     expect(getPluginsDir()).toBe(path.join(userRoot, 'plugins'));
   });
 });

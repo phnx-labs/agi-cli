@@ -181,7 +181,7 @@ describe('ServiceSupervisor', () => {
     const exit = makeExit();
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     const bad = new ThrowingService();
-    const good = new HealthyService('scheduler');
+    const good = new HealthyService('tmux-reap');
     supervisor.register(bad);
     supervisor.register(good);
 
@@ -197,7 +197,7 @@ describe('ServiceSupervisor', () => {
     expect(health['watchdog'].lastError).toMatch(/boom/);
     expect(exit).not.toHaveBeenCalled();
     expect(good.ticks).toBeGreaterThanOrEqual(3);
-    expect(health['scheduler'].state).toBe('running');
+    expect(health['tmux-reap'].state).toBe('running');
 
     await supervisor.stopAll();
   });
@@ -263,7 +263,7 @@ describe('ServiceSupervisor', () => {
 
   it('health() returns a record for every registered service', async () => {
     const supervisor = new ServiceSupervisor();
-    const a = new HealthyService('scheduler');
+    const a = new HealthyService('tmux-reap');
     const b = new HealthyService('watchdog');
     const c = new HealthyService('self-heal');
     supervisor.register(a);
@@ -274,8 +274,8 @@ describe('ServiceSupervisor', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     const health = supervisor.health();
-    expect(Object.keys(health).sort()).toEqual(['scheduler', 'self-heal', 'watchdog']);
-    for (const id of ['scheduler', 'watchdog', 'self-heal'] as const) {
+    expect(Object.keys(health).sort()).toEqual(['self-heal', 'tmux-reap', 'watchdog']);
+    for (const id of ['tmux-reap', 'watchdog', 'self-heal'] as const) {
       expect(health[id].state).toBe('running');
       expect(health[id].consecutiveFailures).toBe(0);
     }
@@ -304,7 +304,7 @@ describe('ServiceSupervisor', () => {
 
   it('stopAll() stops every started service and clears timers (no further ticks)', async () => {
     const supervisor = new ServiceSupervisor();
-    const svc = new HealthyService('scheduler');
+    const svc = new HealthyService('tmux-reap');
     supervisor.register(svc);
     await supervisor.startAll(makeCtx());
     await vi.advanceTimersByTimeAsync(0);
@@ -315,19 +315,19 @@ describe('ServiceSupervisor', () => {
 
     await vi.advanceTimersByTimeAsync(5_000);
     expect(svc.ticks).toBe(ticksAtStop);
-    expect(supervisor.health()['scheduler'].state).toBe('stopped');
+    expect(supervisor.health()['tmux-reap'].state).toBe('stopped');
   });
 
   it('registering the same service id twice throws', () => {
     const supervisor = new ServiceSupervisor();
-    supervisor.register(new HealthyService('scheduler'));
-    expect(() => supervisor.register(new HealthyService('scheduler'))).toThrow(/already registered/);
+    supervisor.register(new HealthyService('tmux-reap'));
+    expect(() => supervisor.register(new HealthyService('tmux-reap'))).toThrow(/already registered/);
   });
 
   it('a service with startupDelayMs defers its FIRST tick, then ticks on the normal interval — a service with no delay still ticks immediately (RUSH-3193 #17)', async () => {
     const supervisor = new ServiceSupervisor();
     const delayed = new HealthyService('self-heal', 30_000);
-    const immediate = new HealthyService('scheduler');
+    const immediate = new HealthyService('tmux-reap');
     supervisor.register(delayed);
     supervisor.register(immediate);
 
@@ -409,7 +409,7 @@ describe('ServiceSupervisor', () => {
         readonly id = id;
       }
       const bad = new NamedThrowingService();
-      const good = new HealthyService('scheduler');
+      const good = new HealthyService('tmux-reap');
       supervisor.register(bad);
       supervisor.register(good);
 
@@ -421,7 +421,7 @@ describe('ServiceSupervisor', () => {
       const health = supervisor.health();
       expect(health[id].state).toBe('running');
       expect(health[id].consecutiveFailures).toBeGreaterThanOrEqual(3);
-      expect(health['scheduler'].state).toBe('running');
+      expect(health['tmux-reap'].state).toBe('running');
       expect(good.ticks).toBeGreaterThanOrEqual(3);
       expect(exit).not.toHaveBeenCalled();
 
@@ -435,7 +435,7 @@ describe('ServiceSupervisor', () => {
         readonly id = id;
       }
       const hanging = new NamedHangingService();
-      const good = new HealthyService('scheduler');
+      const good = new HealthyService('tmux-reap');
       supervisor.register(hanging);
       supervisor.register(good);
 
@@ -461,7 +461,7 @@ describe('ServiceSupervisor', () => {
     const exit = makeExit();
     const supervisor = new ServiceSupervisor({ exit: exit as unknown as (code: number) => never });
     const bad = new ThrowingService();
-    const healthy = new HealthyService('scheduler');
+    const healthy = new HealthyService('tmux-reap');
     supervisor.register(bad);
     supervisor.register(healthy);
 
@@ -471,7 +471,7 @@ describe('ServiceSupervisor', () => {
     expect(bad.ticks).toBeGreaterThan(0);
     expect(supervisor.health()['watchdog'].consecutiveFailures).toBeGreaterThan(0);
     expect(healthy.ticks).toBeGreaterThan(0);
-    expect(supervisor.health()['scheduler'].state).toBe('running');
+    expect(supervisor.health()['tmux-reap'].state).toBe('running');
     expect(exit).not.toHaveBeenCalled();
 
     fs.rmSync(testDaemonDir, { force: true });

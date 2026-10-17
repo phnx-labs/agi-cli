@@ -138,9 +138,6 @@ agents cloud providers
 | `--agent <name>` | Agent to run; native cloud routing includes `claude`, `codex`, `cursor`, `droid`, and `antigravity` |
 | `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Rush or Cursor Cloud) |
 | `--branch <name>` | Target git branch |
-| `--on <event>` | Register the run as a trigger-bound routine instead of dispatching now: `pull_request` (`pr`), `push`, `issue_comment`, `workflow_run` |
-| `--action <name>` / `--label <name>` | GitHub webhook action / label filter for `--on` triggers |
-| `--name <name>` | Routine name to register under (with `--on`) |
 | `-p, --prompt <text>` | Inline prompt (alternative to positional argument) |
 | `--timeout <duration>` | Kill after duration (e.g., `30m`, `2h`) |
 | `--model <model>` | Model override |

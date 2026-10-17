@@ -156,7 +156,7 @@ releases.
 | Register an MCP server for every harness at once | `agents mcp add` |
 | Drive a real browser (fill forms, screenshot) | `browser` (standalone CLI; `agents setup browser` installs it) |
 | Store credentials, inject into runs | `secrets` (standalone CLI) + `agents run --secrets <bundle>` |
-| Schedule recurring agent jobs | `agents routines` |
+| Schedule recurring agent jobs | OS cron / systemd timer / launchd calling `agents run` |
 | Sync skills/commands/rules across the fleet | `agents sync` |
 
 Full docs: <https://github.com/phnx-labs/agi-cli>. Every group teaches its own

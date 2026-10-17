@@ -33,8 +33,7 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
   [computer](computer.md), [secrets](secrets.md); transcript reading is the standalone
   `sessions` CLI, and [sessions](sessions.md) covers what agents-cli keeps
 - Media: [recordings](recordings.md)
-- Orchestration: [teams](teams.md), [routines](routines.md),
-  [cloud](cloud.md), [lead](lead.md)
+- Orchestration: [teams](teams.md), [cloud](cloud.md), [lead](lead.md)
 - Resources: [hooks](hooks.md), [subagents](subagents.md), [plugins](plugins.md),
   [profiles](profiles.md) (+ [profiles/](profiles/INDEX.md))
 - State & security: [secrets-agent-process-model](secrets-agent-process-model.md),

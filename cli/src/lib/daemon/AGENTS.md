@@ -15,7 +15,7 @@ on-demand `ssh` invocation of a peer CLI verb — e.g.
 `watchFleetFeed` spawns `ssh <peer> agents feed watch --local`
 (`cli/src/lib/feed/watch.ts:151`) and `watchFleetSessions` does the same for
 sessions (`cli/src/lib/session/remote/watch.ts:245`). There is no shared daemon
-protocol and no routine device-to-device usage/auth probe mesh.
+protocol and no standing device-to-device usage/auth probe mesh.
 
 **Start, claim, and stop are one serialized lifecycle.** All three mutate the
 shared pid/heartbeat/socket inventory behind `<daemonDir>/daemon.lock`.
@@ -33,8 +33,8 @@ observed, so a wedged duplicate cannot survive while becoming invisible.
 detects HOME pointing away from the account's real home, unless the caller opted
 in with `AGENTS_ALLOW_TEST_DAEMON=1` (the deliberate test/e2e seam — a harness
 that sets it owns stopping what it starts). The explicit start commands
-(`daemon start`, `routines start`) fail loud; auto-start side effects
-(`routines add`, webhook fires) catch the refusal, state it,
+(`daemon start`) fail loud; auto-start side effects
+(`feed watch`, `watchdog`, `recordings`) catch the refusal, state it,
 and leave the foreground command green — the same tier split as the auto-start
 circuit breaker. A daemon launched under a temp HOME
 keeps its own pid file there, so the real install's pid-file takeover can never
@@ -47,11 +47,9 @@ redirected-HOME caller never accuses the production daemon — is surfaced by
 `agents doctor` as a `leaked-daemon` warning with the process's HOME, start
 time, and a `kill <pid>` remediation.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695
-migrated every declared service but one onto the supervisor; 1 declared service
-remains inline).** `cli/src/lib/daemon-services.ts` defines `DaemonServiceId` —
-the catalog every id in `runDaemon()` is expected to register under, whichever
-model it uses. Two services that used to live here, `secrets-broker` and
+**One runtime model: every declared service runs under the supervisor
+(RUSH-3193 plus PHNX-3265/PHNX-3608/PHNX-3695).** `cli/src/lib/daemon-services.ts`
+defines `DaemonServiceId`, the catalog every id in `runDaemon()` registers under. Two services that used to live here, `secrets-broker` and
 `keychain-reap`, moved out of this daemon entirely with the standalone
 `secrets` engine (PHNX-3989 OWN-1) — this daemon no longer hosts, self-heals,
 or reaps that broker at all; `agents daemon status`/`services` only probes its
@@ -64,9 +62,7 @@ record of `null` for it.
   (`account-state-daemon-service.ts` — PHNX-3608 split the old single
   account-state service into `AccountUsageService` and `AccountAuthService`, two
   periodic services with INDEPENDENT circuit breakers so a run of usage-refresh
-  failures parks only usage and never starves the slower auth refresh), `catchup`
-  (`catchup-service.ts`, PHNX-3608 — the scheduler's missed-fire recovery pass,
-  self-gated on the scheduler being booted), `session-index`
+  failures parks only usage and never starves the slower auth refresh), `session-index`
   (`session-index-service.ts`) (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
   `device-probe` (`device-probe-service.ts`), `self-heal`
   (`self-heal-service.ts`), and
@@ -164,16 +160,7 @@ record of `null` for it.
   blocked. Use async IO on tick paths — `fs/promises`, and `execFileBounded`
   ([`../exec-bounded.ts`](../exec-bounded.ts)) for a deadline-bounded,
   process-group-killable subprocess spawn. The heartbeat tick
-  (`heartbeat-service.ts`) is fully async: it reaps exited routine children via
-  `reapExitedRunningJobs` (`runner.ts`) — the async twin of the sync
-  `monitorRunningJobs` the off-loop `agents routines list/status` builders still
-  use, sharing the reconciliation core `reconcileRunningRecord` and differing
-  only in sync-vs-async `fs`/`ps` — whose per-run identity probe is the
-  `execFileBounded`-bounded `isPidOursAsync`, whose `host:`-placed runs read
-  their remote `.exit` over ssh through `finalizeHostRunAsync` →
-  `reconcileTaskAsync` → `sshExecAsync` (a sync `sshExec` there would freeze the
-  loop on a 6s host timeout — worse than the local `ps`), plus
-  `reapTerminalRoutineProcesses` (also `execFileBounded`).
+  (`heartbeat-service.ts`) only publishes the heartbeat and does no blocking IO.
 
   **Self-heal broke the rule through its callee, not its tick body.** Its tick
   was async, but `runSelfHeal` → `heal` → `diffVersionResources` byte-compares
@@ -196,16 +183,15 @@ record of `null` for it.
   launching new work partway through the deadline, and leave the rest due.
 
   **The worst tick-path halt was the event-log LOCK, and it is reached far more
-  broadly than one service.** `emit()`/`emitRoutineEnd()` (`feed/events.ts`)
+  broadly than one service.** `emit()` (`feed/events.ts`)
   acquire the log lock with `withFileLock` → `lockfile.lockSync` + `sleepSync`
   (`Atomics.wait`), which HALTS the thread for up to 30s under contention — worse
   than any `ps`. And **every `ctx.log(...)` on every tick** routes there
   (`daemon.ts` `log()` mirrors into `emit()`). The fix is `withFileLockAsync` +
-  `emitAsync`/`emitRoutineEndAsync` (`fs-atomic.ts`, `feed/events.ts`): the async
+  `emitAsync` (`fs-atomic.ts`, `feed/events.ts`): the async
   lock yields with a real timer between retries instead of `sleepSync`. `log()`'s
   event mirror is now a fire-and-forget `emitAsync`; the watchdog tick emits with
-  `emitAsync`; the reaper injects `emitRoutineEndAsync` into
-  `reconcileRunningRecord`. The other UNCONDITIONAL every-tick halts are fixed the
+  `emitAsync`. The other UNCONDITIONAL every-tick halts are fixed the
   same way: **usage-sync + auth-sync** publish through
   `updateFleetSharedDeviceStateAsync` (was a `withFileLock` every tick,
   `fleet-shared-state.ts`); **keychain-reap**'s whole-process-table `ps` is now
@@ -226,29 +212,15 @@ record of `null` for it.
   **Accepted residue (named, not hidden), a follow-up to this PR.** These are
   either µs-scale single-file writes or CONDITIONAL/rare, not the 30s-lock /
   whole-table-`ps` halts above: the tiny `writeHeartbeat` + `log()` daemon-log
-  append (µs; `log()` must stay a sync primitive that flushes before a crash); the
-  report extraction / transcript archival inside `reconcileRunningRecord`
-  (`inferFinalStatusFromLog`, `extractAndSaveReport`, `archiveRoutineTranscripts`)
-  which fire ONLY when a run ends; `captureProcessStartTime`'s memoized per-helper
-  `ps` fingerprints (keychain-reap, a small pid subset); the opt-in watchdog per-session `statSync`/`readFileSync`; catchup's
-  overdue-dispatch (conditional); and
+  append (µs; `log()` must stay a sync primitive that flushes before a crash);
+  `captureProcessStartTime`'s memoized per-helper
+  `ps` fingerprints (keychain-reap, a small pid subset); the opt-in watchdog per-session `statSync`/`readFileSync`; and
   `session-index`'s synchronous better-sqlite3 (a different class, not a fs/exec
   primitive). Converting these is a separate change and does not block the
   loop the way the halts this PR removed did.
-- **Inline declared service, 1 service:** `scheduler` (the routine
-  `JobScheduler`) remains outside the supervisor.
-  `scheduler` is croner-driven (fires at each job's own cron schedule, not a
-  fixed interval) and already has its own live-reload path
-  (`schedulerGateTransition`, `bootScheduler`/`stopScheduler`) predating the
-  supervisor; folding it in without regressing that reload semantics is
-  future work. It has no per-service circuit breaker or state persisted to
-  `health.json`; `agents daemon services` infers a coarse `running`/`stopped`
-  label from the enable toggle plus whether the daemon process is up.
 
-`runDaemon()` has no bare fixed-cadence maintenance timer left. Its only direct
-`setInterval` is scheduler catch-up, which is part of the one remaining inline
-declared service and shares that service's live boot/stop/reload lifecycle.
-Resource-local timers may still live inside lower-level socket implementations
+`runDaemon()` has no bare fixed-cadence maintenance timer and no direct
+`setInterval`; every cadence belongs to a supervised service. Resource-local timers may still live inside lower-level socket implementations
 (for example the browser IPC server's own idle/reap timers); those own the
 resource they maintain and are closed by the surrounding service lifecycle. (The
 secrets broker's own eviction timers are no longer an example here — that broker
@@ -258,10 +230,10 @@ Enabled/disabled state lives separately in a `DaemonServicesConfig`, read
 and written via `isDaemonServiceEnabled` (`daemon-services.ts`),
 `setDaemonServiceEnabled` (`daemon-services.ts`), and
 `listDaemonServiceStates` (`daemon-services.ts`) — one `services.yaml` under
-`getDaemonConfigDir()`, unioned across both runtime models above.
+`getDaemonConfigDir()`.
 
 **Cross-process health is file-backed, keyed by the same `DaemonServiceId`
-strings the two models above use.** `cli/src/lib/daemon-health.ts` is the
+strings the supervisor uses.** `cli/src/lib/daemon-health.ts` is the
 one health mirror both the daemon (writer) and `agents daemon` /
 `agents daemon services` (a separate reader process) use —
 `recordSubsystemOk`/`recordSubsystemError` (ok/error streak + last
@@ -270,9 +242,9 @@ supervisor's `idle`/`running`/`stopped` lifecycle state, written on
 every transition in `supervisor.ts`'s `startOne`/`stopOne`). A deadline overrun
 does not write a new state — it records the cause via `recordSubsystemError`; only
 a hang also writes `recordDaemonRestart` and exits (PHNX-4116, PHNX-4225), so
-`agents daemon status`'s restart count is real exits, not slow ticks. Only supervised services call
+`agents daemon status`'s restart count is real exits, not slow ticks. Supervised services call
 `recordSubsystemState`, so a `SubsystemHealth` record's `state` field being
-present is itself the signal `agents daemon services` uses to render
+present is the signal `agents daemon services` uses to render
 "measured" vs "inferred" (`commands/daemon.ts`'s `buildServiceRows`).
 Every update holds a cross-process `proper-lockfile` lease across the entire
 read-modify-write and publishes `health.json` by atomic rename. Readers therefore
@@ -285,8 +257,8 @@ THROWN tick, which the supervisor's own try/catch isolates (the service keeps
 ticking).** A supervised tick that HANGS (unsettled at 10x its deadline) or a
 lifecycle call past its deadline is the one case the supervisor deliberately exits
 the process for, so systemd/launchd restart the wedged daemon (PHNX-4116); a tick
-that merely overruns is aborted and skipped, never an exit (PHNX-4225). A throw that escapes an INLINE service's
-local try/catch is still uncaught at the process level. `cli/src/index.ts:96-102` installs the
+that merely overruns is aborted and skipped, never an exit (PHNX-4225). A throw
+outside a supervised tick is still uncaught at the process level. `cli/src/index.ts:96-102` installs the
 top-level handlers:
 
 ```ts
@@ -296,9 +268,7 @@ process.on('unhandledRejection', crash('unhandledRejection'));
 
 `crash()` logs and then calls `process.exit(1)` (`index.ts:100`), relying on
 the OS supervisor (launchd `KeepAlive` on macOS, `systemd Restart=always` on
-Linux) to relaunch the whole process — every INLINE service restarts
-together, not just the one that threw. The inline scheduler still has no
-independent measured health signal.
+Linux) to relaunch the whole process, so every service restarts together.
 
 Two library/callback boundaries are explicitly contained before that terminal
 policy. Direct `proper-lockfile` leases use
@@ -320,9 +290,7 @@ daemon restart. It also drains any queued restart via
 `supervisor.restartOne(id)`. Most services disabled at boot are not registered
 and therefore still require an operator restart to enable. (The former
 always-registered `browser-ipc` exception left with the browser engine, PHNX-4101;
-the standalone `browser` CLI runs its own IPC service.) The inline scheduler is
-re-evaluated directly by `handleReload`; `agents routines start|stop` toggles
-that service and sends SIGHUP while the daemon stays up (PHNX-3605).
+the standalone `browser` CLI runs its own IPC service.)
 `agents daemon services` (no subcommand) reads
 `readAllSubsystemHealth()` plus `listDaemonServiceStates()` and renders one
 row per registered id — state, enabled, consecutive failures, last error —
@@ -444,8 +412,7 @@ new periodic supervised service — the daemon previously ran with
 `AGENTS_CLI_DISABLE_AUTO_UPDATE=1` forced on (`bootstrap.ts`), so R5 ("the
 installed CLI auto-updates") held for the interactive CLI but silently did NOT
 hold for the one process that runs unattended for days. `agents daemon
-services` now reports measured health for every declared service but one
-and infers only `scheduler`. (Two services counted in the P2/P3 history
+services` reports measured health for every declared service. (Two services counted in the P2/P3 history
 above, `secrets-broker` and `keychain-reap`, no longer exist in this daemon
 at all — they moved out entirely with the standalone `secrets` engine,
 PHNX-3989 OWN-1.)
@@ -454,12 +421,6 @@ above is the source of truth for all of it.
 
 **Still open:**
 
-- **`scheduler` supervision.** `scheduler` is
-  croner-driven (fires on each job's own cron schedule, not a fixed
-  interval) and already has its own live-reload path
-  (`schedulerGateTransition`) that predates the supervisor — folding it in
-  needs a `DaemonService` shape that isn't just `PeriodicService`, or a
-  dedicated adapter, without regressing that reload semantics.
 - **Interactive `agents daemon services` browser** (RUSH-3210) — a TTY-only view reusing
   `dynamicPicker` (`lib/picker.ts`), one row per service with a live-updating
   preview pane (log tail, last error, config) and inline
@@ -482,15 +443,12 @@ command exits, repeats on a cadence or event edge, owns a long-lived socket or
 child, or must expose independent health and restart semantics. By that rule,
 the next high-value moves are:
 
-1. **Routine scheduler + catch-up** — the only declared service still inline.
-   It needs a lifecycle adapter that preserves croner reload and catch-up claim
-   semantics; do not flatten cron into a fake fixed interval.
-2. **Fleet feed/session watch coordination** — `watchFleetFeed` and
+1. **Fleet feed/session watch coordination** — `watchFleetFeed` and
    `watchFleetSessions` each create an O(devices) SSH fanout per consumer. A
    daemon-hosted coordinator is justified only with one multiplexed local
    subscription surface, bounded buffers/backpressure, and explicit peer
    unavailable envelopes; moving the same fanout unchanged merely relocates it.
-3. **Cross-device orphan/session ownership** — the local `session-state` service
+2. **Cross-device orphan/session ownership** — the local `session-state` service
    now owns metadata publication, but a peer still must classify its own pane
    and publish that fact. The launching device must not infer peer liveness from
    absent local signals.

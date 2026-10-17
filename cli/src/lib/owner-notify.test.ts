@@ -10,7 +10,6 @@ let identity: typeof import('./identity/client.js');
 let notify: typeof import('./notify.js');
 let send: typeof import('./channels/send.js');
 let broadcast: typeof import('./feed-broadcast.js');
-let routines: typeof import('./routine-notify-owner.js');
 let authMint: typeof import('./auth-mint.js');
 let reserved: typeof import('./reserved-stores.js');
 
@@ -26,7 +25,6 @@ beforeAll(async () => {
   notify = await import('./notify.js');
   send = await import('./channels/send.js');
   broadcast = await import('./feed-broadcast.js');
-  routines = await import('./routine-notify-owner.js');
   authMint = await import('./auth-mint.js');
   reserved = await import('./reserved-stores.js');
 });
@@ -82,7 +80,7 @@ describe('postOwnerNotification — the one owner path', () => {
   });
 
   it('namespaces every producer key as owner:<key> on the wire, exactly once', async () => {
-    const keys = ['block:blk-9', 'feed:s:2026-10-06T12:00:00Z', 'routine:nightly:run-1', 'routine-start:nightly:2026-10-06T00:00:00.000Z', 'send:u-1'];
+    const keys = ['block:blk-9', 'feed:s:2026-10-06T12:00:00Z', 'send:u-1'];
     for (const dedupKey of keys) await ownerNotify.postOwnerNotification({ event: 'message', title: 't', body: 'b', dedupKey });
     expect(api.dedupKeys).toEqual(keys.map((k) => `owner:${k}`));
   });
@@ -170,17 +168,5 @@ describe('producers map onto account events', () => {
     expect(await send.sendMessage({ to: 'owner', channel: 'slack', text: 'x' }, {} as Meta)).toEqual({ error: expect.stringMatching(/cannot be combined with --channel/) });
     expect(await send.sendMessage({ to: 'owner', text: 'x', attachments: ['/tmp/a.png'] }, {} as Meta)).toEqual({ error: expect.stringMatching(/--attach does not apply/) });
     expect(notifications()).toHaveLength(1);
-  });
-
-  it('a failed routine run is one failed event per run; a green run stays silent', async () => {
-    const run = { jobName: 'nightly', runId: 'run-A', status: 'failed', exitCode: 1, errorMessage: 'auth_failed: 401', agent: 'claude' } as Parameters<typeof routines.notifyOwnerRoutineFinish>[0];
-    await routines.notifyOwnerRoutineFinish(run);
-    const second = await routines.notifyOwnerRoutineFinish(run);
-    expect(second?.suppressed).toBe('duplicate');
-    expect(await routines.notifyOwnerRoutineFinish({ ...run, runId: 'run-B', status: 'completed', exitCode: 0 })).toBeNull();
-    const [failed] = notifications();
-    expect(failed).toMatchObject({ event: 'failed', title: 'Routine failed: nightly', dedupKey: 'owner:routine:nightly:run-A' });
-    expect(String(failed.body)).toContain('auth_failed: 401');
-    expect(notifications()).toHaveLength(2);
   });
 });

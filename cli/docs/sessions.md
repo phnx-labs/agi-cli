@@ -57,7 +57,6 @@ sibling is `agents fork <session>`.
 | `-D, --device <name...>` | Only these devices. Peers answer `agents ps --local --json`, so each peer needs agents 1.22.121 or newer |
 | `--status <state...>` | `working`, `idle`, `waiting`, `orphaned`, `crashed`, `closed`, `abandoned`, `queued`, `unknown`; `waiting` exits 1 when any session waits |
 | `--bookmarks` | Only bookmarked sessions (bookmark one with `sessions bookmark <id>`) |
-| `--routine [name]` | Only routine-run sessions, or one routine by fuzzy name; `--routines` is the same flag |
 | `--no-interactive` | Print instead of opening the picker on a TTY |
 
 On a TTY with no `--status`, `ps` opens the session picker seeded running-only; `r`
@@ -232,8 +231,8 @@ touches the endpoint.
 
 - Search and ranking operate over normalized messages and metadata. A keyword
   content query unions FTS5 hits with the listing page so an indexed transcript
-  is returned even when it missed the default cwd/limit window. `--project`,
-  `--agent`, and `--routine` still filter that union — a content hit in another
+  is returned even when it missed the default cwd/limit window. `--project`
+  and `--agent` still filter that union — a content hit in another
   project does not leak back in. The index covers both sides of the
   conversation: user prompts (`content`) and the agent's own answers
   (`assistant`, weighted lower in ranking), so a phrase that only ever

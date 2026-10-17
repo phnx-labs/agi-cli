@@ -34,7 +34,6 @@ export interface FactorySnapshot {
   queues: Record<string, { todo: number; inProgress: number; blocked: number }>;
   prs: Array<{ repo: string; number: number; ci: string; review: string; mergeable: string }>;
   devices: Array<{ name: string; load: number | null; idle: boolean }>;
-  recentRuns: Array<{ routine: string; status: string; durationMs: number | null }>;
   auth: { claude: AuthVerdict | null };
   config: FactoryConfig;
 }
@@ -157,30 +156,6 @@ export function parseDevices(payload: unknown, cached: ReturnType<typeof readSta
   }).filter((row) => row.name.length > 0);
 }
 
-function readRecentRuns(home: string, limit = 3): FactorySnapshot['recentRuns'] {
-  const root = path.join(home, '.agents', '.history', 'runs');
-  if (!fs.existsSync(root)) return [];
-  const found: Array<FactorySnapshot['recentRuns'][number] & { mtime: number }> = [];
-  for (const routine of fs.readdirSync(root)) {
-    const routineDir = path.join(root, routine);
-    if (!fs.statSync(routineDir).isDirectory()) continue;
-    const routineRuns: typeof found = [];
-    for (const run of fs.readdirSync(routineDir)) {
-      const file = path.join(routineDir, run, 'meta.json');
-      if (!fs.existsSync(file)) continue;
-      try {
-        const meta = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
-        const started = Date.parse(String(meta.startedAt ?? meta.createdAt ?? ''));
-        const ended = Date.parse(String(meta.finishedAt ?? meta.completedAt ?? meta.updatedAt ?? ''));
-        const duration = typeof meta.durationMs === 'number' ? meta.durationMs : Number.isFinite(started) && Number.isFinite(ended) ? ended - started : null;
-        routineRuns.push({ routine, status: String(meta.status ?? 'unknown'), durationMs: duration, mtime: fs.statSync(file).mtimeMs });
-      } catch {  }
-    }
-    found.push(...routineRuns.sort((a, b) => b.mtime - a.mtime).slice(0, limit));
-  }
-  return found.sort((a, b) => b.mtime - a.mtime).map(({ mtime: _, ...run }) => run);
-}
-
 function latestClaudeVerdict(entries: ReturnType<typeof readAuthHealthCache>): AuthVerdict | null {
   return Object.entries(entries)
     .filter(([key]) => key.split(':').includes('claude'))
@@ -216,7 +191,7 @@ export async function buildFactorySnapshot(overrides: Partial<SnapshotDependenci
   const [sessions, queues, prs, devices] = await Promise.all([sessionsPromise, queuePromise, prsPromise, devicesPromise]);
   return {
     generatedAt: deps.now().toISOString(), sessions, queues, prs, devices,
-    recentRuns: readRecentRuns(deps.home), auth: { claude: latestClaudeVerdict(deps.readAuth()) },
+    auth: { claude: latestClaudeVerdict(deps.readAuth()) },
     config: readFactoryConfig(deps.home),
   };
 }

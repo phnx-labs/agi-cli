@@ -10,14 +10,15 @@ fs.mkdirSync(path.join(TMP_HOME, '.agents', '.cache'), { recursive: true });
 
 type AuthHealthMod = typeof import('./auth-health.js');
 let authHealth: AuthHealthMod;
-type ExecMod = typeof import('./exec.js');
-let exec: ExecMod;
 
 const HOST = 'testbox';
 
+function readRow(agent: string, version: string) {
+  return authHealth.readAuthHealthCache()[authHealth.authCacheKey(HOST, agent, version)] ?? null;
+}
+
 beforeAll(async () => {
   authHealth = await import('./auth-health.js');
-  exec = await import('./exec.js');
 });
 
 afterAll(() => {
@@ -80,23 +81,16 @@ describe('probeAuthHealth — the row a non-headed box drops (why the host path 
 describe('recordRunAuthOutcome -> the auth cache -> the fact (real IO, temp HOME)', () => {
   it('records a clean run as "last used ok" on the account row', () => {
     authHealth.recordRunAuthOutcome({ agent: 'claude', version: 'ver-ok', host: HOST, outcome: { ok: true }, now: Date.now() });
-    const row = authHealth.readAuthHealth(HOST, 'claude', 'ver-ok');
+    const row = readRow('claude', 'ver-ok');
     expect(row?.source).toBe('run');
     expect(row?.verdict).toBe('live');
     expect(authHealth.formatAuthFact(row)).toMatch(/^last used ok /);
   });
 
-  it('records a real 401 log (through the real isAuthFailureFromLog) as an auth-failure fact', () => {
-    const LOGGED_OUT_CLAUDE_LOG = [
-      '{"type":"system","subtype":"init","session_id":"x"}',
-      '{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,"error_status":401,"error":"authentication_failed","session_id":"x"}',
-      '{"type":"result","subtype":"success","is_error":true,"api_error_status":401,"terminal_reason":"completed","result":"Failed to authenticate. API Error: 401 OAuth access token has been revoked.","num_turns":1}',
-    ].join('\n');
-    expect(exec.isAuthFailureFromLog(LOGGED_OUT_CLAUDE_LOG, 'claude', { processFailed: false })).toBe(true);
-    const reason = exec.authFailureReason(LOGGED_OUT_CLAUDE_LOG) ?? 'authentication_failed';
-    authHealth.recordRunAuthOutcome({ agent: 'claude', version: 'ver-401', host: HOST, outcome: { ok: false, verdict: 'revoked', detail: reason }, now: new Date(2026, 8, 20, 14, 2).getTime() });
-    const row = authHealth.readAuthHealth(HOST, 'claude', 'ver-401');
+  it('records a failed run as an auth-failure fact', () => {
+    authHealth.recordRunAuthOutcome({ agent: 'claude', version: 'ver-401', host: HOST, outcome: { ok: false, verdict: 'revoked', detail: 'OAuth access token has been revoked' }, now: new Date(2026, 8, 20, 14, 2).getTime() });
+    const row = readRow('claude', 'ver-401');
     expect(row?.source).toBe('run');
-    expect(authHealth.formatAuthFact(row)).toBe(`last auth failure ${reason} Sep 20 14:02`);
+    expect(authHealth.formatAuthFact(row)).toBe('last auth failure OAuth access token has been revoked Sep 20 14:02');
   });
 });
