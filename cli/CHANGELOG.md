@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.28
+
+- **A folder two projects claim equally belongs to neither.** When two projects share the deepest root that holds a folder (rush and prix both rooted at one monorepo), `agents projects view`/`status --path` and session attribution now answer no project there instead of whichever project file sorts first, so the AGI EXT Project panel asks you to pick rather than quietly showing the wrong one. Each project's own `defaultPath` still resolves to it. Source: cli/src/lib/projects.ts
+
 ## 1.23.27
 
 - **A Claude session started in a symlinked folder shows its real state (PHNX-4387).** `agents ps` and the session feed looked for the transcript under the folder's path as typed, while Claude stores it under the folder's real path, so such a session showed "Running · no transcript" forever. They now look under both and take the newest; `agents run` and project memory sync use the real path too. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/project-key.ts`, `cli/src/lib/exec.ts`, `cli/src/lib/memory.ts`.
