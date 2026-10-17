@@ -386,7 +386,6 @@ export function projectNameForCwd(cwd: string | undefined, defs: ProjectDef[]): 
 
   if (!cwd) return undefined;
   const abs = path.resolve(localizeHome(expandLocalHome(cwd)));
-  // Deepest anchor wins; two projects tied at it is no answer, never the first listed.
   const deepest = (weak: boolean): { name: string | undefined; len: number } => {
     let name: string | undefined;
     let len = -1;
