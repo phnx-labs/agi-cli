@@ -29,7 +29,6 @@ export interface LinearRun {
   stderr: string;
 }
 
-/** One linear-cli call on behalf of a project; a stale project id gets the relink command. */
 export function runLinearFor(def: ProjectDef, verb: TicketsVerb, json: boolean, env: NodeJS.ProcessEnv = process.env): LinearRun {
   const argv = linearArgv(def, verb, json);
   const res = spawnSync('linear', argv, { env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
