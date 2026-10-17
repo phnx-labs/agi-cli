@@ -26,7 +26,7 @@ function runCommandsExpression(home: string, expression: string): unknown {
   const writersUrl = pathToFileURL(path.resolve('src/lib/staleness/registry.ts')).href;
   const versionsUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/.bin/tsx');
-  const child = spawnSync(tsxBin, ['-e', `
+  const child = spawnSync(tsxBin, ['--input-type=module', '-e', `
     import {
       diffVersionCommands,
       listCommandsInVersionHome,

@@ -23,7 +23,7 @@ const tsxBin = path.resolve('node_modules/.bin/tsx');
 const skillsModuleUrl = pathToFileURL(path.resolve('src/lib/plugins/skills.ts')).href;
 
 function runSkills(home: string, expression: string): unknown {
-  const child = spawnSync(tsxBin, ['-e', `
+  const child = spawnSync(tsxBin, ['--input-type=module', '-e', `
     import * as skills from ${JSON.stringify(skillsModuleUrl)};
     const result = ${expression};
     if (result && typeof result.then === 'function') {

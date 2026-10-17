@@ -33,7 +33,7 @@ function nodeExecPath(): string {
 function runInHome(home: string, body: string): Record<string, unknown> {
   const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
   const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
-  const child = spawnSync(nodeExecPath(), [tsxBin, '-e', `
+  const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
     import * as fs from 'fs';
     import * as path from 'path';
     import {
