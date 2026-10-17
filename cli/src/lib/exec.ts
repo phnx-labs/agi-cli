@@ -53,7 +53,7 @@ import {
   parseClaudeModelRefusal,
   claudeModelRefusalKey,
 } from './accounting/usage.js';
-import { claudeProjectDirName } from './project-key.js';
+import { claudeProjectDirName, realCwd } from './project-key.js';
 import { bootMark, flushBootProfile } from './boot-profile.js';
 
 export type ExecMode = Mode;
@@ -1271,7 +1271,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   const home = resolveExecConfigHome(options).versionHome;
   const modelKey = claudeModelRefusalKey(options.accountId, home);
   const transcript = options.agent === 'claude' && home && options.sessionId
-    ? path.join(home, '.claude', 'projects', claudeProjectDirName(options.cwd || process.cwd()), `${options.sessionId}.jsonl`)
+    ? path.join(home, '.claude', 'projects', claudeProjectDirName(realCwd(options.cwd || process.cwd())), `${options.sessionId}.jsonl`)
     : undefined;
   let offset = transcript && fs.existsSync(transcript) ? fs.statSync(transcript).size : 0;
   const observeTranscript = () => {

@@ -84,4 +84,18 @@ describe('pickClaudeSessionFileAcrossRoots', () => {
       pickClaudeSessionFileAcrossRoots(roots(), cwd, 'ffffffff-0000-0000-0000-000000000000'),
     ).toBeUndefined();
   });
+
+  it('finds the transcript of a cwd reached through a symlink, under the real path', () => {
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'real-'));
+    const link = path.join(base, 'link');
+    fs.symlinkSync(real, link);
+    const realDir = path.join(projectsRoot('live'), fs.realpathSync(real).replace(/[/.]/g, '-'));
+    fs.mkdirSync(realDir, { recursive: true });
+    try {
+      fs.writeFileSync(path.join(realDir, `${sid}.jsonl`), '{"x":3}\n');
+      expect(pickClaudeSessionFileAcrossRoots(roots(), link, sid)).toBe(path.join(realDir, `${sid}.jsonl`));
+    } finally {
+      fs.rmSync(real, { recursive: true, force: true });
+    }
+  });
 });
