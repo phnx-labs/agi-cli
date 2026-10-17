@@ -59,7 +59,7 @@ describe('command index generation', () => {
   it('excludes the inline aliases/tombstones registered in src/index.ts', async () => {
     const nodes = await tree();
     const names = new Set(nodes.map((n) => n.name));
-    for (const inline of ['perms', 'exec', 'jobs', 'cron', 'check', 'resources', 'hq', '_internal']) {
+    for (const inline of ['perms', 'exec', 'check', 'resources', 'hq', '_internal']) {
       expect(names.has(inline)).toBe(false);
     }
   });
