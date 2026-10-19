@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.38
+
+- **The Lead can say what moved today (PHNX-4432).** Its tools now print dates. `agents lead tool linear tasks` lists the most recently updated tickets first, each with its age, cut to `--limit` and with a count of older ones (`linear tasks --json` sorts by priority and returns every match, so a done list started with tickets from August). `prs list` and the roster add when each PR was updated, and when each session started and was last active. The brief now keeps the merged and closed PRs among the 40 most recently updated, with their age, under "Merged or closed lately". Before this, "what happened in the last 24 hours" got "none of my tools show history". Source: cli/src/lib/lead/tools.ts, cli/src/lib/lead/brief.ts, cli/src/lib/lead/roster.ts
+
 ## 1.23.37
 
 - **A headless run an agent starts no longer takes over that agent's tab.** When a Claude session in an editor tab ran `claude -p` through its shell, the SessionStart hook walked up to the tab agent's `~/.agents/.cache/terminals/by-pid/<pid>.json` and rewrote its session id, so `agents ps`, the feed and the editor showed the tab as the one-second headless run (observed on yosemite-s0 for a zion tab, 2026-10-19). A by-pid entry now yields to the session its own process recorded at SessionStart (`state/sessions/<pid>.json`), which only that process writes, so the tab, its launch id and `agents message` resolve to the real session again, including for entries an older hook already rewrote. Source: cli/src/lib/session/pid-registry.ts, cli/src/lib/session/hook-sessions.ts
