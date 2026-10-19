@@ -157,6 +157,7 @@ describe('applySessionNames — the PRs and tickets a session acted on ride the 
     const next = [row(id, { sessionFile: file })];
     applySessionNames(next);
     expect(next[0].touchedPrs?.map(p => `${p.repo}#${p.number} ${p.action}`)).toEqual([
+      'phnx-labs/agi-cli#3990 closed',
       'phnx-labs/agi-cli#3995 merged',
       'phnx-labs/agi-ext#171 merged',
     ]);
