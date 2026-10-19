@@ -657,6 +657,7 @@ WAITING_NOTIFICATION_TYPES = {
 }
 CLEAR_EVENTS = {
     "PostToolUse",
+    "PostToolUseFailure",
     "Stop",
     "SessionEnd",
 }
@@ -737,7 +738,7 @@ def main():
                 return
         except Exception:
             pass
-        if hook_event == "PostToolUse":
+        if hook_event in ("PostToolUse", "PostToolUseFailure"):
             try:
                 with open(target) as existing_file:
                     existing = json.load(existing_file)
@@ -1034,6 +1035,13 @@ export function ensureFeedPublishHook(userAgentsDir: string = getUserAgentsDir()
       'feed-clear-answered': {
         agents: ['claude', 'codex'],
         events: ['PostToolUse'],
+        matcher: 'AskUserQuestion',
+        script: '10-feed-publish.py',
+        timeout: 5,
+      },
+      'feed-clear-answered-failure': {
+        agents: ['claude'],
+        events: ['PostToolUseFailure'],
         matcher: 'AskUserQuestion',
         script: '10-feed-publish.py',
         timeout: 5,

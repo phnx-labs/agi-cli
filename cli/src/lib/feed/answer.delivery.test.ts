@@ -808,3 +808,36 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
     expect(getAnswerRecord(block.blockId, feedRoot)).toBeUndefined();
   });
 });
+
+describe('an answer typed into the VSCodium tab a session runs in', () => {
+  it('opens the extension URI once and reports it unconfirmed, keeping the claim so a retry reconciles', async () => {
+    const feedRoot = dir('feed-vscodium');
+    const log = path.join(dir('codium-log'), 'argv');
+    script(dir('codium-bin'), 'codium', `printf '%s\\n' "$@" >> '${log}'`);
+    const session = parkedSession('codium-tab', {
+      host: 'codium', tty: 'ttys004', status: 'input_required', activity: 'waiting_input', awaitingReason: 'question',
+      provenance: { host: 'zion', transport: 'local', reply: null },
+    } as Partial<ActiveSession>);
+    const block = questionBlock('codium-tab', { questions: [{ text: 'Which env?', options: [{ label: 'Production' }] }] });
+    publishBlock(block, feedRoot);
+    const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
+    const answer = (attempt: number) => claimAndRouteAttentionAnswer({
+      attentionKey: key, text: `Production ${attempt}`, operator: { verified: false, label: 'op' },
+      feedRoot, mailboxRoot: dir('mail-vscodium'), sessions: [session],
+    });
+
+    const first = await answer(1);
+    expect(first.status).toBe('unknown');
+    expect(first.reason).toMatch(/vscodium accepted the hand-off but cannot confirm/);
+    const argv = fs.readFileSync(log, 'utf8').trim().split('\n');
+    expect(argv[0]).toBe('--open-url');
+    expect(argv[1]).toMatch(/^vscodium:\/\/swarmify\.swarm-ext\//);
+    const payload = JSON.parse(Buffer.from(new URL(argv[1]!).searchParams.get('p')!, 'base64url').toString('utf8'));
+    expect(payload).toMatchObject({ terminalId: 'codium-tab', text: 'Production 1', enter: true });
+    expect(getAnswerRecord(block.blockId, feedRoot)).toBeDefined();
+
+    const retry = await answer(2);
+    expect(retry.status).toBe('unknown');
+    expect(fs.readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(2);
+  });
+});
