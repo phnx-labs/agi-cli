@@ -322,7 +322,6 @@ it.skipIf(process.platform !== 'linux')('a headless run the tab agent starts nev
   const previousStateDir = process.env.AGENTS_STATE_DIR;
   process.env.AGENTS_STATE_DIR = path.join(process.env.HOME!, '.agents', '.cache', 'state');
   const hook = process.env.AGENTS_SESSION_IDENTITY_TEST_HOOK || fileURLToPath(new URL('./testdata/deployed-session-identity.sh', import.meta.url));
-  // The tab agent reports its own SessionStart, then runs a nested `claude -p` that reports another.
   const program = `const {spawnSync}=require('node:child_process');
     const [hook, own, ownCwd, child, childCwd] = process.argv.slice(1);
     const run = (sid, cwd) => spawnSync('bash', [hook], { input: JSON.stringify({ session_id: sid, cwd }), encoding: 'utf8' });
