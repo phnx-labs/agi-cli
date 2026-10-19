@@ -290,10 +290,22 @@ touches the endpoint.
   `applySessionNames` puts it on the row, so it rides `agents ps --json`,
   `agents ps watch --json` and `agents feed watch --json`. A session with no recap
   has no field; durable history rows do not carry it.
+- A row's **`title` is its one display name**, drawn verbatim by AGI EXT. It is
+  never Claude's `<folder>-<n>` placeholder ("agents-92", "agents-1f", matched
+  against the row's own cwd so "RUSH-2058" stays) nor the `[host/<device>]`
+  fallback (`isPlaceholderSessionName`), never an injected envelope, another
+  session's note, a sub-agent hand-back or a bare slash command
+  (`cleanDisplayTitle`), and it falls through every rung (label, fork source,
+  generated title, request, topic, `startedAs`) before it is left empty. A
+  session started by `agents fork` carries **`forkOf`**, the source session id
+  read back from the recap `buildForkRecap` wrote (`forkSourceOf`,
+  `lib/session/fork.ts`); until the fork has a name of its own its `title` is
+  the source's name, and an unnamed fork is no longer launched with
+  `--name "fork of …"`, so Claude's own title takes over when it writes one.
 - Every session row's **headline is a user-anchored name, never the agent's latest
   message** (PHNX-3797). One ladder decides it everywhere — `label` →
   `generatedTitle` → the first-prompt `topic` — implemented once in
-  `deriveSessionRecap` (`lib/session/active.ts`) for live rows and
+  `deriveSessionRecap` (`lib/session/active.ts`) for live and history stream rows and
   `sessionHeadline` (`lib/session/title.ts`) for indexed rows, so the CLI list,
   the picker, `agents ps watch --json`, and AGI EXT can never disagree about a
   session's name. `generatedTitle` is a short, descriptive **action + object

@@ -27,8 +27,23 @@ function trimLastLine(text: string): string {
   return `${collapsed.slice(0, LAST_LINE_CAP).trimEnd()}…`;
 }
 
-export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitle' | 'topic' | 'shortId'>): string {
+export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'generatedTitle' | 'topic' | 'shortId' | 'cwd'>): string {
   return sessionHeadline(session) || session.shortId;
+}
+
+const FORK_OPENING_RE = /^Continue a prior \S+ session \("(.+)"\)\. Pick up where it left off/;
+const FORK_SOURCE_RE = /run `\/continue ([^`\s]+)` if you need the full transcript\.$/m;
+
+export interface ForkSource {
+  label: string;
+  id?: string;
+}
+
+export function forkSourceOf(firstUserMessage: string | null | undefined): ForkSource | undefined {
+  const label = firstUserMessage ? FORK_OPENING_RE.exec(firstUserMessage)?.[1] : undefined;
+  if (!label) return undefined;
+  const id = FORK_SOURCE_RE.exec(firstUserMessage!)?.[1];
+  return id ? { label, id } : { label };
 }
 
 export function buildForkRecap(input: ForkRecapInput): string {

@@ -23,7 +23,8 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';
+import { cleanDisplayTitle, isPlaceholderSessionName, resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';
+import { forkSourceOf } from './fork.js';
 import { getIndexedSessionNames, latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
@@ -285,7 +286,7 @@ export type ActiveStatus =
 
 export type SessionPhase = 'running' | 'waiting' | 'failed' | 'done' | 'idle';
 
-export type RecapSource = 'label' | 'generated' | 'prompt';
+export type RecapSource = 'label' | 'generated' | 'fork' | 'prompt';
 
 export type ImportantMessageKind = 'question' | 'needs_you' | 'activity';
 
@@ -325,6 +326,7 @@ export interface ActiveSession {
   lastUserMessage?: string;
   generatedTitle?: string;
   title?: string;
+  forkOf?: string;
   startedAs?: string;
   recap?: SessionRecap;
   recapSource?: RecapSource;
@@ -1686,9 +1688,10 @@ function recapLine(s: string | undefined, max = 120): string | undefined {
 }
 
 export function deriveSessionRecap(
-  row: Pick<ActiveSession, 'label' | 'generatedTitle' | 'topic' | 'tail' | 'firstUserMessage' | 'lastUserMessage' | 'attachments' | 'request'>,
+  row: Pick<ActiveSession, 'label' | 'generatedTitle' | 'topic' | 'tail' | 'firstUserMessage' | 'lastUserMessage' | 'attachments' | 'request' | 'cwd' | 'startedAs'>,
 ): {
   title?: string;
+  forkOf?: string;
   recapSource?: RecapSource;
   userPromptClean?: string;
   userPromptKind?: UserPromptKind;
@@ -1704,18 +1707,26 @@ export function deriveSessionRecap(
   const userPromptClean = tidied?.headline ?? fallback?.clean;
   const userPromptKind = tidied?.kind ?? fallback?.kind;
 
-  const label = recapLine(row.label);
-  const generated = recapLine(row.generatedTitle);
-  const prompt = recapLine(userPromptClean || row.topic);
-
+  const fork = forkSourceOf(row.firstUserMessage ?? row.topic);
+  const ownLabel = row.label && !(fork && row.label.trim() === `fork of ${fork.label}`) ? row.label : undefined;
+  const rungs: Array<[RecapSource, string | undefined]> = [
+    ['label', ownLabel],
+    ['fork', fork?.label],
+    ['generated', row.generatedTitle],
+    ['prompt', userPromptClean],
+    ['prompt', row.topic],
+    ['prompt', row.startedAs],
+  ];
   let title: string | undefined;
   let recapSource: RecapSource | undefined;
-  if (label) { title = label; recapSource = 'label'; }
-  else if (generated) { title = generated; recapSource = 'generated'; }
-  else if (prompt) { title = prompt; recapSource = 'prompt'; }
+  for (const [source, candidate] of rungs) {
+    const clean = isPlaceholderSessionName(candidate, row.cwd) ? undefined : recapLine(cleanDisplayTitle(candidate));
+    if (clean) { title = clean; recapSource = source; break; }
+  }
 
   return {
     title,
+    ...(fork?.id ? { forkOf: fork.id } : {}),
     recapSource,
     userPromptClean: recapLine(userPromptClean),
     userPromptKind,
@@ -1752,9 +1763,10 @@ export function deriveImportantMessage(
 }
 
 function applyRecap(s: ActiveSession): void {
+  s.startedAs ??= s.firstUserMessage ? startedAsFromUserTurn(s.firstUserMessage) : undefined;
   const recap = deriveSessionRecap(s);
   s.title = recap.title;
-  s.startedAs ??= s.firstUserMessage ? startedAsFromUserTurn(s.firstUserMessage) : undefined;
+  s.forkOf = recap.forkOf;
   s.recapSource = recap.recapSource;
   s.userPromptClean = recap.userPromptClean;
   s.userPromptKind = recap.userPromptKind;

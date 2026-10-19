@@ -6,6 +6,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, deriveImportantMessage, foldRecap, isReapableOrphan, backfillActiveRowsFromMeta } from './active.js';
 import type { ActiveSession } from './active.js';
+import { buildForkRecap } from './fork.js';
+import { fileURLToPath } from 'url';
 import { SESSION_AGENTS } from '@phnx-labs/sessions-cli/reader';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
@@ -368,6 +370,45 @@ describe('deriveSessionRecap (headline ladder — a user-anchored NAME, never th
     foldRecap(rows);
     expect(rows[0]).toMatchObject({ title: 'Daemon titler wiring', recapSource: 'generated', lastAgentLine: 'did the thing' });
     expect(rows[0].importantMessage).toEqual({ text: 'did the thing', kind: 'activity' });
+  });
+});
+
+describe('deriveSessionRecap — one display name the extension draws verbatim (2026-10-18 owner feedback)', () => {
+  const rows = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'session-titles', 'rows.json'), 'utf-8')) as Record<string, ActiveSession>;
+
+  it("never titles a row with Claude's <folder>-<n> placeholder, decimal or hex", () => {
+    expect(deriveSessionRecap(rows['placeholder-label'])).toMatchObject({ title: 'Read the brief and apply it to pull request 3847', recapSource: 'prompt' });
+    expect(deriveSessionRecap(rows['placeholder-hex-label'])).toMatchObject({ title: 'Weekly recap social post automation', recapSource: 'generated' });
+  });
+
+  it('keeps a ticket-style label that only looks like a placeholder', () => {
+    expect(deriveSessionRecap(rows['ticket-style-label'])).toMatchObject({ title: 'RUSH-2058', recapSource: 'label' });
+  });
+
+  it('never titles a row with the [host/<device>] fallback', () => {
+    expect(deriveSessionRecap(rows['host-fallback-label']).title).toBe('run the nightly evals');
+  });
+
+  it("an unnamed fork carries its source's name and forkOf, not \"fork of …\"", () => {
+    expect(deriveSessionRecap(rows['unnamed-fork'])).toMatchObject({
+      title: 'Process - Podcasts', recapSource: 'fork', forkOf: '4aa3c855-eb2e-417c-8067-c7f079a5963f',
+    });
+  });
+
+  it('a fork with a name of its own keeps it and is still marked a fork', () => {
+    expect(deriveSessionRecap(rows['fork-with-own-name'])).toMatchObject({
+      title: 'Podcast skill for episode recordings', recapSource: 'label', forkOf: '4aa3c855-eb2e-417c-8067-c7f079a5963f',
+    });
+  });
+
+  it('reads the recap agents fork writes today, so the builder and the reader cannot drift', () => {
+    const firstUserMessage = buildForkRecap({ agent: 'codex', label: 'Say "hi" to (prod)', cwd: '/w', shortId: 'abcd1234', id: 'abcd1234-0000', lastAssistant: 'done' });
+    expect(deriveSessionRecap({ firstUserMessage, cwd: '/w' })).toMatchObject({ title: 'Say "hi" to (prod)', forkOf: 'abcd1234-0000' });
+    expect(deriveSessionRecap({ firstUserMessage: 'Continue the work from yesterday' }).forkOf).toBeUndefined();
+  });
+
+  it('skips injected turns and still finds a usable name rather than going empty', () => {
+    expect(deriveSessionRecap(rows['injected-turns-only'])).toMatchObject({ title: 'Ship the sidebar patch', recapSource: 'prompt' });
   });
 });
 
