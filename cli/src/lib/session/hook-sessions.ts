@@ -61,7 +61,6 @@ export function readStateSessionRecord(
   return rec;
 }
 
-// The Stop hook merges `verdict: { state, gaps, at: epoch ms }` into the record the SessionStart hook wrote.
 export function readDoneVerdict(pid: number, sessionId: string, processStartedAtMs?: number): DoneVerdict | undefined {
   const rec = readStateSessionRecord(pid, processStartedAtMs);
   if (!rec || rec.pid !== pid || rec.session_id !== sessionId) return undefined;
