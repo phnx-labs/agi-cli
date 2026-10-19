@@ -5,7 +5,7 @@ import * as path from 'path';
 import { createMemoryCache } from '../memory-cache.js';
 import { getCacheDir } from '../state.js';
 import { artifactKind, backfillActiveRowsFromIndex, foldRecap, sessionProcessIsLocal, type ActiveSession } from './active.js';
-import { extractArtifacts, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
+import { extractArtifacts, mergeArtifacts, reviewedArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { enrichGlanceFiles } from './glance-files.js';
 import { enrichLiveWork } from './pending-work.js';
 import { readSessionSummaryAny, readSessionTimelineAny } from './db.js';
@@ -411,11 +411,12 @@ export function resolveStreamSummaryState(
   return isSummarizerReady(nowMs) ? 'pending' : 'skipped';
 }
 
-export function withCreatedArtifacts(s: ActiveSession): ActiveSession {
-  const created = (s.files?.changes ?? [])
-    .filter((c) => c.op === 'created')
+export function withProducedArtifacts(s: ActiveSession): ActiveSession {
+  const written = (s.files?.changes ?? [])
+    .filter((c) => c.op !== 'deleted')
     .map((c) => ({ path: path.isAbsolute(c.path) || !s.cwd ? c.path : path.resolve(s.cwd, c.path), op: c.op }));
-  const merged = created.length > 0 ? mergeArtifacts(extractArtifacts(created), s.artifacts ?? []) : (s.artifacts ?? []);
+  const produced = written.length > 0 ? reviewedArtifacts(extractArtifacts(written)) : [];
+  const merged = produced.length > 0 ? mergeArtifacts(produced, s.artifacts ?? []) : (s.artifacts ?? []);
   if (merged.length > 0) s.artifacts = merged.map((a) => ({ ...a, kind: artifactKind(a.path) }));
   return s;
 }
@@ -442,7 +443,7 @@ export function mergeSessionTimeline(s: ActiveSession): ActiveSession {
 }
 
 export function applyImmutableMemo(s: ActiveSession): ActiveSession {
-  return withCreatedArtifacts(applyStoredFields(s));
+  return withProducedArtifacts(applyStoredFields(s));
 }
 
 function applyStoredFields(s: ActiveSession): ActiveSession {
