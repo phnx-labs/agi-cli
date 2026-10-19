@@ -115,6 +115,22 @@ describe('process-table memo (#2047)', () => {
   });
 });
 
+describe('process-table read in flight', () => {
+  it('shares one ps/CIM read among callers that arrive while it runs', async () => {
+    let t = 1_500_000;
+    setActiveScanClockForTest(() => t);
+    clearActiveScanCachesForTest();
+    setActiveScanClockForTest(() => t);
+
+    await Promise.all(Array.from({ length: 20 }, () => hostFromPid(process.pid)));
+    expect(processTableLiveReadCountForTest()).toBe(1);
+
+    t += PROCESS_TABLE_FRESH_MS + 1;
+    await Promise.all(Array.from({ length: 20 }, () => hostFromPid(process.pid)));
+    expect(processTableLiveReadCountForTest()).toBe(2);
+  });
+});
+
 describe('unattributed rescan throttle (#2047)', () => {
   it('reuses the last full scan within UNATTRIBUTED_RESCAN_MS when attributed did not shrink', async () => {
     let t = 2_000_000;

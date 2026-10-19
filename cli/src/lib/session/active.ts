@@ -71,6 +71,7 @@ export function setActiveScanClockForTest(fn?: () => number): void {
 }
 
 let processTableCache: { at: number; rows: ProcRow[] } | undefined;
+let processTableReading: Promise<ProcRow[]> | undefined;
 let processTableLiveReads = 0;
 let unattributedCache: {
   at: number;
@@ -82,6 +83,7 @@ let unattributedFullRescans = 0;
 
 export function clearActiveScanCachesForTest(): void {
   processTableCache = undefined;
+  processTableReading = undefined;
   processTableLiveReads = 0;
   unattributedCache = undefined;
   unattributedFullRescans = 0;
@@ -1067,9 +1069,12 @@ async function readProcessTable(): Promise<ProcRow[]> {
   if (processTableCache && now - processTableCache.at < PROCESS_TABLE_FRESH_MS) {
     return processTableCache.rows;
   }
-  const rows = await readProcessTableLive();
-  processTableCache = { at: now, rows };
-  return rows;
+  if (processTableReading) return processTableReading;
+  const reading = readProcessTableLive()
+    .then((rows) => { processTableCache = { at: now, rows }; return rows; })
+    .finally(() => { if (processTableReading === reading) processTableReading = undefined; });
+  processTableReading = reading;
+  return reading;
 }
 
 async function readProcessTableLive(): Promise<ProcRow[]> {
