@@ -60,6 +60,14 @@ describe('touchedPrs: the PRs a Claude session acted on but did not open', () =>
     expect(state.touchedTickets).toEqual([{ id: 'PHNX-12', action: 'commented' }]);
   });
 
+  it('a call whose exit status a pipe, || or a later command hides counts only on its own evidence: a merge that says merged', () => {
+    expect(scan(fixtureLines('masked-exit.jsonl')).touchedPrs).toEqual([
+      pr('acme/api', 19, 'closed'),
+      pr('acme/api', 16, 'merged'),
+      pr('acme/api', 15, 'merged'),
+    ]);
+  });
+
   it('a call whose result lands after a checkpoint still counts', () => {
     const lines = fixtureLines('last-action-wins.jsonl');
     const state = initClaudeParseState();
@@ -84,7 +92,7 @@ describe('touchedPrs: a bare PR number takes its repo from the git remote of the
   });
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  it("the line's cwd, a leading cd, and nothing when the directory has no GitHub remote", () => {
+  it("the line's cwd, a leading cd; nothing when the directory has no GitHub remote or no longer exists", () => {
     const state = scan(fixtureLines('repo-from-git-remote.jsonl', {
       __REPO__: path.join(root, 'repo'),
       __NOT_A_REPO__: path.join(root, 'plain'),

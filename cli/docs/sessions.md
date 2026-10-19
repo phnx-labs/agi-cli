@@ -302,17 +302,25 @@ touches the endpoint.
     `moved to <state>` (`--status`), else `commented` (`--comment`/`--proof`),
     else `updated`. `linear tasks <ID>` is a read and does not count.
 
-  Only a Bash call whose `tool_result` came back without `is_error` counts: a
-  mention in prose, a failed call, a `run_in_background` call (its result is
-  the launch, not the command), `gh pr merge --auto`, `echo "gh pr merge 5"`
-  and a quoted heredoc body do not. Commands are split with sessions-cli's
-  `tokenizeBash`, so `cd x && gh pr merge 12`, `VAR=1 gh ...` and `a; b | tail`
-  each yield their own command. The repo is `--repo`/`-R`/`--repo=`, or the
-  owner/repo of a PR URL argument; for a bare number with neither, it is the
-  `remote.origin.url` of the directory the call ran in (a leading `cd <dir>`,
-  else the transcript line's `cwd`, walking up to the nearest directory that
-  exists), resolved once at scan time; a non-GitHub or missing remote drops the
-  entry. A PR in the session's own `prUrls` and a ticket in `createdTickets`
+  A Bash call counts when its `tool_result` came back without `is_error`, and
+  only for a command whose exit status is the call's: every operator after it
+  is `&&`. One behind `| tail`, `|| true` or a later `;` command counts only on
+  its own evidence, which today is a merge whose output says so
+  (`"merged": true` or "merged pull request"). A mention in prose, a
+  `run_in_background` call (its result is the launch, not the command),
+  `gh pr merge --auto` or `--disable-auto`, `echo "gh pr merge 5"` and a
+  heredoc body do not count. The command is split at top-level `&&`, `||`, `|`,
+  `;`, `&` and newlines (quotes, `$(…)` and heredoc bodies kept whole), and each
+  part is tokenized with sessions-cli's `tokenizeBash`; `VAR=1 gh …` drops the
+  assignment, and a `cd <dir>` part moves the directory for the parts after it.
+  Value flags are per verb, so `gh pr merge -m 12` is `--merge`, not a milestone.
+  The repo is `--repo`/`-R`/`--repo=`, or the owner/repo of a PR URL argument.
+  For a bare number with neither, it is the `remote.origin.url` of the directory
+  the call ran in (after any `cd`, else the transcript line's `cwd`), read with
+  one `git config` per directory at scan time and cached for 1024 directories.
+  When that directory no longer exists (a removed worktree, a transcript synced
+  from another device), has no GitHub remote, or is not a repo, the entry is
+  dropped. A PR in the session's own `prUrls` and a ticket in `createdTickets`
   are left out. The scan keeps both lists in the resumable Claude parse state
   (`v: 7`; a `v: 6` checkpoint re-parses its transcript from the start on its
   next change) and `applySessionNames` puts them on the row beside `recap`.
