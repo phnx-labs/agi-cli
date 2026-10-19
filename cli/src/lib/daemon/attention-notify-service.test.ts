@@ -343,7 +343,12 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
   });
 
   it('posts a done banner for another device\'s finished turn from the fleet hub, never for a previous row', async () => {
-    const service = makeService('zion');
+    const service = new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ interactiveHost: 'zion', schedules: { ...DEFAULTS(), low: parseNotifySchedule(['0m']) as NotifySchedule } }),
+      fleetHub: () => hub, getSessions: async () => [], notify: (n) => posts.push(n), withdraw: (keys) => withdrawn.push(keys),
+      gc: () => {}, ledgerDir: path.join(tmp, 'notified'), now: () => clock,
+    });
     const agent = (status: string, previous = false) => ({
       rowKey: previous ? 'old' : 'r1', sourceDevice: 'yosemite-m6', sessionId: previous ? 'sess-old' : 'sess-9', kind: 'claude',
       context: 'terminal', status, previous, title: previous ? 'Old run' : 'Port the parser',
@@ -431,8 +436,8 @@ describe('AttentionNotifyService — finished-turn banners', () => {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {  }
   });
 
-  function makeService(normal: readonly string[] = DEFAULT_NOTIFY_SCHEDULES.normal) {
-    const schedules = Object.fromEntries((['urgent', 'high', 'normal', 'low'] as const).map((l) => [l, parseNotifySchedule(l === 'normal' ? normal : DEFAULT_NOTIFY_SCHEDULES[l]) as NotifySchedule])) as Record<'urgent' | 'high' | 'normal' | 'low', NotifySchedule>;
+  function makeService(low: readonly string[] = ['0m']) {
+    const schedules = Object.fromEntries((['urgent', 'high', 'normal', 'low'] as const).map((l) => [l, parseNotifySchedule(l === 'low' ? low : DEFAULT_NOTIFY_SCHEDULES[l]) as NotifySchedule])) as Record<'urgent' | 'high' | 'normal' | 'low', NotifySchedule>;
     return new AttentionNotifyService({
       self: () => 'zion',
       settings: () => ({ schedules }),
@@ -482,8 +487,8 @@ describe('AttentionNotifyService — finished-turn banners', () => {
     expect(posts.map((n) => [n.title, n.body])).toEqual([['3 sessions finished', 'Task s1 · Task s2 · Task s3']]);
   });
 
-  it('a normal level set to sidebar posts no done banner', async () => {
-    const service = makeService(['sidebar']);
+  it('posts no done banner under the default low schedule (sidebar)', async () => {
+    const service = makeService(DEFAULT_NOTIFY_SCHEDULES.low);
     await tickAt(service, 5_000, [live('s1', 'running')]);
     await tickAt(service, 3 * 60_000, [live('s1', 'idle')]);
     await tickAt(service, 4 * 60_000, [live('s1', 'idle')]);

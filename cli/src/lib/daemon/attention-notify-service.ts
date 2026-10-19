@@ -282,7 +282,7 @@ export class AttentionNotifyService extends BasePeriodicService {
     banners: Map<string, BannerState>,
     nowMs: number,
   ): Promise<number> {
-    const schedule = settings.schedules.normal;
+    const schedule = settings.schedules.low;
     if (schedule.sidebar) return 0;
     const fresh: TurnFinish[] = [];
     for (const finish of due) if (!await this.stageSent(finishKey(finish), 0, banners)) fresh.push(finish);
@@ -299,7 +299,7 @@ export class AttentionNotifyService extends BasePeriodicService {
     for (const key of new Set([...bannerKeys, ...fresh.map(finishKey)])) {
       const up = bannerKeys.has(key) && !schedule.stay;
       const state: BannerState = {
-        key, postedAt: new Date(nowMs).toISOString(), level: 'normal', stage: 0, bannerUp: up, finished: true,
+        key, postedAt: new Date(nowMs).toISOString(), level: 'low', stage: 0, bannerUp: up, finished: true,
         ...(up ? { hideAt: nowMs + BANNER_HIDE_AFTER_MS } : { resolvedAt: new Date(nowMs).toISOString() }),
       };
       if (up) banners.set(key, state);

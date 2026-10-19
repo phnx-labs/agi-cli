@@ -274,9 +274,12 @@ waits 15 s before posting (a flap back to `running` cancels it, the Stop hook's
 verdict lands); finishes that land within 15 s of one another, at most 60 s in
 all, go out together, as one `<n> sessions finished` banner when there are
 three or more. The ledger key `<host>/<session>/done-<turn start>` makes it one
-banner per turn across restarts. The `notifyNormal` schedule governs it: `sidebar`
-posts none, `sound` adds the sound, `stay` keeps it on screen (otherwise it is
-withdrawn after ~10 s); `interactive.host` picks the posting machine as for asks.
+banner per turn across restarts. It is **off by default**: the `notifyLow` schedule
+governs it, and its default `["sidebar"]` posts none. Any time token turns it on
+(`agents config set menubar.menu.notifyLow '["0m"]'`; the time itself is ignored,
+a finish posts once it settles), `sound` adds the sound, `stay` keeps it on screen
+(otherwise it is withdrawn after ~10 s). Low-urgency asks follow the same key.
+`interactive.host` picks the posting machine as for asks.
 A headless `agents run --notify` banners from its own exit instead
 ([`src/lib/run-notify.ts`](../src/lib/run-notify.ts)).
 
