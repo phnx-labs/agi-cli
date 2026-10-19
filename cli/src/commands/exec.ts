@@ -243,11 +243,24 @@ export function hostInteractiveNeedsCorrelationId(
   return !hostSessionId && isSessionTrackedAgent(runAgent);
 }
 
+export function runStageLine(
+  text: string,
+  opts: { json?: boolean; quiet?: boolean },
+  stderrIsTty: boolean = Boolean(process.stderr.isTTY),
+): string | null {
+  return stderrIsTty && !opts.json && !opts.quiet ? chalk.dim(`${text}\n`) : null;
+}
+
+function writeRunStage(text: string, opts: { json?: boolean; quiet?: boolean }): void {
+  const line = runStageLine(text, opts);
+  if (line) process.stderr.write(line);
+}
+
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
   const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
-  const caveat = result.usageUnverified ? ', usage unverified — no account could be refreshed' : '';
+  const caveat = result.usageUnverified ? ', usage unverified — no recent usage reading' : '';
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
 }
 
@@ -1257,6 +1270,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         const { applyDeviceAutoToOptions } = await import('../lib/smart-launch.js');
         const result: DeviceAutoApplyResult = await applyDeviceAutoToOptions(options, {
           accountPickerRequested,
+          onPlacing: () => writeRunStage('Placing on the fleet…', options),
           agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
             ? undefined
             : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
@@ -1677,6 +1691,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
                 if (started) process.stderr.write(chalk.gray(started));
               }
             }
+            writeRunStage(`Starting on ${host.name}…`, options);
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
               version: resumeId ? undefined : runVersion,
@@ -1762,6 +1777,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
               `[hosts] dispatch headless ${runAgent}${runVersion ? `@${runVersion}` : ''} -> ${host.name}\n`,
             ));
           }
+          writeRunStage(`Starting on ${host.name}…`, options);
           const { task, exitCode } = await dispatchPromptToHost(host, {
             agent: runAgent,
             version: resumeId ? undefined : runVersion,
@@ -2395,6 +2411,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
         } else {
           try {
             const { collectRunCandidatesForRun } = await import('../lib/accounting/account-pool-collect.js');
+            writeRunStage('Picking an account…', options);
             bootMark('resolve-version:start');
             const routingModel = options.model ?? resolvedResumeSource?.model ?? workflowModel
               ?? (options.fallback ? undefined : resolveRunDefaults(agent, resolveVersion(agent, cwd), cwd).model);
@@ -2511,6 +2528,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
       {
         const launchTarget = version ?? resolveVersion(agent, cwd) ?? undefined;
         if (launchTarget) {
+          writeRunStage(`Starting ${agent}@${launchTarget}…`, options);
           const healed = await ensureAgentRunnable(
             agent,
             launchTarget,

@@ -17,6 +17,13 @@ export class DeviceProbeService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
+    const { listOnlineDeviceNames } = await import('../smart-launch.js');
+    const { refreshPlacementSnapshot } = await import('../teams/placement-probe.js');
+    const refreshed = await refreshPlacementSnapshot(listOnlineDeviceNames()).catch((err: Error) => {
+      ctx.log('WARN', `placement snapshot refresh failed: ${err.message}`);
+      return null;
+    });
+    if (refreshed !== null) ctx.log('DEBUG', `placement snapshot: probed ${refreshed} device(s)`);
     const { runDeviceSync } = await import('../devices/sync.js');
     const { reconcilePendingSentinels, pruneDismissedPendingSentinels } = await import('../devices/pending.js');
     const dev = await runDeviceSync({ soft: true, mode: 'refresh' });

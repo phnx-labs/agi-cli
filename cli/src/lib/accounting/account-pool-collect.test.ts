@@ -1,5 +1,11 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { foldRegistryCandidates, type RunCandidateInputs } from './account-pool-collect.js';
+import { foldRegistryCandidates, localRegistryRecords, type RunCandidateInputs } from './account-pool-collect.js';
+import { addAccount, readAccountRegistry } from '../account-registry.js';
+import { deleteKeychainTokenSync } from '../secrets-client.js';
+import { standaloneKeychainIsFileBacked, useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
 import type { RegistryAccountRecord } from './account-pool.js';
 import type { RotateCandidate } from './rotate.js';
 
@@ -84,5 +90,30 @@ describe('foldRegistryCandidates', () => {
     const registry = out.filter((c) => c.providerAccount);
     expect(registry).toHaveLength(1);
     expect(registry[0].signedIn).toBe(false);
+  });
+});
+
+const fileBacked = await standaloneKeychainIsFileBacked();
+
+describe.skipIf(!fileBacked)('localRegistryRecords — which stored credentials a run may rotate through', () => {
+  useFreshSecretsHome();
+
+  it('checks only the accounts that serve the harness, and keeps only those whose secret is present', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-pool-'));
+    addAccount('claude-a', 'anthropic', 'setup-token', 'sk-ant-oat01-a', root);
+    addAccount('claude-b', 'anthropic', 'setup-token', 'sk-ant-oat01-b', root);
+    addAccount('claude-gone', 'anthropic', 'setup-token', 'sk-ant-oat01-c', root);
+    addAccount('or-key', 'openrouter', 'api-key', 'sk-or-secret', root);
+    deleteKeychainTokenSync(Object.values(readAccountRegistry().accounts).find((a) => a.name === 'claude-gone')!.secretRef);
+
+    const started = Date.now();
+    const records = await localRegistryRecords('claude');
+    const elapsed = Date.now() - started;
+    expect(records.map((r) => r.name).sort()).toEqual(['claude-a', 'claude-b']);
+    expect(records.every((r) => r.secretPresent)).toBe(true);
+    expect((await localRegistryRecords('claude', true)).map((r) => r.name).sort()).toEqual(['claude-a', 'claude-b', 'or-key']);
+    expect(await localRegistryRecords('kimi')).toEqual([]);
+    expect(elapsed).toBeLessThan(5_000);
+    fs.rmSync(root, { recursive: true, force: true });
   });
 });

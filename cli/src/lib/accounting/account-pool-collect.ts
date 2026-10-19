@@ -1,14 +1,17 @@
 import type { AgentId } from '../types.js';
 import { readAccountRegistry } from '../account-registry.js';
-import { hasKeychainTokenSync, isSecretsTransportError } from '../secrets-client.js';
+import { hasKeychainToken, isSecretsTransportError } from '../secrets-client.js';
 import { getGlobalDefault, listInstalledVersions } from '../installations/versions.js';
 import { collectRunCandidates, type RotateCandidate } from './rotate.js';
-import { registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
+import { registryAccountServesHarness, registryPoolCandidates, type RegistryAccountRecord } from './account-pool.js';
 
-function localRegistryRecords(): RegistryAccountRecord[] {
+export async function localRegistryRecords(agent: AgentId, includeKeyed = false): Promise<RegistryAccountRecord[]> {
   try {
-    return Object.values(readAccountRegistry().accounts)
-      .filter((a) => hasKeychainTokenSync(a.secretRef))
+    const accounts = Object.values(readAccountRegistry().accounts)
+      .filter((a) => registryAccountServesHarness(a, agent, includeKeyed));
+    const present = await Promise.all(accounts.map((a) => hasKeychainToken(a.secretRef)));
+    return accounts
+      .filter((_, i) => present[i])
       .map((a) => ({ id: a.id, name: a.name, provider: a.provider, auth: a.auth, secretPresent: true }));
   } catch (err) {
 
@@ -54,7 +57,10 @@ export function foldRegistryCandidates(agent: AgentId, inputs: RunCandidateInput
 }
 
 export async function collectRunCandidatesForRun(agent: AgentId, includeKeyed = false): Promise<RotateCandidate[]> {
-  const native = await collectRunCandidates(agent);
   const runVersion = getGlobalDefault(agent) ?? listInstalledVersions(agent)[0];
-  return foldRegistryCandidates(agent, { native, records: localRegistryRecords(), runVersion }, includeKeyed);
+  const [native, records] = await Promise.all([
+    collectRunCandidates(agent),
+    runVersion ? localRegistryRecords(agent, includeKeyed) : Promise.resolve([]),
+  ]);
+  return foldRegistryCandidates(agent, { native, records, runVersion }, includeKeyed);
 }

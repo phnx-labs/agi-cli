@@ -12,6 +12,7 @@ export interface DevicePlacementSignal {
   signedIn?: boolean;
   pickerEligible?: boolean;
   reason?: string;
+  fromSnapshot?: boolean;
 }
 
 interface PlacementTeam {

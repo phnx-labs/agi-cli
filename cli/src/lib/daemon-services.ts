@@ -63,7 +63,7 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
   {
     id: 'device-probe',
     title: 'Device probe',
-    description: 'Discovers Tailscale devices and surfaces pending ones for registration.',
+    description: 'Discovers Tailscale devices and surfaces pending ones for registration, and keeps the placement snapshot `--device auto` reads current while placement was used in the last day.',
   },
   {
     id: 'state-dir-check',

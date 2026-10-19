@@ -21,6 +21,7 @@ import {
   hostInteractiveNeedsCorrelationId,
   parseExplicitSessionId,
   RUN_AUTO_KEYWORD,
+  runStageLine,
 } from './exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import { codexShortKey, shortCodexHome } from '../lib/codex-home.js';
@@ -797,5 +798,14 @@ describe.skipIf(process.platform === 'win32')('--copy-creds refusal (RUSH-2527)'
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('runStageLine — progress lines only for a person watching a terminal', () => {
+  it('names the step on a terminal and stays silent for --json, --quiet and piped stderr', () => {
+    expect(runStageLine('Placing on the fleet…', {}, true)).toContain('Placing on the fleet…\n');
+    expect(runStageLine('Placing on the fleet…', { json: true }, true)).toBeNull();
+    expect(runStageLine('Placing on the fleet…', { quiet: true }, true)).toBeNull();
+    expect(runStageLine('Placing on the fleet…', {}, false)).toBeNull();
   });
 });

@@ -38,48 +38,115 @@ export function retainHardwareFacts(
   };
 }
 
+export const PLACEMENT_SNAPSHOT_MAX_AGE_MS = 5 * 60_000;
+
+export const PLACEMENT_DEMAND_WINDOW_MS = 24 * 60 * 60_000;
+
+export interface ReadyProbeEntry {
+  answered: boolean;
+  timedOut?: boolean;
+  version: string | null;
+  view: string;
+  fetchedAt: number;
+}
+
+export interface PlacementSnapshot {
+  stats: Record<string, DeviceStats>;
+  readiness: Record<string, ReadyProbeEntry>;
+  demandAt?: number;
+}
+
 interface StatsCacheFile {
   version: 1;
   entries: Record<string, DeviceStats>;
+  readiness?: Record<string, ReadyProbeEntry>;
+  placementDemandAt?: number;
 }
 
 function cacheFilePath(): string {
   return path.join(getCacheDir(), CACHE_FILE);
 }
 
-export function readStatsCache(): Record<string, DeviceStats> {
+function readCacheFile(): StatsCacheFile {
   try {
     const parsed = JSON.parse(fs.readFileSync(cacheFilePath(), 'utf-8')) as StatsCacheFile;
-    if (parsed && parsed.entries && typeof parsed.entries === 'object') return parsed.entries;
+    if (parsed && parsed.entries && typeof parsed.entries === 'object') return parsed;
   } catch {
   }
-  return {};
+  return { version: 1, entries: {} };
 }
 
-export function writeStatsCache(entries: Record<string, DeviceStats>): void {
+function updateCacheFile(update: (current: StatsCacheFile) => StatsCacheFile): void {
   try {
     const dir = getCacheDir();
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const merged: StatsCacheFile = {
-      version: 1,
-      entries: { ...readStatsCache(), ...entries },
-    };
-    fs.writeFileSync(cacheFilePath(), JSON.stringify(merged, null, 2));
+    const file = cacheFilePath();
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(update(readCacheFile()), null, 2));
+    fs.renameSync(tmp, file);
   } catch {
   }
+}
+
+export function readStatsCache(): Record<string, DeviceStats> {
+  return readCacheFile().entries;
+}
+
+export function writeStatsCache(entries: Record<string, DeviceStats>): void {
+  updateCacheFile((current) => ({ ...current, entries: { ...current.entries, ...entries } }));
+}
+
+export function readPlacementSnapshot(): PlacementSnapshot {
+  const file = readCacheFile();
+  return { stats: file.entries, readiness: file.readiness ?? {}, demandAt: file.placementDemandAt };
+}
+
+export function writePlacementSnapshot(update: {
+  stats?: Record<string, DeviceStats>;
+  readiness?: Record<string, ReadyProbeEntry>;
+  demandAt?: number;
+}): void {
+  updateCacheFile((current) => ({
+    ...current,
+    entries: { ...current.entries, ...update.stats },
+    readiness: { ...current.readiness, ...update.readiness },
+    placementDemandAt: update.demandAt ?? current.placementDemandAt,
+  }));
+}
+
+export function freshReadyProbe(
+  snapshot: PlacementSnapshot,
+  name: string,
+  now: number = Date.now(),
+): ReadyProbeEntry | undefined {
+  const entry = snapshot.readiness[name];
+  return entry && now - entry.fetchedAt <= PLACEMENT_SNAPSHOT_MAX_AGE_MS ? entry : undefined;
+}
+
+export function freshSnapshotStats(
+  snapshot: PlacementSnapshot,
+  name: string,
+  now: number = Date.now(),
+): DeviceStats | undefined {
+  const stats = snapshot.stats[name];
+  return stats && now - stats.fetchedAt <= PLACEMENT_SNAPSHOT_MAX_AGE_MS ? stats : undefined;
+}
+
+export function placementDemandIsRecent(snapshot: PlacementSnapshot, now: number = Date.now()): boolean {
+  return snapshot.demandAt !== undefined && now - snapshot.demandAt <= PLACEMENT_DEMAND_WINDOW_MS;
 }
 
 export function removeStatsCacheEntry(name: string): void {
-  try {
-    const current = readStatsCache();
-    if (!(name in current)) return;
-    const entries = pruneStatsCache(current, name);
-    fs.writeFileSync(cacheFilePath(), JSON.stringify({ version: 1, entries }, null, 2));
-  } catch {
-  }
+  const current = readCacheFile();
+  if (!(name in current.entries) && !(current.readiness && name in current.readiness)) return;
+  updateCacheFile((file) => ({
+    ...file,
+    entries: pruneStatsCache(file.entries, name),
+    readiness: file.readiness ? pruneStatsCache(file.readiness, name) : undefined,
+  }));
 }
 
-export function pruneStatsCache(entries: Record<string, DeviceStats>, name: string): Record<string, DeviceStats> {
+export function pruneStatsCache<T>(entries: Record<string, T>, name: string): Record<string, T> {
   const { [name]: _removed, ...remaining } = entries;
   void _removed;
   return remaining;

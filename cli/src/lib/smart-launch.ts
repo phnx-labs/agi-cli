@@ -5,7 +5,7 @@ import { loadDevicesSync } from './devices/registry.js';
 import { blocksPlacement } from './devices/health.js';
 import { autoLaunchPreferredSet, describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
-import { probePoolSignals } from './teams/placement-probe.js';
+import { confirmPlacementTarget, probePoolSignals } from './teams/placement-probe.js';
 import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
 import type { AgentType } from './teams/agents.js';
 
@@ -140,7 +140,8 @@ export async function resolveDeviceAuto(
     eligibleHosts?: string[];
     localMachine?: string;
     accountPicker?: boolean;
-    probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
+    probe?: (pool: string[], agent?: AgentType, opts?: { force?: boolean }) => Promise<Map<string, DevicePlacementSignal>>;
+    confirm?: (key: string) => Promise<boolean>;
     preferred?: ReadonlySet<string>;
   } = {},
 ): Promise<DeviceAutoPlan> {
@@ -151,24 +152,27 @@ export async function resolveDeviceAuto(
 
   if (pool.length === 0) throw new Error(formatEmptyAutoPoolError());
 
-  const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined);
-  if (!agent && !opts.probe) {
-    const { collectFleetHarnesses } = await import('./devices/harness-inventory.js');
-    const { isInteractiveTerminal } = await import('./format.js');
-    const { default: ora } = await import('ora');
-    const inventory = await collectFleetHarnesses({
-      devices: pool,
-      spinner: isInteractiveTerminal() ? (text) => ora(text).start() : undefined,
-    });
-    const byHost = new Map(inventory.map((result) => [normalizeHost(result.host), result]));
-    for (const key of pool) {
-      const result = byHost.get(key);
-      const accountEligible = !!result && !result.error && !result.skipped && result.rows.some((row) => row.ready);
-      const current = signals.get(key);
-      if (current) signals.set(key, { ...current, installed: accountEligible, signedIn: accountEligible });
+  const collectSignals = async (force: boolean): Promise<Map<string, DevicePlacementSignal>> => {
+    const signals = await (opts.probe ?? probePoolSignals)(pool, agent as AgentType | undefined, { force });
+    if (!agent && !opts.probe) {
+      const { collectFleetHarnesses } = await import('./devices/harness-inventory.js');
+      const { isInteractiveTerminal } = await import('./format.js');
+      const { default: ora } = await import('ora');
+      const inventory = await collectFleetHarnesses({
+        devices: pool,
+        spinner: isInteractiveTerminal() ? (text) => ora(text).start() : undefined,
+      });
+      const byHost = new Map(inventory.map((result) => [normalizeHost(result.host), result]));
+      for (const key of pool) {
+        const result = byHost.get(key);
+        const accountEligible = !!result && !result.error && !result.skipped && result.rows.some((row) => row.ready);
+        const current = signals.get(key);
+        if (current) signals.set(key, { ...current, installed: accountEligible, signedIn: accountEligible });
+      }
     }
-  }
-  const eligiblePool = pool.filter((key) => {
+    return signals;
+  };
+  const eligibleIn = (signals: Map<string, DevicePlacementSignal>): string[] => pool.filter((key) => {
     const signal = signals.get(key);
     if (signal?.reachable !== true || blocksPlacement(signal.headroom)) return false;
     if (!agent) return opts.probe ? true : signal.installed === true && signal.signedIn === true;
@@ -176,11 +180,25 @@ export async function resolveDeviceAuto(
       ? signal.pickerEligible === true
       : signal.signedIn === true);
   });
+
+  let signals = await collectSignals(false);
+  let eligiblePool = eligibleIn(signals);
+  if (eligiblePool.length === 0 && [...signals.values()].some((signal) => signal.fromSnapshot)) {
+    signals = await collectSignals(true);
+    eligiblePool = eligibleIn(signals);
+  }
   if (eligiblePool.length === 0) {
     throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
   }
   const preferred = opts.preferred ?? autoLaunchPreferredSet(pool, { roster: pool });
-  const picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent, preferred });
+  const confirm = opts.confirm ?? confirmPlacementTarget;
+  let picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent, preferred });
+  while (picked !== local && signals.get(picked)?.fromSnapshot && !(await confirm(picked))) {
+    signals.set(picked, { ...signals.get(picked), reachable: false, fromSnapshot: false });
+    eligiblePool = eligiblePool.filter((key) => key !== picked);
+    if (eligiblePool.length === 0) throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
+    picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent, preferred });
+  }
   return {
     host: picked === local ? null : picked,
     pickedDeviceKey: picked,
@@ -279,12 +297,14 @@ export async function applyDeviceAutoToOptions(
     resolve?: (accountPicker: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan>;
     agent?: string;
     accountPickerRequested?: boolean;
+    onPlacing?: () => void;
   } = {},
 ): Promise<DeviceAutoApplyResult> {
   const hasAuto = HOST_SLOTS.some((k) => isDeviceAuto(options[k]));
   if (!hasAuto) {
     return { attempted: false };
   }
+  deps.onPlacing?.();
 
   const accountPickerRequested = deps.accountPickerRequested ?? false;
   const resolve: (accountPicker: boolean) => DeviceAutoPlan | Promise<DeviceAutoPlan> =

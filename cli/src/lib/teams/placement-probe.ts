@@ -5,11 +5,24 @@ import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { buildSshInvocation, writeAskpassShim } from '../devices/connect.js';
 import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import {
+  freshReadyProbe,
+  freshSnapshotStats,
+  placementDemandIsRecent,
+  readPlacementSnapshot,
+  retainHardwareFacts,
+  writePlacementSnapshot,
+  type PlacementSnapshot,
+  type ReadyProbeEntry,
+} from '../devices/stats-cache.js';
+import {
   buildReadyProbeCommand,
+  compactReadyView,
+  hostAnswers,
   parseReadyProbe,
   viewAgentAccountEligibility,
   viewHasAgent,
 } from '../hosts/ready.js';
+import { resolveHost } from '../hosts/registry.js';
 import {
   collectRunCandidates,
   isSignInRecoverable,
@@ -22,22 +35,6 @@ import type { DevicePlacementSignal } from './scheduler.js';
 
 export const READY_PROBE_TIMEOUT_MS = 8_000;
 
-export const SIGNAL_TTL_MS = 15_000;
-
-interface CacheEntry {
-  at: number;
-  signals: Map<string, DevicePlacementSignal>;
-}
-const cache = new Map<string, CacheEntry>();
-
-function cacheKey(pool: string[], agent?: string): string {
-  return `${agent ?? 'any-agent'}::${[...pool].map(normalizeHost).sort().join(',')}`;
-}
-
-export function clearPlacementSignalCache(): void {
-  cache.clear();
-}
-
 interface ReadinessInfo {
   answered: boolean;
   installed: boolean | undefined;
@@ -47,12 +44,8 @@ interface ReadinessInfo {
   timedOut?: boolean;
 }
 
-function probeRemoteReadiness(
-  device: DeviceProfile,
-  agent: string,
-  usagePayload: string,
-): Promise<ReadinessInfo> {
-  const unknown: ReadinessInfo = { answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined };
+function probeRemoteReady(device: DeviceProfile, usagePayload: string): Promise<ReadyProbeEntry> {
+  const unknown = (): ReadyProbeEntry => ({ answered: false, version: null, view: '', fetchedAt: Date.now() });
   let args: string[];
   let env: Record<string, string>;
   try {
@@ -60,7 +53,7 @@ function probeRemoteReadiness(
     const cmd = buildReadyProbeCommand(resolveDeviceProfile(device).shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
     ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
-    return Promise.resolve(unknown);
+    return Promise.resolve(unknown());
   }
   return new Promise((resolve) => {
     const child = spawn('ssh', args, {
@@ -70,7 +63,7 @@ function probeRemoteReadiness(
     });
     let stdout = '';
     let settled = false;
-    const finish = (value: ReadinessInfo): void => {
+    const finish = (value: ReadyProbeEntry): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -84,22 +77,29 @@ function probeRemoteReadiness(
     child.stdout.setEncoding('utf-8');
     child.stdout.on('data', (chunk: string) => { stdout += chunk; });
     child.stderr.resume();
-    child.on('error', () => finish(unknown));
+    child.on('error', () => finish(unknown()));
     child.on('close', (code) => {
-      if (timedOut) return finish({ ...unknown, timedOut: true });
-      if (code !== 0 || !stdout) return finish(unknown);
+      if (timedOut) return finish({ ...unknown(), timedOut: true });
+      if (code !== 0 || !stdout) return finish(unknown());
       const probe = parseReadyProbe(stdout);
-      if (!probe.reachable) return finish(unknown);
-      if (!probe.version) return finish({ answered: true, installed: false, signedIn: false, pickerEligible: false });
-      const installed = viewHasAgent(probe.view, agent);
-      const eligibility = installed
-        ? viewAgentAccountEligibility(probe.view, agent)
-        : { signedIn: false, pickerEligible: false };
-      finish({ answered: true, installed, ...eligibility });
+      if (!probe.reachable) return finish(unknown());
+      finish({ answered: true, version: probe.version, view: compactReadyView(probe.view), fetchedAt: Date.now() });
     });
     child.stdin.on('error', () => {  });
     child.stdin.end(usagePayload);
   });
+}
+
+export function readinessFromProbe(entry: ReadyProbeEntry, agent: string): ReadinessInfo {
+  if (!entry.answered) {
+    return { answered: false, installed: undefined, signedIn: undefined, pickerEligible: undefined, timedOut: entry.timedOut };
+  }
+  if (!entry.version) return { answered: true, installed: false, signedIn: false, pickerEligible: false };
+  const installed = viewHasAgent(entry.view, agent);
+  const eligibility = installed
+    ? viewAgentAccountEligibility(entry.view, agent)
+    : { signedIn: false, pickerEligible: false };
+  return { answered: true, installed, ...eligibility };
 }
 
 export function mergePlacementSignal(
@@ -121,21 +121,64 @@ export function mergePlacementSignal(
   };
 }
 
-export async function probePoolSignals(
-  pool: string[],
-  agent?: AgentType,
-  opts: { force?: boolean; now?: number } = {},
-): Promise<Map<string, DevicePlacementSignal>> {
-  const now = opts.now ?? Date.now();
-  const key = cacheKey(pool, agent);
-  const cached = cache.get(key);
-  if (!opts.force && cached && now - cached.at < SIGNAL_TTL_MS) return cached.signals;
+export function snapshotSignal(
+  snapshot: PlacementSnapshot,
+  name: string,
+  agent: string | undefined,
+  now: number,
+): DevicePlacementSignal | undefined {
+  const stats = freshSnapshotStats(snapshot, name, now);
+  if (!stats) return undefined;
+  if (!agent) return { ...mergePlacementSignal(stats, undefined), fromSnapshot: true };
+  const probe = freshReadyProbe(snapshot, name, now);
+  if (!probe) return undefined;
+  return { ...mergePlacementSignal(stats, readinessFromProbe(probe, agent)), fromSnapshot: true };
+}
 
+async function localReadiness(agent: AgentType): Promise<ReadinessInfo> {
+  if (!checkCliAvailable(agent)[0]) return { answered: true, installed: false, signedIn: false, pickerEligible: false };
+  const candidates = await collectRunCandidates(agent).catch(() => null);
+  if (!candidates) return { answered: true, installed: true, signedIn: undefined, pickerEligible: undefined };
+  const readiness = candidates.map((candidate) => readinessFromCandidate(candidate));
+  return {
+    answered: true,
+    installed: true,
+    signedIn: readiness.some((candidate) => candidate.ready),
+    pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
+  };
+}
+
+async function probeLive(
+  profiles: DeviceProfile[],
+  selfName: string | undefined,
+  withReadiness: boolean,
+  demandAt?: number,
+): Promise<{ stats: Map<string, DeviceStats>; probes: Map<string, ReadyProbeEntry> }> {
+  const remote = profiles.filter((d) => d.name !== selfName);
+  const usagePayload = withReadiness && remote.length > 0
+    ? JSON.stringify(buildFleetStatePayload({ usageOnly: true }))
+    : '';
+  const [stats, probed] = await Promise.all([
+    profiles.length > 0 ? probeFleetStats(profiles, { selfName }) : Promise.resolve(new Map<string, DeviceStats>()),
+    withReadiness
+      ? Promise.all(remote.map(async (d) => [d.name, await probeRemoteReady(d, usagePayload)] as const))
+      : Promise.resolve([] as Array<readonly [string, ReadyProbeEntry]>),
+  ]);
+  const prior = readPlacementSnapshot().stats;
+  const rows: Record<string, DeviceStats> = {};
+  for (const [name, row] of stats) {
+    const kept = retainHardwareFacts(row, prior[name]);
+    stats.set(name, kept);
+    rows[name] = kept;
+  }
+  const probes = new Map(probed);
+  writePlacementSnapshot({ stats: rows, readiness: Object.fromEntries(probes), demandAt });
+  return { stats, probes };
+}
+
+function resolvePoolProfiles(pool: string[]): { lookup: (name: string) => DeviceProfile | undefined; profiles: DeviceProfile[] } {
   const reg = loadDevicesSync();
-  const self = normalizeHost(localMachineId());
-  const lookup = (name: string): DeviceProfile | undefined =>
-    reg[name] ?? reg[normalizeHost(name)];
-
+  const lookup = (name: string): DeviceProfile | undefined => reg[name] ?? reg[normalizeHost(name)];
   const profiles: DeviceProfile[] = [];
   const seen = new Set<string>();
   for (const name of pool) {
@@ -145,45 +188,65 @@ export async function probePoolSignals(
       seen.add(d.name);
     }
   }
+  return { lookup, profiles };
+}
 
+export async function probePoolSignals(
+  pool: string[],
+  agent?: AgentType,
+  opts: { force?: boolean; now?: number } = {},
+): Promise<Map<string, DevicePlacementSignal>> {
+  const now = opts.now ?? Date.now();
+  const self = normalizeHost(localMachineId());
+  const { lookup, profiles } = resolvePoolProfiles(pool);
   const selfProfile = profiles.find((d) => normalizeHost(d.name) === self);
-  const stats = await probeFleetStats(profiles, { selfName: selfProfile?.name });
-  const usagePayload = JSON.stringify(buildFleetStatePayload({ usageOnly: true }));
 
-  const installed = new Map<string, ReadinessInfo>(agent
-    ? await Promise.all(
-      profiles.map(async (d): Promise<readonly [string, ReadinessInfo]> => {
-        const isSelf = normalizeHost(d.name) === self;
-        if (isSelf) {
-          const inst = checkCliAvailable(agent)[0];
-          if (!inst) return [d.name, { answered: true, installed: false, signedIn: false, pickerEligible: false }];
-          const candidates = await collectRunCandidates(agent).catch(() => null);
-          if (!candidates) {
-            return [d.name, { answered: true, installed: true, signedIn: undefined, pickerEligible: undefined }];
-          }
-          const readiness = candidates.map((candidate) => readinessFromCandidate(candidate));
-          return [d.name, {
-            answered: true,
-            installed: true,
-            signedIn: readiness.some((candidate) => candidate.ready),
-            pickerEligible: readiness.some((candidate) => candidate.ready || isSignInRecoverable(candidate)),
-          }];
-        }
-        return [d.name, await probeRemoteReadiness(d, agent, usagePayload)];
-      }),
-    )
-    : [],
-  );
+  const snapshot = readPlacementSnapshot();
+  const cached = new Map<string, DevicePlacementSignal>();
+  const live: DeviceProfile[] = [];
+  for (const d of profiles) {
+    const signal = d === selfProfile || opts.force ? undefined : snapshotSignal(snapshot, d.name, agent, now);
+    if (signal) cached.set(d.name, signal);
+    else live.push(d);
+  }
+
+  const [{ stats, probes }, selfReadiness] = await Promise.all([
+    probeLive(live, selfProfile?.name, agent !== undefined, now),
+    agent && selfProfile ? localReadiness(agent) : Promise.resolve(undefined),
+  ]);
 
   const signals = new Map<string, DevicePlacementSignal>();
   for (const name of pool) {
     const d = lookup(name);
-    const s = d ? stats.get(d.name) : undefined;
-    const inst = d ? installed.get(d.name) : undefined;
+    if (!d) continue;
+    const fromSnapshot = cached.get(d.name);
+    if (fromSnapshot) {
+      signals.set(name, fromSnapshot);
+      continue;
+    }
+    const s = stats.get(d.name);
+    const probe = probes.get(d.name);
+    const inst = d === selfProfile ? selfReadiness : probe && agent ? readinessFromProbe(probe, agent) : undefined;
     if (!s && !inst) continue;
     signals.set(name, mergePlacementSignal(s, inst));
   }
-
-  cache.set(key, { at: now, signals });
   return signals;
+}
+
+export async function refreshPlacementSnapshot(pool: string[], now: number = Date.now()): Promise<number | null> {
+  if (!placementDemandIsRecent(readPlacementSnapshot(), now)) return null;
+  const self = normalizeHost(localMachineId());
+  const remote = resolvePoolProfiles(pool).profiles.filter((d) => normalizeHost(d.name) !== self);
+  const { probes } = await probeLive(remote, undefined, true);
+  return probes.size;
+}
+
+export async function confirmPlacementTarget(name: string): Promise<boolean> {
+  const host = await resolveHost(name).catch(() => null);
+  if (host && hostAnswers(host)) return true;
+  const deviceName = resolvePoolProfiles([name]).profiles[0]?.name ?? name;
+  writePlacementSnapshot({
+    readiness: { [deviceName]: { answered: false, timedOut: true, version: null, view: '', fetchedAt: Date.now() } },
+  });
+  return false;
 }

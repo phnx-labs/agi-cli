@@ -156,6 +156,20 @@ load probe timed out, and ranks with unknown load (`mergePlacementSignal`,
 every load probe past 2.5 s at once. Before this, that stall alone refused the
 whole fleet while every worker was signed in and answering.
 
+**Placement reads a snapshot first.** Every probe's result (load stats and the
+readiness probe's `agents view --json`, trimmed to the fields the gates read) is
+kept in `~/.agents/.cache/.fleet-stats.json`, and the daemon's `device-probe`
+tick re-probes the auto pool every 3 minutes while placement was used in the
+last 24 hours. `--device auto`, `agents devices pick` and teams placement use a
+device's entry when it is at most 5 minutes old (`PLACEMENT_SNAPSHOT_MAX_AGE_MS`,
+`devices/stats-cache.ts`) and probe live only the devices whose entry is missing
+or older, stats and readiness in parallel. A device `--device auto` picks from
+the snapshot is confirmed with one `ssh … true` (5 s budget, multiplexed so the dispatch reuses
+the connection); one that does not answer is marked and the next best is picked.
+When the snapshot leaves no eligible device, placement probes the whole pool live
+before refusing. `ensureHostReady` uses the same fresh entry after that one
+`ssh … true`, instead of its own 20 s `agents view` probe.
+
 Roles live in that device's tracked `devices/<name>/agents.yaml` `config.role`
 and travel with `agents repo push` / `pull`. Per-device files are
 conflict-free because each machine writes only its own folder; a role set
