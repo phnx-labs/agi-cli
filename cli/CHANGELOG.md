@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.32
+
+- **A session row lists every PR the session opened (#3989).** The session index records each PR a Claude or Codex session created (`pr_urls`, schema v53), not only the first, and live and ended rows read it as `prs`, so a long session whose PR creations scrolled out of its transcript tail still lists them all. Upgrading re-parses only the transcripts of sessions that already have a PR. Source: cli/src/lib/session/discover.ts, cli/src/lib/session/db.ts, cli/src/lib/session/active.ts
+
 ## 1.23.31
 
 - **A session row's `title` is the one name to show, and a fork says it is one.** `title` on `agents ps --json`, `agents ps watch --json` and `agents feed watch --json` (live and history rows) is never Claude's `<folder>-<n>` placeholder such as "agents-92" or "agents-1f", never the `[host/<device>]` fallback, and never an injected note, sub-agent hand-back or bare slash command; it falls through to the next usable name instead of going empty. A session started by `agents fork` carries `forkOf` (the source session id) and, until it has a name of its own, the source's name as its `title` instead of "fork of …". `agents fork` no longer launches an unnamed fork with `--name "fork of …"`, so the harness's own title takes over once it writes one; `--name` still names it. Source: `cli/src/lib/session/title.ts`, `cli/src/lib/session/fork.ts`, `cli/src/lib/session/active.ts`, `cli/src/lib/session/remote/watch.ts`, `cli/src/commands/fork.ts`.
