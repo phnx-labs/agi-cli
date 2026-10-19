@@ -1175,16 +1175,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.some(c => c.name === 'pr_urls')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_urls TEXT`);
   }
 
-  // v53 recorded every created PR; v54 counts a create only from a real `gh pr create` run.
   if (fromVersion < 54) reparseSessionsWithPr(db);
-
 }
 
-/** Drop the scan ledger of every session with a PR, so the next scan re-derives its PRs. */
 function reparseSessionsWithPr(db: Database.Database): void {
-  const withPr = db.prepare(`SELECT file_path FROM sessions WHERE pr_url IS NOT NULL AND file_path IS NOT NULL`).all() as Array<{ file_path: string }>;
+  const withPr = db.prepare(`SELECT file_path FROM sessions WHERE pr_url IS NOT NULL AND file_path IS NOT NULL AND mirror_synced_at IS NULL`).all() as Array<{ file_path: string }>;
   const dropLedger = db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`);
   for (const { file_path } of withPr) dropLedger.run(canonicalLedgerKey(file_path));
+  db.exec(`UPDATE sessions SET pr_url = NULL, pr_urls = NULL, pr_number = NULL WHERE mirror_synced_at IS NOT NULL AND pr_url IS NOT NULL`);
 }
 
 function backfillClaudeAccounts(

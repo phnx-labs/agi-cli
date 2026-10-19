@@ -339,6 +339,18 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
     expect(other.status).toBe('running');
   });
 
+  it('a memo written before pr/prs came only from a real gh pr create is dropped, not refilled', () => {
+    fs.writeFileSync(paths.imm, JSON.stringify({ version: 1, entries: { s9: { mtimeMs: 500, writtenAt: 1, fields: {
+      topic: 'Automations', pr: { url: 'https://github.com/acme/widget/pull/12', number: 12 },
+    } } } }));
+    const row = session({ sessionId: 's9', status: 'idle', lastActivityMs: 500 });
+    applyImmutableMemo(row);
+    expect(row.pr).toBeUndefined();
+    expect(row.topic).toBeUndefined();
+    writeImmutableMemo('s9', 500, { topic: 'Automations' }, 2);
+    expect(applyImmutableMemo(session({ sessionId: 's9', status: 'idle', lastActivityMs: 500 })).topic).toBe('Automations');
+  });
+
   it('applyImmutableMemo never overwrites a live-derived immutable field', () => {
     writeImmutableMemo('s4', 1, { topic: 'from-memo' }, 1);
     const live = session({
