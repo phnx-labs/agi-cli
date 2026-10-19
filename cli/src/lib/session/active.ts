@@ -344,7 +344,6 @@ export interface ActiveSession {
   todos?: TodoProgress;
   tail?: string[];
   pr?: SessionPr;
-  /** Every PR the session created, oldest first; set only when there is more than one. */
   prs?: DetectedPr[];
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;

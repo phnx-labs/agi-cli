@@ -981,8 +981,6 @@ describe('feed store', () => {
     expect(ask.status).toBe(0);
     const question = { kind: 'question', questions: [{ text: 'How should each kind post?', header: 'Split' }] };
     expect(listBlocks(feedDir)).toMatchObject([question]);
-    // Claude routes AskUserQuestion through its permission flow, and a later request for
-    // any tool must not shadow the question either.
     for (const tool_name of ['AskUserQuestion', 'Bash']) {
       const perm = run({ session_id: 'sess-split', hook_event_name: 'PermissionRequest', tool_name, tool_input: { command: 'ls' }, permission_suggestions: [], transcript_path: '/h/.claude/projects/p/sess-split.jsonl' });
       expect(perm.status).toBe(0);
