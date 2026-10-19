@@ -170,8 +170,6 @@ export async function toolLinearTasks(ctx: LeadToolContext, status: string, limi
   return formatLinearTasks(raw.issues ?? [], status, limit, Date.now());
 }
 
-/** Newest change first, cut to `limit`: `linear tasks --json` sorts by priority and returns
- *  every match, so "what moved today" would otherwise be buried in the oldest tickets. */
 export function formatLinearTasks(issues: LinearIssue[], status: string, limit: number, nowMs: number): string {
   if (issues.length === 0) return `No ${status} tickets.`;
   const when = (i: LinearIssue) => (i.updatedAt ? Date.parse(i.updatedAt) || 0 : 0);
