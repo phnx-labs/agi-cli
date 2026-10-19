@@ -147,8 +147,10 @@ agents lead ask ──unix socket (0600)──▶ host (agents __lead-host <proj
 The first message of a session carries the brief: the project, its Linear project and
 goals, the repository, the rules, a digest of the project's `AGENTS.md` (title, first
 paragraph, section names), the project's live sessions and a fleet count from the feed,
-open tickets (`linear tasks --project … --status open --json`), open PRs
-(`gh api repos/<repo>/pulls`, REST), and `memory.md`. A ticket or PR source that fails is
+open tickets (`linear tasks --project … --status open --json`), the 40 most recently
+updated PRs (`gh api repos/<repo>/pulls?state=all&sort=updated`, REST) split into open ones
+with their last update and "Merged or closed lately" with when each was merged or closed,
+and `memory.md`. Sessions carry when they started and were last active. A ticket or PR source that fails is
 named in the brief as unavailable, never silently dropped.
 
 Every later message starts with `[State delta]`: sessions of this project that started,
@@ -164,10 +166,10 @@ other program is denied. Each tool has one fixed shape:
 
 | Tool | Does |
 |---|---|
-| `roster [--project <p>]` | Live sessions from the host's feed snapshot (never a fleet `agents ps`) plus a fleet count. The only way the Lead sees sessions. |
+| `roster [--project <p>]` | Live sessions from the host's feed snapshot (never a fleet `agents ps`), each with when it started and was last active, plus a fleet count. The only way the Lead sees sessions. |
 | `attention` | Every open ask across the fleet from the host's feed (the `attention` items of `feed watch --json`, any project): one line each with the attention key, session title, host, project, age, the question (cut to 240 characters) and the choice ids and labels. No SSH of its own; says so when the feed is not connected yet. |
-| `prs list [--repo <owner/repo>]` | `agents projects prs list <project> --json`, one line per open PR: `repo#number [draft] title`. |
-| `linear tasks [--status …] [--limit n]`, `linear view <ID>`, `linear create --title <t> [--description <d>]` | Reads, and creation in the project's Linear project. |
+| `prs list [--repo <owner/repo>]` | `agents projects prs list <project> --json`, one line per open PR: `repo#number [draft] title · updated 3h ago`. |
+| `linear tasks [--status …] [--limit n]`, `linear view <ID>`, `linear create --title <t> [--description <d>]` | Reads, and creation in the project's Linear project. `tasks` lists the most recently updated first, each with `· updated 2d ago`, cut to `--limit` with a count of the older ones. |
 | `answer --key <key> (--choice <id> \| --text <answer>)` | **Held.** The key must be open in the feed and the choice one of its ids; the text is one line and may not start with `/`, `!` or `#`. Confirm runs `agents feed answer <key> --choice\|--text <value> --json`. |
 | `send --session <id> -- <text>` | **Held.** Confirm runs `agents send --channel session --to <id> --text "[Lead] <text>"` to a live session of this project. The text must be one line; control characters are stripped; text whose first non-space character is a slash, a bang or a hash is refused; and what is typed always starts with `[Lead] `, so the session never sees a slash command, a shell escape or a memory note. |
 | `start --agent <a> -- <task>` | **Held.** A task that starts with `-` is refused (it would be read as a flag). Confirm starts `agents run <a> "<task>" --headless -P <project> --mode edit`, detached. |

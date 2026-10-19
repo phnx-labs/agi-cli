@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  LeadToolError, answerArgv, appendNote, assertHeldArgv, assertSendText, dispatchPrompt, editorContextLines, leadToolContext,
+  LeadToolError, formatLinearTasks, answerArgv, appendNote, assertHeldArgv, assertSendText, dispatchPrompt, editorContextLines, leadToolContext,
   linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, parseEditorContext, prArgv, runArgv, sendArgv, toolRemember,
 } from './tools.js';
 import { ensureLeadDir } from './paths.js';
@@ -118,5 +118,21 @@ describe('Lead tool shapes', () => {
     expect(() => parseEditorContext('{"front":{"sessionId":"a b"}}')).toThrow(/session id/);
     expect(() => parseEditorContext('{"cmd":"rm"}')).toThrow(/unknown field 'cmd'/);
     expect(() => parseEditorContext('{"tabs":{}}')).toThrow(/array/);
+  });
+});
+
+describe('Lead read tools', () => {
+  it('linear tasks lists the most recently updated first, with each one\'s age, cut to the limit', () => {
+    const now = Date.parse('2026-10-19T12:00:00.000Z');
+    const issues = [
+      { identifier: 'PHNX-1', title: 'Old', state: { name: 'Done' }, updatedAt: '2026-08-27T11:27:58.570Z' },
+      { identifier: 'PHNX-2', title: 'Today', state: { name: 'Done' }, updatedAt: '2026-10-19T09:00:00.000Z' },
+      { identifier: 'PHNX-3', title: 'Yesterday', updatedAt: '2026-10-18T10:00:00.000Z' },
+      { identifier: 'PHNX-4', title: 'Undated' },
+    ];
+    expect(formatLinearTasks(issues, 'done', 2, now)).toBe(
+      'PHNX-2 Today (Done) · updated 3h ago\nPHNX-3 Yesterday · updated 26h ago\n(2 older done tickets not shown)');
+    expect(formatLinearTasks(issues, 'done', 50, now).split('\n').at(-1)).toBe('PHNX-4 Undated');
+    expect(formatLinearTasks([], 'open', 20, now)).toBe('No open tickets.');
   });
 });
