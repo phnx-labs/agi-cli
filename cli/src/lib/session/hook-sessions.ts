@@ -4,19 +4,17 @@ import { execFileSync } from 'node:child_process';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { hostProcessView } from './process-view.js';
 import path from 'path';
-import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
-import { listPidSessionEntries, pidSessionEntryMatchesLiveProcess, readLivePidSessionEntry, readPidSessionEntry, type PidSessionEntry } from './pid-registry.js';
+import { getTerminalsDir } from '../state.js';
+import {
+  listPidSessionEntries, parseSessionRecord, pidSessionEntryMatchesLiveProcess, readLivePidSessionEntry, readPidSessionEntry,
+  readStateSessionRecord, RECORD_SKEW_MS, stateSessionRecordPath, type PidSessionEntry, type SessionStartRecord,
+} from './pid-registry.js';
 
-export interface HookSessionRecord {
-  session_id: string;
+export interface HookSessionRecord extends SessionStartRecord {
   agent?: string;
-  cwd?: string;
-  pid: number;
   launch_id?: string;
   terminal_id?: string;
-  ts?: number;
   completed?: boolean;
-  verdict?: unknown;
 }
 
 export interface DoneVerdict {
@@ -25,7 +23,6 @@ export interface DoneVerdict {
   at: string;
 }
 
-const RECORD_SKEW_MS = 5_000;
 const VERDICT_STATES = new Set(['done', 'open', 'unchecked']);
 
 export interface HookSessionIndex {
@@ -38,29 +35,6 @@ function hookSessionsDir(): string {
   return path.join(getTerminalsDir(), 'sessions');
 }
 
-function stateSessionRecordPath(pid: number): string {
-  return path.join(getRuntimeStateDir(), 'sessions', `${pid}.json`);
-}
-
-export function readStateSessionRecord(
-  pid: number,
-  startedAtMs?: number,
-): HookSessionRecord | undefined {
-
-  if (!pid || pid < 1) return undefined;
-  let rec: HookSessionRecord | undefined;
-  try {
-    rec = parseRecord(fs.readFileSync(stateSessionRecordPath(pid), 'utf8'));
-  } catch {
-    return undefined;
-  }
-  if (!rec) return undefined;
-  if (startedAtMs !== undefined && typeof rec.ts === 'number') {
-    if (rec.ts * 1000 < startedAtMs - RECORD_SKEW_MS) return undefined;
-  }
-  return rec;
-}
-
 export function readDoneVerdict(pid: number, sessionId: string, processStartedAtMs?: number): DoneVerdict | undefined {
   const rec = readStateSessionRecord(pid, processStartedAtMs);
   if (!rec || rec.pid !== pid || rec.session_id !== sessionId) return undefined;
@@ -70,17 +44,6 @@ export function readDoneVerdict(pid: number, sessionId: string, processStartedAt
   if (processStartedAtMs !== undefined && v.at < processStartedAtMs - RECORD_SKEW_MS) return undefined;
   const gaps = Array.isArray(v.gaps) ? v.gaps.filter((g): g is string => typeof g === 'string' && g.length > 0) : [];
   return { state: v.state as DoneVerdict['state'], gaps, at: new Date(v.at).toISOString() };
-}
-
-function parseRecord(raw: string): HookSessionRecord | undefined {
-  try {
-    const o = JSON.parse(raw);
-    if (o && typeof o === 'object' && typeof o.session_id === 'string' && o.session_id) {
-      return o as HookSessionRecord;
-    }
-  } catch {
-  }
-  return undefined;
 }
 
 function keepNewest(map: Map<string | number, HookSessionRecord>, key: string | number, rec: HookSessionRecord): void {
@@ -113,7 +76,7 @@ function liveUnregisteredHookRecords(): HookSessionRecord[] {
         if (!fs.existsSync(stateSessionRecordPath(pid))) continue;
         const before = identity(pid);
         if (!before) continue;
-        const rec = readStateSessionRecord(pid);
+        const rec = readStateSessionRecord<HookSessionRecord>(pid);
         const startedSeconds = bootSeconds + Number(before) / clockTicks;
         if (!rec || rec.pid !== pid || typeof rec.ts !== 'number'
           || rec.ts < Math.floor(startedSeconds) || rec.ts > Date.now() / 1000) continue;
@@ -171,7 +134,7 @@ export function loadHookSessionIndex(): HookSessionIndex {
   for (const f of files) {
     let rec: HookSessionRecord | undefined;
     try {
-      rec = parseRecord(fs.readFileSync(path.join(hookSessionsDir(), f), 'utf8'));
+      rec = parseSessionRecord<HookSessionRecord>(fs.readFileSync(path.join(hookSessionsDir(), f), 'utf8'));
     } catch {
     }
     if (!rec) continue;

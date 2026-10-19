@@ -3,7 +3,7 @@ import { spanSync } from '../daemon/diagnostics.js';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { hostProcessView, writerProcessView } from './process-view.js';
-import { getTerminalsDir } from '../state.js';
+import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
 import { atomicWriteFileSync, withFileLock } from '../fs-atomic.js';
 import type { LaunchOrigin } from '../launch-identity.js';
 
@@ -22,6 +22,55 @@ export interface PidSessionEntry {
   machine?: string;
   startedAtMs: number;
   processIdentity?: { bootId?: string; pidNamespace?: string; initStartTicks?: string; startTicks?: string; startTime?: string };
+}
+
+export interface SessionStartRecord {
+  session_id: string;
+  pid: number;
+  cwd?: string;
+  ts?: number;
+  verdict?: unknown;
+}
+
+export const RECORD_SKEW_MS = 5_000;
+
+export function parseSessionRecord<T extends SessionStartRecord = SessionStartRecord>(raw: string): T | undefined {
+  try {
+    const o = JSON.parse(raw);
+    if (o && typeof o === 'object' && typeof o.session_id === 'string' && o.session_id) return o as T;
+  } catch {
+  }
+  return undefined;
+}
+
+export function stateSessionRecordPath(pid: number): string {
+  return path.join(getRuntimeStateDir(), 'sessions', `${pid}.json`);
+}
+
+// state/sessions/<pid>.json: the session the process <pid> itself reported at SessionStart.
+export function readStateSessionRecord<T extends SessionStartRecord = SessionStartRecord>(pid: number, startedAtMs?: number): T | undefined {
+  if (!pid || pid < 1) return undefined;
+  let rec: T | undefined;
+  try {
+    rec = parseSessionRecord<T>(fs.readFileSync(stateSessionRecordPath(pid), 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (!rec) return undefined;
+  if (startedAtMs !== undefined && typeof rec.ts === 'number') {
+    if (rec.ts * 1000 < startedAtMs - RECORD_SKEW_MS) return undefined;
+  }
+  return rec;
+}
+
+// The deployed SessionStart hook walks up from its agent to the nearest by-pid file, so an
+// agent's own `claude -p` child used to rewrite the parent's sessionId and claim its tab.
+// Only the process itself writes state/sessions/<pid>.json, so that session wins.
+function ownSession(entry: PidSessionEntry): PidSessionEntry {
+  const own = readStateSessionRecord(entry.pid, entry.startedAtMs);
+  return own && own.pid === entry.pid && entry.sessionId && own.session_id !== entry.sessionId
+    ? { ...entry, sessionId: own.session_id }
+    : entry;
 }
 
 function linuxStartTicks(pid: number): string | undefined {
@@ -197,7 +246,7 @@ export function readPidSessionEntry(pid: number): PidSessionEntry | undefined {
   try {
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && parsed.pid === pid) {
-      return restoreOwnership(parsed as PidSessionEntry);
+      return ownSession(restoreOwnership(parsed as PidSessionEntry));
     }
   } catch {
   }
@@ -235,7 +284,7 @@ export function listPidSessionEntries(): PidSessionEntry[] {
     try {
       const parsed = JSON.parse(fs.readFileSync(path.join(pidRegistryDir(), f), 'utf8'));
       if (parsed && typeof parsed === 'object' && typeof parsed.pid === 'number') {
-        out.push(restoreOwnership(parsed as PidSessionEntry));
+        out.push(ownSession(restoreOwnership(parsed as PidSessionEntry)));
       }
     } catch {
     }

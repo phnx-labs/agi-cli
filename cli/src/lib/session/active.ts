@@ -16,11 +16,12 @@ import {
   readLivePidSessionEntry as readPidSessionEntry,
   listPidSessionEntries,
   prunePidSessionRegistry,
+  readStateSessionRecord,
   sessionIdFromLivePid,
   type PidSessionEntry,
 } from './pid-registry.js';
 import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
-import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, readDoneVerdict, type DoneVerdict, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionRecord, readDoneVerdict, type DoneVerdict, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { cleanDisplayTitle, isPlaceholderSessionName, resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';

@@ -4,9 +4,9 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
-import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readStateSessionRecord, readDoneVerdict } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readDoneVerdict } from './hook-sessions.js';
 import { foldDoneVerdict, type ActiveSession } from './active.js';
-import { writePidSessionEntry } from './pid-registry.js';
+import { readStateSessionRecord, writePidSessionEntry } from './pid-registry.js';
 import { hostProcessView } from './process-view.js';
 
 const P1 = 999_100_001;
@@ -312,4 +312,51 @@ describe('readDoneVerdict (the Stop hook verdict merged into state/sessions/<pid
     expect(rows[0]!.doneVerdict).toEqual({ state: 'done', gaps: [], at: '2026-10-19T05:02:01.000Z' });
     expect(rows[1]!.doneVerdict).toBeUndefined();
   });
+});
+
+it.skipIf(process.platform !== 'linux')('a headless run the tab agent starts never takes over the tab agent\'s session', async () => {
+  const { spawn } = await import('node:child_process');
+  const { readLivePidSessionEntry, liveSessionProcesses } = await import('./pid-registry.js');
+  const fixture = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'nested-headless-claim.json'), 'utf8'));
+  const { tab, nested } = fixture;
+  const previousStateDir = process.env.AGENTS_STATE_DIR;
+  process.env.AGENTS_STATE_DIR = path.join(process.env.HOME!, '.agents', '.cache', 'state');
+  const hook = process.env.AGENTS_SESSION_IDENTITY_TEST_HOOK || fileURLToPath(new URL('./testdata/deployed-session-identity.sh', import.meta.url));
+  // The tab agent reports its own SessionStart, then runs a nested `claude -p` that reports another.
+  const program = `const {spawnSync}=require('node:child_process');
+    const [hook, own, ownCwd, child, childCwd] = process.argv.slice(1);
+    const run = (sid, cwd) => spawnSync('bash', [hook], { input: JSON.stringify({ session_id: sid, cwd }), encoding: 'utf8' });
+    const go = () => { run(own, ownCwd);
+      spawnSync(process.execPath, ['-e', 'require("node:child_process").spawnSync("bash",[process.argv[1]],{input:process.argv[2],encoding:"utf8"})',
+        hook, JSON.stringify({ session_id: child, cwd: childCwd })], { encoding: 'utf8' });
+      process.stdout.write('ready\\n'); process.stdin.resume(); };
+    process.stdin.once('data', go);`;
+  const agent = spawn(process.execPath, ['-e', program, hook, tab.sessionId, tab.cwd, nested.sessionId, nested.cwd], {
+    stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, AGENT_TERMINAL_ID: tab.terminalId, AGENT_LAUNCH_ID: tab.launchId, AGENTS_RUNTIME: 'terminal' },
+  });
+  const pid = agent.pid!;
+  const registryDir = path.join(getTerminalsDir(), 'by-pid');
+  const before = new Set(fs.existsSync(registryDir) ? fs.readdirSync(registryDir) : []);
+  try {
+    writePidSessionEntry({ pid, agent: 'claude', sessionId: tab.sessionId, cwd: tab.cwd, launchId: tab.launchId, terminalId: tab.terminalId, startedAtMs: Date.now() });
+    const ready = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('tab agent did not become ready')), 10_000);
+      agent.once('error', error => { clearTimeout(timer); reject(error); });
+      agent.stdout.once('data', () => { clearTimeout(timer); resolve(); });
+    });
+    agent.stdin.write('go\n');
+    await ready;
+    expect(readStateSessionRecord(pid)?.session_id).toBe(tab.sessionId);
+    expect(readLivePidSessionEntry(pid)?.sessionId).toBe(tab.sessionId);
+    const index = loadHookSessionIndex();
+    expect(index.byTerminalId.get(tab.terminalId)?.session_id).toBe(tab.sessionId);
+    expect(index.byLaunchId.get(tab.launchId)?.session_id).toBe(tab.sessionId);
+    expect(liveSessionProcesses(nested.sessionId).map(e => e.pid)).not.toContain(pid);
+  } finally {
+    agent.kill();
+    if (fs.existsSync(registryDir)) for (const name of fs.readdirSync(registryDir)) if (!before.has(name)) fs.rmSync(path.join(registryDir, name), { force: true });
+    fs.rmSync(path.join(getRuntimeStateDir(), 'sessions', `${pid}.json`), { force: true });
+    if (previousStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
+    else process.env.AGENTS_STATE_DIR = previousStateDir;
+  }
 });

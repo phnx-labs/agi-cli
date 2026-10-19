@@ -42,7 +42,8 @@ for (let i = 0; i < STATE_SEED_COUNT; i++) {
   fs.writeFileSync(path.join(STATE_SESSIONS_DIR, `${pid}.json`), JSON.stringify(record), 'utf8');
 }
 
-const { loadHookSessionIndex, readStateSessionRecord, resolveHookSessionRecord, resolveHookSessionId } = await import('./hook-sessions.js');
+const { loadHookSessionIndex, resolveHookSessionRecord, resolveHookSessionId } = await import('./hook-sessions.js');
+const { readStateSessionRecord } = await import('./pid-registry.js');
 
 const index = loadHookSessionIndex();
 const midTerminalsPid = seededTerminalsPids[Math.floor(TERMINALS_SEED_COUNT / 2)];
@@ -57,7 +58,7 @@ describe(`loadHookSessionIndex — terminals/sessions/ scan (hook-sessions.ts:12
   });
 });
 
-describe(`readStateSessionRecord — targeted single-pid read (hook-sessions.ts:81, state/sessions/ seeded at THIS box's REAL measured scale: ${STATE_SEED_COUNT} files)`, () => {
+describe(`readStateSessionRecord — targeted single-pid read (pid-registry.ts, state/sessions/ seeded at THIS box's REAL measured scale: ${STATE_SEED_COUNT} files)`, () => {
   bench('HIT — pid present, no staleness check', () => {
     readStateSessionRecord(midStatePid);
   });

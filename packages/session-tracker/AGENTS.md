@@ -47,6 +47,13 @@ tests/scenarios/     cold-spawn (50×, ≥99%) + kill-restart (20×, stale-entry
   authoritative). Same pid→id data, two writers — the CLI reads `by-pid/`, the
   extension reads `sessions/`. The full picture is in
   [`cli/docs/architecture.md`](../../cli/docs/architecture.md).
+- **A by-pid `sessionId` yields to the process's own SessionStart record.** The deployed
+  identity hook walks up from its agent to the nearest `by-pid/` file, so a `claude -p`
+  an agent ran through its shell rewrote the parent's `sessionId` and claimed its tab
+  (yosemite-s0, 2026-10-19). Only the process itself writes
+  `~/.agents/.cache/state/sessions/<pid>.json`, so `readPidSessionEntry` and
+  `listPidSessionEntries` (`cli/src/lib/session/pid-registry.ts`) take that record's session
+  when the two disagree.
 - **Files are keyed by the agent PID** (`<pid>.json`). Lookups from a terminal walk
   the descendant-pid tree from the shell pid to find the agent pid.
 - **Stale entries** — the spawn-time id goes stale after the user exits + reruns in
