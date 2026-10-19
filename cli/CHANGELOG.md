@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.37
+
+- **A headless run an agent starts no longer takes over that agent's tab.** When a Claude session in an editor tab ran `claude -p` through its shell, the SessionStart hook walked up to the tab agent's `~/.agents/.cache/terminals/by-pid/<pid>.json` and rewrote its session id, so `agents ps`, the feed and the editor showed the tab as the one-second headless run (observed on yosemite-s0 for a zion tab, 2026-10-19). A by-pid entry now yields to the session its own process recorded at SessionStart (`state/sessions/<pid>.json`), which only that process writes, so the tab, its launch id and `agents message` resolve to the real session again, including for entries an older hook already rewrote. Source: cli/src/lib/session/pid-registry.ts, cli/src/lib/session/hook-sessions.ts
+
 ## 1.23.36
 
 - **The Lead can act on the fleet, and every action waits for your Confirm.** `agents lead tool attention` lists every open ask across the fleet from the host's live feed, and `answer --key <key> (--choice <id> | --text <answer>)` answers one. `send`, `start` and `dispatch` now queue instead of acting, as `stop` already did, and the new `prs list` reads the project's open PRs while `prs merge|comment|ready|rerun|close` queue one action on a PR. A queued action is a confirm token holding the exact `agents` argv; `agents lead confirm <token>` checks it against its fixed shape and runs it once (a dispatch moves its ticket to In Progress only then). A Lead session briefed before an upgrade that changed its rules starts fresh from the brief on its next turn, so it knows the new tools. The `confirm` event is now `{type, token, action, label, detail?, sessionId?}` with `action` one of `stop`, `answer`, `send`, `start`, `dispatch`, `pr`. Source: cli/src/lib/lead/act.ts, cli/src/lib/lead/tools.ts, cli/src/lib/lead/shapes.ts, cli/src/lib/lead/host.ts
