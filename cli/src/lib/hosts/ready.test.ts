@@ -13,8 +13,11 @@ import {
   buildRemoteVersionCommand,
   buildBootstrapCommand,
   buildReadyProbeCommand,
+  compactReadyView,
+  ensureHostReady,
   type ReadyProbe,
 } from './ready.js';
+import { writePlacementSnapshot } from '../devices/stats-cache.js';
 import { decodePowershell } from './remote-cmd.js';
 import { decodeRenderedPowershell } from './remote-cmd.test-fixture.js';
 
@@ -336,5 +339,51 @@ describe('ready commands — Windows branch speaks PowerShell', () => {
     );
     expect(script).not.toContain('tail -3');
     expect(script).not.toContain('[ ! -d');
+  });
+});
+
+describe('compactReadyView — the placement snapshot keeps only what the readiness gates read', () => {
+  const now = Date.parse('2026-10-19T12:00:00Z');
+  const full = JSON.stringify([
+    {
+      agent: 'claude',
+      runReady: { ready: false, reason: 'all rate_limited', accounts: [{ name: 'a@x.com', ready: false, reason: 'rate_limited' }] },
+      accounts: [{ name: 'a@x.com', email: 'a@x.com' }],
+      harnesses: [{ id: 'claude', path: '/opt/claude' }],
+      versions: [
+        { version: '2.1.261', signedIn: true, launchable: true, authVerdict: null, authCheckedAt: null, usageStatus: 'rate_limited', usageCapturedAt: '2026-10-19T11:59:00Z', email: 'a@x.com', windows: [{ key: 'week', usedPercent: 100 }], path: '/opt/claude/2.1.261' },
+        { version: '2.1.250', signedIn: false, launchable: false, email: null, windows: [] },
+      ],
+    },
+    { agent: 'codex', versions: [{ version: '0.50.0', signedIn: true, launchable: true, usageStatus: 'available', usageCapturedAt: '2026-10-19T11:00:00Z' }] },
+  ]);
+
+  it('drops emails, paths and usage windows but every gate answers the same', () => {
+    const compact = compactReadyView(full);
+    expect(compact.length).toBeLessThan(full.length);
+    expect(compact).not.toContain('a@x.com');
+    expect(compact).not.toContain('/opt/claude');
+    for (const agent of ['claude', 'codex', 'grok']) {
+      expect(viewHasAgent(compact, agent)).toBe(viewHasAgent(full, agent));
+      expect(viewAgentAccountEligibility(compact, agent, now)).toEqual(viewAgentAccountEligibility(full, agent, now));
+      expect(viewAgentVersions(compact, agent)).toEqual(viewAgentVersions(full, agent));
+    }
+    const pinned = { agent: 'claude', version: '2.1.261' };
+    expect(evaluateHostAgentInstall(compact, pinned, 'm5')).toEqual(evaluateHostAgentInstall(full, pinned, 'm5'));
+  });
+
+  it('passes an old CLI\'s plain `agents list` text through untouched', () => {
+    expect(compactReadyView('claude 2.1.261 (default)\ncodex 0.50.0')).toBe('claude 2.1.261 (default)\ncodex 0.50.0');
+  });
+});
+
+describe('ensureHostReady over a fresh placement snapshot', () => {
+  it('still refuses a host that does not answer, however fresh its snapshot entry is', () => {
+    const view = JSON.stringify([{ agent: 'claude', versions: [{ version: '2.1.261' }] }]);
+    writePlacementSnapshot({ readiness: { 'gone-box': { answered: true, version: '1.23.38', view, fetchedAt: Date.now() } } });
+    expect(() => ensureHostReady(
+      { name: 'gone-box', provider: 'devices', source: 'inline', address: 'gone-box.probe-must-fail.invalid' },
+      { agent: 'claude' },
+    )).toThrow(/not reachable|did not respond/);
   });
 });

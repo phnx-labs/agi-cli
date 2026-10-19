@@ -9,6 +9,7 @@ import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershell
 import { resolveRemoteOsSync } from './remote-os.js';
 import { AUTH_PROBE_MAX_AGE_MS, isDeadVerdict, type AuthVerdict } from '../auth-health.js';
 import { USAGE_STALE_REFUSAL_MAX_AGE_MS } from '../accounting/rotate.js';
+import { freshReadyProbe, readPlacementSnapshot } from '../devices/stats-cache.js';
 
 export function localCliVersion(): string | null {
   let dir = path.dirname(fileURLToPath(import.meta.url));
@@ -95,6 +96,39 @@ export function readyProbe(target: string, os?: string, extraSshArgs?: string[])
   const r = sshExec(target, buildReadyProbeCommand(os), { timeoutMs: 20000, multiplex: false, extraSshArgs });
   if (r.timedOut) return { reachable: false, version: null, view: '', timedOut: true };
   return parseReadyProbe(r.stdout);
+}
+
+export const HOST_CONFIRM_TIMEOUT_MS = 5_000;
+
+export function hostAnswers(host: Host, timeoutMs: number = HOST_CONFIRM_TIMEOUT_MS): boolean {
+  return sshExec(sshTargetFor(host), 'true', { timeoutMs, extraSshArgs: hostIdentityArgs(host) }).code === 0;
+}
+
+export function compactReadyView(view: string): string {
+  let rows: unknown;
+  try {
+    rows = JSON.parse(view);
+  } catch {
+    return view;
+  }
+  if (!Array.isArray(rows)) return view;
+  return JSON.stringify(rows.map((row: Record<string, any>) => ({
+    agent: row?.agent,
+    runReady: row?.runReady && {
+      ready: row.runReady.ready,
+      reason: row.runReady.reason,
+      accounts: (row.runReady.accounts ?? []).map((a: Record<string, unknown>) => ({ ready: a.ready, reason: a.reason })),
+    },
+    versions: (row?.versions ?? []).map((v: Record<string, unknown>) => ({
+      version: v.version,
+      signedIn: v.signedIn,
+      launchable: v.launchable,
+      authVerdict: v.authVerdict,
+      authCheckedAt: v.authCheckedAt,
+      usageStatus: v.usageStatus,
+      usageCapturedAt: v.usageCapturedAt,
+    })),
+  })));
 }
 
 export function parseReadyProbe(stdout: string): ReadyProbe {
@@ -286,9 +320,16 @@ export function evaluateHostAgentInstall(
   return { warnings };
 }
 
+function snapshotReadyProbe(host: Host): ReadyProbe | undefined {
+  const entry = freshReadyProbe(readPlacementSnapshot(), host.name);
+  if (!entry?.answered || !entry.version || !hostAnswers(host)) return undefined;
+  return { reachable: true, version: entry.version, view: entry.view };
+}
+
 export function ensureHostReady(host: Host, opts: EnsureReadyOptions): { warnings: string[] } {
   const target = sshTargetFor(host);
-  const probe = readyProbe(target, host.os ?? resolveRemoteOsSync(host.name), hostIdentityArgs(host));
+  const probe = snapshotReadyProbe(host)
+    ?? readyProbe(target, host.os ?? resolveRemoteOsSync(host.name), hostIdentityArgs(host));
   if (probe.timedOut) {
     throw new Error(
       `Host "${host.name}" (${target}) did not respond in time — the SSH probe timed out after 20 seconds. ` +

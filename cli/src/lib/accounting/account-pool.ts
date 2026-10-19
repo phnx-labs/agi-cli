@@ -21,6 +21,14 @@ interface RegistryAccountInput {
   secretPresent: boolean;
 }
 
+export function registryAccountServesHarness(
+  record: Pick<RegistryAccountRecord, 'provider' | 'auth'>,
+  agent: AgentId,
+  includeKeyed = false,
+): boolean {
+  return (record.auth === 'setup-token' || includeKeyed) && providerAuthenticatesHarness(record.provider, record.auth, agent);
+}
+
 export function registryPoolCandidates(
   records: RegistryAccountRecord[],
   agent: AgentId,
@@ -28,8 +36,7 @@ export function registryPoolCandidates(
 ): RegistryAccountInput[] {
   const out: RegistryAccountInput[] = [];
   for (const r of records) {
-    if (r.auth !== 'setup-token' && !includeKeyed) continue;
-    if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
+    if (!registryAccountServesHarness(r, agent, includeKeyed)) continue;
     out.push({
       id: r.id,
       accountKey: `${agent}:name=${r.name}`,

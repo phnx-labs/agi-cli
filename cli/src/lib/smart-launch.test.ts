@@ -214,6 +214,47 @@ describe('resolveDeviceAuto', () => {
     expect(['m1', 'm6']).toContain(plan.host);
   });
 
+  it('confirms a snapshot pick and moves on when it no longer answers', async () => {
+    const confirmed: string[] = [];
+    const plan = await resolveDeviceAuto('claude', {
+      localMachine: 'local',
+      eligibleHosts: ['gone', 'next'],
+      probe: async () => new Map([
+        ['gone', { reachable: true, loadPercent: 1, headroom: 'idle', installed: true, signedIn: true, fromSnapshot: true }],
+        ['next', { reachable: true, loadPercent: 40, headroom: 'light', installed: true, signedIn: true, fromSnapshot: true }],
+      ] as const),
+      confirm: async (key) => { confirmed.push(key); return key !== 'gone'; },
+    });
+    expect(confirmed).toEqual(['gone', 'next']);
+    expect(plan.host).toBe('next');
+  });
+
+  it('never dials to confirm a device it just probed live', async () => {
+    const plan = await resolveDeviceAuto('claude', {
+      localMachine: 'local',
+      eligibleHosts: ['live'],
+      probe: async () => new Map([['live', { reachable: true, headroom: 'idle', installed: true, signedIn: true }]] as const),
+      confirm: async () => { throw new Error('confirm must not run for a live signal'); },
+    });
+    expect(plan.host).toBe('live');
+  });
+
+  it('re-probes live before refusing when only the snapshot says no device is ready', async () => {
+    const forces: boolean[] = [];
+    const plan = await resolveDeviceAuto('claude', {
+      localMachine: 'local',
+      eligibleHosts: ['m5'],
+      probe: async (_pool, _agent, opts) => {
+        forces.push(opts?.force === true);
+        return new Map([['m5', opts?.force
+          ? { reachable: true, headroom: 'idle', installed: true, signedIn: true }
+          : { reachable: true, headroom: 'idle', installed: true, signedIn: false, fromSnapshot: true }]] as const);
+      },
+    });
+    expect(forces).toEqual([false, true]);
+    expect(plan.host).toBe('m5');
+  });
+
   it('fails loud when live probing cannot evaluate placement', async () => {
     await expect(resolveDeviceAuto('codex', {
       localMachine: 'local',
