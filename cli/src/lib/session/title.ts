@@ -92,7 +92,7 @@ export function sessionHeadline<
 }
 
 const HOST_FALLBACK_LABEL_RE = /^\[host\/[^\]]+\]$/;
-const PLACEHOLDER_SUFFIX_RE = /^(?:\d+|[0-9a-f]{1,4})$/i;
+const PLACEHOLDER_SUFFIX_RE = /^(?:\d+|(?=[0-9a-f]*\d)[0-9a-f]{1,4})$/i;
 
 export function isPlaceholderSessionName(name: string | null | undefined, cwd?: string | null): boolean {
   const n = name?.trim();

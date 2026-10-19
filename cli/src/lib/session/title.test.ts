@@ -10,6 +10,8 @@ import {
   startedAsFromUserTurn,
   selectSessionsNeedingTitle,
   sessionHeadline,
+  isPlaceholderSessionName,
+  cleanDisplayTitle,
   sessionTitleSourceKey,
 } from './title.js';
 import type { SessionTitleCandidateRow } from './db.js';
@@ -207,5 +209,28 @@ describe('startedAsFromUserTurn (PHNX-4387)', () => {
     const long = startedAsFromUserTurn('x'.repeat(1000))!;
     expect(long.length).toBe(280);
     expect(long.endsWith('…')).toBe(true);
+  });
+});
+
+describe('isPlaceholderSessionName / cleanDisplayTitle — the row title rules', () => {
+  it("matches Claude's <folder>-<n> name on the row's own folder, decimal or hex with a digit", () => {
+    expect(isPlaceholderSessionName('agents-92', '/home/u/agents')).toBe(true);
+    expect(isPlaceholderSessionName('agents-1f', '/home/u/agents/')).toBe(true);
+    expect(isPlaceholderSessionName('agents-add', '/home/u/agents'), 'a word is a name').toBe(false);
+    expect(isPlaceholderSessionName('RUSH-2058', '/home/u/agents')).toBe(false);
+    expect(isPlaceholderSessionName('agents-92', undefined)).toBe(false);
+    expect(isPlaceholderSessionName('[host/mark-1]')).toBe(true);
+  });
+
+  it('sessionHeadline skips a placeholder label for the next rung', () => {
+    expect(sessionHeadline({ label: 'agents-05', generatedTitle: null, topic: 'apply the fix', cwd: '/home/u/agents' })).toBe('apply the fix');
+  });
+
+  it('drops envelopes, notes, hand-backs and bare slash commands, keeps words', () => {
+    expect(cleanDisplayTitle('<system-reminder>x</system-reminder>')).toBeUndefined();
+    expect(cleanDisplayTitle('[subagent hand-back] done')).toBeUndefined();
+    expect(cleanDisplayTitle('/sessions:continue')).toBeUndefined();
+    expect(cleanDisplayTitle('Another claude session sent a message: <agent-message>Fix `the` [docs](http://x)</agent-message>')).toBe('Fix the docs');
+    expect(cleanDisplayTitle('rename snake_case keys')).toBe('rename snake_case keys');
   });
 });
