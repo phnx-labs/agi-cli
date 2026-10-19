@@ -3,13 +3,13 @@ import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import type { ProjectDef } from '../projects.js';
-import { formatRosterRow, type RosterSnapshot } from './roster.js';
+import { ago, formatRosterRow, type RosterSnapshot } from './roster.js';
 
 export const BRIEF_FETCH_TIMEOUT_MS = 8_000;
 const DIGEST_MAX_CHARS = 2_500;
 
 export interface BriefTicket { id: string; title: string; state?: string; url?: string }
-export interface BriefPr { number: number; title: string; url: string; draft: boolean; open: boolean }
+export interface BriefPr { number: number; title: string; url: string; draft: boolean; open: boolean; updatedAt?: string; mergedAt?: string; closedAt?: string }
 
 export interface BriefInputs {
   project: string;
@@ -25,10 +25,10 @@ export interface BriefInputs {
 export const LEAD_RULES = [
   'You are the Lead for this project: one long-lived agent the owner talks or types to. You dispatch and manage coding agents; you never edit files.',
   'Your only tools are these shell commands, each run on its own (no pipes, ;, &&, redirects or $(...); those are denied):',
-  '  `agents lead tool roster [--project <name>]` lists live sessions from the live feed. It is the only way to see sessions.',
+  '  `agents lead tool roster [--project <name>]` lists live sessions from the live feed, each with when it started and was last active. It is the only way to see sessions.',
   '  `agents lead tool attention` lists every open ask across the fleet (question, choices, its key). It is the only way to see what agents are asking.',
-  '  `agents lead tool prs list [--repo <owner/repo>]` lists this project\'s open PRs.',
-  '  `agents lead tool linear tasks [--status open|todo|progress|backlog|done]`, `agents lead tool linear view <ID>`, `agents lead tool linear create --title <title> [--description <text>]`.',
+  '  `agents lead tool prs list [--repo <owner/repo>]` lists this project\'s open PRs, each with when it was last updated.',
+  '  `agents lead tool linear tasks [--status open|todo|progress|backlog|done] [--limit 1-50]` (most recently updated first, each with its age), `agents lead tool linear view <ID>`, `agents lead tool linear create --title <title> [--description <text>]`.',
   'These queue one action for the owner\'s Confirm and never act themselves:',
   '  `agents lead tool answer --key <key> (--choice <id> | --text <answer>)` answers an open ask from the attention tool.',
   '  `agents lead tool send --session <id> -- <text>` types a message into a running session of this project (no slash commands).',
@@ -101,8 +101,14 @@ export async function fetchRecentPrs(repo: string | undefined, cwd: string | und
   if (!repo) throw new Error('project has no GitHub repo');
   const raw = JSON.parse(await run('gh', ['api', `repos/${repo}/pulls?state=all&sort=updated&direction=desc&per_page=40`], cwd)) as Array<{
     number: number; title: string; html_url: string; draft?: boolean; state: string;
+    updated_at?: string; merged_at?: string | null; closed_at?: string | null;
   }>;
-  return raw.map((p) => ({ number: p.number, title: p.title, url: p.html_url, draft: p.draft === true, open: p.state === 'open' }));
+  return raw.map((p) => ({
+    number: p.number, title: p.title, url: p.html_url, draft: p.draft === true, open: p.state === 'open',
+    ...(p.updated_at ? { updatedAt: p.updated_at } : {}),
+    ...(p.merged_at ? { mergedAt: p.merged_at } : {}),
+    ...(p.closed_at ? { closedAt: p.closed_at } : {}),
+  }));
 }
 
 export function linearTeamKey(home: string): string | undefined {
@@ -127,7 +133,7 @@ export function projectRepo(def: ProjectDef): string | undefined {
   return def.repo ?? def.repos?.[0]?.slug;
 }
 
-export function buildBrief(inputs: BriefInputs): string {
+export function buildBrief(inputs: BriefInputs, nowMs = Date.now()): string {
   const { def } = inputs;
   const out: string[] = [];
   out.push(`# Lead brief: ${inputs.project}`);
@@ -139,7 +145,7 @@ export function buildBrief(inputs: BriefInputs): string {
   out.push('', '## Rules', ...LEAD_RULES.map((r) => `- ${r}`));
   if (inputs.agentsDigest) out.push('', '## AGENTS.md digest', inputs.agentsDigest);
   const rows = Object.values(inputs.roster);
-  out.push('', `## Live sessions (${rows.length})`, ...(rows.length ? rows.map(formatRosterRow) : ['None.']), inputs.fleet);
+  out.push('', `## Live sessions (${rows.length})`, ...(rows.length ? rows.map((r) => formatRosterRow(r, nowMs)) : ['None.']), inputs.fleet);
   out.push('', '## Open tickets');
   if ('error' in inputs.tickets) out.push(`Unavailable: ${inputs.tickets.error}`);
   else if (inputs.tickets.length === 0) out.push('None.');
@@ -148,7 +154,12 @@ export function buildBrief(inputs: BriefInputs): string {
   const open = 'error' in inputs.prs ? null : inputs.prs.filter((p) => p.open);
   if (open === null) out.push(`Unavailable: ${(inputs.prs as { error: string }).error}`);
   else if (open.length === 0) out.push('None.');
-  else out.push(...open.map((p) => `- #${p.number} ${p.title}${p.draft ? ' (draft)' : ''}`));
+  else out.push(...open.map((p) => `- #${p.number} ${p.title}${p.draft ? ' (draft)' : ''}${p.updatedAt ? ` · updated ${ago(p.updatedAt, nowMs)}` : ''}`));
+  const ended = 'error' in inputs.prs ? [] : inputs.prs.filter((p) => !p.open);
+  if (ended.length) {
+    out.push('', `## Merged or closed lately (as of ${new Date(nowMs).toISOString()})`);
+    out.push(...ended.map((p) => `- #${p.number} ${p.title} · ${p.mergedAt ? `merged ${ago(p.mergedAt, nowMs)}` : `closed without merging ${p.closedAt ? ago(p.closedAt, nowMs) : ''}`.trimEnd()}`));
+  }
   out.push('', '## Memory', quoteNotes(inputs.memory));
   return out.join('\n');
 }

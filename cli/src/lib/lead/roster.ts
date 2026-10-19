@@ -8,6 +8,8 @@ export interface RosterRow {
   project?: string;
   cwd?: string;
   ticket?: string;
+  startedAtMs?: number;
+  lastActivityMs?: number;
 }
 
 export type RosterSnapshot = Record<string, RosterRow>;
@@ -29,6 +31,10 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+function num(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined;
+}
+
 export function rosterRowFromFeed(scope: string, agent: Row): RosterRow | null {
   const id = str(agent.sessionId);
   if (!id || agent.previous === true) return null;
@@ -42,6 +48,8 @@ export function rosterRowFromFeed(scope: string, agent: Row): RosterRow | null {
     project: str(agent.confirmedProject),
     cwd: str(agent.cwd),
     ticket: str(agent.ticketId),
+    startedAtMs: num(agent.startedAtMs),
+    lastActivityMs: num(agent.lastActivityMs),
   };
 }
 
@@ -170,9 +178,11 @@ export function filterProject(
   return out;
 }
 
-export function formatRosterRow(row: RosterRow): string {
+export function formatRosterRow(row: RosterRow, nowMs = Date.now()): string {
   const ticket = row.ticket ? ` ${row.ticket}` : '';
-  return `- ${row.id.slice(0, 8)} “${row.title}” ${row.status} on ${row.host}${ticket}`;
+  const started = row.startedAtMs ? ` · started ${ago(row.startedAtMs, nowMs)}` : '';
+  const active = row.lastActivityMs ? ` · last active ${ago(row.lastActivityMs, nowMs)}` : '';
+  return `- ${row.id.slice(0, 8)} “${row.title}” ${row.status} on ${row.host}${ticket}${started}${active}`;
 }
 
 export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot): string[] {
@@ -195,8 +205,9 @@ export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot): s
 
 const MAX_QUESTION_CHARS = 240;
 
-function age(openedAt: string, nowMs: number): string {
-  const ms = nowMs - Date.parse(openedAt);
+/** How long ago, in the words the Lead reads: "just now", "5m ago", "3h ago", "4d ago". */
+export function ago(at: string | number, nowMs: number): string {
+  const ms = nowMs - (typeof at === 'number' ? at : Date.parse(at));
   if (!Number.isFinite(ms) || ms < 0) return 'just now';
   const mins = Math.floor(ms / 60_000);
   if (mins < 1) return 'just now';
@@ -211,5 +222,5 @@ export function formatAttention(ask: LeadAttention, row: RosterRow | undefined, 
   const title = row?.title ?? ask.sessionId.slice(0, 8);
   const project = ask.project ?? row?.project;
   const choices = ask.choices.length ? ` Choices: ${ask.choices.map((c) => `${c.id}=${c.label}`).join(', ')}` : ' Free-text answer.';
-  return `- ${ask.key} “${title}” on ${ask.host}${project ? ` · ${project}` : ''} · ${age(ask.openedAt, nowMs)}: ${trimmed}${choices}`;
+  return `- ${ask.key} “${title}” on ${ask.host}${project ? ` · ${project}` : ''} · ${ago(ask.openedAt, nowMs)}: ${trimmed}${choices}`;
 }

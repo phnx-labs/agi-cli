@@ -3,7 +3,7 @@ import { atomicWriteFileSync } from '../fs-atomic.js';
 import { connectHost, sendRequest } from './client.js';
 import { runAgents, runLinear } from './act.js';
 import type { HeldAction } from './confirm.js';
-import type { LeadAttention } from './roster.js';
+import { ago, type LeadAttention } from './roster.js';
 import {
   LeadToolError, answerArgv, appendNote, assertAgent, assertPrNumber, assertRepo, assertSessionId, assertTask, assertTicketId,
   dispatchPrompt, linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, prArgv, prFailureArgv, prReadArgv,
@@ -53,7 +53,7 @@ export async function toolAttention(ctx: LeadToolContext): Promise<string> {
   return String(reply.text);
 }
 
-interface LinearIssue { identifier: string; title: string; state?: { name?: string }; url?: string; description?: string }
+interface LinearIssue { identifier: string; title: string; state?: { name?: string }; url?: string; description?: string; updatedAt?: string }
 
 export async function toolDispatch(ctx: LeadToolContext, ticket: string, agent: string): Promise<string> {
   assertTicketId(ticket);
@@ -104,7 +104,7 @@ export async function toolStop(ctx: LeadToolContext, session: string): Promise<s
   return `Queued for the owner's Confirm: ${String(reply.label)}. Nothing was stopped. Do not retry.`;
 }
 
-interface ListedPr { number: number; title: string; isDraft?: boolean; headSha?: string; url?: string }
+interface ListedPr { number: number; title: string; isDraft?: boolean; headSha?: string; url?: string; updatedAt?: string }
 interface PrsEnvelope { repositories: Array<{ slug: string; error?: string; pullRequests: ListedPr[] }> }
 
 export async function toolPrsList(ctx: LeadToolContext, repo?: string): Promise<string> {
@@ -112,7 +112,7 @@ export async function toolPrsList(ctx: LeadToolContext, repo?: string): Promise<
   const lines: string[] = [];
   for (const r of envelope.repositories) {
     if (r.error) { lines.push(`${r.slug}: could not be read (${r.error})`); continue; }
-    for (const pr of r.pullRequests) lines.push(`${r.slug}#${pr.number}${pr.isDraft ? ' [draft]' : ''} ${pr.title}`);
+    for (const pr of r.pullRequests) lines.push(`${r.slug}#${pr.number}${pr.isDraft ? ' [draft]' : ''} ${pr.title}${pr.updatedAt ? ` · updated ${ago(pr.updatedAt, Date.now())}` : ''}`);
   }
   return lines.length ? lines.join('\n') : `No open PRs for ${ctx.project}.`;
 }
@@ -167,9 +167,18 @@ export async function toolPrAct(
 
 export async function toolLinearTasks(ctx: LeadToolContext, status: string, limit: number): Promise<string> {
   const raw = JSON.parse(await runLinear(linearTasksArgv(ctx.def, status, limit))) as { issues?: LinearIssue[] };
-  const issues = raw.issues ?? [];
+  return formatLinearTasks(raw.issues ?? [], status, limit, Date.now());
+}
+
+/** Newest change first, cut to `limit`: `linear tasks --json` sorts by priority and returns
+ *  every match, so "what moved today" would otherwise be buried in the oldest tickets. */
+export function formatLinearTasks(issues: LinearIssue[], status: string, limit: number, nowMs: number): string {
   if (issues.length === 0) return `No ${status} tickets.`;
-  return issues.map((i) => `${i.identifier} ${i.title}${i.state?.name ? ` (${i.state.name})` : ''}`).join('\n');
+  const when = (i: LinearIssue) => (i.updatedAt ? Date.parse(i.updatedAt) || 0 : 0);
+  const shown = [...issues].sort((a, b) => when(b) - when(a)).slice(0, limit);
+  const lines = shown.map((i) => `${i.identifier} ${i.title}${i.state?.name ? ` (${i.state.name})` : ''}${i.updatedAt ? ` · updated ${ago(i.updatedAt, nowMs)}` : ''}`);
+  if (issues.length > shown.length) lines.push(`(${issues.length - shown.length} older ${status} tickets not shown)`);
+  return lines.join('\n');
 }
 
 export async function toolLinearView(id: string): Promise<string> {

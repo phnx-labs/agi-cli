@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FeedRoster, filterProject, formatAttention, rosterDelta } from './roster.js';
+import { FeedRoster, filterProject, formatAttention, formatRosterRow, rosterDelta, rosterRowFromFeed } from './roster.js';
 
 const agent = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
   sessionId: id, title: `Title ${id}`, status, machine: 'box', confirmedProject: 'demo', previous: false, ...extra,
@@ -76,5 +76,12 @@ describe('FeedRoster attention', () => {
     expect(line).toContain('… Choices: 1=Staging, 2=Prod');
     expect(formatAttention({ ...item, choices: [], question: undefined }, undefined, Date.parse('2026-10-19T12:00:00.000Z')))
       .toBe('- box/abcd1234/3 “abcd1234” on box · demo · 2h ago: (question, no question text) Free-text answer.');
+  });
+
+  it('a session line says when it started and was last active, from the feed row', () => {
+    const now = Date.parse('2026-10-19T12:00:00.000Z');
+    const row = rosterRowFromFeed('box', { sessionId: 'abcd1234-ffff', title: 'Fix login', status: 'idle', machine: 'box', startedAtMs: now - 26 * 3_600_000, lastActivityMs: now - 7 * 60_000 })!;
+    expect(formatRosterRow(row, now)).toBe('- abcd1234 “Fix login” idle on box · started 26h ago · last active 7m ago');
+    expect(formatRosterRow(rosterRowFromFeed('box', { sessionId: 'abcd1234-ffff', title: 'T', startedAtMs: 'x' })!, now)).toBe('- abcd1234 “T” unknown on box');
   });
 });
