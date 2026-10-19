@@ -21,6 +21,11 @@ interface RegistryAccountInput {
   secretPresent: boolean;
 }
 
+/** The usage-cache key a provider (setup-token) account's rate limits are credited to. */
+export function providerAccountUsageKey(agent: AgentId, name: string): string {
+  return `${agent}:name=${name}`;
+}
+
 export function registryPoolCandidates(
   records: RegistryAccountRecord[],
   agent: AgentId,
@@ -32,7 +37,7 @@ export function registryPoolCandidates(
     if (!providerAuthenticatesHarness(r.provider, r.auth, agent)) continue;
     out.push({
       id: r.id,
-      accountKey: `${agent}:name=${r.name}`,
+      accountKey: providerAccountUsageKey(agent, r.name),
       email: null,
       name: r.name,
       provider: r.provider,

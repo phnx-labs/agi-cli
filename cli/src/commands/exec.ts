@@ -245,7 +245,9 @@ export function hostInteractiveNeedsCorrelationId(
 
 function formatRotationBanner(result: RotateResult, verb: string = 'balanced'): string {
   const { picked, healthy, excluded } = result;
-  const label = picked.email ? `${picked.email} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
+  // A provider (setup-token) pick has no email; name the account so the banner never reads as "no account".
+  const who = picked.email || picked.accountLabel;
+  const label = who ? `${who} · ${picked.agent}@${picked.version}` : `${picked.agent}@${picked.version}`;
   const ratio = `${healthy.length} of ${healthy.length + excluded.length} healthy`;
   const caveat = result.usageUnverified ? ', usage unverified — no account could be refreshed' : '';
   return `[agents] ${verb} picked ${label} (${ratio}${caveat})`;
@@ -2485,7 +2487,12 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
               if (pickedProviderAccount) {
                 try {
                   const picked = resolveSpawnAccount(pickedProviderAccount, agent, resolved.version, readMeta(), { useDefault: false });
-                  if (picked?.kind === 'provider') accountEnv = picked.env;
+                  if (picked?.kind === 'provider') {
+                    accountEnv = picked.env;
+                    // Carry the pick into AGENTS_RUN_ACCOUNT_ID so the session's status line credits
+                    // its rate limits to this account, not to the version home's native login.
+                    spawnAccount = picked;
+                  }
                 } catch (err) {
                   console.error(chalk.red((err as Error).message));
                   process.exit(1);

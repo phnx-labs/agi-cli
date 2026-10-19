@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { foldRegistryCandidates, type RunCandidateInputs } from './account-pool-collect.js';
 import type { RegistryAccountRecord } from './account-pool.js';
-import type { RotateCandidate } from './rotate.js';
+import { readinessFromCandidate, type RotateCandidate } from './rotate.js';
+import type { UsageSnapshot } from './usage.js';
 
 function nativeCandidate(over: Partial<RotateCandidate>): RotateCandidate {
   return {
@@ -76,6 +77,33 @@ describe('foldRegistryCandidates', () => {
   it('includeKeyed (resume with an explicit --account) folds key accounts in, so the named one can match', () => {
     expect(foldRegistryCandidates('claude', inputs(), true).filter((c) => c.providerAccount).map((c) => c.providerAccount))
       .toEqual(['claude-setup', 'or-key']);
+  });
+
+  it('carries the provider usage key and its cached snapshot, so rotation excludes a limited token account', () => {
+    const resets = new Date(Date.now() + 60 * 60_000);
+    const limited: UsageSnapshot = {
+      source: 'last_seen',
+      sourceLabel: 'status line',
+      capturedAt: new Date(),
+      windows: [
+        { key: 'session', label: 'Current session', shortLabel: 'S', usedPercent: 100, resetsAt: resets, windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 40, resetsAt: resets, windowMinutes: 10_080 },
+      ],
+    };
+    const asked: string[] = [];
+    const out = foldRegistryCandidates('claude', inputs({
+      usageSnapshotFor: (usageKey) => { asked.push(usageKey); return usageKey === 'claude:name=claude-setup' ? limited : null; },
+    }));
+    const token = out.find((c) => c.providerAccount === 'claude-setup')!;
+    expect(token.usageKey).toBe('claude:name=claude-setup');
+    expect(token.usageSnapshot).toBe(limited);
+    expect(asked).toEqual(['claude:name=claude-setup']);
+    expect(readinessFromCandidate(token)).toEqual({ ready: false, reason: 'rate_limited', email: null });
+
+    const blind = foldRegistryCandidates('claude', inputs()).find((c) => c.providerAccount === 'claude-setup')!;
+    expect(blind.usageKey).toBe('claude:name=claude-setup');
+    expect(blind.usageSnapshot).toBeNull();
+    expect(readinessFromCandidate(blind).ready).toBe(true);
   });
 
   it('reports signedIn:false for a registry account whose secret is not actually present (PHNX-3502)', () => {
