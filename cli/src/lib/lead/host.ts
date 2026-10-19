@@ -366,7 +366,7 @@ export class LeadHost {
   private rosterReply(project: string): { type: 'roster'; text: string } {
     if (!this.roster.ready) throw new Error('The live feed is not connected yet; try again in a few seconds.');
     const rows = Object.values(this.projectRoster(project));
-    const lines = rows.length ? rows.map((r) => formatRosterRow(r)) : [`No live sessions for ${project}.`];
+    const lines = rows.length ? rows.map((r) => formatRosterRow(r, Date.now())) : [`No live sessions for ${project}.`];
     return { type: 'roster', text: [`Live sessions for ${project} (${rows.length}):`, ...lines, this.fleetSummary()].join('\n') };
   }
 

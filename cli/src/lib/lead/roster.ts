@@ -178,17 +178,17 @@ export function filterProject(
   return out;
 }
 
-export function formatRosterRow(row: RosterRow, nowMs = Date.now()): string {
+export function formatRosterRow(row: RosterRow, nowMs: number): string {
   const ticket = row.ticket ? ` ${row.ticket}` : '';
   const started = row.startedAtMs ? ` · started ${ago(row.startedAtMs, nowMs)}` : '';
   const active = row.lastActivityMs ? ` · last active ${ago(row.lastActivityMs, nowMs)}` : '';
   return `- ${row.id.slice(0, 8)} “${row.title}” ${row.status} on ${row.host}${ticket}${started}${active}`;
 }
 
-export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot): string[] {
+export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot, nowMs = Date.now()): string[] {
   if (!prev) {
     const rows = Object.values(cur);
-    return rows.length === 0 ? ['No live sessions for this project.'] : rows.map(formatRosterRow);
+    return rows.length === 0 ? ['No live sessions for this project.'] : rows.map((r) => formatRosterRow(r, nowMs));
   }
   const lines: string[] = [];
   for (const row of Object.values(cur)) {

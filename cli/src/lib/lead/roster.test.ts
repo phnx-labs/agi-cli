@@ -83,5 +83,9 @@ describe('FeedRoster attention', () => {
     const row = rosterRowFromFeed('box', { sessionId: 'abcd1234-ffff', title: 'Fix login', status: 'idle', machine: 'box', startedAtMs: now - 26 * 3_600_000, lastActivityMs: now - 7 * 60_000 })!;
     expect(formatRosterRow(row, now)).toBe('- abcd1234 “Fix login” idle on box · started 26h ago · last active 7m ago');
     expect(formatRosterRow(rosterRowFromFeed('box', { sessionId: 'abcd1234-ffff', title: 'T', startedAtMs: 'x' })!, now)).toBe('- abcd1234 “T” unknown on box');
+    expect(rosterDelta(null, { a: row, b: { ...row, id: 'ef567890-0000' } }, now)).toEqual([
+      '- abcd1234 “Fix login” idle on box · started 26h ago · last active 7m ago',
+      '- ef567890 “Fix login” idle on box · started 26h ago · last active 7m ago',
+    ]);
   });
 });
