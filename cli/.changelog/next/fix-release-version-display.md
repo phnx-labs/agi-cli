@@ -1,0 +1,1 @@
+- **Agent version views show the installed release first.** Resource details and section headings no longer report the historical installation label as the installed release. Diagnostics and detail summaries identify a differing stable name as `(installation: <label>)`; homes, selectors, and JSON fields keep their existing meanings. Source: `cli/src/commands/view.ts`.

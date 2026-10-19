@@ -952,7 +952,10 @@ This identity/release split is load-bearing: two Cursor or Grok account slots
 may share the same managed release while retaining different native credentials,
 and removing an isolated installation must never target the managed install merely
 because their releases match. `@latest` keeps the probed release as its convenient label; concrete labels stay
-exactly addressable.
+exactly addressable. Text `view` diagnostics and resource details show the release
+first and annotate a differing name as `(installation: <label>)`; resource section
+headings use the release. Lookups, home paths, defaults, and JSON `version` fields
+continue to use the stable label (`releaseVersion` carries the release in JSON).
 
 ### 9. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
 
