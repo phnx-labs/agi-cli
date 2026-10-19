@@ -17,7 +17,7 @@ import {
   FeedRoster, filterProject, formatAttention, formatRosterRow, rosterDelta, type LeadAttention, type RosterRow, type RosterSnapshot,
 } from './roster.js';
 import {
-  agentsMdDigest, briefSummary, buildBrief, composeTurnMessage, fetchOpenTickets, fetchRecentPrs, fleetLine,
+  LEAD_RULES_ID, agentsMdDigest, briefSummary, buildBrief, composeTurnMessage, fetchOpenTickets, fetchRecentPrs, fleetLine,
   linearTeamKey, projectRepo,
   type BriefInputs, type BriefPr, type BriefTicket,
 } from './brief.js';
@@ -608,12 +608,19 @@ export class LeadHost {
         turns: 0,
         briefed: false,
         brief: briefSummary(inputs),
+        rules: LEAD_RULES_ID,
         rotatedFrom: this.rotatedFrom,
         roster: inputs.roster,
       };
       this.rotatedFrom = undefined;
     };
 
+    if (state && state.rules !== LEAD_RULES_ID) {
+      this.log(`session ${state.sessionId} was briefed with older rules; starting a fresh session from the brief`);
+      if (this.child) await this.stopChild();
+      clearSessionState(this.opts.paths);
+      state = null;
+    }
     if (this.child && state && this.childSessionId === state.sessionId) {
       emit({ type: 'turn', turn: turnId, project: this.opts.project, session: state.sessionId, engine });
       emit({ type: 'status', state: 'thinking' });
