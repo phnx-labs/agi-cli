@@ -1071,7 +1071,7 @@ async function readProcessTable(): Promise<ProcRow[]> {
   }
   if (processTableReading) return processTableReading;
   const reading = readProcessTableLive()
-    .then((rows) => { processTableCache = { at: now, rows }; return rows; })
+    .then((rows) => { if (processTableReading === reading) processTableCache = { at: now, rows }; return rows; })
     .finally(() => { if (processTableReading === reading) processTableReading = undefined; });
   processTableReading = reading;
   return reading;
