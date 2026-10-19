@@ -58,7 +58,7 @@ import {
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
-import { resolveSessionName, type LiveSessionName, type SessionNameSources } from './title.js';
+import { claudeRecapFromLine, resolveSessionName, type LiveSessionName, type SessionNameSources, type SessionRecap } from './title.js';
 import { resolveLinearApiKey } from '../linear-cache.js';
 import {
   ToolCallCollector,
@@ -2521,6 +2521,7 @@ interface ClaudeParseState {
   firstUserMessage?: string;
   customTitle?: string;
   aiTitle?: string;
+  recap?: SessionRecap;
   entrypoint?: string;
   messageCount: number;
   toolCallCount: number;
@@ -2567,6 +2568,7 @@ export function initClaudeParseState(): ClaudeParseState {
     firstUserMessage: undefined,
     customTitle: undefined,
     aiTitle: undefined,
+    recap: undefined,
     entrypoint: undefined,
     messageCount: 0,
     toolCallCount: 0,
@@ -2719,6 +2721,11 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   if (parsed.type === 'ai-title') {
     const t = typeof parsed.aiTitle === 'string' ? parsed.aiTitle.trim() : '';
     if (t) state.aiTitle = t;
+    return;
+  }
+  const recap = claudeRecapFromLine(parsed);
+  if (recap) {
+    state.recap = recap;
     return;
   }
 
@@ -2879,6 +2886,7 @@ export interface ClaudeParserState {
   firstUserMessage?: string;
   customTitle?: string;
   aiTitle?: string;
+  recap?: SessionRecap;
   plan?: string;
   lastTsMs?: number;
   messageCount: number;
@@ -2939,6 +2947,7 @@ export function serializeClaudeParserState(
     firstUserMessage: state.firstUserMessage,
     customTitle: state.customTitle,
     aiTitle: state.aiTitle,
+    recap: state.recap,
     plan: state.plan,
     lastTsMs: state.lastTsMs,
     messageCount: state.messageCount,
@@ -2989,6 +2998,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     firstUserMessage: prior.firstUserMessage,
     customTitle: prior.customTitle,
     aiTitle: prior.aiTitle,
+    recap: prior.recap,
     entrypoint: prior.entrypoint,
     messageCount: prior.messageCount,
     toolCallCount: prior.toolCallCount ?? 0,
