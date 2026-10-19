@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { registerLeadCommand } from './lead.js';
 import { ensureLeadDir } from '../lib/lead/paths.js';
 import { appendHistory, writeSessionState } from '../lib/lead/store.js';
+import { LEAD_TOOL_NAMES } from '../lib/lead/harness.js';
 
 function program(): Command {
   const p = new Command();
@@ -46,6 +47,11 @@ describe('agents lead', () => {
     const out = JSON.parse(await stdoutOf(['lead', 'status', '--project', 'cmd-status', '--json']));
     expect(out).toMatchObject({ project: 'cmd-status', state: 'stopped', session: 'sess-1', engine: 'warm', brief: ['project cmd-status'], memory: [] });
     expect(out.tools.every((t: string) => t.startsWith('Bash(agents lead tool '))).toBe(true);
+  });
+
+  it('the Lead may run exactly the tool commands that exist', () => {
+    const tool = program().commands.find((c) => c.name() === 'lead')!.commands.find((c) => c.name() === 'tool')!;
+    expect(tool.commands.map((c) => c.name()).sort()).toEqual([...LEAD_TOOL_NAMES].sort());
   });
 
   it('lead tools accept no flags beyond their fixed shape', async () => {

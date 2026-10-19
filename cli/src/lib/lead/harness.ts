@@ -6,7 +6,7 @@ import { atomicWriteFileSync, atomicWriteJsonSync } from '../fs-atomic.js';
 import { configKeySpec, getConfigValue } from '../device-config.js';
 import type { LeadPaths } from './paths.js';
 
-export const LEAD_TOOL_NAMES = ['roster', 'dispatch', 'start', 'send', 'stop', 'linear', 'remember'] as const;
+export const LEAD_TOOL_NAMES = ['roster', 'attention', 'answer', 'dispatch', 'start', 'send', 'stop', 'prs', 'linear', 'remember'] as const;
 export type LeadToolName = typeof LEAD_TOOL_NAMES[number];
 
 export const LEAD_ALLOWED_TOOLS: readonly string[] = LEAD_TOOL_NAMES.map((name) => `Bash(agents lead tool ${name}:*)`);
