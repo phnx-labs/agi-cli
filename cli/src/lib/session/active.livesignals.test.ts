@@ -53,6 +53,27 @@ describe('computeLiveSignals wires every tracked harness into real state', () =>
     expect(state!.model).toBe('grok-4.7-build');
   });
 
+  it('a live Claude session that opened two PRs carries both on prs, the newest on pr', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-livesignals-'));
+    tmp.push(dir);
+    const file = path.join(dir, 'claude-two-prs.jsonl');
+    const ts = new Date().toISOString();
+    const prCreate = (id: string, url: string) => [
+      { type: 'assistant', timestamp: ts, message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command: 'gh pr create --fill' } }] } },
+      { type: 'user', timestamp: ts, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: url }] } },
+    ];
+    const lines = [
+      { type: 'user', timestamp: ts, message: { role: 'user', content: 'Ship both fixes' } },
+      ...prCreate('t1', 'https://github.com/acme/api/pull/41'),
+      ...prCreate('t2', 'https://github.com/acme/web/pull/7'),
+      { type: 'assistant', timestamp: ts, message: { role: 'assistant', content: [{ type: 'text', text: 'Both PRs are open.' }] } },
+    ];
+    fs.writeFileSync(file, lines.map(line => JSON.stringify(line)).join('\n') + '\n');
+    const { state } = computeLiveSignals('claude', file, dir, true);
+    expect(state!.prs?.map(pr => pr.url)).toEqual(['https://github.com/acme/api/pull/41', 'https://github.com/acme/web/pull/7']);
+    expect(state!.pr?.url).toBe('https://github.com/acme/web/pull/7');
+  });
+
   it('a live droid transcript yields working', () => {
     const file = freshCopy('droid-working.jsonl', 'droid-working.jsonl');
     const { state } = computeLiveSignals('droid', file, path.dirname(file), true);

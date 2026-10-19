@@ -53,15 +53,15 @@ describe.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('
     expect(state!.quietSinceMs).toBe(LAST_EVENT_MS);
   });
 
-  it('a busy turn whose tail holds only request records is working, quiet since the last write', () => {
+  it('a busy turn whose tail window holds only request records reads past them: working, quiet since the last event', () => {
     const busy = configWith('busy');
     const blob = JSON.stringify({ type: 'api-request-blob', blob: 'x'.repeat(16_000) });
     fs.appendFileSync(busy, `${blob}\n`.repeat(10));
-    const lastWrite = SILENT_NOW - 3 * 60_000;
+    const lastWrite = SILENT_NOW - 60_000;
     fs.utimesSync(busy, new Date(lastWrite), new Date(lastWrite));
     const { state } = computeLiveSignals('claude', busy, '/tmp/phnx4387-silent', true, SILENT_NOW);
     expect(state!.activity).toBe('working');
-    expect(state!.quietSinceMs).toBe(fs.statSync(busy).mtimeMs);
+    expect(state!.quietSinceMs).toBe(LAST_EVENT_MS);
   });
 
   it('an idle report reads idle', () => {

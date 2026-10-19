@@ -1,10 +1,10 @@
 import { deriveBlockState, type OpenBlock, type BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 import type { InjectTarget } from './terminal/index.js';
-import { addressabilityRecoveryHint } from './terminal/resolve.js';
+import { addressabilityRecoveryHint, resolveInjectTargetForSession } from './terminal/resolve.js';
 import { injectTargetFromReplyRail } from './session/inject.js';
 
-export type AnswerRouteKind = 'mailbox' | 'tmux' | 'iterm' | 'resume' | 'refuse';
+export type AnswerRouteKind = 'mailbox' | 'tmux' | 'iterm' | 'vscodium' | 'resume' | 'refuse';
 
 export interface AnswerRoute {
   kind: AnswerRouteKind;
@@ -77,12 +77,15 @@ export function isOpenQuestionBlock(block: OpenBlock | null | undefined): boolea
   return (block.questions?.length ?? 0) > 0;
 }
 
+/** The rail an answer is typed into: the session's reply rail, else tmux, iTerm, or the IDE
+ *  terminal (VSCodium, VS Code, Cursor) it runs in, as the watchdog resolves it. Only the
+ *  reply rail was read here, so a session in a VSCodium tab was "not addressable" (agi-cli#3989). Ghostty's
+ *  focus-the-window path stays off: it is not split-precise. */
 function injectTargetForSession(session: ActiveSession): InjectTarget | null {
-  if (session.provenance?.reply) {
-    const fromRail = injectTargetFromReplyRail(session.provenance.reply);
-    if (fromRail) return fromRail;
-  }
-  return null;
+  const fromRail = session.provenance?.reply ? injectTargetFromReplyRail(session.provenance.reply) : null;
+  if (fromRail) return fromRail;
+  const resolved = resolveInjectTargetForSession(session);
+  return resolved.addressable ? resolved.target : null;
 }
 
 export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
@@ -100,8 +103,8 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
 
     if (inject) {
       const kind: AnswerRouteKind =
-        inject.backend === 'tmux' ? 'tmux'
-          : inject.backend === 'iterm' ? 'iterm'
+        inject.backend === 'iterm' ? 'iterm'
+          : inject.backend === 'vscodium' ? 'vscodium'
             : 'tmux';
       return {
         kind,
@@ -131,7 +134,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
     return {
       kind: 'refuse',
       reason:
-        'Agent is parked on a question but has no addressable terminal (no tmux/iterm rail). ' +
+        'Agent is parked on a question but has no addressable terminal (no tmux, iTerm or IDE rail). ' +
         addressabilityRecoveryHint(session),
     };
   }

@@ -176,6 +176,23 @@ describe('resolveAnswerRoute', () => {
     expect(r.payload).toBe('Production');
   });
 
+  it('types the answer into the VSCodium tab the session runs in (agi-cli#3989)', () => {
+    const r = resolveAnswerRoute({
+      mailboxId: 's1',
+      answer: 'Production',
+      block: block(),
+      session: session({
+        context: 'terminal',
+        tty: 'ttys004',
+        host: 'codium',
+        activity: 'waiting_input',
+        provenance: { host: 'zion', transport: 'local', reply: null },
+      }),
+    });
+    expect(r.kind).toBe('vscodium');
+    expect(r.inject).toEqual({ backend: 'vscodium', terminalId: 's1', cli: 'codium', scheme: 'vscodium' });
+  });
+
   it('refuses a parked interactive agent with no rail and surfaces a recovery hint', () => {
     const r = resolveAnswerRoute({
       mailboxId: 's1',

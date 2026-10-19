@@ -970,6 +970,27 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toMatchObject([expected]);
   });
 
+  it.runIf(hasPython)('a permission request never replaces the open question the terminal shows (agi-cli#3989)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-question-perm-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const run = (input: unknown) => spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], { input: JSON.stringify(input), env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    const ask = run({
+      session_id: 'sess-split', hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', transcript_path: '/h/.claude/projects/p/sess-split.jsonl',
+      tool_input: { questions: [{ question: 'How should each kind post?', header: 'Split', options: [{ label: 'News now, story next' }, { label: 'Both post now' }] }] },
+    });
+    expect(ask.status).toBe(0);
+    const question = { kind: 'question', questions: [{ text: 'How should each kind post?', header: 'Split' }] };
+    expect(listBlocks(feedDir)).toMatchObject([question]);
+    // Claude routes AskUserQuestion through its permission flow, and a later request for
+    // any tool must not shadow the question either.
+    for (const tool_name of ['AskUserQuestion', 'Bash']) {
+      const perm = run({ session_id: 'sess-split', hook_event_name: 'PermissionRequest', tool_name, tool_input: { command: 'ls' }, permission_suggestions: [], transcript_path: '/h/.claude/projects/p/sess-split.jsonl' });
+      expect(perm.status).toBe(0);
+      expect(listBlocks(feedDir)).toMatchObject([question]);
+      expect(listBlocks(feedDir)[0].questions[0].options.map((o: { label: string }) => o.label)).toEqual(['News now, story next', 'Both post now']);
+    }
+  });
+
   it.runIf(hasPython)('real hook clears a Codex approval block once the approved tool runs', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-codex-clear-'));
     const feedDir = path.join(home, '.agents', '.history', 'feed');
