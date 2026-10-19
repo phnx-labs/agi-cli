@@ -131,3 +131,38 @@ describe("applySessionNames — Claude's latest recap rides the live row", () =>
     });
   });
 });
+
+describe('applySessionNames — the PRs and tickets a session acted on ride the live row', () => {
+  const TOUCHED_FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'touched', 'agents-prs-merge.jsonl');
+  const id = '5e55a000-0000-4000-8000-00000000ec02';
+  const projects = path.join(TEST_HOME, '.agents', '.history', 'versions', 'claude', '2.1.289', 'home', '.claude', 'projects', '-repo-touched');
+  const file = path.join(projects, `${id}.jsonl`);
+  const lines = fs.readFileSync(TOUCHED_FIXTURE, 'utf-8').split('\n').filter(Boolean)
+    .map(l => JSON.stringify({ ...JSON.parse(l), sessionId: id }));
+
+  it('touchedPrs comes from the index scan, newest first; a row with none has no field', async () => {
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(file, `${lines.slice(0, 3).join('\n')}\n`);
+    await scanSessionsIncremental({ agent: 'claude' });
+    const first = [row(id, { sessionFile: file })];
+    applySessionNames(first);
+    expect(first[0].touchedPrs).toEqual([
+      { url: 'https://github.com/phnx-labs/agi-ext/pull/171', number: 171, repo: 'phnx-labs/agi-ext', action: 'merged' },
+    ]);
+    expect(first[0].touchedTickets).toBeUndefined();
+
+    getDB().prepare('UPDATE scan_ledger SET scanned_at = 0 WHERE file_path = ?').run(file);
+    fs.appendFileSync(file, `${lines.slice(3).join('\n')}\n`);
+    await scanSessionsIncremental({ agent: 'claude' });
+    const next = [row(id, { sessionFile: file })];
+    applySessionNames(next);
+    expect(next[0].touchedPrs?.map(p => `${p.repo}#${p.number} ${p.action}`)).toEqual([
+      'phnx-labs/agi-cli#3995 merged',
+      'phnx-labs/agi-ext#171 merged',
+    ]);
+
+    const untouched = [row('5e55a000-0000-4000-8000-00000000ec01')];
+    applySessionNames(untouched);
+    expect(untouched[0].touchedPrs).toBeUndefined();
+  });
+});

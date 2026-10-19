@@ -8,6 +8,7 @@ import { parseSession, sessionFilePathContainer } from '@phnx-labs/sessions-cli/
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
 import type { SessionRecap } from './title.js';
+import type { TouchedPr, TouchedTicket } from './touched.js';
 import { query as queryEvents, queryToolUsageForSessions } from '../feed/events.js';
 import { machineForSessionFile } from '../origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
@@ -2285,6 +2286,13 @@ export interface IndexedSessionNames {
   label?: string;
   customTitle?: string;
   recap?: SessionRecap;
+  touchedPrs?: TouchedPr[];
+  touchedTickets?: TouchedTicket[];
+}
+
+function nonEmptyJsonArray<T>(raw: string | null): T[] | undefined {
+  const list = raw ? JSON.parse(raw) as T[] : undefined;
+  return list && list.length > 0 ? list : undefined;
 }
 
 export function getIndexedSessionNames(
@@ -2312,13 +2320,15 @@ export function getIndexedSessionNames(
   for (let i = 0; i < keys.length; i += CHUNK) {
     const chunk = keys.slice(i, i + CHUNK);
     const fromState = db
-      .prepare(`SELECT file_path, json_extract(parser_state, '$.customTitle') AS custom_title, json_extract(parser_state, '$.recap') AS recap FROM scan_ledger WHERE file_path IN (${chunk.map(() => '?').join(',')}) AND json_valid(parser_state)`)
-      .all(...chunk) as Array<{ file_path: string; custom_title: string | null; recap: string | null }>;
+      .prepare(`SELECT file_path, json_extract(parser_state, '$.customTitle') AS custom_title, json_extract(parser_state, '$.recap') AS recap, json_extract(parser_state, '$.touchedPrs') AS touched_prs, json_extract(parser_state, '$.touchedTickets') AS touched_tickets FROM scan_ledger WHERE file_path IN (${chunk.map(() => '?').join(',')}) AND json_valid(parser_state)`)
+      .all(...chunk) as Array<{ file_path: string; custom_title: string | null; recap: string | null; touched_prs: string | null; touched_tickets: string | null }>;
     for (const row of fromState) {
       const id = idByLedgerKey.get(row.file_path)!;
       const customTitle = typeof row.custom_title === 'string' && row.custom_title ? row.custom_title : undefined;
       const recap = row.recap ? JSON.parse(row.recap) as SessionRecap : undefined;
-      if (customTitle || recap) out.set(id, { ...out.get(id), customTitle, recap });
+      const touchedPrs = nonEmptyJsonArray<TouchedPr>(row.touched_prs);
+      const touchedTickets = nonEmptyJsonArray<TouchedTicket>(row.touched_tickets);
+      if (customTitle || recap || touchedPrs || touchedTickets) out.set(id, { ...out.get(id), customTitle, recap, touchedPrs, touchedTickets });
     }
   }
   return out;

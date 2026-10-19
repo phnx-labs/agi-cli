@@ -24,6 +24,7 @@ import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord,
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { cleanDisplayTitle, isPlaceholderSessionName, resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';
+import type { TouchedPr, TouchedTicket } from './touched.js';
 import { forkSourceOf } from './fork.js';
 import { getIndexedSessionNames, latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
@@ -179,6 +180,8 @@ export function applySessionNames(sessions: ActiveSession[]): void {
       launchName: s.name,
     }) ?? s.label;
     if (stored?.recap) s.recap = stored.recap;
+    if (stored?.touchedPrs) s.touchedPrs = stored.touchedPrs;
+    if (stored?.touchedTickets) s.touchedTickets = stored.touchedTickets;
   }
 }
 
@@ -358,6 +361,8 @@ export interface ActiveSession {
   ticket?: DetectedTicket;
   rateLimited?: boolean;
   createdTickets?: string[];
+  touchedPrs?: TouchedPr[];
+  touchedTickets?: TouchedTicket[];
   spawnedTeam?: string;
   attachments?: SessionAttachment[];
   request?: SessionRequest;

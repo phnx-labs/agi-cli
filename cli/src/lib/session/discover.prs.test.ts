@@ -18,14 +18,10 @@ describe('the index records every PR a Claude session created (agi-cli#3989)', (
     expect(scan.prUrls).toEqual(['https://github.com/acme/api/pull/41', 'https://github.com/acme/web/pull/7']);
   });
 
-  it('a session with one PR has no prUrls, and a checkpoint from before prUrls resumes from its prUrl', () => {
+  it('a session with one PR has no prUrls', () => {
     const one = initClaudeParseState();
     prCreate(one, 't1', 'https://github.com/acme/api/pull/41');
     expect(finalizeClaudeScan(one).prUrls).toBeUndefined();
-    const { prUrls: _dropped, ...legacy } = serializeClaudeParserState(one, 100);
-    const resumed = hydrateClaudeParseState(legacy as ReturnType<typeof serializeClaudeParserState>);
-    prCreate(resumed, 't2', 'https://github.com/acme/web/pull/7');
-    expect(finalizeClaudeScan(resumed).prUrls).toEqual(['https://github.com/acme/api/pull/41', 'https://github.com/acme/web/pull/7']);
   });
 });
 

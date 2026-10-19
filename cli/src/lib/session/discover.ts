@@ -58,6 +58,7 @@ import {
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
+import { recordTouches, touchesFromCommand, type CommandTouches, type TouchedPr, type TouchedTicket } from './touched.js';
 import { claudeRecapFromLine, resolveSessionName, type LiveSessionName, type SessionNameSources, type SessionRecap } from './title.js';
 import { resolveLinearApiKey } from '../linear-cache.js';
 import {
@@ -2550,6 +2551,9 @@ interface ClaudeParseState {
   prUrls: string[];
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
+  touchedPrs: TouchedPr[];
+  touchedTickets: TouchedTicket[];
+  pendingTouches: Map<string, CommandTouches>;
   spawnedTeam?: string;
   plan?: string;
   checklistEvents: SessionEvent[];
@@ -2598,6 +2602,9 @@ export function initClaudeParseState(): ClaudeParseState {
     prUrls: [],
     createdTickets: new Set<string>(),
     pendingTicketTools: new Set<string>(),
+    touchedPrs: [],
+    touchedTickets: [],
+    pendingTouches: new Map<string, CommandTouches>(),
     spawnedTeam: undefined,
     plan: undefined,
     checklistEvents: [],
@@ -2662,6 +2669,10 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
       if (typeof b?.id === 'string' && isTicketCreateTool(b?.name, b?.input?.command)) {
         state.pendingTicketTools.add(b.id);
       }
+      if (typeof b?.id === 'string' && b?.name === 'Bash' && typeof b?.input?.command === 'string' && b.input.run_in_background !== true) {
+        const touches = touchesFromCommand(b.input.command, typeof parsed.cwd === 'string' ? parsed.cwd : state.cwd);
+        if (touches.prs.length > 0 || touches.tickets.length > 0) state.pendingTouches.set(b.id, touches);
+      }
       if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
         const p = b.input.plan.trim();
         if (p) state.plan = b.input.plan;
@@ -2699,6 +2710,15 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
         ? b.content
         : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
       recordCreatedPr(state, extractPrUrl(text));
+    }
+  }
+  if (state.pendingTouches.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_result' || typeof b?.tool_use_id !== 'string') continue;
+      const touches = state.pendingTouches.get(b.tool_use_id);
+      if (!touches) continue;
+      state.pendingTouches.delete(b.tool_use_id);
+      if (b.is_error !== true) recordTouches(state, touches, { prUrls: state.prUrls, tickets: state.createdTickets });
     }
   }
 
@@ -2875,7 +2895,7 @@ export async function scanClaudeSession(filePath: string): Promise<ClaudeSession
 }
 
 export interface ClaudeParserState {
-  v: 6;
+  v: 7;
   subAgents: number;
   backgroundShells: number | undefined;
   offset: number;
@@ -2910,9 +2930,12 @@ export interface ClaudeParserState {
   pendingPrCreates?: string[];
   prUrl?: string;
   prNumber?: number;
-  prUrls?: string[];
+  prUrls: string[];
   pendingTicketTools: string[];
   createdTickets: string[];
+  touchedPrs: TouchedPr[];
+  touchedTickets: TouchedTicket[];
+  pendingTouches: Array<[string, CommandTouches]>;
   spawnedTeam?: string;
   ticketId?: string;
   contentText?: string;
@@ -2937,7 +2960,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 6,
+    v: 7,
     subAgents: state.subAgents,
     backgroundShells: state.backgroundShells,
     offset,
@@ -2975,6 +2998,9 @@ export function serializeClaudeParserState(
     prUrls: state.prUrls,
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
+    touchedPrs: state.touchedPrs,
+    touchedTickets: state.touchedTickets,
+    pendingTouches: [...state.pendingTouches],
     spawnedTeam: state.spawnedTeam,
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
@@ -3028,8 +3054,11 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     pendingPrCreates: new Set<string>(prior.pendingPrCreates),
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
-    prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
+    prUrls: prior.prUrls,
     createdTickets: new Set<string>(prior.createdTickets),
+    touchedPrs: prior.touchedPrs,
+    touchedTickets: prior.touchedTickets,
+    pendingTouches: new Map(prior.pendingTouches),
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
     plan: prior.plan,
@@ -3130,7 +3159,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 6 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 7 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;

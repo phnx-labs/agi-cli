@@ -290,6 +290,34 @@ touches the endpoint.
   `applySessionNames` puts it on the row, so it rides `agents ps --json`,
   `agents ps watch --json` and `agents feed watch --json`. A session with no recap
   has no field; durable history rows do not carry it.
+- A live Claude row carries what the session **acted on but did not create**,
+  newest first, the last action per item winning, at most 50 of each, and no
+  field when there are none:
+  - **`touchedPrs`**, `[{ url, number, repo, action }]`, `action` one of
+    `merged | reviewed | commented | checked out | edited | closed`, from
+    `gh pr merge|review|comment|checkout|edit|close` and
+    `agents projects prs merge|review|comment --repo R --number N`.
+  - **`touchedTickets`**, `[{ id, action }]`, from `linear update <ID>...`:
+    `done` (`--done`), `started` (`--pickup`), `moved to Todo` (`--todo`),
+    `moved to <state>` (`--status`), else `commented` (`--comment`/`--proof`),
+    else `updated`. `linear tasks <ID>` is a read and does not count.
+
+  Only a Bash call whose `tool_result` came back without `is_error` counts: a
+  mention in prose, a failed call, a `run_in_background` call (its result is
+  the launch, not the command), `gh pr merge --auto`, `echo "gh pr merge 5"`
+  and a quoted heredoc body do not. Commands are split with sessions-cli's
+  `tokenizeBash`, so `cd x && gh pr merge 12`, `VAR=1 gh ...` and `a; b | tail`
+  each yield their own command. The repo is `--repo`/`-R`/`--repo=`, or the
+  owner/repo of a PR URL argument; for a bare number with neither, it is the
+  `remote.origin.url` of the directory the call ran in (a leading `cd <dir>`,
+  else the transcript line's `cwd`, walking up to the nearest directory that
+  exists), resolved once at scan time; a non-GitHub or missing remote drops the
+  entry. A PR in the session's own `prUrls` and a ticket in `createdTickets`
+  are left out. The scan keeps both lists in the resumable Claude parse state
+  (`v: 7`; a `v: 6` checkpoint re-parses its transcript from the start on its
+  next change) and `applySessionNames` puts them on the row beside `recap`.
+  Codex sessions do not carry them yet: their newer rollouts run commands
+  inside `exec` scripts the index scan does not read.
 - A row's **`title` is its one display name**, drawn verbatim by AGI EXT. It is
   never Claude's `<folder>-<n>` placeholder ("agents-92", "agents-1f", matched
   against the row's own cwd so "RUSH-2058" stays) nor the `[host/<device>]`
