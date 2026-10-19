@@ -830,9 +830,6 @@ def main():
         kind = "notification"
     elif hook_event == "PermissionRequest":
         tool_name = payload.get("tool_name") or "a tool"
-        # AskUserQuestion goes through Claude's permission flow too. The question block
-        # already holds what the terminal shows, with its options, so a permission
-        # request must not replace an open question with Approve/Deny (agi-cli#3989).
         if tool_name == "AskUserQuestion":
             return
         try:

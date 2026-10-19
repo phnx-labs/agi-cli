@@ -77,10 +77,6 @@ export function isOpenQuestionBlock(block: OpenBlock | null | undefined): boolea
   return (block.questions?.length ?? 0) > 0;
 }
 
-/** The rail an answer is typed into: the session's reply rail, else tmux, iTerm, or the IDE
- *  terminal (VSCodium, VS Code, Cursor) it runs in, as the watchdog resolves it. Only the
- *  reply rail was read here, so a session in a VSCodium tab was "not addressable" (agi-cli#3989). Ghostty's
- *  focus-the-window path stays off: it is not split-precise. */
 function injectTargetForSession(session: ActiveSession): InjectTarget | null {
   const fromRail = session.provenance?.reply ? injectTargetFromReplyRail(session.provenance.reply) : null;
   if (fromRail) return fromRail;
