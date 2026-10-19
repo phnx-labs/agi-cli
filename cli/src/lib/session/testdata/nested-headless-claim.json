@@ -1,0 +1,5 @@
+{
+  "source": "yosemite-s0, 2026-10-19: the zion tab cl-1792387010227-1 ran Claude 7ac4beca (pid 157434), which ran `claude -p 'reply with the word ok'` in /tmp (session 79098e00, pid 395500) through its Bash tool. The deployed SessionStart hook rewrote by-pid/157434.json to 79098e00 and kept the tab's terminalId and launchId.",
+  "tab": { "sessionId": "7ac4beca-3219-4972-9136-9c41df4211f9", "terminalId": "cl-1792387010227-1", "launchId": "d5102794-8059-4048-b7dc-e6fafdc84107", "cwd": "/home/muqsit/src/github.com/muqsitnawaz/agi-ext" },
+  "nested": { "sessionId": "79098e00-6e82-46eb-9a1f-0a225ae02407", "cwd": "/tmp" }
+}
