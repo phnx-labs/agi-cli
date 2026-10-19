@@ -134,6 +134,9 @@ agents lead ask ──unix socket (0600)──▶ host (agents __lead-host <proj
 - **Recovery:** if the child exits, the next turn re-spawns it with `--resume <session>`. Only
   a "no session found" failure starts a fresh session from the brief; any other start failure
   (rate limit, auth) is an `error` event and the session is kept.
+- **New rules:** `session.json` records which version of the Lead's rules briefed the session. When
+  an upgrade changes them (new tools, say), the next turn starts a fresh session from the brief, with
+  `memory.md`, instead of resuming one that does not know the new tools.
 - **Rotation:** after a turn whose context passes 60% of the model window (from the
   `result` event's last-iteration usage and `modelUsage[*].contextWindow`), the stream ends
   with `done` as usual and the host then, in the background, asks the Lead for a memory list,

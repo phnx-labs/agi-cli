@@ -8,7 +8,7 @@ import { connectHost, sendRequest } from './client.js';
 import { runConfirm } from './act.js';
 import { confirmsDir, ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
 import { ConfirmError, type ConfirmAction, type ConfirmRecord } from './confirm.js';
-import { readHistory, readSessionState } from './store.js';
+import { readHistory, readSessionState, writeSessionState } from './store.js';
 import { toolAnswer, toolAttention, toolDispatch, toolRoster, toolStart, toolStop } from './tools.js';
 import type { EditorContext } from './shapes.js';
 import type { LeadEvent } from './events.js';
@@ -277,6 +277,17 @@ describe('Lead host over a fake stream-json harness', () => {
     expect(fs.readFileSync(paths.memory, 'utf-8')).toContain('remembered: PHNX-1 goes to Claude');
     expect(readSessionState(paths)).toMatchObject({ sessionId: turn.session, rotatedFrom: old });
     expect(harnessLog().at(-1)!.input).toContain('> - remembered: PHNX-1 goes to Claude');
+  });
+
+  it('starts fresh from the brief when the session was briefed with older rules, so it learns new tools', async () => {
+    const old = readSessionState(paths)!;
+    writeSessionState(paths, { ...old, rules: 'older-rules' });
+    const events = await ask('what can you do now?');
+    const turn = turnEvent(events);
+    expect(turn.engine).toBe('cold');
+    expect(turn.session).not.toBe(old.sessionId);
+    expect(harnessLog().at(-1)!.input).toContain('agents lead tool attention');
+    expect(readSessionState(paths)!.rules).not.toBe('older-rules');
   });
 
   it('start only holds; confirm spawns the worker detached with the confirming env and no Lead markers', async () => {

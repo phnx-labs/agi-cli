@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type { ProjectDef } from '../projects.js';
 import { formatRosterRow, type RosterSnapshot } from './roster.js';
 
@@ -45,6 +46,8 @@ export const LEAD_RULES = [
   'A message may carry an [Editor context] block: the owner\'s front editor tab and open tabs. "This one" or "this session" means the front tab\'s session.',
   'Each later message starts with a [State delta] block: changes to this project\'s sessions since your last turn, then a fleet line counting live sessions by status. Answer "what is running" from it and the roster tool.',
 ];
+
+export const LEAD_RULES_ID = createHash('sha256').update(LEAD_RULES.join('\n')).digest('hex').slice(0, 12);
 
 function run(command: string, args: string[], cwd: string | undefined): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -11,6 +11,7 @@ export interface LeadSessionState {
   turns: number;
   briefed: boolean;
   brief: string[];
+  rules?: string;
   contextTokens?: number;
   contextWindow?: number;
   lastTurnAtMs?: number;
