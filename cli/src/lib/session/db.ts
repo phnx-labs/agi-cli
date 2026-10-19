@@ -30,7 +30,7 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-export const SCHEMA_VERSION = 52;
+export const SCHEMA_VERSION = 53;
 
 export const CONTENT_INDEX_VERSION = 8;
 
@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   is_team_origin INTEGER DEFAULT 0,
   pr_url TEXT,
   pr_number INTEGER,
+  pr_urls TEXT,
   worktree_slug TEXT,
   ticket_id TEXT,
   spawned_team TEXT,
@@ -535,6 +536,7 @@ interface SessionRow {
   is_team_origin: number;
   pr_url: string | null;
   pr_number: number | null;
+  pr_urls: string | null;
   worktree_slug: string | null;
   ticket_id: string | null;
   spawned_team: string | null;
@@ -1167,6 +1169,14 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     db.exec(`DELETE FROM session_resource_usage WHERE plugin IS NOT NULL AND plugin <> '' AND instr(name, ':') = 0`);
   }
 
+  if (fromVersion < 53) {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'pr_urls')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_urls TEXT`);
+    const withPr = db.prepare(`SELECT file_path FROM sessions WHERE pr_url IS NOT NULL AND file_path IS NOT NULL`).all() as Array<{ file_path: string }>;
+    const dropLedger = db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`);
+    for (const { file_path } of withPr) dropLedger.run(canonicalLedgerKey(file_path));
+  }
+
 }
 
 function backfillClaudeAccounts(
@@ -1640,7 +1650,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
     cost_usd, cost_usd_nocache, duration_ms, model, tool_call_count,
     file_path, file_mtime_ms, file_size, scanned_at, is_team_origin,
-    pr_url, pr_number, worktree_slug, ticket_id, spawned_team,
+    pr_url, pr_number, pr_urls, worktree_slug, ticket_id, spawned_team,
     sub_agent_count, background_shell_count, plan, todos,
     recent_directories_touched, linear_project, linear_project_url, machine,
     actor, initiated_by, phoenix_id, used_browser, used_computer
@@ -1651,7 +1661,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
     @cost_usd, @cost_usd_nocache, @duration_ms, @model, @tool_call_count,
     @file_path, @file_mtime_ms, @file_size, @scanned_at, @is_team_origin,
-    @pr_url, @pr_number, @worktree_slug, @ticket_id, @spawned_team,
+    @pr_url, @pr_number, @pr_urls, @worktree_slug, @ticket_id, @spawned_team,
     @sub_agent_count, @background_shell_count, @plan, @todos,
     @recent_directories_touched, @linear_project, @linear_project_url, @machine,
     @actor, @initiated_by, @phoenix_id, @used_browser, @used_computer
@@ -1717,6 +1727,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     is_team_origin = excluded.is_team_origin,
     pr_url = excluded.pr_url,
     pr_number = excluded.pr_number,
+    pr_urls = excluded.pr_urls,
     worktree_slug = excluded.worktree_slug,
     ticket_id = excluded.ticket_id,
     spawned_team = excluded.spawned_team,
@@ -2001,6 +2012,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     is_team_origin: meta.isTeamOrigin ? 1 : 0,
     pr_url: meta.prUrl ?? null,
     pr_number: meta.prNumber ?? null,
+    pr_urls: meta.prUrls ? JSON.stringify(meta.prUrls) : null,
     worktree_slug: meta.worktreeSlug ?? null,
     ticket_id: meta.ticketId ?? null,
     spawned_team: meta.spawnedTeam ?? null,
@@ -2205,6 +2217,7 @@ export function upsertSessionsBatch(
         is_team_origin: meta.isTeamOrigin ? 1 : 0,
         pr_url: meta.prUrl ?? null,
         pr_number: meta.prNumber ?? null,
+        pr_urls: meta.prUrls ? JSON.stringify(meta.prUrls) : null,
         worktree_slug: meta.worktreeSlug ?? null,
         ticket_id: meta.ticketId ?? null,
         spawned_team: meta.spawnedTeam ?? null,
@@ -2420,6 +2433,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     isTeamOrigin: row.is_team_origin === 1,
     prUrl: row.pr_url ?? undefined,
     prNumber: row.pr_number ?? undefined,
+    prUrls: parseJsonColumn(row.pr_urls),
     worktreeSlug: row.worktree_slug ?? undefined,
     ticketId: row.ticket_id ?? undefined,
     spawnedTeam: row.spawned_team ?? undefined,

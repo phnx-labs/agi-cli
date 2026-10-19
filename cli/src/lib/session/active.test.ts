@@ -548,6 +548,17 @@ describe('backfillActiveRowsFromMeta (firstUserMessage rides live rows, PHNX-362
     expect(rows[0].version).toBe('2.1.207');
   });
 
+  it('a live row lists every PR the index recorded when its transcript tail holds fewer (agi-cli#3989)', () => {
+    const rows: ActiveSession[] = [
+      { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', prs: [{ url: 'https://github.com/acme/web/pull/7', number: 7 }] },
+      { context: 'terminal', kind: 'claude', sessionId: 's2', status: 'running' },
+    ];
+    const prUrls = ['https://github.com/acme/api/pull/41', 'https://github.com/acme/web/pull/7'];
+    backfillActiveRowsFromMeta(rows, new Map([['s1', { prUrls }], ['s2', { prUrl: prUrls[0] }]]));
+    expect(rows[0].prs).toEqual([{ url: prUrls[0], number: 41 }, { url: prUrls[1], number: 7 }]);
+    expect(rows[1].prs).toBeUndefined();
+  });
+
   it('backfills lastActivityMs from the index for a live row with no activity signal of its own', () => {
     const rows: ActiveSession[] = [
       { context: 'terminal', kind: 'claude', sessionId: 's1', status: 'running', startedAtMs: 1_000 },
