@@ -44,8 +44,9 @@ export function registerFeedWatchCommand(parent: Command): void {
       controller.abort();
     };
     const leadIds = leadSessionIds();
+    const hiddenLeads = new Set<string>();
     const emit = (event: FeedWatchEnvelope) =>
-      process.stdout.write(`${JSON.stringify(opts.includeLead ? event : hideLeadInFeedEnvelope(event, leadIds))}\n`);
+      process.stdout.write(`${JSON.stringify(opts.includeLead ? event : hideLeadInFeedEnvelope(event, leadIds, hiddenLeads))}\n`);
     process.once('SIGINT', stop); process.once('SIGTERM', stop);
     process.stdout.on('error', stopOnClosedConsumer);
     try {
