@@ -66,21 +66,32 @@ export function hideLeadInSessionEnvelope<E extends { type: string }>(event: E, 
   return event;
 }
 
-export function hideLeadInFeedEnvelope<E extends { type: string }>(event: E, hostSessionIds: ReadonlySet<string>): E {
+export function hideLeadInFeedEnvelope<E extends { type: string }>(
+  event: E,
+  hostSessionIds: ReadonlySet<string>,
+  hidden: Set<string> = new Set(),
+): E {
   const e = event as unknown as Record<string, unknown> & { type: string };
+  const isHiddenAsk = (a: { sessionId?: string }) => !!a.sessionId && (hidden.has(a.sessionId) || hostSessionIds.has(a.sessionId));
   if (e.type === 'reset') {
     const agents = (e.agents as LeadCandidate[] | undefined) ?? [];
     const attention = (e.attention as Array<{ sessionId?: string }> | undefined) ?? [];
-    const hidden = new Set(agents.filter((a) => isLeadSession(a, hostSessionIds)).map((a) => a.sessionId).filter(Boolean));
+    for (const a of agents) if (a.sessionId && isLeadSession(a, hostSessionIds)) hidden.add(a.sessionId);
     return {
       ...event,
       agents: agents.filter((a) => !isLeadSession(a, hostSessionIds)),
-      attention: attention.filter((a) => !a.sessionId || !hidden.has(a.sessionId)),
+      attention: attention.filter((a) => !isHiddenAsk(a)),
     } as E;
   }
   if (e.type === 'agent.upsert' && isLeadSession(e.agent as LeadCandidate, hostSessionIds)) {
-    const { agent: _agent, ...rest } = e;
+    const { agent, ...rest } = e;
+    const id = (agent as LeadCandidate).sessionId;
+    if (id) hidden.add(id);
     return { ...rest, type: 'agent.remove' } as unknown as E;
+  }
+  if (e.type === 'attention.upsert' && isHiddenAsk((e.attention ?? {}) as { sessionId?: string })) {
+    const { attention: _attention, ...rest } = e;
+    return { ...rest, type: 'attention.remove' } as unknown as E;
   }
   return event;
 }

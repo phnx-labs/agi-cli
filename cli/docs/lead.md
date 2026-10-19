@@ -225,7 +225,8 @@ expired ones.
 The Lead's own Claude session is not shown as an ordinary session. Rows whose cwd is under
 `~/.agents/lead` (on any machine) or whose id is in a Lead's `session.json` carry `lead: true`,
 and `agents ps`, `agents ps watch --json` and `agents feed watch --json` leave them out unless
-`--include-lead` is passed. The session index is untouched, so `sessions` still lists and
+`--include-lead` is passed; `feed watch` also drops their asks (attention items), including ones that
+arrive after the reset. The session index is untouched, so `sessions` still lists and
 searches a Lead's transcript.
 
 ## Settings

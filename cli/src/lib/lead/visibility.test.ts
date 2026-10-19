@@ -69,6 +69,14 @@ describe('Lead session visibility', () => {
     expect(reset.attention.map((a) => a.key)).toEqual(['b']);
     expect(hideLeadInFeedEnvelope({ ...base, type: 'agent.upsert', rowKey: 'k1', agent: lead }, none))
       .toEqual({ ...base, type: 'agent.remove', rowKey: 'k1' });
+    const hidden = new Set<string>();
+    hideLeadInFeedEnvelope({ ...base, type: 'agent.upsert', rowKey: 'k1', agent: lead }, none, hidden);
+    expect(hideLeadInFeedEnvelope({ ...base, type: 'attention.upsert', rowKey: 'box/lead-1/1', attention: { sessionId: 'lead-1', key: 'box/lead-1/1' } }, none, hidden))
+      .toEqual({ ...base, type: 'attention.remove', rowKey: 'box/lead-1/1' });
+    expect(hideLeadInFeedEnvelope({ ...base, type: 'attention.upsert', rowKey: 'box/x/1', attention: { sessionId: 'lead-2' } }, new Set(['lead-2'])))
+      .toMatchObject({ type: 'attention.remove' });
+    const workerAsk = { ...base, type: 'attention.upsert', rowKey: 'box/work-1/1', attention: { sessionId: 'work-1' } };
+    expect(hideLeadInFeedEnvelope(workerAsk, none, hidden)).toBe(workerAsk);
     const activity = { ...base, type: 'activity.append', event: {} };
     expect(hideLeadInFeedEnvelope(activity, none)).toBe(activity);
   });
