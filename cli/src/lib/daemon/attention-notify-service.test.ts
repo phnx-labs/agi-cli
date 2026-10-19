@@ -393,3 +393,82 @@ describe('dueStage', () => {
     expect(dueStage(parseNotifySchedule(['sidebar']) as NotifySchedule, 0, 1e9)).toBe(-1);
   });
 });
+
+describe('AttentionNotifyService — finished-turn banners', () => {
+  let tmp: string;
+  let posts: DesktopNotification[];
+  let withdrawn: string[][];
+  let clock: number;
+  let rows: ActiveSession[];
+  const T0 = 1_792_380_000_000;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'attn-done-'));
+    posts = [];
+    withdrawn = [];
+    clock = T0;
+    rows = [];
+  });
+  afterEach(() => {
+    try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {  }
+  });
+
+  function makeService(normal: readonly string[] = DEFAULT_NOTIFY_SCHEDULES.normal) {
+    const schedules = Object.fromEntries((['urgent', 'high', 'normal', 'low'] as const).map((l) => [l, parseNotifySchedule(l === 'normal' ? normal : DEFAULT_NOTIFY_SCHEDULES[l]) as NotifySchedule])) as Record<'urgent' | 'high' | 'normal' | 'low', NotifySchedule>;
+    return new AttentionNotifyService({
+      self: () => 'zion',
+      settings: () => ({ schedules }),
+      getSessions: async () => rows,
+      notify: (n) => posts.push(n),
+      withdraw: (keys) => withdrawn.push(keys),
+      gc: () => {},
+      feedRoot: path.join(tmp, 'feed'),
+      ledgerDir: path.join(tmp, 'notified'),
+      now: () => clock,
+    });
+  }
+
+  const live = (id: string, status: ActiveSession['status']) =>
+    session({ sessionId: id, status, title: `Task ${id}`, userTurns: [{ atMs: T0, text: 'go', images: 0 }] });
+
+  async function tickAt(service: AttentionNotifyService, ms: number, next: ActiveSession[]) {
+    clock = T0 + ms;
+    rows = next;
+    await service.tick(ctx, new AbortController().signal);
+  }
+
+  it('posts one done banner per turn, withdraws it after 10 s, and a restart sends it again never', async () => {
+    const service = makeService();
+    await tickAt(service, 5_000, [live('s1', 'running')]);
+    await tickAt(service, 3 * 60_000, [live('s1', 'idle')]);
+    expect(posts).toEqual([]);
+    await tickAt(service, 3 * 60_000 + 15_000, [live('s1', 'idle')]);
+    expect(posts.map((n) => [n.title, n.category, n.sessionId, n.key])).toEqual([['Finished · Task s1', 'done', 's1', 'zion/s1/done-1792380000000']]);
+    await tickAt(service, 3 * 60_000 + 30_000, [live('s1', 'idle')]);
+    expect(withdrawn).toEqual([['zion/s1/done-1792380000000']]);
+
+    const restarted = makeService();
+    await tickAt(restarted, 4 * 60_000, [live('s1', 'running')]);
+    await tickAt(restarted, 5 * 60_000, [live('s1', 'idle')]);
+    await tickAt(restarted, 6 * 60_000, [live('s1', 'idle')]);
+    expect(posts).toHaveLength(1);
+  });
+
+  it('three finishes together post one summary banner', async () => {
+    const service = makeService();
+    const ids = ['s1', 's2', 's3'];
+    await tickAt(service, 5_000, ids.map((id) => live(id, 'running')));
+    await tickAt(service, 3 * 60_000, ids.map((id) => live(id, id === 's3' ? 'running' : 'idle')));
+    await tickAt(service, 3 * 60_000 + 10_000, ids.map((id) => live(id, 'idle')));
+    await tickAt(service, 3 * 60_000 + 25_000, ids.map((id) => live(id, 'idle')));
+    expect(posts.map((n) => [n.title, n.body])).toEqual([['3 sessions finished', 'Task s1 · Task s2 · Task s3']]);
+  });
+
+  it('a normal level set to sidebar posts no done banner', async () => {
+    const service = makeService(['sidebar']);
+    await tickAt(service, 5_000, [live('s1', 'running')]);
+    await tickAt(service, 3 * 60_000, [live('s1', 'idle')]);
+    await tickAt(service, 4 * 60_000, [live('s1', 'idle')]);
+    expect(posts).toEqual([]);
+  });
+});

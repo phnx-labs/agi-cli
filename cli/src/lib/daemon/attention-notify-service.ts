@@ -7,7 +7,9 @@
  * `interactive.host` unset: this host's asks; this machine: every host's, from
  * the shared fleet collector; another machine: none. The ledger under
  * `feed/notified/` (`<key>`, `<key>#r<n>`) makes a restart re-send nothing.
- * `done` banners ride the run process's exit (`run-notify.ts`), not this service.
+ * A finished interactive turn posts one `done` banner from this tick too
+ * (`finished-banners.ts`), under the normal level's schedule; a headless `agents run
+ * --notify` banners from its own exit (`run-notify.ts`).
  */
 
 import * as fs from 'fs';
@@ -34,6 +36,7 @@ import {
 } from '../feed/notify-schedule.js';
 import { notifyDesktop, withdrawDesktop, type DesktopNotification } from '../menubar/notify-desktop.js';
 import { BasePeriodicService, type DaemonContext } from './service.js';
+import { TurnFinishTracker, buildBurstNotification, buildFinishNotification, finishKey, FINISH_BURST_MIN, type ObservedRow, type TurnFinish } from './finished-banners.js';
 import { span, spanSync } from './diagnostics.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 
@@ -130,6 +133,7 @@ interface BannerState {
   bannerUp: boolean;
   hideAt?: number;
   resolvedAt?: string;
+  finished?: true;
 }
 
 interface AttentionNotifyServiceOptions {
@@ -166,6 +170,7 @@ export class AttentionNotifyService extends BasePeriodicService {
   private banners: Map<string, BannerState> | null = null;
   private fleetHub: FeedHub | null = null;
   private detachFleet: (() => void) | null = null;
+  private readonly finishes = new TurnFinishTracker();
 
   constructor(opts: AttentionNotifyServiceOptions = {}) {
     super();
@@ -195,11 +200,11 @@ export class AttentionNotifyService extends BasePeriodicService {
     const scope = notifyScope(settings.interactiveHost, this.self());
     if (scope !== 'fleet') this.releaseFleet();
     const local = scope === 'local' ? await this.localAsks(nowMs) : undefined;
-    const { asks, scopes } = local
-      ? { asks: local.asks, scopes: null }
+    const { asks, scopes, rows } = local
+      ? { asks: local.asks, scopes: null, rows: local.rows }
       : scope === 'fleet'
         ? this.fleetAsks()
-        : { asks: [], scopes: null };
+        : { asks: [], scopes: null, rows: [] };
     const banners = await this.loadBanners();
 
     const toWithdraw: string[] = [];
@@ -236,8 +241,11 @@ export class AttentionNotifyService extends BasePeriodicService {
       ctx.log('INFO', `attention-notify: posted ${level} ${item.kind} banner for ${item.key}${stage ? ` (reminder ${stage})` : ''}`, { event: 'attention.posted', kind: item.kind, key: item.key, level, reminder: stage });
     }
 
+    this.finishes.observe(rows, nowMs);
+    posted += await this.postFinishes(ctx, this.finishes.due(nowMs), settings, banners, nowMs);
+
     for (const state of banners.values()) {
-      const resolved = !seen.has(state.key) && (scopes === null || scopes.has(state.key.split('/')[0]));
+      const resolved = !state.finished && !seen.has(state.key) && (scopes === null || scopes.has(state.key.split('/')[0]));
       if (resolved) {
         if (state.bannerUp) toWithdraw.push(state.key);
         banners.delete(state.key);
@@ -246,6 +254,10 @@ export class AttentionNotifyService extends BasePeriodicService {
         toWithdraw.push(state.key);
         state.bannerUp = false;
         delete state.hideAt;
+        if (state.finished) {
+          banners.delete(state.key);
+          state.resolvedAt = new Date(nowMs).toISOString();
+        }
         await this.writeState(state);
       }
     }
@@ -265,7 +277,40 @@ export class AttentionNotifyService extends BasePeriodicService {
     return this.settingsCache.value;
   }
 
-  private async localAsks(nowMs: number): Promise<{ asks: AttentionAsk[]; sessions: ActiveSession[] }> {
+  private async postFinishes(
+    ctx: DaemonContext,
+    due: TurnFinish[],
+    settings: AttentionNotifySettings,
+    banners: Map<string, BannerState>,
+    nowMs: number,
+  ): Promise<number> {
+    const schedule = settings.schedules.normal;
+    if (schedule.sidebar) return 0;
+    const fresh: TurnFinish[] = [];
+    for (const finish of due) if (!await this.stageSent(finishKey(finish), 0, banners)) fresh.push(finish);
+    if (fresh.length === 0) return 0;
+    const notifications = fresh.length >= FINISH_BURST_MIN
+      ? [buildBurstNotification(fresh, `${fresh[0]!.scope}/done-burst-${nowMs}`)]
+      : fresh.map(buildFinishNotification);
+    for (const n of notifications) {
+      if (schedule.sound) n.sound = true;
+      this.notify(n);
+      ctx.log('INFO', `attention-notify: posted done banner ${n.key}`, { event: 'attention.done.posted', key: n.key });
+    }
+    const bannerKeys = new Set(notifications.map((n) => n.key!));
+    for (const key of new Set([...bannerKeys, ...fresh.map(finishKey)])) {
+      const up = bannerKeys.has(key) && !schedule.stay;
+      const state: BannerState = {
+        key, postedAt: new Date(nowMs).toISOString(), level: 'normal', stage: 0, bannerUp: up, finished: true,
+        ...(up ? { hideAt: nowMs + BANNER_HIDE_AFTER_MS } : { resolvedAt: new Date(nowMs).toISOString() }),
+      };
+      if (up) banners.set(key, state);
+      await this.writeState(state);
+    }
+    return notifications.length;
+  }
+
+  private async localAsks(nowMs: number): Promise<{ asks: AttentionAsk[]; sessions: ActiveSession[]; rows: ObservedRow[] }> {
     const sessions = await span('attention.sessions', () => this.getSessions(), () => ({}));
     const host = normalizeHost(this.self());
     const asks: AttentionAsk[] = [];
@@ -282,10 +327,10 @@ export class AttentionNotifyService extends BasePeriodicService {
       }));
       if (item) asks.push({ item, session: projected });
     }
-    return { asks, sessions };
+    return { asks, sessions, rows: sessions.map((row) => ({ scope: host, row })) };
   }
 
-  private fleetAsks(): { asks: AttentionAsk[]; scopes: Set<string> } {
+  private fleetAsks(): { asks: AttentionAsk[]; scopes: Set<string>; rows: ObservedRow[] } {
     const hub = this.fleetHubOf();
     // The feed-stream service closes the shared hub when it stops; re-attach rather than read a dead stream.
     if (this.fleetHub !== hub || !this.detachFleet || !hub.active) {
@@ -297,7 +342,7 @@ export class AttentionNotifyService extends BasePeriodicService {
       item: item.urgency ? item : { ...item, urgency: 'normal' as const },
       session: agent ?? {},
     }));
-    return { asks, scopes: hub.state.reportingScopes };
+    return { asks, scopes: hub.state.reportingScopes, rows: hub.state.liveAgents() };
   }
 
   private releaseFleet(): void {

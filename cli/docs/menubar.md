@@ -261,6 +261,25 @@ Set to this machine: it posts every host's asks, read from the daemon's one
 shared fleet collector (`sharedFleetFeedHub`, the same stream `feed watch --json`
 reads — no second SSH fan-out). Set to another machine: this host posts nothing.
 
+**Finished turns** ([`src/lib/daemon/finished-banners.ts`](../src/lib/daemon/finished-banners.ts)).
+The same tick posts one `--category done` banner when an interactive session
+(`context: terminal`, not the Lead) goes from `running` to `idle` after a turn of
+at least 2 minutes, timed from the turn's user message (or from when the daemon
+first saw it running). Its title is `✓ Done · <title>`, `Not done · <title>` or
+`Finished · <title>` from the row's `doneVerdict` when that verdict was written
+during this turn; the body is the verdict's gaps in words when it is open, else
+the first sentence of the agent's last line. It carries `--session <id>`, so a
+tap opens the session, and `--action url:<pr>` when the row has a PR. A finish
+waits 15 s before posting (a flap back to `running` cancels it, the Stop hook's
+verdict lands); finishes that land within 15 s of one another, at most 60 s in
+all, go out together, as one `<n> sessions finished` banner when there are
+three or more. The ledger key `<host>/<session>/done-<turn start>` makes it one
+banner per turn across restarts. The `notifyNormal` schedule governs it: `sidebar`
+posts none, `sound` adds the sound, `stay` keeps it on screen (otherwise it is
+withdrawn after ~10 s); `interactive.host` picks the posting machine as for asks.
+A headless `agents run --notify` banners from its own exit instead
+([`src/lib/run-notify.ts`](../src/lib/run-notify.ts)).
+
 ## Commands
 
 `agents menubar` is hidden from `--help`: it holds only the four verbs AGI Menu

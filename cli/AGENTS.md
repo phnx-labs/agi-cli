@@ -132,7 +132,8 @@ disk-cache read that starts at most one background `linear tasks <id> --json` pe
 ticket per 30 minutes, only once an ask exists. A peer on an older CLI sends no
 urgency; `normalizePeerEnvelope` reads it as `normal`.
 
-**The banner schedule, reminders, withdraw and the fleet rule live in the
+**The banner schedule, reminders, withdraw, the fleet rule and the finished-turn
+`done` banner (a row's `doneVerdict`, `src/lib/daemon/finished-banners.ts`) live in the
 `attention-notify` daemon service** and the helper argv they use is a cross-repo
 contract — see [`docs/menubar.md` §Attention banners](docs/menubar.md#attention-banners-phnx-4369).
 The same service runs `gcMailbox` hourly, so an open ask whose session is gone

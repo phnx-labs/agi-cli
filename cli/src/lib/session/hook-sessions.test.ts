@@ -4,7 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
-import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readStateSessionRecord } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readStateSessionRecord, readDoneVerdict } from './hook-sessions.js';
+import { foldDoneVerdict, type ActiveSession } from './active.js';
 import { writePidSessionEntry } from './pid-registry.js';
 import { hostProcessView } from './process-view.js';
 
@@ -267,4 +268,48 @@ it.skipIf(process.platform !== 'linux')('recovers the surviving live hook launch
     if (previousStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
     else process.env.AGENTS_STATE_DIR = previousStateDir;
   }
+});
+
+describe('readDoneVerdict (the Stop hook verdict merged into state/sessions/<pid>.json)', () => {
+  const fixture = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'state-record-verdict.json'), 'utf8'));
+  const SID = fixture.session_id as string;
+  const write = (overrides: Record<string, unknown> = {}) => writeStateRecord(SP, { ...fixture, pid: SP, ...overrides });
+
+  afterEach(() => {
+    try { fs.unlinkSync(path.join(STATE_SESSIONS_DIR, `${SP}.json`)); } catch {  }
+  });
+
+  it('carries state, gaps and an ISO time for the session the record belongs to', () => {
+    write();
+    expect(readDoneVerdict(SP, SID, 1792384940_000)).toEqual({ state: 'open', gaps: ['open-pr', 'delivery'], at: '2026-10-19T05:02:01.000Z' });
+  });
+
+  it('refuses a record for another session, another pid, or an earlier process', () => {
+    write();
+    expect(readDoneVerdict(SP, 'another-session')).toBeUndefined();
+    write({ pid: SP + 1 });
+    expect(readDoneVerdict(SP, SID)).toBeUndefined();
+    write();
+    expect(readDoneVerdict(SP, SID, 1792390000_000)).toBeUndefined();
+  });
+
+  it('refuses a verdict written before this process started, or one of an unknown shape', () => {
+    write({ ts: 1792390000, verdict: { ...fixture.verdict, at: 1792380000_000 } });
+    expect(readDoneVerdict(SP, SID, 1792390000_000)).toBeUndefined();
+    write({ verdict: { state: 'maybe', gaps: [], at: 1792386121000 } });
+    expect(readDoneVerdict(SP, SID)).toBeUndefined();
+    write({ verdict: { state: 'done', gaps: [], at: '2026-10-18' } });
+    expect(readDoneVerdict(SP, SID)).toBeUndefined();
+  });
+
+  it('foldDoneVerdict sets the verdict on its live row and clears a stale one elsewhere', () => {
+    write({ verdict: { state: 'done', gaps: [], at: 1792386121000 } });
+    const rows = [
+      { context: 'terminal', kind: 'claude', status: 'idle', pid: SP, sessionId: SID, pidAlive: true, processStartedAtMs: 1792384940_000 },
+      { context: 'terminal', kind: 'claude', status: 'idle', pid: SP, sessionId: 'other', pidAlive: true, doneVerdict: { state: 'done', gaps: [], at: 'x' } },
+    ] as ActiveSession[];
+    foldDoneVerdict(rows);
+    expect(rows[0]!.doneVerdict).toEqual({ state: 'done', gaps: [], at: '2026-10-19T05:02:01.000Z' });
+    expect(rows[1]!.doneVerdict).toBeUndefined();
+  });
 });

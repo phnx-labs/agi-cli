@@ -16,7 +16,17 @@ export interface HookSessionRecord {
   terminal_id?: string;
   ts?: number;
   completed?: boolean;
+  verdict?: unknown;
 }
+
+export interface DoneVerdict {
+  state: 'done' | 'open' | 'unchecked';
+  gaps: string[];
+  at: string;
+}
+
+const RECORD_SKEW_MS = 5_000;
+const VERDICT_STATES = new Set(['done', 'open', 'unchecked']);
 
 export interface HookSessionIndex {
   byLaunchId: Map<string, HookSessionRecord>;
@@ -46,10 +56,21 @@ export function readStateSessionRecord(
   }
   if (!rec) return undefined;
   if (startedAtMs !== undefined && typeof rec.ts === 'number') {
-    const SKEW_MS = 5_000;
-    if (rec.ts * 1000 < startedAtMs - SKEW_MS) return undefined;
+    if (rec.ts * 1000 < startedAtMs - RECORD_SKEW_MS) return undefined;
   }
   return rec;
+}
+
+// The Stop hook merges `verdict: { state, gaps, at: epoch ms }` into the record the SessionStart hook wrote.
+export function readDoneVerdict(pid: number, sessionId: string, processStartedAtMs?: number): DoneVerdict | undefined {
+  const rec = readStateSessionRecord(pid, processStartedAtMs);
+  if (!rec || rec.pid !== pid || rec.session_id !== sessionId) return undefined;
+  const v = rec.verdict as { state?: unknown; gaps?: unknown; at?: unknown } | undefined;
+  if (!v || typeof v !== 'object' || typeof v.state !== 'string' || !VERDICT_STATES.has(v.state)) return undefined;
+  if (typeof v.at !== 'number' || !Number.isFinite(v.at)) return undefined;
+  if (processStartedAtMs !== undefined && v.at < processStartedAtMs - RECORD_SKEW_MS) return undefined;
+  const gaps = Array.isArray(v.gaps) ? v.gaps.filter((g): g is string => typeof g === 'string' && g.length > 0) : [];
+  return { state: v.state as DoneVerdict['state'], gaps, at: new Date(v.at).toISOString() };
 }
 
 function parseRecord(raw: string): HookSessionRecord | undefined {
