@@ -58,7 +58,7 @@ import {
   type QueryOptions,
 } from './db.js';
 import { buildRunNameMap } from './run-names.js';
-import { recordTouches, touchesFromCommand, type CommandTouches, type TouchedPr, type TouchedTicket } from './touched.js';
+import { recordTouches, touchesFromCommand, trackPendingTouches, type CommandTouches, type TouchedPr, type TouchedTicket } from './touched.js';
 import { claudeRecapFromLine, resolveSessionName, type LiveSessionName, type SessionNameSources, type SessionRecap } from './title.js';
 import { resolveLinearApiKey } from '../linear-cache.js';
 import {
@@ -2670,8 +2670,7 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
         state.pendingTicketTools.add(b.id);
       }
       if (typeof b?.id === 'string' && b?.name === 'Bash' && typeof b?.input?.command === 'string' && b.input.run_in_background !== true) {
-        const touches = touchesFromCommand(b.input.command, typeof parsed.cwd === 'string' ? parsed.cwd : state.cwd);
-        if (touches.prs.length > 0 || touches.tickets.length > 0) state.pendingTouches.set(b.id, touches);
+        trackPendingTouches(state.pendingTouches, b.id, touchesFromCommand(b.input.command, typeof parsed.cwd === 'string' ? parsed.cwd : state.cwd));
       }
       if (b?.name === 'ExitPlanMode' && typeof b?.input?.plan === 'string') {
         const p = b.input.plan.trim();
@@ -2718,7 +2717,11 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
       const touches = state.pendingTouches.get(b.tool_use_id);
       if (!touches) continue;
       state.pendingTouches.delete(b.tool_use_id);
-      if (b.is_error !== true) recordTouches(state, touches, { prUrls: state.prUrls, tickets: state.createdTickets });
+      if (b.is_error === true) continue;
+      const output = typeof b.content === 'string'
+        ? b.content
+        : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+      recordTouches(state, touches, output, { prUrls: state.prUrls, tickets: state.createdTickets });
     }
   }
 

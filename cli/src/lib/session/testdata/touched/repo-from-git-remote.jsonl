@@ -5,3 +5,5 @@
 {"type": "user", "timestamp": "2026-10-18T12:00:05.000Z", "cwd": "/", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "r2", "content": "\u2713 Closed pull request #9"}]}}
 {"type": "assistant", "timestamp": "2026-10-18T12:00:06.000Z", "cwd": "__NOT_A_REPO__", "message": {"id": "m-r3", "role": "assistant", "content": [{"type": "tool_use", "id": "r3", "name": "Bash", "input": {"command": "gh pr merge 40", "description": "run"}}]}}
 {"type": "user", "timestamp": "2026-10-18T12:00:07.000Z", "cwd": "__NOT_A_REPO__", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "r3", "content": "\u2713 Merged pull request #40"}]}}
+{"type": "assistant", "timestamp": "2026-10-18T13:00:41.000Z", "cwd": "__REPO__/.agents/worktrees/removed", "message": {"id": "m-r4", "role": "assistant", "content": [{"type": "tool_use", "id": "r4", "name": "Bash", "input": {"command": "gh pr merge 41", "description": "run"}}]}}
+{"type": "user", "timestamp": "2026-10-18T13:00:42.000Z", "cwd": "__REPO__/.agents/worktrees/removed", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "r4", "content": ""}]}}
