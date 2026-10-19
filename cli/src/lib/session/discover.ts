@@ -2544,7 +2544,7 @@ interface ClaudeParseState {
   seenAssistantIds: Set<string>;
   userTexts: string[];
   assistantTexts: string[];
-  sawPrCreate: boolean;
+  pendingPrCreates: Set<string>;
   prUrl?: string;
   prNumber?: number;
   prUrls: string[];
@@ -2592,7 +2592,7 @@ export function initClaudeParseState(): ClaudeParseState {
     seenAssistantIds: new Set<string>(),
     userTexts: [],
     assistantTexts: [],
-    sawPrCreate: false,
+    pendingPrCreates: new Set<string>(),
     prUrl: undefined,
     prNumber: undefined,
     prUrls: [],
@@ -2685,16 +2685,16 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     }
   }
 
-  if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+  if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
     for (const b of parsed.message.content) {
-      if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
-        state.sawPrCreate = true;
+      if (b?.type === 'tool_use' && typeof b?.id === 'string' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
+        state.pendingPrCreates.add(b.id);
       }
     }
   }
-  if (state.sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+  if (state.pendingPrCreates.size > 0 && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
     for (const b of parsed.message.content) {
-      if (b?.type !== 'tool_result') continue;
+      if (b?.type !== 'tool_result' || !state.pendingPrCreates.delete(b.tool_use_id)) continue;
       const text = typeof b.content === 'string'
         ? b.content
         : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
@@ -2907,7 +2907,7 @@ export interface ClaudeParserState {
   costUsdNoCache: number;
   seenIdsSize: number;
   seenIdsRecent: string[];
-  sawPrCreate: boolean;
+  pendingPrCreates?: string[];
   prUrl?: string;
   prNumber?: number;
   prUrls?: string[];
@@ -2969,7 +2969,7 @@ export function serializeClaudeParserState(
     costUsdNoCache: state.costUsdNoCache,
     seenIdsSize: state.seenAssistantIds.size,
     seenIdsRecent,
-    sawPrCreate: state.sawPrCreate,
+    pendingPrCreates: [...state.pendingPrCreates],
     prUrl: state.prUrl,
     prNumber: state.prNumber,
     prUrls: state.prUrls,
@@ -3025,7 +3025,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     assistantTexts: prior.assistantContentText !== undefined && prior.assistantContentText.length > 0
       ? [prior.assistantContentText]
       : [],
-    sawPrCreate: prior.sawPrCreate,
+    pendingPrCreates: new Set<string>(prior.pendingPrCreates),
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
     prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
@@ -3120,11 +3120,10 @@ async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): 
   return state.timestamp;
 }
 
-function recordCreatedPr(state: { sawPrCreate: boolean; prUrl?: string; prNumber?: number; prUrls: string[] }, pr: { url: string; number?: number } | null | undefined): void {
+function recordCreatedPr(state: { prUrl?: string; prNumber?: number; prUrls: string[] }, pr: { url: string; number?: number } | null | undefined): void {
   if (!pr) return;
   if (!state.prUrl) { state.prUrl = pr.url; state.prNumber = pr.number; }
   if (!state.prUrls.includes(pr.url)) state.prUrls.push(pr.url);
-  state.sawPrCreate = false;
 }
 
 function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
@@ -3166,7 +3165,7 @@ interface CodexParseState {
   lastTsMs?: number;
   userTexts: string[];
   assistantTexts: string[];
-  sawPrCreate: boolean;
+  pendingPrCreates: Set<string>;
   prUrl?: string;
   prNumber?: number;
   prUrls: string[];
@@ -3197,7 +3196,7 @@ export function initCodexParseState(): CodexParseState {
     lastTsMs: undefined,
     userTexts: [],
     assistantTexts: [],
-    sawPrCreate: false,
+    pendingPrCreates: new Set<string>(),
     prUrl: undefined,
     prNumber: undefined,
     prUrls: [],
@@ -3212,7 +3211,7 @@ export function initCodexParseState(): CodexParseState {
   };
 }
 
-function applyCodexLine(state: CodexParseState, parsed: any): void {
+export function applyCodexLine(state: CodexParseState, parsed: any): void {
   collectCodexToolCalls(state.toolCollector, parsed);
   if (parsed.type === 'response_item') {
     const p = parsed.payload || {};
@@ -3227,7 +3226,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
         type: 'tool_use', agent: 'codex', timestamp: parsed.timestamp || '', tool: p.name, args,
         path: args.file_path || args.path, command: cmd || undefined,
       });
-      if (!state.sawPrCreate && isPrCreateCommand(cmd)) state.sawPrCreate = true;
+      if (typeof p.call_id === 'string' && isPrCreateCommand(cmd)) state.pendingPrCreates.add(p.call_id);
       if (!state.spawnedTeam) {
         const team = detectSpawnedTeam(cmd);
         if (team) state.spawnedTeam = team;
@@ -3237,7 +3236,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
       }
     }
     if (p.type === 'function_call_output') {
-      if (state.sawPrCreate) recordCreatedPr(state, extractPrUrl(String(p.output || '')));
+      if (typeof p.call_id === 'string' && state.pendingPrCreates.delete(p.call_id)) recordCreatedPr(state, extractPrUrl(String(p.output || '')));
       if (typeof p.call_id === 'string' && state.pendingTicketTools.has(p.call_id)) {
         state.pendingTicketTools.delete(p.call_id);
         const t = extractCreatedTicket(String(p.output || ''));
@@ -3302,7 +3301,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
   }
 }
 
-function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
+export function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
   const snap = state.lastTotalTokenUsage;
   const outputTokens = snap
     ? (snap.output_tokens ?? 0) + (snap.reasoning_output_tokens ?? 0)
@@ -3414,7 +3413,7 @@ export interface CodexParserState {
   lastTotalTokenUsage?: any;
   firstTsMs?: number;
   lastTsMs?: number;
-  sawPrCreate: boolean;
+  pendingPrCreates?: string[];
   prUrl?: string;
   prNumber?: number;
   prUrls?: string[];
@@ -3452,7 +3451,7 @@ export function serializeCodexParserState(
     lastTotalTokenUsage: state.lastTotalTokenUsage,
     firstTsMs: state.firstTsMs,
     lastTsMs: state.lastTsMs,
-    sawPrCreate: state.sawPrCreate,
+    pendingPrCreates: [...state.pendingPrCreates],
     prUrl: state.prUrl,
     prNumber: state.prNumber,
     prUrls: state.prUrls,
@@ -3468,7 +3467,7 @@ export function serializeCodexParserState(
   };
 }
 
-function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
+export function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
   return {
     sessionId: prior.sessionId,
     timestamp: prior.timestamp,
@@ -3487,7 +3486,7 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     assistantTexts: prior.assistantContentText !== undefined && prior.assistantContentText.length > 0
       ? [prior.assistantContentText]
       : [],
-    sawPrCreate: prior.sawPrCreate,
+    pendingPrCreates: new Set<string>(prior.pendingPrCreates),
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
     prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
