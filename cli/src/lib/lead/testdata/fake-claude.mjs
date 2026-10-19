@@ -61,6 +61,17 @@ rl.on('line', async (line) => {
     result('Stopping it needs your Confirm.');
     return;
   }
+  const send = /SEND (\S+) (.+)$/m.exec(content);
+  if (send) {
+    await toolCall('toolu_send', `agents lead tool send --session ${send[1]} -- ${send[2]}`, async () => {
+      const r = await hostCall({ op: 'resolve', session: send[1] });
+      const text = `[Lead] ${send[2]}`;
+      return (await hostCall({ op: 'hold', held: { action: 'send', argv: ['send', '--channel', 'session', '--to', r.id, '--text', text], sessionId: r.id, label: `Send to “${r.title}”`, detail: text } })).label;
+    });
+    streamText('Queued the message. Send it?');
+    result('Queued the message. Send it?');
+    return;
+  }
   if (content.includes('ROSTER')) {
     await toolCall('toolu_roster', 'agents lead tool roster', async () => (await hostCall({ op: 'roster' })).text);
     streamText('One session is running.');

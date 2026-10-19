@@ -32,8 +32,9 @@ describe('touchedPrs: the PRs a Claude session acted on but did not open', () =>
     ]);
   });
 
-  it('reads agents projects prs merge|review by --repo and --number, behind a $(…) prefix and a pipe; --help is not an action', () => {
+  it('reads agents projects prs merge|review|close by --repo and --number, behind a $(…) prefix and a pipe; --help is not an action', () => {
     expect(scan(fixtureLines('agents-prs-merge.jsonl')).touchedPrs).toEqual([
+      pr('phnx-labs/agi-cli', 3990, 'closed'),
       pr('phnx-labs/agi-cli', 3995, 'merged'),
       pr('phnx-labs/agi-ext', 171, 'merged'),
     ]);

@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 45,
-  "commands": 332,
+  "commands": 342,
   "root": {
     "name": "agents",
     "path": "",
@@ -7089,8 +7089,8 @@
           "negate": false
         }
       ],
-      "examples": "# Ask the Lead (starts its warm host on first use; later turns reuse it)\nagents lead ask --project rush -- what is running?\nagents lead ask --project rush --json -- put Claude on PHNX-4365\n\n# A stop is held for you; run the token it printed\nagents lead confirm c_0123456789abcdef\n\n# What it said before, its state, and shutting it down\nagents lead history --project rush --limit 20 --json\nagents lead status --json\nagents lead stop --project rush",
-      "notes": "- One host process per project owns the Claude child and survives the caller exiting.\n  Its files live in ~/.agents/lead/<project>/ (session.json, memory.md, history.ndjson, host.log).\n- The Lead runs with isolated settings and may only run the fixed-shape agents lead tool commands.\n- Stops go through confirm tokens, which expire after 10 minutes.\n- The model is the lead.model setting (default sonnet): agents config set lead.model <model>.",
+      "examples": "# Ask the Lead (starts its warm host on first use; later turns reuse it)\nagents lead ask --project rush -- what is running?\nagents lead ask --project rush --json -- put Claude on PHNX-4365\n\n# Pass what the editor shows so \"this one\" resolves, and hear the answer as it streams\nagents lead ask --project rush --context '{\"front\":{\"sessionId\":\"4b2f1a9c-…\",\"title\":\"Fix login\",\"tab\":3}}' -- what is this one stuck on?\nagents lead ask --project rush --speak -- what needs me?\n\n# Anything that acts (answer, send, start, dispatch, stop, a PR action) is held; run the token it printed\nagents lead confirm c_0123456789abcdef\n\n# What it said before, its state, and shutting it down\nagents lead history --project rush --limit 20 --json\nagents lead status --json\nagents lead stop --project rush",
+      "notes": "- One host process per project owns the Claude child and survives the caller exiting.\n  Its files live in ~/.agents/lead/<project>/ (session.json, memory.md, history.ndjson, host.log).\n- The Lead runs with isolated settings and may only run the fixed-shape agents lead tool commands.\n- Every action goes through a confirm token, which expires after 10 minutes; confirm runs the exact\n  agents argv the Lead queued (agents feed answer, agents send, agents run, agents ps stop, agents projects prs …).\n- The model is the lead.model setting (default sonnet): agents config set lead.model <model>.\n- --speak reads ELEVENLABS_API_KEY from the secrets bundle lead.voice.bundle (default elevenlabs) and plays\n  each finished sentence with afplay (macOS) or ffplay; a voice failure is one stderr line, never a failed turn.",
       "subcommands": [
         {
           "name": "ask",
@@ -7125,6 +7125,24 @@
               "negate": false
             },
             {
+              "flags": "--context <json>",
+              "description": "Editor context as a JSON object, e.g. {\"front\":{\"sessionId\":\"…\",\"title\":\"…\",\"tab\":3},\"tabs\":[…]}",
+              "long": "--context",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--speak",
+              "description": "Speak the answer on this machine as it streams (ElevenLabs; see notes)",
+              "long": "--speak",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--json",
               "description": "Stream NDJSON events (turn, status, tool, text, confirm, done, error)",
               "long": "--json",
@@ -7150,7 +7168,7 @@
           "name": "confirm",
           "path": "lead confirm",
           "aliases": [],
-          "description": "Run an action the Lead held for confirmation (a stop), by its token",
+          "description": "Run an action the Lead held for confirmation (answer, send, start, dispatch, stop or a PR action), by its token",
           "args": [
             {
               "name": "token",
@@ -7323,13 +7341,80 @@
               "negate": false
             }
           ],
-          "notes": "- These run inside the Lead's Claude process, which sets AGENTS_LEAD_PROJECT. Each has one fixed shape:\n  no --mode, --secrets, --device, --lease, --cloud or pass-through arguments exist on any of them.\n- stop never stops anything: it mints a confirm token the owner runs with agents lead confirm.",
+          "notes": "- These run inside the Lead's Claude process, which sets AGENTS_LEAD_PROJECT. Each has one fixed shape:\n  no --mode, --secrets, --device, --lease, --cloud or pass-through arguments exist on any of them.\n- answer, send, start, dispatch, stop and prs merge|comment|ready|rerun|close never act: each mints a\n  confirm token (10 minutes) the owner runs with agents lead confirm <token>.\n- roster, attention and prs list read the Lead host's live feed or GitHub; linear reads or creates tickets.",
           "subcommands": [
+            {
+              "name": "answer",
+              "path": "lead tool answer",
+              "aliases": [],
+              "description": "Queue an answer to one open ask for the owner's Confirm (feed answer runs on confirm)",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--key <key>",
+                  "description": "The attention key from the attention tool",
+                  "long": "--key",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--choice <id>",
+                  "description": "A choice id of that ask",
+                  "long": "--choice",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--text <answer>",
+                  "description": "A free-text answer (one line)",
+                  "long": "--text",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "attention",
+              "path": "lead tool attention",
+              "aliases": [],
+              "description": "List every open ask across the fleet from the Lead host's live feed: key, session, host, project, age, question, choices",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
             {
               "name": "dispatch",
               "path": "lead tool dispatch",
               "aliases": [],
-              "description": "Move a ticket to In Progress, delegate it, and start the agent on it in edit mode",
+              "description": "Queue for Confirm: move a ticket to In Progress, delegate it, and start the agent on it in edit mode",
               "args": [],
               "options": [
                 {
@@ -7491,6 +7576,282 @@
               ]
             },
             {
+              "name": "prs",
+              "path": "lead tool prs",
+              "aliases": [],
+              "description": "This project's open PRs: list them, or queue one action on one for Confirm",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": [
+                {
+                  "name": "close",
+                  "path": "lead tool prs close",
+                  "aliases": [],
+                  "description": "Queue for Confirm: agents projects prs close on one PR of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "An attached repo of this project",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--number <n>",
+                      "description": "The PR number",
+                      "long": "--number",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "comment",
+                  "path": "lead tool prs comment",
+                  "aliases": [],
+                  "description": "Queue for Confirm: agents projects prs comment on one PR of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "An attached repo of this project",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--number <n>",
+                      "description": "The PR number",
+                      "long": "--number",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--body <text>",
+                      "description": "The comment",
+                      "long": "--body",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "list",
+                  "path": "lead tool prs list",
+                  "aliases": [],
+                  "description": "List this project's open PRs (repo#number, draft, title)",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "Only this attached repo",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "merge",
+                  "path": "lead tool prs merge",
+                  "aliases": [],
+                  "description": "Queue for Confirm: agents projects prs merge on one PR of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "An attached repo of this project",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--number <n>",
+                      "description": "The PR number",
+                      "long": "--number",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--sha <head>",
+                      "description": "The head commit to pin (merge reads the live head when omitted)",
+                      "long": "--sha",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "ready",
+                  "path": "lead tool prs ready",
+                  "aliases": [],
+                  "description": "Queue for Confirm: agents projects prs ready on one PR of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "An attached repo of this project",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--number <n>",
+                      "description": "The PR number",
+                      "long": "--number",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--sha <head>",
+                      "description": "The head commit to pin (merge reads the live head when omitted)",
+                      "long": "--sha",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                },
+                {
+                  "name": "rerun",
+                  "path": "lead tool prs rerun",
+                  "aliases": [],
+                  "description": "Queue for Confirm: agents projects prs rerun on one PR of this project",
+                  "args": [],
+                  "options": [
+                    {
+                      "flags": "--repo <owner/repo>",
+                      "description": "An attached repo of this project",
+                      "long": "--repo",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--number <n>",
+                      "description": "The PR number",
+                      "long": "--number",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "--run-id <id>",
+                      "description": "Which failing run, when the head has several",
+                      "long": "--run-id",
+                      "required": true,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    },
+                    {
+                      "flags": "-h, --help",
+                      "description": "Show help",
+                      "short": "-h",
+                      "long": "--help",
+                      "required": false,
+                      "optional": false,
+                      "variadic": false,
+                      "negate": false
+                    }
+                  ],
+                  "subcommands": []
+                }
+              ]
+            },
+            {
               "name": "remember",
               "path": "lead tool remember",
               "aliases": [],
@@ -7550,7 +7911,7 @@
               "name": "send",
               "path": "lead tool send",
               "aliases": [],
-              "description": "Type a message into a running session of this project (slash commands are refused)",
+              "description": "Queue for Confirm: type a message into a running session of this project (slash commands are refused)",
               "args": [
                 {
                   "name": "text",
@@ -7586,7 +7947,7 @@
               "name": "start",
               "path": "lead tool start",
               "aliases": [],
-              "description": "Start an agent in edit mode on a task with no ticket",
+              "description": "Queue for Confirm: start an agent in edit mode on a task with no ticket",
               "args": [
                 {
                   "name": "task",
@@ -7622,7 +7983,7 @@
               "name": "stop",
               "path": "lead tool stop",
               "aliases": [],
-              "description": "Ask the owner to confirm stopping a session; mints a confirm token, never stops anything",
+              "description": "Queue for Confirm: stop a session; mints a confirm token, never stops anything",
               "args": [],
               "options": [
                 {
@@ -9156,7 +9517,7 @@
           "name": "prs",
           "path": "projects prs",
           "aliases": [],
-          "description": "Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).",
+          "description": "Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge, close), or read and re-run failed CI (failure, rerun).",
           "args": [],
           "options": [
             {
@@ -9170,7 +9531,7 @@
               "negate": false
             }
           ],
-          "examples": "agents projects prs --json                            # every open PR across your account and orgs, needs-me first\nagents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\nagents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\nagents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
+          "examples": "agents projects prs --json                            # every open PR across your account and orgs, needs-me first\nagents projects prs rush --json                       # every open PR across rush's repos (= prs list rush)\nagents projects prs rush --json --repo phnx-labs/agi-cli --number 3646  # one PR, with checks + mergeability\nagents projects prs ready rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>\nagents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -\nagents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs close rush --repo phnx-labs/agi-cli --number 3646\nagents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>\nagents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>",
           "subcommands": [
             {
               "name": "automerge",
@@ -9253,6 +9614,62 @@
               ],
               "examples": "agents projects prs rush --json --repo phnx-labs/agi-cli --number 3646   # read headSha + merge.autoMergeAllowed\nagents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>\nagents projects prs automerge rush --repo phnx-labs/agi-cli --number 3646 --off --json",
               "notes": "GitHub has no REST endpoint for auto-merge, so each call is one GraphQL\nmutation (enablePullRequestAutoMerge / disablePullRequestAutoMerge) after a REST\nread. Turning it on passes expectedHeadOid, so a branch that moved since --sha\nis refused. The repository must allow auto-merge (merge.autoMergeAllowed in\nprs --json), and GitHub refuses it on a PR that can already merge: use prs merge\nfor that. Exits 1 unless auto-merge ends in the requested state.",
+              "subcommands": []
+            },
+            {
+              "name": "close",
+              "path": "projects prs close",
+              "aliases": [],
+              "description": "Close one open PR without merging it.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--repo <owner/repo>",
+                  "description": "owner/repo (with a project name, one of its attached repos)",
+                  "long": "--repo",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--number <n>",
+                  "description": "The PR number",
+                  "long": "--number",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable result",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents projects prs close rush --repo phnx-labs/agi-cli --number 3646\nagents projects prs close --repo muqsitnawaz/agents --number 12 --json   # any repo, no project",
+              "notes": "One REST read, then one REST call (PATCH pulls/{n} with state=closed), not the\nGraphQL-backed gh pr close. The branch is kept. A PR that is already closed\nsucceeds without a write; a merged one is refused (exit 1, closed: false in --json).",
               "subcommands": []
             },
             {

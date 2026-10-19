@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).
 
-_45 command groups · 332 commands._
+_45 command groups · 342 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -245,21 +245,30 @@ agents inspect <target>  Inspect one installed agent harness at one version (not
 ```
 agents lead                          Talk to the per-project Lead: one warm headless Claude that dispatches and manages your agents
 agents lead ask <text...>            Send one message to the project Lead and stream its reply
-agents lead confirm <token>          Run an action the Lead held for confirmation (a stop), by its token
+agents lead confirm <token>          Run an action the Lead held for confirmation (answer, send, start, dispatch, stop or a PR action), by its token
 agents lead history                  Print finished Lead turns for a project, oldest first
 agents lead status                   Show whether each project Lead is warm, cold or stopped, with its session and context use
 agents lead stop                     Stop a project Lead host and its Claude process (its session stays resumable)
 agents lead tool                     The fixed-shape commands a Lead may run (only inside a Lead; the harness allows nothing else)
-agents lead tool dispatch            Move a ticket to In Progress, delegate it, and start the agent on it in edit mode
+agents lead tool answer              Queue an answer to one open ask for the owner's Confirm (feed answer runs on confirm)
+agents lead tool attention           List every open ask across the fleet from the Lead host's live feed: key, session, host, project, age, question, choices
+agents lead tool dispatch            Queue for Confirm: move a ticket to In Progress, delegate it, and start the agent on it in edit mode
 agents lead tool linear              Read this project's Linear tickets, or create one
 agents lead tool linear create       Create a ticket in this project
 agents lead tool linear tasks        List tickets of this project
 agents lead tool linear view <id>    Show one ticket
+agents lead tool prs                 This project's open PRs: list them, or queue one action on one for Confirm
+agents lead tool prs close           Queue for Confirm: agents projects prs close on one PR of this project
+agents lead tool prs comment         Queue for Confirm: agents projects prs comment on one PR of this project
+agents lead tool prs list            List this project's open PRs (repo#number, draft, title)
+agents lead tool prs merge           Queue for Confirm: agents projects prs merge on one PR of this project
+agents lead tool prs ready           Queue for Confirm: agents projects prs ready on one PR of this project
+agents lead tool prs rerun           Queue for Confirm: agents projects prs rerun on one PR of this project
 agents lead tool remember <note...>  Save one short note to the Lead's memory.md
 agents lead tool roster              List live sessions for this project (or --project) from the Lead host's live feed
-agents lead tool send <text...>      Type a message into a running session of this project (slash commands are refused)
-agents lead tool start <task...>     Start an agent in edit mode on a task with no ticket
-agents lead tool stop                Ask the owner to confirm stopping a session; mints a confirm token, never stops anything
+agents lead tool send <text...>      Queue for Confirm: type a message into a running session of this project (slash commands are refused)
+agents lead tool start <task...>     Queue for Confirm: start an agent in edit mode on a task with no ticket
+agents lead tool stop                Queue for Confirm: stop a session; mints a confirm token, never stops anything
 ```
 
 ## mcp: Connect agents to external tools via Model Context Protocol servers
@@ -332,8 +341,9 @@ agents projects edit <name>           Open the project YAML in $EDITOR (it is ha
 agents projects import                Import project definitions from Linear (via the `linear` CLI).
 agents projects link <name>           Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list                  List defined projects (definitions only by default; no session scan).
-agents projects prs                   Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).
+agents projects prs                   Open pull requests: every one across your GitHub account and orgs, or one project's (list, the default); act on one (ready, review, comment, merge, close), or read and re-run failed CI (failure, rerun).
 agents projects prs automerge [name]  Turn GitHub auto-merge on (or off with --off) for one open PR, so it merges itself once its required checks pass.
+agents projects prs close [name]      Close one open PR without merging it.
 agents projects prs comment [name]    Post a comment on one open PR.
 agents projects prs failure [name]    Why one commit's CI failed: each failing check with the error lines of its job log.
 agents projects prs list [name]       Every OPEN pull request across a project's attached repos, or with no project across your GitHub account and every org you belong to, with what needs you first.

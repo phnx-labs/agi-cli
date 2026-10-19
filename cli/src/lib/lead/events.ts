@@ -1,3 +1,5 @@
+import type { ConfirmAction } from './confirm.js';
+
 export type LeadEngine = 'warm' | 'cold';
 export type LeadStatusState = 'booting' | 'thinking' | 'tool' | 'answering';
 
@@ -14,7 +16,7 @@ export type LeadEvent =
   | { type: 'tool'; id: string; label: string; cmd: string; state: 'run' }
   | { type: 'tool'; id: string; label: string; state: 'ok' | 'fail'; secs: number }
   | { type: 'text'; delta: string }
-  | { type: 'confirm'; token: string; action: 'stop'; sessionId: string; label: string }
+  | { type: 'confirm'; token: string; action: ConfirmAction; label: string; detail?: string; sessionId?: string }
   | { type: 'done'; turn: string; text: string; summary: string; refs: LeadRef[]; timing: LeadTiming }
   | { type: 'error'; message: string };
 
@@ -34,8 +36,8 @@ export type ParsedItem =
 
 export const ROTATE_AT_FRACTION = 0.6;
 
-const LEAD_TOOL_RE = /^\s*agents\s+lead\s+tool\s+([a-z]+)/;
-const HELD_TOOLS = new Set(['stop']);
+const LEAD_TOOL_RE = /^\s*agents\s+lead\s+tool\s+([a-z]+)(?:\s+([a-z]+))?/;
+const HELD_TOOLS = new Set(['stop', 'answer', 'send', 'start', 'dispatch']);
 
 export function toolLabel(command: string): string {
   const lead = LEAD_TOOL_RE.exec(command);
@@ -46,7 +48,8 @@ export function toolLabel(command: string): string {
 
 export function isHeldCommand(command: string): boolean {
   const lead = LEAD_TOOL_RE.exec(command);
-  return lead !== null && HELD_TOOLS.has(lead[1]);
+  if (lead === null) return false;
+  return HELD_TOOLS.has(lead[1]) || (lead[1] === 'prs' && lead[2] !== undefined && lead[2] !== 'list');
 }
 
 function round2(n: number): number {

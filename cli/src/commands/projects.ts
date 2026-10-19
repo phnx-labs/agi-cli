@@ -77,6 +77,7 @@ import {
 import {
   approveProjectPr,
   buildProjectPrs,
+  closeProjectPr,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -875,7 +876,7 @@ async function runProjectCard(
 
   const prsCmd = projects
     .command('prs')
-    .description('Open pull requests: every one across your GitHub account and orgs, or one project\'s (list, the default); act on one (ready, review, comment, merge), or read and re-run failed CI (failure, rerun).');
+    .description('Open pull requests: every one across your GitHub account and orgs, or one project\'s (list, the default); act on one (ready, review, comment, merge, close), or read and re-run failed CI (failure, rerun).');
   const prsListCmd = prsCmd
     .command('list [name]', { isDefault: true })
     .description('Every OPEN pull request across a project\'s attached repos, or with no project across your GitHub account and every org you belong to, with what needs you first.')
@@ -1140,6 +1141,35 @@ async function runProjectCard(
     `,
   });
 
+  const closeCmd = prsCmd
+    .command('close [name]')
+    .description('Close one open PR without merging it.')
+    .requiredOption('--repo <owner/repo>', 'owner/repo (with a project name, one of its attached repos)')
+    .requiredOption('--number <n>', 'The PR number')
+    .option('--json', 'Machine-readable result')
+    .action(async (name: string | undefined, opts: { repo: string; number: string; json?: boolean }) => {
+      const def = prProjectOrExit(name);
+      const number = prNumberOrExit(opts.number);
+      const repo = await prRepoOrExit(def, opts.repo);
+      const result = await closeProjectPr(repo, number);
+      if (opts.json) console.log(JSON.stringify(result, null, 2));
+      else if (result.closed) console.log(`${chalk.green(result.message)}: ${repo}#${number}`);
+      else console.error(chalk.red(`Not closed: ${repo}#${number}: ${result.message}`));
+      if (!result.closed) process.exit(1);
+    });
+
+  setHelpSections(closeCmd, {
+    examples: `
+      agents projects prs close rush --repo phnx-labs/agi-cli --number 3646
+      agents projects prs close --repo muqsitnawaz/agents --number 12 --json   # any repo, no project
+    `,
+    notes: `
+      One REST read, then one REST call (PATCH pulls/{n} with state=closed), not the
+      GraphQL-backed gh pr close. The branch is kept. A PR that is already closed
+      succeeds without a write; a merged one is refused (exit 1, closed: false in --json).
+    `,
+  });
+
   const failureCmd = prsCmd
     .command('failure [name]')
     .description('Why one commit\'s CI failed: each failing check with the error lines of its job log.')
@@ -1225,6 +1255,7 @@ async function runProjectCard(
       agents projects prs review rush --repo phnx-labs/agi-cli --number 3646 --approve --sha <headSha>
       agents projects prs comment rush --repo phnx-labs/agi-cli --number 3646 --body-file -
       agents projects prs merge rush --repo phnx-labs/agi-cli --number 3646 --sha <headSha>
+      agents projects prs close rush --repo phnx-labs/agi-cli --number 3646
       agents projects prs failure rush --repo phnx-labs/agi-cli --sha <sha>
       agents projects prs rerun rush --repo phnx-labs/agi-cli --run-id <runId>
     `,

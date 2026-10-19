@@ -46,6 +46,7 @@ const AGENTS_PRS_ACTIONS: Record<string, TouchedPrAction> = {
   merge: 'merged',
   review: 'reviewed',
   comment: 'commented',
+  close: 'closed',
 };
 
 const LINEAR_UPDATE_VALUE_FLAGS = new Set([

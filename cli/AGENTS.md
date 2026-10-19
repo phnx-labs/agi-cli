@@ -155,7 +155,9 @@ the daemon does not host it (it stays on production code and restarts on self-up
 The Lead runs with isolated Claude settings, its own cwd and a minimal env, and may only call
 the fixed-shape `agents lead tool` commands; never widen that allow-list to raw `agents`,
 `linear` or shell prefixes (a compound command or a flag like `--mode skip` slips through
-them). Stops run only through `agents lead confirm <token>`. The NDJSON event shapes are a
+them). Every action the Lead takes (answer, send, start, dispatch, stop, a PR action) is held as a
+confirm token holding one fixed-shape `agents` argv, re-checked and run only by `agents lead confirm
+<token>` (`src/lib/lead/act.ts`); `ask --speak` synthesizes on the client, never the host. The NDJSON event shapes are a
 cross-repo contract with AGI EXT and the FastWispr bubble: change them only with both.
 Lead sessions carry `lead: true` and are hidden from `ps`, `ps watch` and `feed watch`
 unless `--include-lead` (`src/lib/lead/visibility.ts`); `sessions` still indexes them.
@@ -1330,6 +1332,7 @@ agents config set summarizer.enabled on
 agents config set summarizer.baseUrl http://localhost:11434
 agents config set summarizer.model qwen2.5:3b
 agents config set lead.model sonnet
+agents config set lead.voice.bundle elevenlabs
 ```
 
 The new command is a **facade over the existing YAML storage**

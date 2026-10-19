@@ -1,18 +1,18 @@
-import { execFile } from 'node:child_process';
-import { getCliLaunch } from '../cli-entry.js';
 import { loadProjectDef, type ProjectDef } from '../projects.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { connectHost, sendRequest } from './client.js';
+import { runAgents, runLinear } from './act.js';
+import type { HeldAction } from './confirm.js';
+import type { LeadAttention } from './roster.js';
 import {
-  LeadToolError, appendNote, assertAgent, assertSendText, assertSessionId, assertTask, assertTicketId, dispatchPrompt,
-  linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, runArgv, sendArgv,
+  LeadToolError, answerArgv, appendNote, assertAgent, assertPrNumber, assertRepo, assertSessionId, assertTask, assertTicketId,
+  dispatchPrompt, linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, prArgv, prFailureArgv, prReadArgv,
+  prsListArgv, runArgv, sendArgv, type AnswerValue, type PrVerb,
 } from './shapes.js';
 import { ensureLeadDir, type LeadPaths } from './paths.js';
 import { readMemory } from './store.js';
 
 export * from './shapes.js';
-
-const LINEAR_TIMEOUT_MS = 20_000;
 
 export interface LeadToolContext {
   project: string;
@@ -28,15 +28,6 @@ export function leadToolContext(env: NodeJS.ProcessEnv = process.env): LeadToolC
   return { project, def, paths: ensureLeadDir(project) };
 }
 
-function runLinear(args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile('linear', args, { timeout: LINEAR_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new LeadToolError(`linear ${args[0]} failed: ${String(stderr || err.message).trim().split('\n').pop()}`));
-      else resolve(stdout);
-    });
-  });
-}
-
 async function hostRequest(project: string, req: Record<string, unknown>): Promise<Record<string, unknown>> {
   const socket = await connectHost(project);
   if (!socket) throw new LeadToolError(`The Lead host for '${project}' is not running.`);
@@ -47,13 +38,18 @@ async function hostRequest(project: string, req: Record<string, unknown>): Promi
   return reply;
 }
 
-async function spawnWorker(ctx: LeadToolContext, agent: string, prompt: string): Promise<string> {
-  const reply = await hostRequest(ctx.project, { op: 'spawn', agent, prompt });
-  return String(reply.log);
+async function hold(ctx: LeadToolContext, held: Omit<HeldAction, 'project'>): Promise<string> {
+  const reply = await hostRequest(ctx.project, { op: 'hold', held });
+  return `Queued for the owner's Confirm: ${String(reply.label)}. Nothing has happened yet. Say what you queued and ask once; do not queue it again.`;
 }
 
 export async function toolRoster(ctx: LeadToolContext, project?: string): Promise<string> {
   const reply = await hostRequest(ctx.project, { op: 'roster', project: project ?? ctx.project });
+  return String(reply.text);
+}
+
+export async function toolAttention(ctx: LeadToolContext): Promise<string> {
+  const reply = await hostRequest(ctx.project, { op: 'attention' });
   return String(reply.text);
 }
 
@@ -64,38 +60,109 @@ export async function toolDispatch(ctx: LeadToolContext, ticket: string, agent: 
   assertAgent(agent);
   const issue = JSON.parse(await runLinear(linearViewArgv(ticket))) as LinearIssue;
   const prompt = dispatchPrompt(issue.identifier, issue.title);
-  runArgv(agent, prompt, ctx.project);
-  await runLinear(linearPickupArgv(issue.identifier, agent));
-  const log = await spawnWorker(ctx, agent, prompt);
-  return `Dispatched ${agent} on ${issue.identifier}: ${issue.title}. ${issue.identifier} is In Progress, delegated to ${agent}. Log: ${log}`;
+  return hold(ctx, {
+    action: 'dispatch',
+    argv: runArgv(agent, prompt, ctx.project),
+    linearArgv: linearPickupArgv(issue.identifier, agent),
+    label: `Dispatch ${agent} on ${issue.identifier}: ${issue.title}`,
+    detail: prompt,
+  });
 }
 
 export async function toolStart(ctx: LeadToolContext, agent: string, task: string): Promise<string> {
-  runArgv(agent, task, ctx.project);
-  const log = await spawnWorker(ctx, agent, task);
-  return `Started ${agent} on: ${assertTask(task).slice(0, 120)}. Log: ${log}`;
+  const argv = runArgv(agent, task, ctx.project);
+  return hold(ctx, { action: 'start', argv, label: `Start ${agent} on: ${argv[2].slice(0, 80)}`, detail: argv[2] });
 }
 
 export async function toolSend(ctx: LeadToolContext, session: string, text: string): Promise<string> {
   assertSessionId(session);
-  assertSendText(text);
+  const argv = sendArgv(session, text);
   const reply = await hostRequest(ctx.project, { op: 'resolve', session });
   const id = String(reply.id);
-  const argv = sendArgv(id, text);
-  const launch = getCliLaunch(argv);
-  await new Promise<void>((resolve, reject) => {
-    execFile(launch.command, launch.args, { timeout: 60_000 }, (err, _stdout, stderr) => {
-      if (err) reject(new LeadToolError(`agents send failed: ${String(stderr || err.message).trim().split('\n').pop()}`));
-      else resolve();
-    });
-  });
-  return `Sent to “${String(reply.title)}” (${id.slice(0, 8)}).`;
+  return hold(ctx, { action: 'send', argv: sendArgv(id, text), sessionId: id, label: `Send to “${String(reply.title)}”`, detail: argv[6] });
+}
+
+export async function toolAnswer(ctx: LeadToolContext, key: string, value: AnswerValue): Promise<string> {
+  const argv = answerArgv(key, value);
+  const reply = await hostRequest(ctx.project, { op: 'attention-item', key });
+  const ask = reply.ask as LeadAttention;
+  let detail: string;
+  if ('choice' in value) {
+    const choice = ask.choices.find((c) => c.id === value.choice);
+    if (!choice) {
+      const known = ask.choices.map((c) => `${c.id}=${c.label}`).join(', ');
+      throw new LeadToolError(`'${value.choice}' is not a choice of this ask (${known || 'it takes a free-text answer'}).`);
+    }
+    detail = choice.label;
+  } else detail = argv[4];
+  return hold(ctx, { action: 'answer', argv, sessionId: ask.sessionId, label: `Answer “${String(reply.title)}”`, detail });
 }
 
 export async function toolStop(ctx: LeadToolContext, session: string): Promise<string> {
   assertSessionId(session);
   const reply = await hostRequest(ctx.project, { op: 'hold-stop', session });
-  return `Held for the owner's Confirm: ${String(reply.label)}. Nothing was stopped. Do not retry.`;
+  return `Queued for the owner's Confirm: ${String(reply.label)}. Nothing was stopped. Do not retry.`;
+}
+
+interface ListedPr { number: number; title: string; isDraft?: boolean; headSha?: string; url?: string }
+interface PrsEnvelope { repositories: Array<{ slug: string; error?: string; pullRequests: ListedPr[] }> }
+
+export async function toolPrsList(ctx: LeadToolContext, repo?: string): Promise<string> {
+  const envelope = JSON.parse(await runAgents(prsListArgv(ctx.project, repo))) as PrsEnvelope;
+  const lines: string[] = [];
+  for (const r of envelope.repositories) {
+    if (r.error) { lines.push(`${r.slug}: could not be read (${r.error})`); continue; }
+    for (const pr of r.pullRequests) lines.push(`${r.slug}#${pr.number}${pr.isDraft ? ' [draft]' : ''} ${pr.title}`);
+  }
+  return lines.length ? lines.join('\n') : `No open PRs for ${ctx.project}.`;
+}
+
+async function readPr(ctx: LeadToolContext, repo: string, number: number): Promise<ListedPr> {
+  const envelope = JSON.parse(await runAgents(prReadArgv(ctx.project, repo, number))) as PrsEnvelope;
+  const pr = envelope.repositories.flatMap((r) => r.pullRequests).find((p) => p.number === number);
+  if (!pr) throw new LeadToolError(`${repo}#${number} is not an open PR of ${ctx.project}.`);
+  return pr;
+}
+
+async function failingRunIds(ctx: LeadToolContext, repo: string, sha: string): Promise<number[]> {
+  const report = JSON.parse(await runAgents(prFailureArgv(ctx.project, repo, sha))) as { checks: Array<{ runId: number | null }>; error?: string };
+  if (report.error) throw new LeadToolError(`Could not read the failing checks: ${report.error}`);
+  return [...new Set(report.checks.flatMap((c) => (c.runId === null ? [] : [c.runId])))];
+}
+
+const PR_LABEL: Record<PrVerb, string> = { merge: 'Merge', comment: 'Comment on', ready: 'Mark ready', rerun: 'Re-run failed CI of', close: 'Close' };
+
+export async function toolPrAct(
+  ctx: LeadToolContext,
+  verb: PrVerb,
+  opts: { repo: string; number: string; sha?: string; body?: string; runId?: string },
+): Promise<string> {
+  const repo = assertRepo(opts.repo);
+  const number = assertPrNumber(opts.number);
+  if (opts.body !== undefined && verb !== 'comment') throw new LeadToolError('--body applies only to prs comment.');
+  if (opts.runId !== undefined && verb !== 'rerun') throw new LeadToolError('--run-id applies only to prs rerun.');
+  if (verb === 'comment') assertTask(opts.body ?? '');
+  const pr = await readPr(ctx, repo, number);
+  const sha = opts.sha ?? (verb === 'merge' || verb === 'rerun' ? pr.headSha : undefined);
+  if ((verb === 'merge' || verb === 'rerun') && !sha) throw new LeadToolError(`${repo}#${number} has no head commit to pin; pass --sha.`);
+  let runId: number | undefined;
+  if (verb === 'rerun') {
+    const runs = await failingRunIds(ctx, repo, sha!);
+    runId = opts.runId !== undefined ? assertPrNumber(opts.runId) : runs.length === 1 ? runs[0] : undefined;
+    if (runId === undefined) {
+      throw new LeadToolError(runs.length === 0
+        ? `${repo}#${number} has no failing GitHub Actions run at ${sha!.slice(0, 7)}.`
+        : `${repo}#${number} has ${runs.length} failing runs (${runs.join(', ')}); pass --run-id <id>.`);
+    }
+    if (!runs.includes(runId)) throw new LeadToolError(`Run ${runId} is not a failing run of ${repo}#${number}.`);
+  }
+  const argv = prArgv(ctx.project, verb, { repo, number, sha: verb === 'rerun' ? undefined : sha, body: opts.body, runId });
+  return hold(ctx, {
+    action: 'pr',
+    argv,
+    label: `${PR_LABEL[verb]} ${repo}#${number} “${pr.title}”`,
+    detail: verb === 'comment' ? argv[argv.indexOf('--body') + 1] : pr.title,
+  });
 }
 
 export async function toolLinearTasks(ctx: LeadToolContext, status: string, limit: number): Promise<string> {

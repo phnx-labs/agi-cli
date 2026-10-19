@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CONFIRM_TTL_MS, ConfirmError, claimConfirm, mintConfirm, sweepExpiredConfirms } from './confirm.js';
 import { confirmsDir } from './paths.js';
 
-const input = { project: 'demo', action: 'stop' as const, sessionId: 's-1', label: 'Stop “Docs”' };
+const input = { project: 'demo', action: 'stop' as const, argv: ['ps', 'stop', 'abcd1234'], sessionId: 'abcd1234', label: 'Stop “Docs”' };
 
 describe('confirm tokens', () => {
   it('mints a c_ token that claims exactly once', () => {

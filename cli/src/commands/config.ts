@@ -193,7 +193,7 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       return;
     }
     case 'lead':
-      setConfigValue('lead.model', value);
+      setConfigValue(formatConfigKey(parsed), value);
       return;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
@@ -267,8 +267,9 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       return had;
     }
     case 'lead': {
-      const had = getConfigValue('lead.model').value !== undefined;
-      unsetConfigValue('lead.model');
+      const name = formatConfigKey(parsed);
+      const had = getConfigValue(name).value !== undefined;
+      unsetConfigValue(name);
       return had;
     }
     case 'device': {
@@ -311,7 +312,7 @@ function getConfig(parsed: ParsedConfigKey): unknown {
     case 'menubar':
       return getConfigValue(formatConfigKey(parsed)).value;
     case 'lead':
-      return getConfigValue('lead.model').value;
+      return getConfigValue(formatConfigKey(parsed)).value;
     case 'device': {
       const configName = devicePropertyToConfigName(parsed.property);
       return getConfigValue(configName, { device: parsed.device }).value;
@@ -389,9 +390,9 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     }
   }
 
-  const leadModel = getConfigValue('lead.model').value;
-  if (leadModel !== undefined) {
-    yield { key: 'lead.model', value: leadModel, hint: configKeyStorageHint(parseConfigKey('lead.model')) };
+  for (const key of ['lead.model', 'lead.voice.bundle'] as const) {
+    const value = getConfigValue(key).value;
+    if (value !== undefined) yield { key, value, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
 
   const globalAutoUpdate = rawGlobalAutoUpdateSetting();

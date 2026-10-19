@@ -10,6 +10,7 @@ import {
   PASSING_ROLLUP_TTL_MS,
   FAILING_ROLLUP_TTL_MS,
   isFinishedRollup,
+  closeProjectPr,
   commentOnProjectPr,
   markProjectPrReady,
   mergeProjectPr,
@@ -744,6 +745,25 @@ describe('markProjectPrReady', () => {
     expect(result).toMatchObject({ ready: false, sha: null });
     expect(result.message).toContain('moved to fff0000');
     expect(asked).not.toContain('graphql');
+  });
+});
+
+describe('closeProjectPr', () => {
+  it('closes an open PR with one REST PATCH, and never writes to a merged or closed one', async () => {
+    const open = recordedGh({
+      'repos/acme/mono/pulls/7': JSON.stringify({ state: 'open', merged: false }),
+      'PATCH repos/acme/mono/pulls/7': 'closed\n',
+    });
+    expect(await closeProjectPr('acme/mono', 7, open.gh)).toEqual({ repo: 'acme/mono', number: 7, closed: true, message: 'Closed' });
+    expect(open.asked).toEqual(['repos/acme/mono/pulls/7', 'PATCH repos/acme/mono/pulls/7']);
+
+    const merged = recordedGh({ 'repos/acme/mono/pulls/7': JSON.stringify({ state: 'closed', merged: true }) });
+    expect(await closeProjectPr('acme/mono', 7, merged.gh)).toMatchObject({ closed: false, message: 'Already merged' });
+    expect(merged.asked).toEqual(['repos/acme/mono/pulls/7']);
+
+    const shut = recordedGh({ 'repos/acme/mono/pulls/7': JSON.stringify({ state: 'closed', merged: false }) });
+    expect(await closeProjectPr('acme/mono', 7, shut.gh)).toMatchObject({ closed: true, message: 'Already closed' });
+    expect(shut.asked).toEqual(['repos/acme/mono/pulls/7']);
   });
 });
 
