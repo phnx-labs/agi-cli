@@ -1,1 +1,0 @@
-- **A Codex session that opened several PRs before the upgrade lists them all.** The resumable Codex parse state moves to v5, so a v4 checkpoint (written before the index recorded every PR) re-parses its transcript once instead of resuming with only its first PR, as Claude's v7 already does. Source: cli/src/lib/session/discover.ts
