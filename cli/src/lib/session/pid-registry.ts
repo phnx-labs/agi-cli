@@ -47,7 +47,6 @@ export function stateSessionRecordPath(pid: number): string {
   return path.join(getRuntimeStateDir(), 'sessions', `${pid}.json`);
 }
 
-// state/sessions/<pid>.json: the session the process <pid> itself reported at SessionStart.
 export function readStateSessionRecord<T extends SessionStartRecord = SessionStartRecord>(pid: number, startedAtMs?: number): T | undefined {
   if (!pid || pid < 1) return undefined;
   let rec: T | undefined;
@@ -63,9 +62,6 @@ export function readStateSessionRecord<T extends SessionStartRecord = SessionSta
   return rec;
 }
 
-// The deployed SessionStart hook walks up from its agent to the nearest by-pid file, so an
-// agent's own `claude -p` child used to rewrite the parent's sessionId and claim its tab.
-// Only the process itself writes state/sessions/<pid>.json, so that session wins.
 function ownSession(entry: PidSessionEntry): PidSessionEntry {
   const own = readStateSessionRecord(entry.pid, entry.startedAtMs);
   return own && own.pid === entry.pid && entry.sessionId && own.session_id !== entry.sessionId
