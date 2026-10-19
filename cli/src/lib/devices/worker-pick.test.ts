@@ -24,6 +24,20 @@ describe('resolveWorkerDevice', () => {
     expect(plan.isLocal).toBe(false);
   });
 
+  it('re-probes live before refusing when only the snapshot says no worker is up', async () => {
+    const forces: boolean[] = [];
+    const plan = await resolveWorkerDevice({
+      eligibleHosts: ['worker-a'],
+      localMachine: 'laptop',
+      probe: async (_pool, force) => {
+        forces.push(force === true);
+        return new Map([['worker-a', force ? healthy(5) : { reachable: false, fromSnapshot: true }]]);
+      },
+    });
+    expect(forces).toEqual([false, true]);
+    expect(plan.device).toBe('worker-a');
+  });
+
   it('drops an unreachable box and says so, rather than picking it', async () => {
     const plan = await resolveWorkerDevice({
       eligibleHosts: ['worker-a', 'worker-b'],

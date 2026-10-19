@@ -152,7 +152,6 @@ async function probeLive(
   profiles: DeviceProfile[],
   selfName: string | undefined,
   withReadiness: boolean,
-  demandAt?: number,
 ): Promise<{ stats: Map<string, DeviceStats>; probes: Map<string, ReadyProbeEntry> }> {
   const remote = profiles.filter((d) => d.name !== selfName);
   const usagePayload = withReadiness && remote.length > 0
@@ -172,7 +171,7 @@ async function probeLive(
     rows[name] = kept;
   }
   const probes = new Map(probed);
-  writePlacementSnapshot({ stats: rows, readiness: Object.fromEntries(probes), demandAt });
+  writePlacementSnapshot({ stats: rows, readiness: Object.fromEntries(probes) });
   return { stats, probes };
 }
 
@@ -211,7 +210,7 @@ export async function probePoolSignals(
   }
 
   const [{ stats, probes }, selfReadiness] = await Promise.all([
-    probeLive(live, selfProfile?.name, agent !== undefined, now),
+    probeLive(live, selfProfile?.name, agent !== undefined),
     agent && selfProfile ? localReadiness(agent) : Promise.resolve(undefined),
   ]);
 
@@ -242,7 +241,7 @@ export async function refreshPlacementSnapshot(pool: string[], now: number = Dat
 }
 
 export async function confirmPlacementTarget(name: string): Promise<boolean> {
-  const host = await resolveHost(name).catch(() => null);
+  const host = await resolveHost(name);
   if (host && hostAnswers(host)) return true;
   const deviceName = resolvePoolProfiles([name]).profiles[0]?.name ?? name;
   writePlacementSnapshot({

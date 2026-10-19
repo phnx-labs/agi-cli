@@ -82,8 +82,12 @@ function updateCacheFile(update: (current: StatsCacheFile) => StatsCacheFile): v
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const file = cacheFilePath();
     const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(update(readCacheFile()), null, 2));
-    fs.renameSync(tmp, file);
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(update(readCacheFile()), null, 2));
+      fs.renameSync(tmp, file);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
   } catch {
   }
 }
