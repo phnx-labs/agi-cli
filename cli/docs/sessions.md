@@ -290,6 +290,16 @@ touches the endpoint.
   `applySessionNames` puts it on the row, so it rides `agents ps --json`,
   `agents ps watch --json` and `agents feed watch --json`. A session with no recap
   has no field; durable history rows do not carry it.
+- A live row carries **`doneVerdict`**, `{ state, gaps, at }`, when the Stop hook
+  judged the session's last turn: `state` is `done`, `open` or `unchecked`, `gaps`
+  the hook's reasons it is not done (`open-pr`, `keep-moving`, `delivery`,
+  `live-team`, `self-audit`), `at` an ISO time. The hook merges it as
+  `verdict: { state, gaps, at: <epoch ms> }` into the per-process record
+  `~/.agents/.cache/state/sessions/<pid>.json`; the row takes it only when that
+  record names the row's pid and session id and neither the record nor the verdict
+  predates the process (`readDoneVerdict`, `src/lib/session/hook-sessions.ts`). It
+  rides `agents ps --json`, `agents ps watch --json`, `agents feed watch --json`
+  and remote rows; no field when there is no verdict.
 - A live Claude row carries what the session **acted on but did not create**,
   newest first, the last action per item winning, at most 50 of each, and no
   field when there are none:

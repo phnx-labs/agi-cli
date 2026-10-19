@@ -54,7 +54,8 @@ export function notifyScheduleDescription(level: AttentionUrgency): string {
   return (
     `AGI Menu: when a ${level}-urgency agent ask posts a Mac banner. Times (5m, 1h) are measured from when the ask ` +
     'opened: the first posts the banner, each later one a reminder. Add stay to keep the banner on screen and sound ' +
-    `to play a sound, or set just sidebar for no banner. Default ${JSON.stringify(DEFAULT_NOTIFY_SCHEDULES[level])}.`
+    `to play a sound, or set just sidebar for no banner. Default ${JSON.stringify(DEFAULT_NOTIFY_SCHEDULES[level])}.` +
+    (level === 'normal' ? ' Its sidebar, stay and sound also govern the banner a finished session turn posts.' : '')
   );
 }
 

@@ -90,6 +90,14 @@ export class FeedHubState {
     return out;
   }
 
+  liveAgents(): Array<{ scope: string; row: SessionWatchRow }> {
+    const out: Array<{ scope: string; row: SessionWatchRow }> = [];
+    for (const [scope, state] of this.scopes) {
+      for (const row of state.agents.values()) if (!row.previous) out.push({ scope, row });
+    }
+    return out;
+  }
+
   attention(): Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> {
     const out: Array<{ scope: string; item: AttentionItem; agent?: SessionWatchRow }> = [];
     for (const [scope, state] of this.scopes) {
