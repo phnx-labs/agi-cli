@@ -88,6 +88,7 @@ export async function runConfirm(
   launch: (args: string[]) => Launch = agentsCliLaunch,
 ): Promise<boolean> {
   const record = claimConfirm(token);
+  if (!Array.isArray(record.argv)) throw new LeadToolError(`Confirm token ${token} was minted by an older agents version; ask the Lead again.`);
   assertHeldArgv(record);
   const paths = ensureLeadDir(record.project);
   const turn = `t_${randomBytes(6).toString('hex')}`;

@@ -60,7 +60,9 @@ export function dispatchPrompt(id: string, title: string): string {
 }
 
 export function runArgv(agent: string, prompt: string, project: string): string[] {
-  return ['run', assertAgent(agent), assertTask(prompt), '--headless', '-P', project, '--mode', 'edit'];
+  const task = assertTask(prompt);
+  if (task.startsWith('-')) throw new LeadToolError('Refusing a task that starts with - (agents run would read it as a flag).');
+  return ['run', assertAgent(agent), task, '--headless', '-P', project, '--mode', 'edit'];
 }
 
 export function linearPickupArgv(id: string, agent: string): string[] {
