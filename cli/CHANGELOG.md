@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.34
+
+- **A session row says whether its last turn was done, and a finished turn posts a banner.** Live rows on `agents ps --json`, `agents ps watch --json` and `agents feed watch --json` (remote rows too) carry `doneVerdict: { state: 'done'|'open'|'unchecked', gaps, at }` from the Stop hook's verdict in `~/.agents/.cache/state/sessions/<pid>.json`, only when that record belongs to the row's live process. Off by default, an interactive session going from running to idle after at least 2 minutes of work can post one AGI Menu `done` banner: "✓ Done", "Not done" or "Finished" with the row's title, the verdict's gaps in words when it is open or else the first sentence of the agent's last line, and a tap opens the session. One banner per turn; three or more finishes that land together post one summary banner. The `menubar.menu.notifyLow` schedule governs it: its default `["sidebar"]` posts none, and `agents config set menubar.menu.notifyLow '["0m"]'` turns it on (low-urgency asks follow the same key). Source: cli/src/lib/session/hook-sessions.ts, cli/src/lib/session/active.ts, cli/src/lib/daemon/finished-banners.ts, cli/src/lib/daemon/attention-notify-service.ts
+
 ## 1.23.33
 
 - **A Codex session that opened several PRs before the upgrade lists them all.** The resumable Codex parse state moves to v5, so a v4 checkpoint (written before the index recorded every PR) re-parses its transcript once instead of resuming with only its first PR, as Claude's v7 already does. Source: cli/src/lib/session/discover.ts
