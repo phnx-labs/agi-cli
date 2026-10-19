@@ -60,6 +60,7 @@ interface ImmutableSessionFields {
   startedAtMs?: number;
   version?: string;
   pr?: ActiveSession['pr'];
+  prs?: ActiveSession['prs'];
   worktree?: ActiveSession['worktree'];
   ticket?: ActiveSession['ticket'];
   createdTickets?: string[];
@@ -82,6 +83,7 @@ export const IMMUTABLE_FIELD_KEYS = [
   'startedAtMs',
   'version',
   'pr',
+  'prs',
   'worktree',
   'ticket',
   'createdTickets',

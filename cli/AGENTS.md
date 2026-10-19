@@ -143,7 +143,8 @@ every live one.
 Claude's `PermissionRequest` hook writes "Claude needs approval to run <tool>:
 <command>" (Codex keeps "Codex needs approval to run …"), and the later
 `permission_prompt` Notification does not overwrite that richer block with
-"Claude needs your permission".
+"Claude needs your permission". Neither replaces an open AskUserQuestion block,
+which `PostToolUse` or `PostToolUseFailure` on AskUserQuestion clears.
 
 `agents lead` is the per-project **Lead** (`src/commands/lead.ts`, `src/lib/lead/`): one
 warm headless Claude per project, owned by a detached host (`agents __lead-host <project>`,

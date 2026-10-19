@@ -639,6 +639,7 @@ describe('feed store', () => {
     expect(doc.hooks['feed-clear-answered'].agents).toContain('claude');
     expect(doc.hooks['feed-clear-answered'].events).toEqual(['PostToolUse']);
     expect(doc.hooks['feed-clear-answered'].matcher).toBe('AskUserQuestion');
+    expect(doc.hooks['feed-clear-answered-failure']).toMatchObject({ agents: ['claude'], events: ['PostToolUseFailure'], matcher: 'AskUserQuestion' });
     expect(doc.hooks['feed-clear-permission'].events).toEqual(['PostToolUse']);
   });
 
@@ -987,6 +988,19 @@ describe('feed store', () => {
       expect(listBlocks(feedDir)).toMatchObject([question]);
       expect(listBlocks(feedDir)[0].questions[0].options.map((o: { label: string }) => o.label)).toEqual(['News now, story next', 'Both post now']);
     }
+  });
+
+  it.runIf(hasPython)('a question the user rejects clears, so the next permission request shows (agi-cli#3989)', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-question-reject-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const run = (input: unknown) => spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], { input: JSON.stringify(input), env: { ...process.env, HOME: home }, encoding: 'utf-8' });
+    const transcript_path = '/h/.claude/projects/p/sess-reject.jsonl';
+    run({ session_id: 'sess-reject', hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion', transcript_path, tool_input: { questions: [{ question: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }] }] } });
+    expect(listBlocks(feedDir)).toMatchObject([{ kind: 'question' }]);
+    expect(run({ session_id: 'sess-reject', hook_event_name: 'PostToolUseFailure', tool_name: 'AskUserQuestion', transcript_path, error: 'User rejected' }).status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+    run({ session_id: 'sess-reject', hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'rm -r build' }, permission_suggestions: [], transcript_path });
+    expect(listBlocks(feedDir)).toMatchObject([{ kind: 'notification' }]);
   });
 
   it.runIf(hasPython)('real hook clears a Codex approval block once the approved tool runs', () => {
