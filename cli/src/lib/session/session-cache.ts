@@ -132,8 +132,10 @@ interface ImmutableMemoEntry {
   writtenAt: number;
 }
 
+const IMMUTABLE_MEMO_VERSION = 2;
+
 interface ImmutableMemoFile {
-  version: 1;
+  version: typeof IMMUTABLE_MEMO_VERSION;
   entries: Record<string, ImmutableMemoEntry>;
 }
 
@@ -322,12 +324,12 @@ export function transcriptMtimeMs(s: ActiveSession): number | null {
 function readImmutableFile(): ImmutableMemoFile {
   try {
     const parsed = JSON.parse(fs.readFileSync(immutablePath(), 'utf-8')) as ImmutableMemoFile;
-    if (parsed && parsed.version === 1 && parsed.entries && typeof parsed.entries === 'object') {
+    if (parsed && parsed.version === IMMUTABLE_MEMO_VERSION && parsed.entries && typeof parsed.entries === 'object') {
       return parsed;
     }
   } catch {
   }
-  return { version: 1, entries: {} };
+  return { version: IMMUTABLE_MEMO_VERSION, entries: {} };
 }
 
 export function readImmutableMemo(
