@@ -37,6 +37,8 @@ describe('Lead brief', () => {
 
   it('composes deltas, voice markers and fleet counts', () => {
     expect(composeTurnMessage({ delta: ['x'], text: 'hi', voiceSecs: 2 })).toBe('[State delta]\nx\n\n[Dictated by voice, 2s; the transcript may contain recognition errors]\nhi');
+    expect(composeTurnMessage({ delta: ['x'], editor: ['Front tab (what "this one" means): tab 3'], text: 'stop this one' }))
+      .toBe('[State delta]\nx\n\n[Editor context]\nFront tab (what "this one" means): tab 3\n\nstop this one');
     expect(fleetLine([{ status: 'running', host: 'a' }, { status: 'idle', host: 'b' }, { status: 'running', host: 'a' }], 1))
       .toBe('Fleet: 3 live sessions on 2 devices (not counting you): 2 running, 1 idle.');
   });

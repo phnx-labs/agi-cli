@@ -147,6 +147,16 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'until `agents lead stop` or the next context rotation.',
   },
   {
+    name: 'lead.voice.bundle',
+    yamlKey: 'leadVoiceBundle',
+    scope: 'user',
+    type: 'string',
+    defaultValue: 'elevenlabs',
+    description:
+      'Secrets bundle `agents lead ask --speak` reads ELEVENLABS_API_KEY from, through the secrets CLI, each time it speaks. ' +
+      'The key is never written anywhere else.',
+  },
+  {
     name: 'updates.auto',
     yamlKey: 'updatesAuto',
     scope: 'user',

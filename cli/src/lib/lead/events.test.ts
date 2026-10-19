@@ -83,11 +83,16 @@ describe('rotation threshold', () => {
 });
 
 describe('labels and summaries', () => {
-  it('labels Lead tools by name and holds only the stop tool', () => {
+  it('labels Lead tools by name and holds only the tools that queue an action', () => {
     expect(toolLabel('agents lead tool dispatch --ticket PHNX-1')).toBe('dispatch');
     expect(toolLabel('cat /etc/hostname')).toBe('cat');
-    expect(isHeldCommand('agents lead tool stop --session 4b2f1a9c')).toBe(true);
+    for (const held of ['stop --session 4b2f1a9c', 'send --session 4b2f1a9c -- go', 'start --agent claude -- x', 'dispatch --ticket PHNX-1',
+      'answer --key box/s/1 --choice 1', 'prs merge --repo a/b --number 3', 'prs close --repo a/b --number 3']) {
+      expect(isHeldCommand(`agents lead tool ${held}`), held).toBe(true);
+    }
     expect(isHeldCommand('agents lead tool roster')).toBe(false);
+    expect(isHeldCommand('agents lead tool attention')).toBe(false);
+    expect(isHeldCommand('agents lead tool prs list --repo a/b')).toBe(false);
     expect(isHeldCommand('agents ps stop 4b2f1a9c')).toBe(false);
   });
 

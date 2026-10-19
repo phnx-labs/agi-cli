@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+import * as fs from 'node:fs';
+const args = process.argv.slice(2);
+if (process.env.FAKE_LINEAR_LOG) fs.appendFileSync(process.env.FAKE_LINEAR_LOG, `${JSON.stringify(args)}\n`);
+if (args[0] === 'tasks' && /^[A-Z]+-\d+$/.test(args[1] ?? '')) {
+  process.stdout.write(JSON.stringify({ identifier: args[1], title: 'Fix the flaky login test', state: { name: 'Todo' } }));
+} else if (args[0] === 'update') {
+  process.stdout.write(`Updated ${args[1]}\n`);
+} else {
+  process.stderr.write(`fake linear: unexpected ${args.join(' ')}\n`);
+  process.exit(2);
+}

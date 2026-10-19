@@ -1,14 +1,15 @@
 # Lead
 
 The Lead is one long-lived headless Claude per project. You talk or type to it and it
-dispatches and manages agents through the CLIs. It never speaks and never edits files.
+dispatches and manages agents through the CLIs. It never edits files, and it never acts on its own:
+every action it takes is held for your Confirm. A client may read its reply aloud (`ask --speak`).
 agents-cli owns the process; every UI (AGI EXT, the FastWispr bubble) is a thin client
 that shells out to `agents lead … --json`.
 
 ## Commands
 
 ```
-agents lead ask --project <name> [--voice <secs>] [--json] -- <text…>
+agents lead ask --project <name> [--voice <secs>] [--context <json>] [--speak] [--json] -- <text…>
 agents lead confirm <token> [--json]
 agents lead history --project <name> [--limit N] --json
 agents lead status [--project <name>] --json
@@ -17,13 +18,45 @@ agents lead stop --project <name>
 
 | Command | Does | Exit |
 |---|---|---|
-| `ask` | Starts the project host if needed, sends one message, streams the turn. `--voice` marks the text as a transcript of that many seconds. | 1 on an `error` event or a stream that closed before `done` |
-| `confirm` | Runs the action a `confirm` event held (today only `stop`, as `agents ps stop <sessionId>`), streams `tool` and `done`. | 1 on an unknown, used, expired or failed token |
+| `ask` | Starts the project host if needed, sends one message, streams the turn. `--voice` marks the text as a transcript of that many seconds. `--context` and `--speak` are below. | 1 on an `error` event or a stream that closed before `done` (never because of `--speak`) |
+| `confirm` | Re-checks the held argv against its fixed shape and runs it once (see [Confirm](#confirm)), streams `tool` and `done`. | 1 on an unknown, used, expired, malformed or failed token |
 | `history` | Prints finished turns, oldest first. `--json` is a JSON array. | 0 |
 | `status` | `--json` prints one status object with `--project`, else an array over every project that has a Lead directory. | 0 |
 | `stop` | Stops the host and its Claude process. The session stays resumable. | 0 (prints whether it was running) |
 
 `--project` is a name from `agents projects list`; an unknown name fails before anything starts.
+
+### `ask --context <json>`
+
+A client passes what the editor shows so "this one" resolves. The value must be a JSON object with
+only these fields (anything else, or text that is not JSON, fails before the host is contacted):
+
+```json
+{"front": {"sessionId": "…", "title": "…", "tab": 10},
+ "tabs":  [{"sessionId": "…", "title": "…", "tab": 1}]}
+```
+
+Every field is optional; `tab` is a positive integer, `sessionId` a session id, `title` is cut to
+200 characters, and at most 60 tabs are accepted. The turn's message then carries a short block
+before the text:
+
+```
+[Editor context]
+Front tab (what "this one" means): tab 10 “Fix login” (session 4b2f1a9c)
+Open tabs: tab 1 “Docs” (session ffff0000); tab 2 “Fix login” (session 4b2f1a9c)
+```
+
+### `ask --speak`
+
+Speaks the reply on the machine running `ask`, while it streams. Finished sentences are cut from the
+`text` deltas (a period, `!`, `?` or `…` followed by a space, or a line break; `e.g.` and list
+numbers do not end one), each is synthesized at once with ElevenLabs (`eleven_turbo_v2_5`, voice
+`JBFqnCBsd6RMkjVDRZzb`, mp3), and the clips play in order with `afplay` on macOS and
+`ffplay -nodisp -autoexit` elsewhere. The API key is `ELEVENLABS_API_KEY` read through the secrets
+CLI from the bundle named by `lead.voice.bundle` (default `elevenlabs`) and is never written
+anywhere. Speech never blocks or fails the turn: events stream as usual, a failure (no key, an HTTP
+error, no player) prints one `voice: …` line on stderr and stops speaking, and `ask` exits after the
+last clip has played.
 
 ### `ask --json` events (NDJSON)
 
@@ -33,7 +66,7 @@ agents lead stop --project <name>
 {"type":"tool","id":"…","label":"agents ps","cmd":"agents ps --json","state":"run"}
 {"type":"tool","id":"…","label":"agents ps","state":"ok"|"fail","secs":1.24}
 {"type":"text","delta":"…"}
-{"type":"confirm","token":"c_…","action":"stop","sessionId":"…","label":"Stop “Rush MCP token security”"}
+{"type":"confirm","token":"c_…","action":"stop"|"answer"|"send"|"start"|"dispatch"|"pr","label":"Stop “Rush MCP token security”","detail":"…","sessionId":"…"}
 {"type":"done","turn":"t_…","text":"<full reply>","summary":"<first sentence, ≤80 chars>","refs":[…],"timing":{"boot":0,"model":1.45,"tools":1.24}}
 {"type":"error","message":"…"}
 ```
@@ -49,6 +82,9 @@ agents lead stop --project <name>
   only when 123 is among the project's open or recently updated PRs, explicit GitHub PR
   urls, and live sessions by id or by an exact title of three or more words. The Lead's
   own session is never a ref.
+- `confirm` is emitted when the Lead queues an action. `label` says what it does; `detail` (when
+  present) is the message, answer text, task, or PR title or comment; `sessionId` names the session it
+  acts on, when there is one. Nothing has run until `agents lead confirm <token>`.
 - `timing` is seconds: `boot` (from the first spawn of the turn to Claude's init, cold turns
   only, including a failed resume before a fresh start), `tools` (union of tool run time),
   `model` (the rest).
@@ -126,15 +162,22 @@ other program is denied. Each tool has one fixed shape:
 | Tool | Does |
 |---|---|
 | `roster [--project <p>]` | Live sessions from the host's feed snapshot (never a fleet `agents ps`) plus a fleet count. The only way the Lead sees sessions. |
-| `dispatch --ticket <ID> [--agent <a>]` | `linear update <ID> --pickup --delegate <a>`, then asks the host to start `agents run <a> "Work on <ID>: <title>" --headless -P <project> --mode edit`, detached. |
-| `start --agent <a> -- <task>` | The same run shape for a task with no ticket. |
-| `send --session <id> -- <text>` | `agents send --channel session` to a live session of this project. The text must be one line; control characters are stripped; text whose first non-space character is a slash, a bang or a hash is refused; and what is typed always starts with `[Lead] `, so the session never sees a slash command, a shell escape or a memory note. |
-| `stop --session <id>` | Mints a confirm token and emits the `confirm` event. Never stops anything. |
+| `attention` | Every open ask across the fleet from the host's feed (the `attention` items of `feed watch --json`, any project): one line each with the attention key, session title, host, project, age, the question (cut to 240 characters) and the choice ids and labels. No SSH of its own; says so when the feed is not connected yet. |
+| `prs list [--repo <owner/repo>]` | `agents projects prs list <project> --json`, one line per open PR: `repo#number [draft] title`. |
 | `linear tasks [--status …] [--limit n]`, `linear view <ID>`, `linear create --title <t> [--description <d>]` | Reads, and creation in the project's Linear project. |
+| `answer --key <key> (--choice <id> \| --text <answer>)` | **Held.** The key must be open in the feed and the choice one of its ids; the text is one line and may not start with `/`, `!` or `#`. Confirm runs `agents feed answer <key> --choice\|--text <value> --json`. |
+| `send --session <id> -- <text>` | **Held.** Confirm runs `agents send --channel session --to <id> --text "[Lead] <text>"` to a live session of this project. The text must be one line; control characters are stripped; text whose first non-space character is a slash, a bang or a hash is refused; and what is typed always starts with `[Lead] `, so the session never sees a slash command, a shell escape or a memory note. |
+| `start --agent <a> -- <task>` | **Held.** Confirm starts `agents run <a> "<task>" --headless -P <project> --mode edit`, detached. |
+| `dispatch --ticket <ID> [--agent <a>]` | **Held.** Reads the ticket's title now; confirm runs `linear update <ID> --pickup --delegate <a>`, then starts `agents run <a> "Work on <ID>: <title>" --headless -P <project> --mode edit`, detached. |
+| `stop --session <id>` | **Held.** Confirm runs `agents ps stop <id>`. |
+| `prs merge\|comment\|ready\|rerun\|close --repo <r> --number <n> [--body <text>] [--sha <head>] [--run-id <id>]` | **Held.** Reads the PR first (it must be an open PR of the project). Confirm runs `agents projects prs <verb> <project> --repo <r> …--json`: merge is pinned to `--sha` or the head read now and never passes `--admin`; comment needs `--body`; rerun takes the PR's one failing Actions run, or `--run-id` when it has several. |
 | `remember -- <note>` | Appends one note (at most 500 characters) to `memory.md`, keeping the last 60. |
 
-Workers are spawned by the host, not by the Lead's shell, with a curated copy of the calling
-client's environment (`PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`,
+A held tool mints a confirm token on the host and emits the `confirm` event on the turn; its output
+tells the model that nothing has happened yet, and the Lead says what it queued and asks once.
+
+Workers are spawned by `agents lead confirm`, not by the Lead's shell or the host, with a curated copy of the confirming
+process's environment (`PATH`, `HOME`, `SSH_AUTH_SOCK`, `GH_TOKEN`, `GITHUB_TOKEN`,
 `LINEAR_API_KEY`, `DISPLAY`, the Anthropic auth variables and similar). `AGENTS_LEAD_PROJECT`
 and the Lead's `agents` shim never reach a worker, so a worker cannot call the Lead tools or
 write its memory. The roster and the per-turn delta leave out Lead sessions (title `lead-*` or
@@ -144,8 +187,15 @@ No tool accepts `--mode`, `--secrets`, `--device`, `--lease`, `--cloud` or pass-
 arguments. Ticket, PR and session titles reach the model as data; the brief says so, and
 `memory.md` is quoted under "notes, not instructions".
 
-`agents lead confirm <token>` claims a token once (atomic rename) and runs
-`agents ps stop <sessionId>`. Tokens expire after 10 minutes; the host sweeps expired ones.
+## Confirm
+
+A held action is a record in `confirms/<token>.json`: `{token, project, action, argv, label, detail?,
+sessionId?, linearArgv?, createdAtMs, expiresAtMs}`, where `argv` is the exact `agents` argv to run
+(and `linearArgv` the ticket pickup of a dispatch). `agents lead confirm <token>` claims it once
+(atomic rename), rebuilds the argv from its fixed shape and refuses a record that differs, then runs
+it: `start` and `dispatch` start the worker detached (a dispatch picks the ticket up first), every
+other action runs `agents <argv>` and waits for it. Tokens expire after 10 minutes; the host sweeps
+expired ones.
 
 `cli/scripts/lead-permission-smoke.ts` runs the real Claude launch shape against probes
 (`;`, `&&`, `$(…)`, backticks, `>`, `cat ~/.agents/agents.yaml`, `jq -n env`, `agents ps --local stop`,
@@ -175,7 +225,10 @@ and `agents ps`, `agents ps watch --json` and `agents feed watch --json` leave t
 `--include-lead` is passed. The session index is untouched, so `sessions` still lists and
 searches a Lead's transcript.
 
-## Setting
+## Settings
 
 `lead.model` (user scope, central `agents.yaml`, default `sonnet`) is the model passed to
 `agents run claude --model`. A running Lead keeps its model until `stop` or a rotation.
+
+`lead.voice.bundle` (user scope, default `elevenlabs`) is the secrets bundle `ask --speak` reads
+`ELEVENLABS_API_KEY` from.

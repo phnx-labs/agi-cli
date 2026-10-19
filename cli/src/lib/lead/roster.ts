@@ -12,6 +12,17 @@ export interface RosterRow {
 
 export type RosterSnapshot = Record<string, RosterRow>;
 
+export interface LeadAttention {
+  key: string;
+  sessionId: string;
+  host: string;
+  project?: string;
+  kind: string;
+  openedAt: string;
+  question?: string;
+  choices: Array<{ id: string; label: string }>;
+}
+
 type Row = Record<string, unknown>;
 
 function str(v: unknown): string | undefined {
@@ -34,8 +45,27 @@ export function rosterRowFromFeed(scope: string, agent: Row): RosterRow | null {
   };
 }
 
+export function attentionFromFeed(item: Row): LeadAttention | null {
+  const key = str(item.key);
+  const sessionId = str(item.sessionId);
+  if (!key || !sessionId || item.state !== 'open') return null;
+  const question = (item.question ?? {}) as Row;
+  const choices = Array.isArray(item.choices) ? (item.choices as Row[]) : [];
+  return {
+    key,
+    sessionId,
+    host: str(item.host) ?? key.split('/')[0],
+    project: str(item.project),
+    kind: str(item.kind) ?? 'question',
+    openedAt: str(item.openedAt) ?? '',
+    question: str(question.text) ?? str(question.header),
+    choices: choices.flatMap((c) => (str(c.id) ? [{ id: String(c.id), label: str(c.label) ?? String(c.id) }] : [])),
+  };
+}
+
 export class FeedRoster {
   private readonly byScope = new Map<string, Map<string, RosterRow>>();
+  private readonly attentionByScope = new Map<string, Map<string, LeadAttention>>();
   private readonly scopesSeen = new Set<string>();
   private readonly waiters: Array<() => void> = [];
 
@@ -49,6 +79,12 @@ export class FeedRoster {
           if (row) rows.set(String(agent.rowKey ?? row.id), row);
         }
         this.byScope.set(scope, rows);
+        const asks = new Map<string, LeadAttention>();
+        for (const item of (envelope.attention as Row[] | undefined) ?? []) {
+          const ask = attentionFromFeed(item);
+          if (ask) asks.set(ask.key, ask);
+        }
+        this.attentionByScope.set(scope, asks);
         this.scopesSeen.add(scope);
         for (const wake of this.waiters.splice(0)) wake();
         return;
@@ -63,6 +99,17 @@ export class FeedRoster {
       }
       case 'agent.remove':
         this.scopeRows(scope).delete(String(envelope.rowKey));
+        return;
+      case 'attention.upsert': {
+        const asks = this.scopeAttention(scope);
+        const key = String(envelope.rowKey);
+        const ask = attentionFromFeed((envelope.attention as Row) ?? {});
+        if (ask) asks.set(key, ask);
+        else asks.delete(key);
+        return;
+      }
+      case 'attention.remove':
+        this.scopeAttention(scope).delete(String(envelope.rowKey));
         return;
       default:
         return;
@@ -88,6 +135,18 @@ export class FeedRoster {
       for (const row of rows.values()) out[row.id] = row;
     }
     return out;
+  }
+
+  openAttention(): LeadAttention[] {
+    const out = new Map<string, LeadAttention>();
+    for (const asks of this.attentionByScope.values()) for (const ask of asks.values()) out.set(ask.key, ask);
+    return [...out.values()].sort((a, b) => a.openedAt.localeCompare(b.openedAt));
+  }
+
+  private scopeAttention(scope: string): Map<string, LeadAttention> {
+    let asks = this.attentionByScope.get(scope);
+    if (!asks) { asks = new Map(); this.attentionByScope.set(scope, asks); }
+    return asks;
   }
 
   private scopeRows(scope: string): Map<string, RosterRow> {
@@ -132,4 +191,25 @@ export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot): s
     if (!cur[row.id]) lines.push(`- ended ${row.id.slice(0, 8)} “${row.title}” (was ${row.status} on ${row.host})`);
   }
   return lines;
+}
+
+const MAX_QUESTION_CHARS = 240;
+
+function age(openedAt: string, nowMs: number): string {
+  const ms = nowMs - Date.parse(openedAt);
+  if (!Number.isFinite(ms) || ms < 0) return 'just now';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  return hours < 48 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+}
+
+export function formatAttention(ask: LeadAttention, row: RosterRow | undefined, nowMs = Date.now()): string {
+  const question = (ask.question ?? `(${ask.kind}, no question text)`).replace(/\s+/g, ' ').trim();
+  const trimmed = question.length > MAX_QUESTION_CHARS ? `${question.slice(0, MAX_QUESTION_CHARS - 1)}…` : question;
+  const title = row?.title ?? ask.sessionId.slice(0, 8);
+  const project = ask.project ?? row?.project;
+  const choices = ask.choices.length ? ` Choices: ${ask.choices.map((c) => `${c.id}=${c.label}`).join(', ')}` : ' Free-text answer.';
+  return `- ${ask.key} “${title}” on ${ask.host}${project ? ` · ${project}` : ''} · ${age(ask.openedAt, nowMs)}: ${trimmed}${choices}`;
 }

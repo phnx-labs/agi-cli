@@ -2,15 +2,12 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as readline from 'node:readline';
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { getCliLaunch } from '../cli-entry.js';
 import { loadProjectDef } from '../projects.js';
 import { ensureLeadDir, leadPaths, type LeadPaths } from './paths.js';
 import { LeadHost, readHostRecord, type LeadRequest } from './host.js';
-import { agentsCliLaunch, cliVersion, leadModel, type Launch } from './harness.js';
-import { claimConfirm } from './confirm.js';
-import { summarize, type LeadEvent, type LeadRef } from './events.js';
-import { appendHistory, appendLog } from './store.js';
+import { agentsCliLaunch, cliVersion, leadModel } from './harness.js';
+import { appendLog } from './store.js';
 
 export const HOST_START_TIMEOUT_MS = 15_000;
 const HOST_POLL_MS = 100;
@@ -119,55 +116,4 @@ export async function runLeadHost(project: string): Promise<number> {
   process.on('SIGHUP', () => {});
   await host.closed;
   return 0;
-}
-
-export async function runConfirm(
-  token: string,
-  emit: (e: LeadEvent) => void,
-  launch: (args: string[]) => Launch = agentsCliLaunch,
-): Promise<boolean> {
-  const record = claimConfirm(token);
-  const paths = ensureLeadDir(record.project);
-  const turn = `t_${randomBytes(6).toString('hex')}`;
-  const startedAt = Date.now();
-  const args = ['ps', 'stop', record.sessionId];
-  const cmd = `agents ${args.join(' ')}`;
-  const toolId = `confirm_${record.token}`;
-  emit({ type: 'tool', id: toolId, label: 'agents ps stop', cmd, state: 'run' });
-  const l = launch(args);
-  const { code, output } = await new Promise<{ code: number; output: string }>((resolve) => {
-    const child = spawn(l.command, l.args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let output = '';
-    child.stdout!.on('data', (d: Buffer) => { output += d.toString(); });
-    child.stderr!.on('data', (d: Buffer) => { output += d.toString(); });
-    child.on('error', (err) => resolve({ code: -1, output: err.message }));
-    child.on('exit', (c) => resolve({ code: c ?? -1, output }));
-  });
-  const secs = Math.round((Date.now() - startedAt) / 10) / 100;
-  const ok = code === 0;
-  emit({ type: 'tool', id: toolId, label: 'agents ps stop', state: ok ? 'ok' : 'fail', secs });
-  const title = record.label.replace(/^Stop\s+/, '');
-  const text = ok
-    ? `Stopped ${title}.`
-    : `Could not stop ${title}: ${output.trim().split('\n').pop() ?? `exit ${code}`}`;
-  if (!ok) {
-    emit({ type: 'error', message: text });
-    return false;
-  }
-  const refs: LeadRef[] = [{ kind: 'session', id: record.sessionId, title: title.replace(/^“|”$/g, '') }];
-  const timing = { boot: 0, model: 0, tools: secs };
-  const summary = summarize(text);
-  emit({ type: 'done', turn, text, summary, refs, timing });
-  appendHistory(paths, {
-    turn,
-    at: new Date(startedAt).toISOString(),
-    ask: `confirm ${record.token}: ${record.label}`,
-    text,
-    summary,
-    refs,
-    tools: [{ label: 'agents ps stop', cmd, state: 'ok', secs }],
-    session: record.sessionId,
-    timing,
-  });
-  return true;
 }

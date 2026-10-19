@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FeedRoster, filterProject, rosterDelta } from './roster.js';
+import { FeedRoster, filterProject, formatAttention, rosterDelta } from './roster.js';
 
 const agent = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
   sessionId: id, title: `Title ${id}`, status, machine: 'box', confirmedProject: 'demo', previous: false, ...extra,
@@ -45,5 +45,36 @@ describe('roster delta', () => {
     };
     const out = filterProject(snap, 'demo', (cwd) => (cwd?.startsWith('/p/demo') ? 'demo' : undefined), new Set(['lead']));
     expect(Object.keys(out).sort()).toEqual(['x', 'y']);
+  });
+});
+
+describe('FeedRoster attention', () => {
+  const ask = (key: string, extra: Record<string, unknown> = {}) => ({
+    key, sessionId: key.split('/')[1], host: key.split('/')[0], kind: 'question', state: 'open', openedAt: '2026-10-19T10:00:00.000Z',
+    question: { text: 'Which database?', header: 'DB' }, choices: [{ id: '1', label: 'Staging' }, { id: '2', label: 'Prod' }], urgency: 'normal', ...extra,
+  });
+
+  it('tracks open asks fleet-wide per scope through reset, upsert and remove', () => {
+    const r = new FeedRoster();
+    r.apply({ type: 'reset', scope: 'a', agents: [], attention: [ask('a/s1/1'), ask('a/s2/1', { state: 'answered' })] });
+    r.apply({ type: 'reset', scope: 'b', agents: [], attention: [ask('b/s3/1', { project: 'other' })] });
+    r.apply({ type: 'attention.upsert', scope: 'a', rowKey: 'a/s4/2', attention: ask('a/s4/2', { openedAt: '2026-10-19T09:00:00.000Z' }) });
+    expect(r.openAttention().map((x) => x.key)).toEqual(['a/s4/2', 'a/s1/1', 'b/s3/1']);
+    r.apply({ type: 'attention.upsert', scope: 'a', rowKey: 'a/s1/1', attention: ask('a/s1/1', { state: 'resolved' }) });
+    r.apply({ type: 'attention.remove', scope: 'b', rowKey: 'b/s3/1' });
+    expect(r.openAttention().map((x) => x.key)).toEqual(['a/s4/2']);
+    r.apply({ type: 'reset', scope: 'a', agents: [], attention: [] });
+    expect(r.openAttention()).toEqual([]);
+  });
+
+  it('prints one line per ask: key, title, host, project, age, trimmed question and choices', () => {
+    const r = new FeedRoster();
+    r.apply({ type: 'reset', scope: 'a', agents: [], attention: [ask('box/abcd1234/3', { project: 'demo', question: { text: `Pick one ${'x'.repeat(300)}` } })] });
+    const [item] = r.openAttention();
+    const line = formatAttention(item, { id: 'abcd1234', title: 'Fix login', status: 'idle', host: 'box' }, Date.parse('2026-10-19T10:05:00.000Z'));
+    expect(line.startsWith('- box/abcd1234/3 “Fix login” on box · demo · 5m ago: Pick one x')).toBe(true);
+    expect(line).toContain('… Choices: 1=Staging, 2=Prod');
+    expect(formatAttention({ ...item, choices: [], question: undefined }, undefined, Date.parse('2026-10-19T12:00:00.000Z')))
+      .toBe('- box/abcd1234/3 “abcd1234” on box · demo · 2h ago: (question, no question text) Free-text answer.');
   });
 });

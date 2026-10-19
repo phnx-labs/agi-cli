@@ -8,12 +8,21 @@ export const CONFIRM_TTL_MS = 10 * 60 * 1000;
 
 const TOKEN_RE = /^c_[0-9a-f]{16}$/;
 
-export interface ConfirmRecord {
-  token: string;
+export const CONFIRM_ACTIONS = ['stop', 'answer', 'send', 'start', 'dispatch', 'pr'] as const;
+export type ConfirmAction = typeof CONFIRM_ACTIONS[number];
+
+export interface HeldAction {
   project: string;
-  action: 'stop';
-  sessionId: string;
+  action: ConfirmAction;
+  argv: string[];
   label: string;
+  detail?: string;
+  sessionId?: string;
+  linearArgv?: string[];
+}
+
+export interface ConfirmRecord extends HeldAction {
+  token: string;
   createdAtMs: number;
   expiresAtMs: number;
 }
@@ -28,10 +37,7 @@ function tokenPath(token: string): string {
   return path.join(confirmsDir(), `${token}.json`);
 }
 
-export function mintConfirm(
-  input: { project: string; action: 'stop'; sessionId: string; label: string },
-  nowMs = Date.now(),
-): ConfirmRecord {
+export function mintConfirm(input: HeldAction, nowMs = Date.now()): ConfirmRecord {
   ensureLeadRoot();
   fs.mkdirSync(confirmsDir(), { recursive: true, mode: 0o700 });
   const record: ConfirmRecord = {

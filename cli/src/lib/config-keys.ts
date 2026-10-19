@@ -101,7 +101,7 @@ export interface ParsedSummarizerConfigKey {
 
 export interface ParsedLeadConfigKey {
   scope: 'lead';
-  property: 'model';
+  property: 'model' | 'voice.bundle';
 }
 
 export interface ParsedUpdatesConfigKey {
@@ -222,6 +222,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   if (raw === 'lead.model') return { scope: 'lead', property: 'model' };
+  if (raw === 'lead.voice.bundle') return { scope: 'lead', property: 'voice.bundle' };
 
   if (raw === 'menubar.enabled') return { scope: 'menubar', property: 'enabled' };
   if (raw === 'menubar.autoUpdate') return { scope: 'menubar', property: 'autoUpdate' };
@@ -279,7 +280,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     throw new Error(`Invalid summarizer config key '${key}'. Use summarizer.enabled, summarizer.baseUrl, or summarizer.model.`);
   }
   if (raw.startsWith('lead.')) {
-    throw new Error(`Invalid lead config key '${key}'. Use lead.model.`);
+    throw new Error(`Invalid lead config key '${key}'. Use lead.model or lead.voice.bundle.`);
   }
   if (raw.startsWith('updates.')) {
     throw new Error(`Invalid updates config key '${key}'. Use updates.auto or updates.<agent>.auto.`);
@@ -326,7 +327,7 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
     case 'menubar':
       return parsed.section ? `menubar.${parsed.section}.${parsed.property}` : `menubar.${parsed.property}`;
     case 'lead':
-      return 'lead.model';
+      return `lead.${parsed.property}`;
   }
 }
 
@@ -353,6 +354,7 @@ export function listKnownConfigKeys(): string[] {
     'updates.auto',
     'updates.<agent>.auto',
     'lead.model',
+    'lead.voice.bundle',
   );
   keys.push(...MENUBAR_CONFIG_KEYS);
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
@@ -423,7 +425,7 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
         ? `config.updatesAgentAuto.${parsed.agent} (central agents.yaml; syncs fleet-wide)`
         : 'config.updatesAuto (central agents.yaml; syncs fleet-wide)';
     case 'lead':
-      return 'config.leadModel (central agents.yaml; syncs fleet-wide)';
+      return `config.${parsed.property === 'model' ? 'leadModel' : 'leadVoiceBundle'} (central agents.yaml; syncs fleet-wide)`;
     case 'menubar':
       if (parsed.property === 'enabled') return 'devices/<self>/agents.yaml config.menubarEnabled';
       return `config.menubar${parsed.section === 'menu' ? 'Menu' : parsed.section === 'statusbar' ? 'Statusbar' : ''}${parsed.property.charAt(0).toUpperCase()}${parsed.property.slice(1)} (central agents.yaml; syncs fleet-wide)`;

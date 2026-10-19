@@ -1064,3 +1064,29 @@ export async function commentOnProjectPr(
   }
   return { repo, number, commented: true, id: posted.id ?? null, url: posted.url || null, message: 'Commented' };
 }
+
+export interface ProjectPrCloseResult {
+  repo: string;
+  number: number;
+  closed: boolean;
+  message: string;
+}
+
+export async function closeProjectPr(repo: string, number: number, gh: GhExec = ghExec): Promise<ProjectPrCloseResult> {
+  let pr: { state: string; merged: boolean };
+  try {
+    pr = JSON.parse((await gh([
+      'api', `repos/${repo}/pulls/${number}`, '--jq', '{state: .state, merged: (.merged // false)}',
+    ])).trim()) as { state: string; merged: boolean };
+  } catch (err) {
+    return { repo, number, closed: false, message: ghFailure(err) };
+  }
+  if (pr.merged) return { repo, number, closed: false, message: 'Already merged' };
+  if (pr.state !== 'open') return { repo, number, closed: true, message: 'Already closed' };
+  try {
+    await gh(['api', '-X', 'PATCH', `repos/${repo}/pulls/${number}`, '-f', 'state=closed', '--jq', '.state']);
+  } catch (err) {
+    return { repo, number, closed: false, message: ghFailure(err) };
+  }
+  return { repo, number, closed: true, message: 'Closed' };
+}

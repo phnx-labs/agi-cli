@@ -4,18 +4,22 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LeadHost, isLeadRow, readHostRecord, type LeadStatus } from './host.js';
-import { connectHost, runConfirm, sendRequest } from './client.js';
-import { ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
-import { ConfirmError } from './confirm.js';
+import { connectHost, sendRequest } from './client.js';
+import { runConfirm } from './act.js';
+import { confirmsDir, ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
+import { ConfirmError, type ConfirmAction, type ConfirmRecord } from './confirm.js';
 import { readHistory, readSessionState } from './store.js';
-import { toolRoster, toolStop } from './tools.js';
+import { toolAnswer, toolAttention, toolDispatch, toolRoster, toolStart, toolStop } from './tools.js';
+import type { EditorContext } from './shapes.js';
 import type { LeadEvent } from './events.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = path.join(here, 'testdata', 'fake-claude.mjs');
 const FAKE_FEED = path.join(here, 'testdata', 'fake-feed.mjs');
+const FAKE_LINEAR_BIN = path.join(here, 'testdata', 'linear-bin');
 const PROJECT = 'demo';
 const ROW_ID = 'abcd1234-0000-4000-8000-000000000001';
+const OTHER_ID = 'ffff0000-0000-4000-8000-000000000002';
 const DEF = { name: PROJECT, repo: 'acme/demo', linear: { name: 'Demo' }, goals: [{ objective: 'Ship the demo' }] };
 
 let host: LeadHost;
@@ -28,13 +32,27 @@ function harnessLog(): Array<{ argv?: string[]; cwd?: string; input?: string }> 
   return fs.readFileSync(logFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
 }
 
-async function ask(text: string, voice?: number): Promise<LeadEvent[]> {
+async function ask(text: string, voice?: number, context?: EditorContext): Promise<LeadEvent[]> {
   const socket = await connectHost(PROJECT);
   if (!socket) throw new Error('host not listening');
   const events: LeadEvent[] = [];
-  await sendRequest(socket, { op: 'ask', text, ...(voice !== undefined ? { voice } : {}) }, (e) => events.push(e as unknown as LeadEvent));
+  await sendRequest(socket, { op: 'ask', text, ...(voice !== undefined ? { voice } : {}), ...(context ? { context } : {}) }, (e) => events.push(e as unknown as LeadEvent));
   return events;
 }
+
+function heldOf(action: ConfirmAction): ConfirmRecord {
+  const records = fs.readdirSync(confirmsDir()).filter((n) => n.endsWith('.json'))
+    .map((n) => JSON.parse(fs.readFileSync(path.join(confirmsDir(), n), 'utf-8')) as ConfirmRecord)
+    .filter((r) => r.action === action && r.project === PROJECT)
+    .sort((a, b) => b.createdAtMs - a.createdAtMs);
+  if (!records[0]) throw new Error(`no held ${action}`);
+  return records[0];
+}
+
+const recordLaunch = (ran: string[][]) => (args: string[]) => {
+  ran.push(args);
+  return { command: process.execPath, args: ['-e', 'process.exit(0)'] };
+};
 
 function done(events: LeadEvent[]): Extract<LeadEvent, { type: 'done' }> {
   const d = events.find((e) => e.type === 'done');
@@ -64,10 +82,6 @@ describe('Lead host over a fake stream-json harness', () => {
       harness: (args) => ({ command: process.execPath, args: [FAKE_CLAUDE, ...args] }),
       feed: { command: process.execPath, args: [FAKE_FEED] },
       childEnv,
-      workerLaunch: (args) => ({
-        command: process.execPath,
-        args: ['-e', `require('fs').writeFileSync(${JSON.stringify(workerDump)}, JSON.stringify({ argv: process.argv.slice(1), env: process.env }))`, ...args],
-      }),
       teamKey: 'PHNX',
       fetchTickets: async () => [{ id: 'PHNX-4365', title: 'Rush MCP server', url: 'https://linear.app/acme/issue/PHNX-4365' }],
       fetchPrs: async () => [{ number: 3607, title: 'Lead CLI', url: 'https://github.com/acme/demo/pull/3607', draft: false, open: true }],
@@ -159,6 +173,57 @@ describe('Lead host over a fake stream-json harness', () => {
     expect(unknown).toContain('Stop session deadbeef');
   });
 
+  it('holds a send with its text as detail, and confirm runs exactly that argv once', async () => {
+    const events = await ask('SEND abcd1234 please rebase on main');
+    const confirm = events.find((e) => e.type === 'confirm');
+    expect(confirm).toEqual({
+      type: 'confirm', token: expect.stringMatching(/^c_[0-9a-f]{16}$/), action: 'send', label: 'Send to “Fix the flaky login test”',
+      detail: '[Lead] please rebase on main', sessionId: ROW_ID,
+    });
+    expect(events.some((e) => e.type === 'tool')).toBe(false);
+    const ran: string[][] = [];
+    const confirmEvents: LeadEvent[] = [];
+    expect(await runConfirm((confirm as { token: string }).token, (e) => confirmEvents.push(e), recordLaunch(ran))).toBe(true);
+    expect(ran).toEqual([['send', '--channel', 'session', '--to', ROW_ID, '--text', '[Lead] please rebase on main']]);
+    expect(done(confirmEvents).text).toBe('Done: Send to “Fix the flaky login test”.');
+    expect(confirmEvents[0]).toMatchObject({ type: 'tool', label: 'agents send', state: 'run' });
+  });
+
+  it('lists open asks fleet-wide from the feed, and answer holds only an open key with a real choice', async () => {
+    const ctx = { project: PROJECT, def: DEF, paths };
+    const attention = await toolAttention(ctx);
+    expect(attention.split('\n')).toEqual([
+      'Open asks across the fleet (2):',
+      expect.stringMatching(new RegExp(`^- box-a/${ROW_ID}/4 “Fix the flaky login test” on box-a · demo · 5m ago: Which database should the migration run against\\? Choices: 1=Staging, 2=Production$`)),
+      expect.stringMatching(new RegExp(`^- box-a/${OTHER_ID}/9 “Other project work” on box-a · elsewhere · 5m ago: Ship it\\? Free-text answer\\.$`)),
+    ]);
+    await expect(toolAnswer(ctx, `box-a/${ROW_ID}/3`, { choice: '1' })).rejects.toThrow(/No open ask/);
+    await expect(toolAnswer(ctx, `box-a/${ROW_ID}/4`, { choice: '7' })).rejects.toThrow(/not a choice of this ask \(1=Staging, 2=Production\)/);
+    expect(await toolAnswer(ctx, `box-a/${ROW_ID}/4`, { choice: '2' })).toContain('Queued for the owner\'s Confirm: Answer “Fix the flaky login test”');
+    const held = heldOf('answer');
+    expect(held).toMatchObject({ argv: ['feed', 'answer', `box-a/${ROW_ID}/4`, '--choice', '2', '--json'], detail: 'Production', sessionId: ROW_ID });
+    const ran: string[][] = [];
+    expect(await runConfirm(held.token, () => {}, recordLaunch(ran))).toBe(true);
+    expect(ran).toEqual([held.argv]);
+  });
+
+  it('refuses a held record whose argv was tampered with, running nothing', async () => {
+    const ctx = { project: PROJECT, def: DEF, paths };
+    await toolAnswer(ctx, `box-a/${OTHER_ID}/9`, { text: 'yes, ship it' });
+    const held = heldOf('answer');
+    fs.writeFileSync(path.join(confirmsDir(), `${held.token}.json`), JSON.stringify({ ...held, argv: ['ps', 'stop', '--all'] }));
+    const ran: string[][] = [];
+    await expect(runConfirm(held.token, () => {}, recordLaunch(ran))).rejects.toThrow(/fixed shapes|attention key/);
+    expect(ran).toEqual([]);
+  });
+
+  it('carries the editor context into the turn so "this one" resolves', async () => {
+    const before = harnessLog().length;
+    done(await ask('what is this one doing?', undefined, { front: { sessionId: ROW_ID, title: 'Fix the flaky login test', tab: 3 } }));
+    const input = harnessLog().slice(before).find((l) => l.input)!.input!;
+    expect(input).toContain('[Editor context]\nFront tab (what "this one" means): tab 3 “Fix the flaky login test” (session abcd1234)\n\nwhat is this one doing?');
+  });
+
   it('recovers a dead process with --resume and no second brief', async () => {
     const session = readSessionState(paths)!.sessionId;
     expect((await ask('CRASH now')).at(-1)).toMatchObject({ type: 'error' });
@@ -214,23 +279,56 @@ describe('Lead host over a fake stream-json harness', () => {
     expect(harnessLog().at(-1)!.input).toContain('> - remembered: PHNX-1 goes to Claude');
   });
 
-  it('spawns dispatched workers through the host with the caller env and no Lead markers', async () => {
-    const socket = await connectHost(PROJECT);
-    await sendRequest(socket!, {
-      op: 'ask', text: 'hello', env: { SSH_AUTH_SOCK: '/run/agent.sock', GH_TOKEN: 'gh', AGENTS_LEAD_PROJECT: 'evil', PATH: `${paths.bin}:/usr/bin` },
-    }, () => {});
-    let reply: Record<string, unknown> = {};
-    await sendRequest((await connectHost(PROJECT))!, { op: 'spawn', agent: 'codex', prompt: 'Work on PHNX-9: x' }, (r) => { reply = r; });
-    expect(reply.type).toBe('spawned');
+  it('start only holds; confirm spawns the worker detached with the confirming env and no Lead markers', async () => {
+    expect(await toolStart({ project: PROJECT, def: DEF, paths }, 'codex', 'Work on PHNX-9: x')).toContain('Nothing has happened yet');
+    expect(fs.existsSync(workerDump)).toBe(false);
+    const held = heldOf('start');
+    expect(held).toMatchObject({ argv: ['run', 'codex', 'Work on PHNX-9: x', '--headless', '-P', PROJECT, '--mode', 'edit'], detail: 'Work on PHNX-9: x' });
+    const saved = { ...process.env };
+    Object.assign(process.env, { SSH_AUTH_SOCK: '/run/agent.sock', GH_TOKEN: 'gh', AGENTS_LEAD_PROJECT: 'evil', PATH: `${paths.bin}:/usr/bin` });
+    const confirmEvents: LeadEvent[] = [];
+    try {
+      expect(await runConfirm(held.token, (e) => confirmEvents.push(e), (args) => ({
+        command: process.execPath,
+        args: ['-e', `require('fs').writeFileSync(${JSON.stringify(workerDump)}, JSON.stringify({ argv: process.argv.slice(1), env: process.env }))`, ...args],
+      }))).toBe(true);
+    } finally {
+      for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
+      Object.assign(process.env, saved);
+    }
+    expect(done(confirmEvents).text).toMatch(/^Started codex on: Work on PHNX-9: x\. Log: .*-codex\.log$/);
     for (let i = 0; i < 50 && !fs.existsSync(workerDump); i++) await new Promise((r) => setTimeout(r, 50));
     const dump = JSON.parse(fs.readFileSync(workerDump, 'utf-8'));
-    expect(dump.argv).toEqual(['run', 'codex', 'Work on PHNX-9: x', '--headless', '-P', PROJECT, '--mode', 'edit']);
+    expect(dump.argv).toEqual(held.argv);
     expect(dump.env).toMatchObject({ SSH_AUTH_SOCK: '/run/agent.sock', GH_TOKEN: 'gh', PATH: '/usr/bin' });
     expect(dump.env.AGENTS_LEAD_PROJECT).toBeUndefined();
     expect(dump.env.FAKE_LEAD_LOG).toBeUndefined();
-    let bad: Record<string, unknown> = {};
-    await sendRequest((await connectHost(PROJECT))!, { op: 'spawn', agent: 'sh -c', prompt: 'x' }, (r) => { bad = r; });
-    expect(bad).toMatchObject({ type: 'error', message: expect.stringContaining('not a known agent') });
+    await expect(toolStart({ project: PROJECT, def: DEF, paths }, 'sh -c', 'x')).rejects.toThrow(/not a known agent/);
+  });
+
+  it('dispatch reads the ticket but moves nothing until confirm, which picks it up and then starts the worker', async () => {
+    const linearLog = path.join(path.dirname(workerDump), 'linear.ndjson');
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${FAKE_LINEAR_BIN}${path.delimiter}${savedPath}`;
+    process.env.FAKE_LINEAR_LOG = linearLog;
+    try {
+      expect(await toolDispatch({ project: PROJECT, def: DEF, paths }, 'PHNX-9', 'claude')).toContain('Dispatch claude on PHNX-9: Fix the flaky login test');
+      expect(fs.readFileSync(linearLog, 'utf-8').trim().split('\n').map((l) => JSON.parse(l))).toEqual([['tasks', 'PHNX-9', '--json']]);
+      const held = heldOf('dispatch');
+      expect(held).toMatchObject({
+        argv: ['run', 'claude', 'Work on PHNX-9: Fix the flaky login test', '--headless', '-P', PROJECT, '--mode', 'edit'],
+        linearArgv: ['update', 'PHNX-9', '--pickup', '--delegate', 'claude'],
+      });
+      const ran: string[][] = [];
+      const confirmEvents: LeadEvent[] = [];
+      expect(await runConfirm(held.token, (e) => confirmEvents.push(e), recordLaunch(ran))).toBe(true);
+      expect(fs.readFileSync(linearLog, 'utf-8').trim().split('\n').map((l) => JSON.parse(l)).at(-1)).toEqual(held.linearArgv);
+      expect(ran).toEqual([held.argv]);
+      expect(done(confirmEvents).text).toContain('PHNX-9 is In Progress, delegated to claude.');
+    } finally {
+      process.env.PATH = savedPath;
+      delete process.env.FAKE_LINEAR_LOG;
+    }
   });
 
   it('recognizes Lead sessions by title or by a cwd under the Lead root', () => {

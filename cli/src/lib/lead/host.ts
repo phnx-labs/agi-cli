@@ -12,8 +12,10 @@ import {
   type LeadEngine, type LeadEvent, type LeadTiming, type TurnResult,
 } from './events.js';
 import { extractRefs, enrichTickets } from './refs.js';
-import { mintConfirm, sweepExpiredConfirms } from './confirm.js';
-import { FeedRoster, filterProject, formatRosterRow, rosterDelta, type RosterRow, type RosterSnapshot } from './roster.js';
+import { mintConfirm, sweepExpiredConfirms, type HeldAction } from './confirm.js';
+import {
+  FeedRoster, filterProject, formatAttention, formatRosterRow, rosterDelta, type LeadAttention, type RosterRow, type RosterSnapshot,
+} from './roster.js';
 import {
   agentsMdDigest, briefSummary, buildBrief, composeTurnMessage, fetchOpenTickets, fetchRecentPrs, fleetLine,
   linearTeamKey, projectRepo,
@@ -24,9 +26,9 @@ import {
   type LeadHistoryTool, type LeadSessionState,
 } from './store.js';
 import { ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
-import { runArgv } from './shapes.js';
+import { assertHeldArgv, editorContextLines, type EditorContext } from './shapes.js';
 import {
-  LEAD_ALLOWED_TOOLS, agentsCliLaunch, curatedClientEnv, leadChildEnv, leadRunArgs, workerEnv, writeAgentsShim, writeLeadSettings,
+  LEAD_ALLOWED_TOOLS, leadChildEnv, leadRunArgs, writeAgentsShim, writeLeadSettings,
   type Launch, type LeadSessionStart,
 } from './harness.js';
 
@@ -66,13 +68,15 @@ export interface LeadStatus {
 }
 
 export type LeadRequest =
-  | { op: 'ask'; text: string; voice?: number; env?: Record<string, string> }
+  | { op: 'ask'; text: string; voice?: number; context?: EditorContext }
   | { op: 'status' }
   | { op: 'stop' }
   | { op: 'roster'; project?: string }
   | { op: 'resolve'; session: string }
   | { op: 'hold-stop'; session: string }
-  | { op: 'spawn'; agent: string; prompt: string };
+  | { op: 'hold'; held: Omit<HeldAction, 'project'> }
+  | { op: 'attention' }
+  | { op: 'attention-item'; key: string };
 
 export interface LeadHostRecord {
   pid: number;
@@ -91,7 +95,6 @@ export interface LeadHostOptions {
   harness: (args: string[]) => Launch;
   feed: Launch | null;
   childEnv?: NodeJS.ProcessEnv;
-  workerLaunch?: (args: string[]) => Launch;
   fetchTickets?: (def: ProjectDef) => Promise<BriefTicket[]>;
   fetchPrs?: (def: ProjectDef) => Promise<BriefPr[]>;
   teamKey?: string;
@@ -202,7 +205,6 @@ export class LeadHost {
   private readonly knownPrs = new Set<number>();
   private readonly ticketPrefixes = new Set<string>();
   private rotatedFrom: string | undefined;
-  private clientEnv: Record<string, string> = {};
   private resolveClosed!: () => void;
   readonly closed = new Promise<void>((resolve) => { this.resolveClosed = resolve; });
 
@@ -338,8 +340,7 @@ export class LeadHost {
       const reply = (event: unknown) => { emit(event); socket.end(); };
       if (req.op === 'ask') {
         this.armIdle();
-        if (req.env) this.clientEnv = curatedClientEnv(req.env);
-        void this.enqueue(req.text, req.voice, emit).finally(() => socket.end());
+        void this.enqueue(req.text, req.voice, emit, req.context).finally(() => socket.end());
         return;
       }
       try {
@@ -352,7 +353,9 @@ export class LeadHost {
         } else if (req.op === 'roster') reply(this.rosterReply(req.project ?? this.opts.project));
         else if (req.op === 'resolve') reply(this.resolveReply(req.session));
         else if (req.op === 'hold-stop') reply(this.holdStop(req.session));
-        else if (req.op === 'spawn') reply(this.spawnWorker(req.agent, req.prompt));
+        else if (req.op === 'hold') reply(this.hold({ ...req.held, project: this.opts.project }));
+        else if (req.op === 'attention') reply(this.attentionReply());
+        else if (req.op === 'attention-item') reply(this.attentionItem(req.key));
         else reply({ type: 'error', message: `unknown op ${(req as { op?: string }).op}` });
       } catch (err) {
         reply({ type: 'error', message: err instanceof Error ? err.message : String(err) });
@@ -373,36 +376,53 @@ export class LeadHost {
     return { type: 'session', id: row.id, title: row.title };
   }
 
-  private holdStop(session: string): { type: 'held'; token: string; label: string; sessionId: string } {
+  private holdStop(session: string): { type: 'held'; token: string; label: string } {
     const row = this.findRow(session, this.liveRows());
-    const record = mintConfirm({
+    const sessionId = row?.id ?? session;
+    return this.hold({
       project: this.opts.project,
       action: 'stop',
-      sessionId: row?.id ?? session,
+      argv: ['ps', 'stop', sessionId],
+      sessionId,
       label: row ? `Stop “${row.title}”` : `Stop session ${session}`,
     });
-    this.active?.emit({ type: 'confirm', token: record.token, action: 'stop', sessionId: record.sessionId, label: record.label });
-    this.log(`held stop of ${record.sessionId} as ${record.token}`);
-    return { type: 'held', token: record.token, label: record.label, sessionId: record.sessionId };
   }
 
-  private spawnWorker(agent: string, prompt: string): { type: 'spawned'; log: string; pid: number | undefined } {
-    const { paths, project } = this.opts;
-    const argv = runArgv(agent, prompt, project);
-    fs.mkdirSync(paths.runs, { recursive: true, mode: 0o700 });
-    const log = path.join(paths.runs, `${new Date().toISOString().replace(/[:.]/g, '-')}-${agent}.log`);
-    const fd = fs.openSync(log, 'a');
-    const launch = (this.opts.workerLaunch ?? agentsCliLaunch)(argv);
-    const child = spawn(launch.command, launch.args, {
-      detached: true,
-      stdio: ['ignore', fd, fd],
-      env: workerEnv(process.env, this.clientEnv, leadRoot()),
-      cwd: os.homedir(),
+  private hold(held: HeldAction): { type: 'held'; token: string; label: string } {
+    assertHeldArgv(held);
+    if (held.action === 'answer' && !this.openAsk(held.argv[2])) {
+      throw new Error(`The ask ${held.argv[2]} is no longer open; check the attention tool.`);
+    }
+    const record = mintConfirm(held);
+    this.active?.emit({
+      type: 'confirm',
+      token: record.token,
+      action: record.action,
+      label: record.label,
+      ...(record.detail !== undefined ? { detail: record.detail } : {}),
+      ...(record.sessionId !== undefined ? { sessionId: record.sessionId } : {}),
     });
-    fs.closeSync(fd);
-    child.unref();
-    this.log(`spawned ${agent} worker pid ${child.pid} (${log})`);
-    return { type: 'spawned', log, pid: child.pid };
+    this.log(`held ${record.action} (${record.label}) as ${record.token}`);
+    return { type: 'held', token: record.token, label: record.label };
+  }
+
+  private openAsk(key: string): LeadAttention | undefined {
+    return this.roster.openAttention().find((a) => a.key === key);
+  }
+
+  private attentionReply(): { type: 'attention'; text: string } {
+    if (!this.roster.ready) throw new Error('The live feed is not connected yet; try again in a few seconds.');
+    const asks = this.roster.openAttention();
+    if (asks.length === 0) return { type: 'attention', text: 'No open asks across the fleet.' };
+    const rows = this.roster.snapshot();
+    return { type: 'attention', text: [`Open asks across the fleet (${asks.length}):`, ...asks.map((a) => formatAttention(a, rows[a.sessionId]))].join('\n') };
+  }
+
+  private attentionItem(key: string): { type: 'attention-item'; ask: LeadAttention; title: string } {
+    if (!this.roster.ready) throw new Error('The live feed is not connected yet; try again in a few seconds.');
+    const ask = this.openAsk(key);
+    if (!ask) throw new Error(`No open ask '${key}' in the live feed; check the attention tool.`);
+    return { type: 'attention-item', ask, title: this.roster.snapshot()[ask.sessionId]?.title ?? ask.sessionId.slice(0, 8) };
   }
 
   status(): LeadStatus {
@@ -425,14 +445,14 @@ export class LeadHost {
     return next;
   }
 
-  enqueue(text: string, voice: number | undefined, emit: (e: LeadEvent) => void): Promise<void> {
+  enqueue(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext): Promise<void> {
     this.queued++;
     return this.schedule(async () => {
       this.queued--;
       this.busy = true;
       let rotate: LeadSessionState | null = null;
       try {
-        rotate = await this.runTurn(text, voice, emit);
+        rotate = await this.runTurn(text, voice, emit, context);
       } catch (err) {
         emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
@@ -558,7 +578,7 @@ export class LeadHost {
     return { result, parser, initAtMs, tools: [...tools.values()] };
   }
 
-  private async runTurn(text: string, voice: number | undefined, emit: (e: LeadEvent) => void): Promise<LeadSessionState | null> {
+  private async runTurn(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext): Promise<LeadSessionState | null> {
     const turnId = newTurnId();
     const startedAt = Date.now();
     let state = readSessionState(this.opts.paths);
@@ -610,7 +630,8 @@ export class LeadHost {
       const projectLines = rosterDelta(state?.roster ?? null, roster);
       return [...(projectLines.length ? projectLines : ['No changes to this project\'s sessions.']), this.fleetSummary()];
     };
-    const message = () => composeTurnMessage({ brief: briefText, delta: delta(), text, voiceSecs: voice });
+    const editor = context ? editorContextLines(context) : [];
+    const message = () => composeTurnMessage({ brief: briefText, delta: delta(), editor, text, voiceSecs: voice });
     const sent = Date.now();
     let outcome: Awaited<ReturnType<LeadHost['exchange']>>;
     try {

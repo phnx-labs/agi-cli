@@ -1,8 +1,8 @@
 import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  LeadToolError, appendNote, assertSendText, dispatchPrompt, leadToolContext, linearCreateArgv, linearPickupArgv,
-  linearTasksArgv, linearViewArgv, runArgv, sendArgv, toolRemember,
+  LeadToolError, answerArgv, appendNote, assertHeldArgv, assertSendText, dispatchPrompt, editorContextLines, leadToolContext,
+  linearCreateArgv, linearPickupArgv, linearTasksArgv, linearViewArgv, parseEditorContext, prArgv, runArgv, sendArgv, toolRemember,
 } from './tools.js';
 import { ensureLeadDir } from './paths.js';
 
@@ -62,5 +62,58 @@ describe('Lead tool shapes', () => {
     const paths = ensureLeadDir('tools-demo');
     toolRemember({ project: 'tools-demo', def, paths }, 'PHNX-1 goes to Claude');
     expect(fs.readFileSync(paths.memory, 'utf-8')).toBe('- PHNX-1 goes to Claude\n');
+  });
+
+  it('answer holds one feed answer argv, by choice id or one line of text', () => {
+    expect(answerArgv('box-a/abcd1234/7', { choice: '2' })).toEqual(['feed', 'answer', 'box-a/abcd1234/7', '--choice', '2', '--json']);
+    expect(answerArgv('box-a/abcd1234/7', { text: 'use the staging db' })).toEqual(['feed', 'answer', 'box-a/abcd1234/7', '--text', 'use the staging db', '--json']);
+    expect(() => answerArgv('--help', { choice: '1' })).toThrow(/not an attention key/);
+    expect(() => answerArgv('box-a/abcd1234', { choice: '1' })).toThrow(/not an attention key/);
+    expect(() => answerArgv('box-a/abcd1234/7', { choice: '1 --as root' })).toThrow(/not a choice id/);
+    expect(() => answerArgv('box-a/abcd1234/7', { text: '/exit' })).toThrow(/starts with/);
+    expect(() => answerArgv('box-a/abcd1234/7', { text: 'a\nb' })).toThrow(/one line/);
+  });
+
+  it('PR actions are fixed agents projects prs argvs on the Lead project; merge is pinned and never --admin', () => {
+    expect(prArgv('demo', 'merge', { repo: 'acme/demo', number: 7, sha: 'abc1234' }))
+      .toEqual(['projects', 'prs', 'merge', 'demo', '--repo', 'acme/demo', '--number', '7', '--sha', 'abc1234', '--json']);
+    expect(prArgv('demo', 'close', { repo: 'acme/demo', number: 7 })).toEqual(['projects', 'prs', 'close', 'demo', '--repo', 'acme/demo', '--number', '7', '--json']);
+    expect(prArgv('demo', 'rerun', { repo: 'acme/demo', number: 7, runId: 99 })).toEqual(['projects', 'prs', 'rerun', 'demo', '--repo', 'acme/demo', '--run-id', '99', '--json']);
+    expect(() => prArgv('demo', 'merge', { repo: 'acme/demo', number: 7 })).toThrow(/SHA/);
+    expect(() => prArgv('demo', 'comment', { repo: 'acme/demo', number: 7 })).toThrow(/--body/);
+    expect(() => prArgv('demo', 'close', { repo: 'acme demo', number: 7 })).toThrow(/owner\/repo/);
+  });
+
+  it('confirm re-checks the stored argv against its fixed shape and refuses anything else', () => {
+    const ok = (action: Parameters<typeof assertHeldArgv>[0]['action'], argv: string[], linearArgv?: string[]) =>
+      assertHeldArgv({ action, project: 'demo', argv, linearArgv });
+    ok('stop', ['ps', 'stop', 'abcd1234']);
+    ok('send', sendArgv('abcd1234', 'go on'));
+    ok('answer', answerArgv('box-a/abcd1234/7', { choice: '1' }));
+    ok('start', runArgv('claude', 'fix it', 'demo'));
+    ok('dispatch', runArgv('claude', 'Work on PHNX-1: x', 'demo'), linearPickupArgv('PHNX-1', 'claude'));
+    ok('pr', prArgv('demo', 'merge', { repo: 'acme/demo', number: 7, sha: 'abc1234' }));
+    expect(() => ok('stop', ['ps', 'stop', '--all'])).toThrow(LeadToolError);
+    expect(() => ok('send', ['send', '--channel', 'session', '--to', 'abcd1234', '--text', '/exit'])).toThrow(/label/);
+    expect(() => ok('start', [...runArgv('claude', 'x', 'demo').slice(0, -1), 'skip'])).toThrow(/fixed shapes/);
+    expect(() => ok('start', runArgv('claude', 'x', 'other'))).toThrow(/fixed shapes/);
+    expect(() => ok('pr', [...prArgv('demo', 'merge', { repo: 'acme/demo', number: 7, sha: 'abc1234' }), '--admin'])).toThrow(/fixed shapes/);
+    expect(() => ok('pr', ['projects', 'prs', 'review', 'demo', '--repo', 'acme/demo', '--number', '7', '--json'])).toThrow(/not a PR action/);
+    expect(() => ok('dispatch', runArgv('claude', 'x', 'demo'))).toThrow(/pickup/);
+    expect(() => ok('send', sendArgv('abcd1234', 'go'), linearPickupArgv('PHNX-1', 'claude'))).toThrow(/pickup/);
+  });
+
+  it('editor context is a validated JSON object rendered as a short block', () => {
+    const ctx = parseEditorContext('{"front":{"sessionId":"abcd1234-0000-4000-8000-000000000001","title":"Fix\\nlogin","tab":10},"tabs":[{"sessionId":"ffff0000-1","title":"Docs","tab":1},{"tab":2}]}');
+    expect(editorContextLines(ctx)).toEqual([
+      'Front tab (what "this one" means): tab 10 “Fix login” (session abcd1234)',
+      'Open tabs: tab 1 “Docs” (session ffff0000); tab 2',
+    ]);
+    expect(() => parseEditorContext('front=3')).toThrow(/JSON object/);
+    expect(() => parseEditorContext('[1]')).toThrow(/JSON object/);
+    expect(() => parseEditorContext('{"front":{"tab":-1}}')).toThrow(/positive integer/);
+    expect(() => parseEditorContext('{"front":{"sessionId":"a b"}}')).toThrow(/session id/);
+    expect(() => parseEditorContext('{"cmd":"rm"}')).toThrow(/unknown field 'cmd'/);
+    expect(() => parseEditorContext('{"tabs":{}}')).toThrow(/array/);
   });
 });

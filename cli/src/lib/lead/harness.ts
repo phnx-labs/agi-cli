@@ -77,7 +77,7 @@ export const WORKER_ENV_PASSTHROUGH = [
   'DBUS_SESSION_BUS_ADDRESS', 'COLORTERM', 'EDITOR', 'VISUAL',
 ] as const;
 
-export function curatedClientEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+function curatedEnv(source: NodeJS.ProcessEnv): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of WORKER_ENV_PASSTHROUGH) {
     const value = source[key];
@@ -87,8 +87,8 @@ export function curatedClientEnv(source: NodeJS.ProcessEnv = process.env): Recor
   return env;
 }
 
-export function workerEnv(hostEnv: NodeJS.ProcessEnv, clientEnv: Record<string, string>, leadRootDir: string): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...curatedClientEnv(hostEnv), ...curatedClientEnv(clientEnv) };
+export function workerEnv(source: NodeJS.ProcessEnv, leadRootDir: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = curatedEnv(source);
   if (env.PATH) {
     env.PATH = env.PATH.split(path.delimiter).filter((dir) => dir && !path.resolve(dir).startsWith(path.resolve(leadRootDir))).join(path.delimiter);
   }

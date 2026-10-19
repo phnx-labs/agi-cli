@@ -483,6 +483,7 @@ describe('listConfig', () => {
       'formFactor',
       'interactive.host',
       'lead.model',
+      'lead.voice.bundle',
       'menubar.autoUpdate',
       'menubar.enabled',
       'menubar.menu.artifactApps',

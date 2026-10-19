@@ -9,13 +9,8 @@ function program(): Command {
   p.exitOverride();
   p.configureOutput({ writeErr: () => {}, writeOut: () => {} });
   registerLeadCommand(p);
-  for (const c of p.commands) {
-    c.exitOverride();
-    for (const sub of c.commands) {
-      sub.exitOverride();
-      for (const leaf of sub.commands) leaf.exitOverride();
-    }
-  }
+  const override = (c: Command): void => { c.exitOverride(); c.commands.forEach(override); };
+  p.commands.forEach(override);
   return p;
 }
 
@@ -60,6 +55,16 @@ describe('agents lead', () => {
       .rejects.toThrow(/too many arguments/);
     await expect(program().parseAsync(['node', 'agents', 'lead', 'tool', 'roster', '--secrets', 'prod']))
       .rejects.toThrow(/unknown option '--secrets'/);
+    await expect(program().parseAsync(['node', 'agents', 'lead', 'tool', 'prs', 'merge', '--repo', 'a/b', '--number', '1', '--admin']))
+      .rejects.toThrow(/unknown option '--admin'/);
+    await expect(program().parseAsync(['node', 'agents', 'lead', 'tool', 'prs', 'close', '--repo', 'a/b', '--number', '1', '--body', 'x']))
+      .rejects.toThrow(/unknown option '--body'/);
+  });
+
+  it('ask refuses a --context that is not a JSON object before starting anything', async () => {
+    const out = await stdoutOf(['lead', 'ask', '--project', 'cmd-demo', '--json', '--context', 'front=3', '--', 'stop this one']);
+    expect(JSON.parse(out.trim())).toEqual({ type: 'error', message: expect.stringContaining('--context expects a JSON object') });
+    expect(process.exitCode).toBe(1);
   });
 
   it('a lead tool outside a Lead fails loud', async () => {
