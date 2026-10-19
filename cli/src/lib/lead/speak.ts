@@ -10,6 +10,7 @@ export const VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
 export const VOICE_KEY = 'ELEVENLABS_API_KEY';
 const ELEVENLABS_URL = 'https://api.elevenlabs.io';
 const SYNTH_TIMEOUT_MS = 20_000;
+const PLAY_TIMEOUT_MS = 60_000;
 
 const BOUNDARY = /[.!?…]+["”’')\]]*(?=\s)|\n+/g;
 const ABBREVIATION = /(?:^|\s)(?:e\.g|i\.e|etc|vs|approx|Mr|Mrs|Ms|Dr|St|No)\.$/i;
@@ -91,9 +92,13 @@ export class LeadSpeaker {
     opts.apiKey.catch((err) => this.fail(err));
   }
 
-  static start(): LeadSpeaker {
-    const bundle = voiceBundle();
-    return new LeadSpeaker({ apiKey: readVoiceKey(bundle) });
+  static start(): LeadSpeaker | null {
+    try {
+      return new LeadSpeaker({ apiKey: readVoiceKey(voiceBundle()) });
+    } catch (err) {
+      process.stderr.write(`voice: ${err instanceof Error ? err.message : String(err)}; the reply is not spoken.\n`);
+      return null;
+    }
   }
 
   onEvent(e: LeadEvent): void {
@@ -155,8 +160,13 @@ export class LeadSpeaker {
     const [command, ...args] = (this.opts.player ?? playerArgv)(file);
     return new Promise((resolve, reject) => {
       const child = spawn(command, args, { stdio: 'ignore' });
-      child.on('error', (err) => reject((err as NodeJS.ErrnoException).code === 'ENOENT' ? new Error(`${command} is not installed`) : err));
-      child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`))));
+      const timer = setTimeout(() => child.kill('SIGKILL'), PLAY_TIMEOUT_MS);
+      child.on('error', (err) => { clearTimeout(timer); reject((err as NodeJS.ErrnoException).code === 'ENOENT' ? new Error(`${command} is not installed`) : err); });
+      child.on('exit', (code, signal) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(signal === 'SIGKILL' ? `${command} did not finish within ${PLAY_TIMEOUT_MS / 1000}s` : `${command} exited ${code}`));
+      });
     });
   }
 }

@@ -12,11 +12,14 @@ describe('Lead tool shapes', () => {
   it('dispatch and start always run headless, in edit mode, on the Lead project, with nothing else', () => {
     expect(runArgv('claude', dispatchPrompt('PHNX-1', 'Fix it'), 'demo')).toEqual(
       ['run', 'claude', 'Work on PHNX-1: Fix it', '--headless', '-P', 'demo', '--mode', 'edit']);
-    const argv = runArgv('codex', '--mode skip --secrets prod --device x -- --dangerously-skip-permissions', 'demo');
+    const argv = runArgv('codex', 'fix it --mode skip --secrets prod -- --dangerously-skip-permissions', 'demo');
     expect(argv.slice(3)).toEqual(['--headless', '-P', 'demo', '--mode', 'edit']);
-    expect(argv[2]).toBe('--mode skip --secrets prod --device x -- --dangerously-skip-permissions');
+    expect(argv[2]).toBe('fix it --mode skip --secrets prod -- --dangerously-skip-permissions');
+    expect(() => runArgv('codex', '--mode skip --secrets prod', 'demo')).toThrow(/starts with -/);
     expect(() => runArgv('rm -rf', 'x', 'demo')).toThrow(LeadToolError);
     expect(() => runArgv('claude', ' ', 'demo')).toThrow(/empty/);
+    expect(() => runArgv('claude', '--secrets=prod fix it', 'demo')).toThrow(/starts with -/);
+    expect(() => runArgv('claude', ' -x', 'demo')).toThrow(/starts with -/);
   });
 
   it('moves a ticket to In Progress and delegates it, for a valid ticket and agent only', () => {
