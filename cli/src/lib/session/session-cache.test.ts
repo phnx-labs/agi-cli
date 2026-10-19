@@ -448,3 +448,30 @@ describe('artifacts on a live row — from the same ledger as files.changes', ()
     expect(out.artifacts?.some((a) => a.path.endsWith('a.ts'))).toBe(false);
   });
 });
+
+describe('a live row lists the rendered page of what the session produced', () => {
+  it('a source the artifacts CLI made and the session then edited is listed as its page, as is a created one', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'produced-page-'));
+    const dir = path.join(home, '.local', 'share', 'agents', 'artifacts', '2026-10-18', 'pr-reviewer');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const name of ['plan.md', 'plan.html', 'pr-reviewer.md', 'pr-reviewer.html', 'DESIGN.md']) fs.writeFileSync(path.join(dir, name), '');
+    const row = {
+      context: 'terminal', kind: 'claude', sessionId: 'art-2', cwd: home,
+      files: {
+        source: 'harness', total: 3, changes: [
+          { path: path.join(dir, 'plan.md'), op: 'modified', edits: 10, at: '2026-10-19T04:10:49.712Z' },
+          { path: path.join(dir, 'pr-reviewer.md'), op: 'created', edits: 3, at: '2026-10-19T01:47:44.594Z' },
+          { path: path.join(home, 'src', 'notes.md'), op: 'modified', edits: 1, at: '2026-10-19T01:00:00.000Z' },
+        ],
+      },
+    } as ActiveSession;
+    try {
+      expect(applyImmutableMemo(row).artifacts?.map((a) => [a.basename, a.bucket])).toEqual([
+        ['plan.html', 'artifacts'],
+        ['pr-reviewer.html', 'artifacts'],
+      ]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

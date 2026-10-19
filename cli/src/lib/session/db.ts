@@ -31,7 +31,7 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-export const SCHEMA_VERSION = 53;
+export const SCHEMA_VERSION = 54;
 
 export const CONTENT_INDEX_VERSION = 8;
 
@@ -1173,11 +1173,18 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   if (fromVersion < 53) {
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'pr_urls')) db.exec(`ALTER TABLE sessions ADD COLUMN pr_urls TEXT`);
-    const withPr = db.prepare(`SELECT file_path FROM sessions WHERE pr_url IS NOT NULL AND file_path IS NOT NULL`).all() as Array<{ file_path: string }>;
-    const dropLedger = db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`);
-    for (const { file_path } of withPr) dropLedger.run(canonicalLedgerKey(file_path));
   }
 
+  // v53 recorded every created PR; v54 counts a create only from a real `gh pr create` run.
+  if (fromVersion < 54) reparseSessionsWithPr(db);
+
+}
+
+/** Drop the scan ledger of every session with a PR, so the next scan re-derives its PRs. */
+function reparseSessionsWithPr(db: Database.Database): void {
+  const withPr = db.prepare(`SELECT file_path FROM sessions WHERE pr_url IS NOT NULL AND file_path IS NOT NULL`).all() as Array<{ file_path: string }>;
+  const dropLedger = db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`);
+  for (const { file_path } of withPr) dropLedger.run(canonicalLedgerKey(file_path));
 }
 
 function backfillClaudeAccounts(

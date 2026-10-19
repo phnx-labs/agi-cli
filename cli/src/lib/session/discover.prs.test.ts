@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { applyClaudeLine, applyCodexLine, finalizeClaudeScan, finalizeCodexScan, hydrateClaudeParseState, hydrateCodexParseState, initClaudeParseState, initCodexParseState, serializeClaudeParserState, serializeCodexParserState } from './discover.js';
 
 const prCreate = (state: ReturnType<typeof initClaudeParseState>, id: string, url: string) => {
@@ -56,5 +58,16 @@ describe('a PR counts only from the result of its own create call', () => {
     const scan = finalizeCodexScan(resumed);
     expect(scan.prUrl).toBe('https://github.com/acme/api/pull/41');
     expect(scan.prUrls).toEqual(['https://github.com/acme/api/pull/41', 'https://github.com/acme/web/pull/7']);
+  });
+});
+
+describe('a PR is one the session created, never one it only read', () => {
+  it('a grep for "gh pr create" and an echo of it are not creates; the real create is (Claude transcript)', () => {
+    const state = initClaudeParseState();
+    const file = path.join(import.meta.dirname, 'testdata', 'claude-mentioned-pr.jsonl');
+    for (const line of fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)) applyClaudeLine(state, JSON.parse(line));
+    const scan = finalizeClaudeScan(state);
+    expect(scan.prUrl).toBe('https://github.com/acme/api/pull/41');
+    expect(scan.prUrls).toBeUndefined();
   });
 });
