@@ -7,9 +7,7 @@
  * `interactive.host` unset: this host's asks; this machine: every host's, from
  * the shared fleet collector; another machine: none. The ledger under
  * `feed/notified/` (`<key>`, `<key>#r<n>`) makes a restart re-send nothing.
- * A finished interactive turn posts one `done` banner from this tick too
- * (`finished-banners.ts`), under the normal level's schedule; a headless `agents run
- * --notify` banners from its own exit (`run-notify.ts`).
+ * Finished interactive turns post `done` banners here too (`finished-banners.ts`, docs/menubar.md).
  */
 
 import * as fs from 'fs';

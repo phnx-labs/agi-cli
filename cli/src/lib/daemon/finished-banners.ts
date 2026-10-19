@@ -1,12 +1,3 @@
-/**
- * Finished-turn banners: an interactive session whose turn ran at least two minutes
- * and went from running to idle posts one `done` banner, through the same
- * attention-notify tick and AGI Menu `--notify` path as the asks. A finish waits
- * FINISH_SETTLE_MS (the Stop hook's verdict lands, a flap back to running cancels it);
- * finishes that land together (each within the settle window of the last, at most
- * FINISH_BURST_WINDOW_MS in all) post as one banner, a summary when there are three or more.
- */
-
 import type { ActiveSession } from '../session/active.js';
 import type { DoneVerdict } from '../session/hook-sessions.js';
 import { harnessOf } from '../feed/attention.js';
@@ -95,7 +86,6 @@ export class TurnFinishTracker {
     }
   }
 
-  // The held finishes once the burst has settled; empty while one is still settling.
   due(nowMs: number): TurnFinish[] {
     if (this.pending.size === 0) return [];
     const ends = [...this.pending.values()].map((f) => f.endedAtMs);

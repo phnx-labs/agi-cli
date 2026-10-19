@@ -10,6 +10,7 @@ import { FeedWatchState, type FeedWatchEnvelope } from '../feed/envelope.js';
 import { blockIdForSession, publishBlock } from '../feed/feed.js';
 import type { AttentionItem } from '../feed/attention.js';
 import type { ActiveSession } from '../session/active.js';
+import type { SessionWatchRow } from '../session/watch.js';
 import type { DaemonContext } from './service.js';
 import type { DesktopNotification } from '../menubar/notify-desktop.js';
 
@@ -339,6 +340,23 @@ describe('AttentionNotifyService — per-urgency schedule, reminders and withdra
     expect(restartedHub.state.scopeNames).toContain('yosemite-m6');
     expect(withdrawn).toEqual([]);
     await restartedHub.close();
+  });
+
+  it('posts a done banner for another device\'s finished turn from the fleet hub, never for a previous row', async () => {
+    const service = makeService('zion');
+    const agent = (status: string, previous = false) => ({
+      rowKey: previous ? 'old' : 'r1', sourceDevice: 'yosemite-m6', sessionId: previous ? 'sess-old' : 'sess-9', kind: 'claude',
+      context: 'terminal', status, previous, title: previous ? 'Old run' : 'Port the parser',
+      doneVerdict: { state: 'done', gaps: [], at: new Date(OPENED + 4 * MIN).toISOString() },
+    }) as unknown as SessionWatchRow;
+    const rows = async (status: string) => {
+      if (!emit) await attached();
+      emit!(wire.emit({ type: 'reset', scope: 'yosemite-m6', capturedAt: clock, agents: [agent(status), agent(status, true)], attention: [], tools: [], setup: [] }));
+    };
+    await rows('running'); await at(service, 0);
+    await rows('idle'); await at(service, 5);
+    await at(service, 6);
+    expect(posts.map((n) => [n.title, n.sessionId, n.key])).toEqual([['✓ Done · Port the parser', 'sess-9', `yosemite-m6/sess-9/done-${OPENED}`]]);
   });
 
   it('a fleet tick never waits on the session scan behind the hourly mailbox sweep', async () => {
