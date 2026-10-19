@@ -3429,7 +3429,7 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
 }
 
 export interface CodexParserState {
-  v: 4;
+  v: 5;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
@@ -3448,7 +3448,7 @@ export interface CodexParserState {
   pendingPrCreates?: string[];
   prUrl?: string;
   prNumber?: number;
-  prUrls?: string[];
+  prUrls: string[];
   pendingTicketTools: string[];
   createdTickets: string[];
   spawnedTeam?: string;
@@ -3467,7 +3467,7 @@ export function serializeCodexParserState(
 ): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 4,
+    v: 5,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
@@ -3521,7 +3521,7 @@ export function hydrateCodexParseState(prior: CodexParserState): CodexParseState
     pendingPrCreates: new Set<string>(prior.pendingPrCreates),
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
-    prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
+    prUrls: prior.prUrls,
     createdTickets: new Set<string>(prior.createdTickets),
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
@@ -3616,7 +3616,7 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as CodexParserState;
-    if (parsed?.v !== 4 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 5 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
