@@ -47,6 +47,11 @@ discovery is idempotent. Duplicate identities become one normal account row, but
 the hidden `--versions` diagnostic retains every installation; migration never
 deletes them.
 
+Text views show the installed release first. If it differs from the stable label,
+`agents view codex --versions` and `agents view codex@default` identify it as
+`0.163.0 (installation: 0.144.1)`. Resource section headings show `Codex (0.163.0)`.
+The installation label still selects the same home; updating does not rename it.
+
 ## Automatic update policy
 
 The daemon owns a supervised harness-update service, separate from agents-cli's

@@ -1182,6 +1182,10 @@ agents view claude                       # accounts and usage, one row per ident
 agents view claude --versions            # legacy diagnostic: every retained installation and actual release
 ```
 
+Version diagnostics and resource details show the installed release first, with
+`(installation: <label>)` when the stable installation name differs. Resource
+section headings use the release; existing installation selectors stay valid.
+
 `accounts add <harness> [name]` reuses the managed install, creates a HOME-shaped
 slot (no binary), drives the native login there, registers the fleet-wide row, and
 mints the worker credential (claude: `setup-token`; codex/grok/cursor/opencode:
