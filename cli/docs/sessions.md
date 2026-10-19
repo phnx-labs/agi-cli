@@ -283,6 +283,13 @@ touches the endpoint.
   sidebar card and status bar show the same name. Live rows also carry
   `startedAs`: the first prompt the session was started with, `/goal` and
   harness-injected turns stripped (SES-14d).
+- A live Claude row carries **`recap`**, `{ text, at }`: the newest recap
+  Claude Code wrote into the transcript (`{"type":"system","subtype":"away_summary"}`),
+  with its trailing "(disable recaps in /config)" hint removed, and `at` the
+  entry's ISO timestamp. The index scan keeps it in the resumable parse state and
+  `applySessionNames` puts it on the row, so it rides `agents ps --json`,
+  `agents ps watch --json` and `agents feed watch --json`. A session with no recap
+  has no field; durable history rows do not carry it.
 - Every session row's **headline is a user-anchored name, never the agent's latest
   message** (PHNX-3797). One ladder decides it everywhere — `label` →
   `generatedTitle` → the first-prompt `topic` — implemented once in

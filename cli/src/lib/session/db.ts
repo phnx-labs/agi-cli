@@ -7,6 +7,7 @@ import { claudeSubagentFiles, resolvedSubAgentCount } from './glance-files.js';
 import { parseSession, sessionFilePathContainer } from '@phnx-labs/sessions-cli/reader';
 import { extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from '@phnx-labs/sessions-cli/reader';
 import { getSessionsDir, getSessionsDbPath } from '../state.js';
+import type { SessionRecap } from './title.js';
 import { query as queryEvents, queryToolUsageForSessions } from '../feed/events.js';
 import { machineForSessionFile } from '../origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
@@ -2267,10 +2268,16 @@ export function upsertSessionsBatch(
   maintainSessionSearchIndex(db);
 }
 
+export interface IndexedSessionNames {
+  label?: string;
+  customTitle?: string;
+  recap?: SessionRecap;
+}
+
 export function getIndexedSessionNames(
   rows: Array<{ id: string; filePath?: string }>,
-): Map<string, { label?: string; customTitle?: string }> {
-  const out = new Map<string, { label?: string; customTitle?: string }>();
+): Map<string, IndexedSessionNames> {
+  const out = new Map<string, IndexedSessionNames>();
   if (rows.length === 0) return out;
   const db = getDB();
   const CHUNK = 500;
@@ -2291,13 +2298,14 @@ export function getIndexedSessionNames(
   const keys = [...idByLedgerKey.keys()];
   for (let i = 0; i < keys.length; i += CHUNK) {
     const chunk = keys.slice(i, i + CHUNK);
-    const titled = db
-      .prepare(`SELECT file_path, json_extract(parser_state, '$.customTitle') AS custom_title FROM scan_ledger WHERE file_path IN (${chunk.map(() => '?').join(',')}) AND json_valid(parser_state)`)
-      .all(...chunk) as Array<{ file_path: string; custom_title: string | null }>;
-    for (const row of titled) {
-      if (typeof row.custom_title !== 'string' || !row.custom_title) continue;
+    const fromState = db
+      .prepare(`SELECT file_path, json_extract(parser_state, '$.customTitle') AS custom_title, json_extract(parser_state, '$.recap') AS recap FROM scan_ledger WHERE file_path IN (${chunk.map(() => '?').join(',')}) AND json_valid(parser_state)`)
+      .all(...chunk) as Array<{ file_path: string; custom_title: string | null; recap: string | null }>;
+    for (const row of fromState) {
       const id = idByLedgerKey.get(row.file_path)!;
-      out.set(id, { ...out.get(id), customTitle: row.custom_title });
+      const customTitle = typeof row.custom_title === 'string' && row.custom_title ? row.custom_title : undefined;
+      const recap = row.recap ? JSON.parse(row.recap) as SessionRecap : undefined;
+      if (customTitle || recap) out.set(id, { ...out.get(id), customTitle, recap });
     }
   }
   return out;

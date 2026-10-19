@@ -90,6 +90,20 @@ export function sessionHeadline<
   return row.label || row.generatedTitle || row.topic || undefined;
 }
 
+export interface SessionRecap {
+  text: string;
+  at: string;
+}
+
+const CLAUDE_RECAP_HINT_RE = /\s*\(disable recaps in \/config\)\s*$/i;
+
+export function claudeRecapFromLine(parsed: { type?: unknown; subtype?: unknown; content?: unknown; timestamp?: unknown }): SessionRecap | undefined {
+  if (parsed.type !== 'system' || parsed.subtype !== 'away_summary') return undefined;
+  if (typeof parsed.content !== 'string' || typeof parsed.timestamp !== 'string') return undefined;
+  const text = parsed.content.replace(CLAUDE_RECAP_HINT_RE, '').trim();
+  return text ? { text, at: parsed.timestamp } : undefined;
+}
+
 export interface LiveSessionName {
   name: string;
   source?: string;

@@ -23,7 +23,7 @@ import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar
 import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
-import { resolveSessionName, startedAsFromUserTurn } from './title.js';
+import { resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';
 import { getIndexedSessionNames, latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
@@ -172,6 +172,7 @@ export function applySessionNames(sessions: ActiveSession[]): void {
       indexed: stored?.label,
       launchName: s.name,
     }) ?? s.label;
+    if (stored?.recap) s.recap = stored.recap;
   }
 }
 
@@ -325,6 +326,7 @@ export interface ActiveSession {
   generatedTitle?: string;
   title?: string;
   startedAs?: string;
+  recap?: SessionRecap;
   recapSource?: RecapSource;
   userPromptClean?: string;
   userPromptKind?: UserPromptKind;

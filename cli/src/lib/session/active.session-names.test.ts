@@ -11,7 +11,7 @@ process.env.USERPROFILE = TEST_HOME;
 const { applySessionNames, readTranscriptHead } = await import('./active.js');
 const { recordRunName } = await import('./run-names.js');
 const { scanSessionsIncremental } = await import('./discover.js');
-const { upsertSession, closeDB } = await import('./db.js');
+const { upsertSession, closeDB, getDB } = await import('./db.js');
 const { machineId } = await import('../machine-id.js');
 type ActiveSession = import('./active.js').ActiveSession;
 
@@ -97,5 +97,37 @@ describe('applySessionNames — one label for every live row (PHNX-4387)', () =>
     const rows = [row('offloaded-a', { machine: `${machineId()}-peer`, offloadedFrom: machineId() })];
     applySessionNames(rows);
     expect(rows[0].label).toBe('nightly');
+  });
+});
+
+describe("applySessionNames — Claude's latest recap rides the live row", () => {
+  const RECAP_FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'session-names', 'claude-recap.jsonl');
+  const id = '5e55a000-0000-4000-8000-00000000ec01';
+  const projects = path.join(TEST_HOME, '.agents', '.history', 'versions', 'claude', '2.1.289', 'home', '.claude', 'projects', '-repo-recap');
+  const file = path.join(projects, `${id}.jsonl`);
+  const lines = fs.readFileSync(RECAP_FIXTURE, 'utf-8').split('\n').filter(Boolean);
+
+  it('is the newest away_summary, without the "(disable recaps in /config)" hint', async () => {
+    fs.mkdirSync(projects, { recursive: true });
+    fs.writeFileSync(file, `${lines.slice(0, 7).join('\n')}\n`);
+    await scanSessionsIncremental({ agent: 'claude' });
+    const first = [row(id, { sessionFile: file })];
+    applySessionNames(first);
+    expect(first[0].label).toBe('Platform readiness for agents');
+    expect(first[0].recap).toEqual({
+      text: 'Main already matches origin and no task is open yet. Next, pick one: PHNX-4360 or PHNX-4397.',
+      at: '2026-10-19T00:38:19.222Z',
+    });
+
+    getDB().prepare('UPDATE scan_ledger SET scanned_at = 0 WHERE file_path = ?').run(file);
+    fs.appendFileSync(file, `${lines.slice(7).join('\n')}\n`);
+    writeLiveName(5104, id, '', 'derived');
+    await scanSessionsIncremental({ agent: 'claude' });
+    const next = [row(id, { sessionFile: file })];
+    applySessionNames(next);
+    expect(next[0].recap).toEqual({
+      text: 'You asked where the Turing milestone stands: it is due today at 17%, with three fixes merged but not yet released. Next is releasing rush/api and rush/console, once you say go.',
+      at: '2026-10-19T00:49:31.496Z',
+    });
   });
 });
