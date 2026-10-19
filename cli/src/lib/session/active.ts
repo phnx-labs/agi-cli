@@ -344,6 +344,8 @@ export interface ActiveSession {
   todos?: TodoProgress;
   tail?: string[];
   pr?: SessionPr;
+  /** Every PR the session created, oldest first; set only when there is more than one. */
+  prs?: DetectedPr[];
   worktree?: DetectedWorktree;
   ticket?: DetectedTicket;
   rateLimited?: boolean;
@@ -835,6 +837,7 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: LiveState | unde
     tail: state.tail,
     preview: state.preview ?? base.preview,
     pr: state.pr,
+    prs: state.prs,
     worktree: state.worktree,
     ticket: state.ticket,
     createdTickets: state.createdTickets,

@@ -830,6 +830,18 @@ def main():
         kind = "notification"
     elif hook_event == "PermissionRequest":
         tool_name = payload.get("tool_name") or "a tool"
+        # AskUserQuestion goes through Claude's permission flow too. The question block
+        # already holds what the terminal shows, with its options, so a permission
+        # request must not replace an open question with Approve/Deny (agi-cli#3989).
+        if tool_name == "AskUserQuestion":
+            return
+        try:
+            with open(target) as existing_file:
+                existing = json.load(existing_file)
+            if existing.get("kind") == "question":
+                return
+        except Exception:
+            pass
         tool_input = payload.get("tool_input", {})
         transcript_path = str(payload.get("transcript_path") or "")
         is_claude = "permission_suggestions" in payload or "/.claude/" in transcript_path.replace(os.sep, "/")
