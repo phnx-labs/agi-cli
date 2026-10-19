@@ -205,7 +205,6 @@ export function rosterDelta(prev: RosterSnapshot | null, cur: RosterSnapshot): s
 
 const MAX_QUESTION_CHARS = 240;
 
-/** How long ago, in the words the Lead reads: "just now", "5m ago", "3h ago", "4d ago". */
 export function ago(at: string | number, nowMs: number): string {
   const ms = nowMs - (typeof at === 'number' ? at : Date.parse(at));
   if (!Number.isFinite(ms) || ms < 0) return 'just now';
