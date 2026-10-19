@@ -26,7 +26,7 @@ interface WorkerPickOptions {
   platforms?: string[];
   eligibleHosts?: string[];
   localMachine?: string;
-  probe?: (pool: string[]) => Promise<Map<string, DevicePlacementSignal>>;
+  probe?: (pool: string[], force?: boolean) => Promise<Map<string, DevicePlacementSignal>>;
   preferred?: ReadonlySet<string>;
 }
 
@@ -60,7 +60,11 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
   });
   if (onPlatform.length === 0) throw new Error(formatNoWorkerError(excluded, wanted));
 
-  const signals = await (opts.probe ?? ((p: string[]) => probePoolSignals(p)))(onPlatform);
+  const probe = opts.probe ?? ((p: string[], force?: boolean) => probePoolSignals(p, undefined, { force }));
+  let signals = await probe(onPlatform);
+  if (!onPlatform.some((device) => isWorkerEligible(signals.get(device))) && [...signals.values()].some((s) => s.fromSnapshot)) {
+    signals = await probe(onPlatform, true);
+  }
   const eligible = onPlatform.filter((device) => {
     const signal = signals.get(device);
 
@@ -88,6 +92,10 @@ export async function resolveWorkerDevice(opts: WorkerPickOptions = {}): Promise
     })),
     excluded,
   };
+}
+
+function isWorkerEligible(signal: DevicePlacementSignal | undefined): boolean {
+  return signal?.reachable === true && !blocksPlacement(signal.headroom);
 }
 
 export function formatNoWorkerError(excluded: WorkerExclusion[], platforms: Set<string>): string {

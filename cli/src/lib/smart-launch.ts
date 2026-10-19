@@ -6,6 +6,7 @@ import { blocksPlacement } from './devices/health.js';
 import { autoLaunchPreferredSet, describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { confirmPlacementTarget, probePoolSignals } from './teams/placement-probe.js';
+import { writePlacementSnapshot } from './devices/stats-cache.js';
 import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
 import type { AgentType } from './teams/agents.js';
 
@@ -181,6 +182,7 @@ export async function resolveDeviceAuto(
       : signal.signedIn === true);
   });
 
+  if (!opts.probe) writePlacementSnapshot({ demandAt: Date.now() });
   let signals = await collectSignals(false);
   let eligiblePool = eligibleIn(signals);
   if (eligiblePool.length === 0 && [...signals.values()].some((signal) => signal.fromSnapshot)) {

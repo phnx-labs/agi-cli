@@ -15,6 +15,7 @@ import {
   refreshPlacementSnapshot,
   snapshotSignal,
 } from './placement-probe.js';
+import { resolveDeviceAuto } from '../smart-launch.js';
 
 const readyView = JSON.stringify([
   { agent: 'claude', runReady: { ready: true, reason: 'ready', accounts: [{ ready: true, reason: 'ready' }] }, versions: [{ version: '2.1.261' }] },
@@ -83,14 +84,24 @@ describe('probePoolSignals over the persisted snapshot', () => {
     expect(signals.size).toBe(0);
   });
 
-  it('serves a fresh snapshot without dialing the device, and records the placement demand', async () => {
+  it('serves a fresh snapshot without dialing the device', async () => {
     const now = Date.now();
     writePlacementSnapshot(snapshot('snap-box', now, now));
     const started = Date.now();
     const signals = await probePoolSignals(['snap-box'], 'claude', { now });
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(signals.get('snap-box')).toMatchObject({ reachable: true, signedIn: true, fromSnapshot: true });
-    expect(readPlacementSnapshot().demandAt).toBe(now);
+  });
+
+  it('only --device auto placement arms the background refresh', async () => {
+    writePlacementSnapshot({ demandAt: 1 });
+    await probePoolSignals(['snap-box'], 'claude');
+    expect(readPlacementSnapshot().demandAt).toBe(1);
+    const now = Date.now();
+    writePlacementSnapshot(snapshot('snap-box', now, now));
+    const plan = await resolveDeviceAuto('claude', { localMachine: 'local', eligibleHosts: ['snap-box'], confirm: async () => true });
+    expect(plan.host).toBe('snap-box');
+    expect(readPlacementSnapshot().demandAt).toBeGreaterThanOrEqual(now);
   });
 
   it('probes live when the snapshot is stale and persists what it found', async () => {
