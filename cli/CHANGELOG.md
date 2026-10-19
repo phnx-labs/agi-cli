@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.23.33
+
+- **A Codex session that opened several PRs before the upgrade lists them all.** The resumable Codex parse state moves to v5, so a v4 checkpoint (written before the index recorded every PR) re-parses its transcript once instead of resuming with only its first PR, as Claude's v7 already does. Source: cli/src/lib/session/discover.ts
+
+- **A live Claude row lists the PRs and tickets the session acted on.** `touchedPrs` (`[{ url, number, repo, action }]`, action `merged`, `reviewed`, `commented`, `checked out`, `edited` or `closed`) comes from `gh pr merge|review|comment|checkout|edit|close` and `agents projects prs merge|review|comment`; `touchedTickets` (`[{ id, action }]`) from `linear update`. Only calls that ran and succeeded count, newest first with the last action per item, leaving out what the session created itself (`prs`, `createdTickets`). Upgrading re-parses a Claude transcript from the start the next time it changes. Source: cli/src/lib/session/touched.ts, cli/src/lib/session/discover.ts, cli/src/lib/session/active.ts
+
 ## 1.23.32
 
 - **A session row lists every PR the session opened (#3989).** The session index records each PR a Claude or Codex session created (`pr_urls`, schema v53), not only the first, and live and ended rows read it as `prs`, so a long session whose PR creations scrolled out of its transcript tail still lists them all. Upgrading re-parses only the transcripts of sessions that already have a PR. Source: cli/src/lib/session/discover.ts, cli/src/lib/session/db.ts, cli/src/lib/session/active.ts
