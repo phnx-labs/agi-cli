@@ -9,8 +9,10 @@ import {
   noteRateLimited,
   parseRateLimitReset,
   readCached,
+  resolveLinearApiKey,
   writeCached,
 } from './linear-cache.js';
+import { installFakeBin } from './__tests__/fake-linear.js';
 
 let home: string;
 let cacheFile: string;
@@ -112,5 +114,45 @@ describe('linear cache', () => {
     for (let i = 0; i < 40; i++) writeCached(`b-${i}`, i, T0);
     const survived = fs.readdirSync(cacheFile).filter((f) => f.endsWith('.json')).length;
     expect(survived).toBe(80);
+  });
+});
+
+describe('resolveLinearApiKey', () => {
+  const profile = `agents-test-${process.pid}-${Date.now()}`;
+  const profileDir = () => path.join(os.homedir(), '.linear-cli', 'profiles', profile);
+  afterEach(() => {
+    delete process.env.LINEAR_API_KEY;
+    fs.rmSync(profileDir(), { recursive: true, force: true });
+  });
+
+  it('reads a profile\'s own config and never the default workspace\'s env key', () => {
+    process.env.LINEAR_API_KEY = 'lin_api_default_workspace';
+    expect(resolveLinearApiKey()).toBe('lin_api_default_workspace');
+    expect(resolveLinearApiKey(profile)).toBeNull();
+    fs.mkdirSync(profileDir(), { recursive: true });
+    fs.writeFileSync(path.join(profileDir(), 'config.json'), JSON.stringify({ apiKey: ' lin_api_personal ' }));
+    expect(resolveLinearApiKey(profile)).toBe('lin_api_personal');
+  });
+
+  it('refuses a profile name that could leave the profiles directory, and the reserved default', () => {
+    expect(() => resolveLinearApiKey('../x')).toThrow(/Invalid linear-cli profile/);
+    expect(() => resolveLinearApiKey('default')).toThrow(/reserved for the default workspace/);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('looks a profile key up under its own Keychain service, never the default one', () => {
+    const security = installFakeBin('security', {
+      'find-generic-password -s linear-api-key -w': 'lin_api_default_keychain\n',
+      [`find-generic-password -s linear-api-key.${profile} -w`]: 'lin_api_profile_keychain\n',
+    });
+    try {
+      expect(resolveLinearApiKey()).toBe('lin_api_default_keychain');
+      expect(resolveLinearApiKey(profile)).toBe('lin_api_profile_keychain');
+      expect(security.calls().map((c) => c.argv)).toEqual([
+        'find-generic-password -s linear-api-key -w',
+        `find-generic-password -s linear-api-key.${profile} -w`,
+      ]);
+    } finally {
+      security.restore();
+    }
   });
 });

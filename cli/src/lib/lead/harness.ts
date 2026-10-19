@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { getCliLaunch } from '../cli-entry.js';
 import { atomicWriteFileSync, atomicWriteJsonSync } from '../fs-atomic.js';
 import { configKeySpec, getConfigValue } from '../device-config.js';
+import { linearSpawnEnv } from '../linear-projects.js';
 import type { LeadPaths } from './paths.js';
 
 export const LEAD_TOOL_NAMES = ['roster', 'dispatch', 'start', 'send', 'stop', 'linear', 'remember'] as const;
@@ -61,14 +62,19 @@ export function writeAgentsShim(paths: LeadPaths, launch: Launch = getCliLaunch(
   return file;
 }
 
-export function leadChildEnv(project: string, paths: LeadPaths, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function leadChildEnv(
+  project: string,
+  paths: LeadPaths,
+  source: NodeJS.ProcessEnv = process.env,
+  linearProfile?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of LEAD_ENV_PASSTHROUGH) if (source[key] !== undefined) env[key] = source[key];
   for (const [key, value] of Object.entries(source)) if (LEAD_ENV_AUTH.test(key) && value !== undefined) env[key] = value;
   env.PATH = [paths.bin, env.PATH].filter(Boolean).join(path.delimiter);
   env.AGENTS_LEAD_PROJECT = project;
   env.AGENTS_NO_AUTOPULL = '1';
-  return env;
+  return linearSpawnEnv(linearProfile, env);
 }
 
 export const WORKER_ENV_PASSTHROUGH = [
@@ -87,12 +93,17 @@ export function curatedClientEnv(source: NodeJS.ProcessEnv = process.env): Recor
   return env;
 }
 
-export function workerEnv(hostEnv: NodeJS.ProcessEnv, clientEnv: Record<string, string>, leadRootDir: string): NodeJS.ProcessEnv {
+export function workerEnv(
+  hostEnv: NodeJS.ProcessEnv,
+  clientEnv: Record<string, string>,
+  leadRootDir: string,
+  linearProfile?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...curatedClientEnv(hostEnv), ...curatedClientEnv(clientEnv) };
   if (env.PATH) {
     env.PATH = env.PATH.split(path.delimiter).filter((dir) => dir && !path.resolve(dir).startsWith(path.resolve(leadRootDir))).join(path.delimiter);
   }
-  return env;
+  return linearSpawnEnv(linearProfile, env);
 }
 
 export function leadRunArgs(project: string, model: string, start: LeadSessionStart, paths: LeadPaths): string[] {

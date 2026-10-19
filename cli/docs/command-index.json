@@ -8911,7 +8911,7 @@
           "negate": false
         }
       ],
-      "examples": "agents projects import --from-linear  # the projects you actually track\nagents projects add rush --repo phnx-labs/rush --path apps/web\nagents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\nagents projects set rush --add-dir ~/.agents/.system  # bind one more\nagents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\nagents projects list                 # definitions only (no session scan)\nagents projects list --with-agents   # opt-in local active counts\nagents projects list --json          # machine-readable defs (AGI EXT uses this)\necho '{...}' | agents projects save --json  # create/update one def from stdin\nagents projects remove rush --json   # machine-readable removal\nagents projects status              # every project, across the whole fleet\nagents projects status rush         # one project (same body as view)\nagents projects view rush           # alias of status <name>\nagents projects status --device s0  # scope to one device (or --devices a,b,c)\nagents projects link rush --linear  # bind the Linear project (auto-suggest)\nagents run --project rush           # land an agent in the project",
+      "examples": "agents projects import --from-linear  # the projects you actually track\nagents projects add rush --repo phnx-labs/rush --path apps/web\nagents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\nagents projects set rush --add-dir ~/.agents/.system  # bind one more\nagents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\nagents projects list                 # definitions only (no session scan)\nagents projects list --with-agents   # opt-in local active counts\nagents projects list --json          # machine-readable defs (AGI EXT uses this)\necho '{...}' | agents projects save --json  # create/update one def from stdin\nagents projects remove rush --json   # machine-readable removal\nagents projects status              # every project, across the whole fleet\nagents projects status rush         # one project (same body as view)\nagents projects view rush           # alias of status <name>\nagents projects status --device s0  # scope to one device (or --devices a,b,c)\nagents projects link rush --linear  # bind the Linear project (auto-suggest)\nagents projects link talora --linear Talora --profile personal  # project in another Linear workspace\nagents run --project rush           # land an agent in the project",
       "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\nmachines with 'agents repo push user' / 'agents repo pull user'. AGI EXT\nreads and writes only through these commands — never\n~/.agents/factory/projects.json.\n\nA project may bind several directories ('--dir' / '--add-dir'). The cwd an\nagent lands in is 'defaultPath' (else 'root') — set it with --root/--path,\nnot with --dir. Every bound directory other than that cwd rides along as\nan --add-dir grant (Claude, Codex, Cursor, Kimi, Grok consume it; others ignore).",
       "subcommands": [
         {
@@ -9100,6 +9100,24 @@
               "optional": true,
               "variadic": false,
               "negate": false
+            },
+            {
+              "flags": "--profile <name>",
+              "description": "linear-cli profile (workspace) the project lives in; stored as linear.profile and kept on later re-links",
+              "long": "--profile",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-profile",
+              "description": "Bind from the default workspace and remove a stored linear.profile",
+              "long": "--no-profile",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
             },
             {
               "flags": "-h, --help",
@@ -9990,7 +10008,7 @@
             },
             {
               "flags": "--path [dir]",
-              "description": "Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId}, root}, all-null when nothing matches (fail-open, exit 0).",
+              "description": "Treat the argument as a DIRECTORY and auto-detect the project that contains it (bare --path uses the cwd). With --json prints {name, linear:{name,projectId[,profile]}, root} (profile only when the def sets linear.profile), all-null when nothing matches (fail-open, exit 0).",
               "long": "--path",
               "required": false,
               "optional": true,

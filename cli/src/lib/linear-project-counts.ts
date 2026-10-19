@@ -30,6 +30,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached, resolveLinearApiKey } from './linear-cache.js';
 import { reserveLinearRequest } from './linear-rate-limit.js';
+import { DEFAULT_LINEAR_PROFILE } from './linear-projects.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 const TIMEOUT_MS = 8_000;
@@ -136,7 +137,8 @@ export function nextMilestone(
   return open.find((m) => m.isNext) ?? open[0];
 }
 
-function resolveApiKey(): string | null {
+function resolveApiKey(profile: string | undefined): string | null {
+  if (profile) return resolveLinearApiKey(profile);
   const fromChain = resolveLinearApiKey();
   if (fromChain) return fromChain;
   try {
@@ -149,9 +151,15 @@ function resolveApiKey(): string | null {
   }
 }
 
+export type LinearIssuesPageFetcher = (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined>;
+
+export function linearIssuesPageFetcher(profile: string | undefined): LinearIssuesPageFetcher {
+  return (projectId, after, signal) => fetchLinearIssuesPage(projectId, after, signal, profile);
+}
+
 export async function fetchLinearProjectCounts(
   projectId: string,
-  fetchPage: (projectId: string, after: string | undefined, signal: AbortSignal) => Promise<LinearIssuesResponse | undefined> = fetchLinearIssuesPage,
+  fetchPage: LinearIssuesPageFetcher = linearIssuesPageFetcher(undefined),
   nowMs: number = Date.now(),
 ): Promise<LinearProjectCounts | undefined> {
   const cached = readCached<LinearProjectCounts>(projectId, nowMs);
@@ -198,10 +206,11 @@ async function fetchLinearIssuesPage(
   projectId: string,
   after: string | undefined,
   signal: AbortSignal,
+  profile: string | undefined,
 ): Promise<LinearIssuesResponse | undefined> {
-  const apiKey = resolveApiKey();
+  const apiKey = resolveApiKey(profile);
   if (!apiKey) return undefined;
-  if (!reserveLinearRequest(apiKey)) return undefined;
+  if (!reserveLinearRequest(profile ?? DEFAULT_LINEAR_PROFILE)) return undefined;
   const issuesSelection =
     'issues(filter:{ project:{ id:{ eq:$p } } }, first:' +
     PAGE_SIZE +

@@ -49,5 +49,9 @@ describe('Lead brief', () => {
     fs.mkdirSync(path.join(dir, '.linear-cli'));
     fs.writeFileSync(path.join(dir, '.linear-cli', 'config.json'), JSON.stringify({ teamKey: 'PHNX' }));
     expect(linearTeamKey(dir)).toBe('PHNX');
+    fs.mkdirSync(path.join(dir, '.linear-cli', 'profiles', 'personal'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.linear-cli', 'profiles', 'personal', 'config.json'), JSON.stringify({ teamKey: 'TAL' }));
+    expect(linearTeamKey(dir, 'personal')).toBe('TAL');
+    expect(linearTeamKey(dir, 'missing')).toBeUndefined();
   });
 });

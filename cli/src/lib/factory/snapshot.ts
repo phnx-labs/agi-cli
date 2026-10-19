@@ -8,6 +8,7 @@ import { getActiveSessions, type ActiveSession } from '../session/active.js';
 import { serializeActiveSessionsForJson } from '../session/active.js';
 import { readAuthHealthCache, type AuthVerdict } from '../auth-health.js';
 import { readStatsCache } from '../devices/stats-cache.js';
+import { linearSpawnEnv } from '../linear-projects.js';
 
 const execFile = promisify(execFileCallback);
 
@@ -169,7 +170,7 @@ export async function buildFactorySnapshot(overrides: Partial<SnapshotDependenci
     home: os.homedir(),
     now: () => new Date(),
     activeSessions: () => getActiveSessions(),
-    run: async (file, args) => (await execFile(file, args, { maxBuffer: 10 * 1024 * 1024 })).stdout,
+    run: async (file, args) => (await execFile(file, args, { maxBuffer: 10 * 1024 * 1024, env: linearSpawnEnv(undefined) })).stdout,
     readAuth: readAuthHealthCache,
     readDeviceStats: readStatsCache,
     ...overrides,

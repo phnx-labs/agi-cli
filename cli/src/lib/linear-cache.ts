@@ -1,24 +1,44 @@
 
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { getCacheDir } from './state.js';
+import { linearProfileError } from './linear-projects.js';
 
 export const LINEAR_CACHE_TTL_MS = 10 * 60_000;
 
-export function resolveLinearApiKey(): string | null {
+export function resolveLinearApiKey(profile?: string): string | null {
+  if (profile) return resolveProfileApiKey(profile);
   const fromEnv = process.env.LINEAR_API_KEY?.trim();
   if (fromEnv) return fromEnv;
-  if (process.platform === 'darwin') {
-    try {
-      const out = execFileSync('security', ['find-generic-password', '-s', 'linear-api-key', '-w'], {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-      const key = out.trim();
-      if (key) return key;
-    } catch {
-    }
+  return keychainApiKey('linear-api-key');
+}
+
+function resolveProfileApiKey(profile: string): string | null {
+  const invalid = linearProfileError(profile);
+  if (invalid) throw new Error(`Invalid linear-cli profile: ${invalid}`);
+  try {
+    const cfg = JSON.parse(
+      fs.readFileSync(path.join(os.homedir(), '.linear-cli', 'profiles', profile, 'config.json'), 'utf8'),
+    ) as { apiKey?: unknown };
+    const key = typeof cfg.apiKey === 'string' ? cfg.apiKey.trim() : '';
+    if (key) return key;
+  } catch {
+  }
+  return keychainApiKey(`linear-api-key.${profile}`);
+}
+
+function keychainApiKey(service: string): string | null {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const out = execFileSync('security', ['find-generic-password', '-s', service, '-w'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const key = out.trim();
+    if (key) return key;
+  } catch {
   }
   return null;
 }
