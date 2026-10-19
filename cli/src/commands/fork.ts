@@ -55,6 +55,8 @@ const FORK_HELP = {
     - The recap carries the source id — the sibling can run '/continue <id>' for the
       full history if it needs more than the recap.
     - Resolve the source the same way as resume: an exact or prefix id fragment.
+    - Without --name the fork's row carries forkOf (the source id) and the source's
+      name as its title until the harness gives the fork a name of its own.
   `,
 };
 
@@ -105,7 +107,8 @@ export async function runFork(
     changes: digest?.changes,
   });
 
-  const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced', '--name', options.name || `fork of ${label}`];
+  const runArgs = ['run', source.agent, recap, '-i', '--strategy', 'balanced'];
+  if (options.name) runArgs.push('--name', options.name);
   const sourceIsHere = !source.machine || isSelfHost(source.machine);
   const landsOnSource = !options.device
     ? sourceIsHere
@@ -130,7 +133,7 @@ export function registerForkCommand(program: Command): void {
   const cmd = program
     .command('fork <session>')
     .description('Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.')
-    .option('--name <label>', 'Session label for the fork (default: "fork of <original>")')
+    .option('--name <label>', 'Session label for the fork (default: the source\'s name until the fork names itself)')
     .option('--device <host>', 'Place the sibling on a fleet device (name or "auto"); defaults to here')
     .option('--terminal [backend]', 'Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place');
 

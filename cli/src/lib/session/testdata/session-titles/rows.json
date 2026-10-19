@@ -1,0 +1,49 @@
+{
+  "placeholder-label": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents",
+    "label": "agents-92",
+    "topic": "Read the brief and apply it to pull request 3847",
+    "firstUserMessage": "Read the brief and apply it to pull request 3847"
+  },
+  "placeholder-hex-label": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents/",
+    "label": "agents-1f",
+    "generatedTitle": "Weekly recap social post automation"
+  },
+  "ticket-style-label": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents",
+    "label": "RUSH-2058",
+    "topic": "fix the login redirect"
+  },
+  "host-fallback-label": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents",
+    "label": "[host/mark-1]",
+    "topic": "run the nightly evals"
+  },
+  "unnamed-fork": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents",
+    "name": "fork of Process - Podcasts",
+    "label": "fork of Process - Podcasts",
+    "topic": "Continue a prior claude session (\"Process - Podcasts\"). Pick up where it left off — do not restart it.",
+    "firstUserMessage": "Continue a prior claude session (\"Process - Podcasts\"). Pick up where it left off — do not restart it.\nWorking directory: /home/u/src/agents\nIt last said: \"I'll pick this up when diarization finishes.\"\nSource session 4aa3c855 on zion — run `/continue 4aa3c855-eb2e-417c-8067-c7f079a5963f` if you need the full transcript."
+  },
+  "fork-with-own-name": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agents",
+    "label": "Podcast skill for episode recordings",
+    "firstUserMessage": "Continue a prior claude session (\"Process - Podcasts\"). Pick up where it left off — do not restart it.\nSource session 4aa3c855 on zion — run `/continue 4aa3c855-eb2e-417c-8067-c7f079a5963f` if you need the full transcript."
+  },
+  "injected-turns-only": {
+    "kind": "claude",
+    "cwd": "/home/u/src/agi-ext",
+    "label": "agi-ext-3",
+    "topic": "<task-notification><task-id>b1</task-id></task-notification>",
+    "lastUserMessage": "Another claude session sent a message: <agent-message from=\"x\">[subagent hand-back] done</agent-message>",
+    "startedAs": "Ship the sidebar patch"
+  }
+}

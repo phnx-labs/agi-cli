@@ -85,9 +85,39 @@ export function sanitizeGeneratedTitle(raw: string | null | undefined): string |
 type CarriesTitleRung<T> = 'generatedTitle' extends keyof T ? T : never;
 
 export function sessionHeadline<
-  T extends { label?: string | null; generatedTitle?: string | null; topic?: string | null },
+  T extends { label?: string | null; generatedTitle?: string | null; topic?: string | null; cwd?: string | null },
 >(row: CarriesTitleRung<T>): string | undefined {
-  return row.label || row.generatedTitle || row.topic || undefined;
+  const label = isPlaceholderSessionName(row.label, row.cwd) ? undefined : row.label;
+  return label || row.generatedTitle || row.topic || undefined;
+}
+
+const HOST_FALLBACK_LABEL_RE = /^\[host\/[^\]]+\]$/;
+const PLACEHOLDER_SUFFIX_RE = /^(?:\d+|[0-9a-f]{1,4})$/i;
+
+export function isPlaceholderSessionName(name: string | null | undefined, cwd?: string | null): boolean {
+  const n = name?.trim();
+  if (!n) return false;
+  if (HOST_FALLBACK_LABEL_RE.test(n)) return true;
+  const dir = cwd?.replace(/[/\\]+$/, '').split(/[/\\]/).pop();
+  if (!dir || n.length <= dir.length + 1) return false;
+  return n.slice(0, dir.length + 1).toLowerCase() === `${dir.toLowerCase()}-` && PLACEHOLDER_SUFFIX_RE.test(n.slice(dir.length + 1));
+}
+
+const INJECTED_NOTE_RE = /^another \w+ session sent a message:?\s*/i;
+
+export function cleanDisplayTitle(raw: string | null | undefined): string | undefined {
+  if (!raw || /^\s*<(?:task-notification|system-reminder)/i.test(raw)) return undefined;
+  const t = raw
+    .replace(/<\/?agent-message[^>]*>/gi, ' ')
+    .replace(INJECTED_NOTE_RE, '')
+    .replace(/\[([^\]]+)\]\([^)]*(?:\)|$)/g, '$1')
+    .replace(/[`*]+/g, '')
+    .replace(/^[#>\s]+/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[…. ]+$/, '');
+  if (!t || /^\[subagent hand-back\]/i.test(t) || /^\/[\w:-]+(?:\s|$)/.test(t)) return undefined;
+  return t;
 }
 
 export interface SessionRecap {

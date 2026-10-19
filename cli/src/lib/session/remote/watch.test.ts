@@ -124,6 +124,17 @@ describe('durable Previous rows on the canonical watch stream', () => {
       topic: 'the sessions list headline is wrong, fix it',
     }));
     expect(untitled.title).toBe('the sessions list headline is wrong, fix it');
+
+    const placeholder = toPreviousSessionWatchRow('zion', indexed('history-5', {
+      cwd: '/home/u/agents', label: 'agents-05', topic: 'apply the review fix to PR 3847',
+    }));
+    expect(placeholder.title, "a stored Claude <folder>-<n> placeholder is not a name").toBe('apply the review fix to PR 3847');
+
+    const fork = toPreviousSessionWatchRow('zion', indexed('history-6', {
+      label: 'fork of Release',
+      firstUserMessage: 'Continue a prior claude session ("Release"). Pick up where it left off — do not restart it.\nSource session 1234abcd — run `/continue 1234abcd-0000` if you need the full transcript.',
+    }));
+    expect(fork).toMatchObject({ title: 'Release', forkOf: '1234abcd-0000' });
   });
 
   it('a LIVE row carries its generated title verbatim onto the stream, for local and forwarded remote rows alike', () => {

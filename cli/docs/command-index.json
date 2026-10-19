@@ -5173,7 +5173,7 @@
       "options": [
         {
           "flags": "--name <label>",
-          "description": "Session label for the fork (default: \"fork of <original>\")",
+          "description": "Session label for the fork (default: the source's name until the fork names itself)",
           "long": "--name",
           "required": true,
           "optional": false,
@@ -5210,7 +5210,7 @@
         }
       ],
       "examples": "# Fork a session by (partial) id — launches a same-harness sibling seeded with a recap\nagents fork 4f3a9c21\n\n# Name the fork's session label\nagents fork 4f3a9c21 --name \"try redis instead\"\n\n# Place the sibling on a fleet worker instead of here\nagents fork 4f3a9c21 --device auto\n\n# Open the sibling in a fresh terminal tab where you work\nagents fork 4f3a9c21 --terminal",
-      "notes": "- 'resume' continues the SAME conversation; 'fork' launches a NEW same-harness\n  session seeded with a recap of the source, so the two diverge.\n- Works cross-device and cross-harness: the source is resolved across the fleet\n  and the sibling gets a plain-text recap, so it never reaches the source transcript.\n- The recap carries the source id — the sibling can run '/continue <id>' for the\n  full history if it needs more than the recap.\n- Resolve the source the same way as resume: an exact or prefix id fragment.",
+      "notes": "- 'resume' continues the SAME conversation; 'fork' launches a NEW same-harness\n  session seeded with a recap of the source, so the two diverge.\n- Works cross-device and cross-harness: the source is resolved across the fleet\n  and the sibling gets a plain-text recap, so it never reaches the source transcript.\n- The recap carries the source id — the sibling can run '/continue <id>' for the\n  full history if it needs more than the recap.\n- Resolve the source the same way as resume: an exact or prefix id fragment.\n- Without --name the fork's row carries forkOf (the source id) and the source's\n  name as its title until the harness gives the fork a name of its own.",
       "subcommands": []
     },
     {

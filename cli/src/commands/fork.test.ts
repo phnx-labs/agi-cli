@@ -51,7 +51,7 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(recap).toContain('Continue a prior claude session ("Prix Evals")');
     expect(recap).toContain('insight widgets need gaps closed');
     expect(recap).toContain('/continue 11111111-2222-3333-4444-555555555555');
-    expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of Prix Evals']));
+    expect(args, 'an unnamed fork is titled after its source by the row, never pinned to "fork of …"').not.toContain('--name');
     expect(args).not.toContain('--cwd');
   });
 
@@ -97,6 +97,15 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(args.slice(args.indexOf('--device'))).toEqual(expect.arrayContaining(['--device', 'auto']));
   });
 
+  it("names the recap after the source's topic, not Claude's <folder>-<n> placeholder", async () => {
+    const src = { id: 'eeeeeeee-1111-2222-3333-444444444444', shortId: 'eeeeeeee', agent: 'claude', cwd: '/home/u/agents', label: 'agents-92', topic: 'ship the recap row' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
+
+    await runFork('eeeeeeee', {}, deps);
+
+    expect(launched[0][2]).toContain('Continue a prior claude session ("ship the recap row")');
+  });
+
   it('falls back to the source topic (not the raw short id) when it has no explicit label', async () => {
     const src = { id: 'dddddddd-1111-2222-3333-444444444444', shortId: 'dddddddd', agent: 'claude', topic: 'wire up the evals console' };
     const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
@@ -106,7 +115,6 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     const [args] = launched;
     expect(args[2]).toContain('wire up the evals console');
     expect(args[2]).not.toContain('("dddddddd")');
-    expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of wire up the evals console']));
   });
 
   it('rejects --device + --terminal up front, before launching anything', async () => {

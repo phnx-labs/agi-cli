@@ -109,15 +109,11 @@ function previousSessionWatchRowKey(scope: string, sessionId: string): string {
   return createHash('sha256').update(`${scope}\0previous\0${sessionId}`).digest('base64url').slice(0, 22);
 }
 
-function previousRowTitle(session: SessionMeta, foldedHeadline: string | undefined): string | undefined {
-  return session.label || session.generatedTitle || foldedHeadline || session.topic || undefined;
-}
-
 function previousRowCard(
   session: SessionMeta,
   request: ActiveSession['request'],
   attachments: ActiveSession['attachments'],
-): Pick<ActiveSession, 'lastAgentLine' | 'request' | 'userPromptClean' | 'userPromptKind' | 'todos' | 'artifacts' | 'importantMessage'> {
+): Pick<ActiveSession, 'title' | 'forkOf' | 'lastAgentLine' | 'request' | 'userPromptClean' | 'userPromptKind' | 'todos' | 'artifacts' | 'importantMessage'> {
   const digest = readCachedPreviewDigest(session);
   const recap = deriveSessionRecap({
     ...session,
@@ -130,6 +126,8 @@ function previousRowCard(
   const todos = digest?.todos ?? session.todos;
   const importantMessage = deriveImportantMessage({ status: 'closed', lastAgentLine: recap.lastAgentLine });
   return {
+    ...(recap.title ? { title: recap.title } : {}),
+    ...(recap.forkOf ? { forkOf: recap.forkOf } : {}),
     ...(recap.lastAgentLine ? { lastAgentLine: recap.lastAgentLine } : {}),
     ...(recap.request ? { request: recap.request } : {}),
     ...(recap.userPromptClean ? { userPromptClean: recap.userPromptClean } : {}),
@@ -158,7 +156,6 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     : readSessionSummaryAny(session.id);
   const folded = readSessionTimelineAny(session.id);
   const model = folded?.model ?? session.model;
-  const title = previousRowTitle(session, folded?.request?.headline);
   const card = previousRowCard(session, folded?.request, folded?.attachments);
   return {
     context: 'recent',
@@ -171,7 +168,6 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
     ...(session.label ? { label: session.label } : {}),
     ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
-    ...(title ? { title } : {}),
     ...(session.topic ? { topic: session.topic } : {}),
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),
