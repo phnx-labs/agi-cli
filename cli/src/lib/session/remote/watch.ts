@@ -10,7 +10,7 @@ import { machineId, normalizeHost } from '../../machine-id.js';
 import { shellQuote } from '../../ssh-exec.js';
 import { streamFromPeer } from './peer-stream.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import { artifactKind, deriveImportantMessage, deriveSessionRecap, isReapableOrphan, sessionAccountLabel, type ActiveSession } from '../active.js';
+import { artifactKind, deriveImportantMessage, deriveSessionRecap, isReapableOrphan, prsFromUrls, sessionAccountLabel, type ActiveSession } from '../active.js';
 import { loadSessionPreviewDigest, readCachedPreviewDigest } from '../preview-digest.js';
 import { indexArtifactSidecars, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { listNativeAccounts } from '../../account-registry.js';
@@ -174,6 +174,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     ...(session.account ? { account: session.account } : {}),
     accountLabel: sessionAccountLabel(session.agent, session, accounts),
     ...(session.prUrl ? { pr: { url: session.prUrl, number: session.prNumber } } : {}),
+    ...(session.prUrls ? { prs: prsFromUrls(session.prUrls) } : {}),
     ...(worktree ? { worktree } : {}),
     ...(session.gitBranch ? { branch: session.gitBranch } : {}),
     ...(session.ticketId ? { ticket: { id: session.ticketId, url: linearIssueUrl(session.ticketId) } } : {}),

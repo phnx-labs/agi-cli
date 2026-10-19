@@ -28,7 +28,7 @@ import { forkSourceOf } from './fork.js';
 import { getIndexedSessionNames, latestSessionFileForCwd, indexedSessionIdForFile, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
 import { extractSessionTopic, classifyUserPrompt, tidyRequest, type UserPromptKind } from '@phnx-labs/sessions-cli/reader';
 import { readSessionTailWithRaw } from '@phnx-labs/sessions-cli/reader';
-import { parseSession } from '@phnx-labs/sessions-cli/reader';
+import { parseSession, extractPrUrl } from '@phnx-labs/sessions-cli/reader';
 import { computeTokPerSec } from './throughput.js';
 import { inferSessionState, readHarnessStatus, type SessionState, type SessionActivity, type AwaitingReason, type StructuredQuestion, type TodoProgress, type DetectedPr, type DetectedWorktree, type DetectedTicket } from '@phnx-labs/sessions-cli/reader';
 import { isSessionTrackedAgent, SESSION_AGENTS, AG_TMUX_NAME_RE, type SessionAgentId, type SessionAttachment, type SessionEvent, type SessionFiles, type SessionMeta, type SessionRequest, type SessionTimeline } from '@phnx-labs/sessions-cli/reader';
@@ -117,9 +117,13 @@ export function filterCachedUnattributed(
 export type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'harness' |
+  'version' | 'account' | 'accountId' | 'accountKey' | 'timestamp' | 'label' | 'firstUserMessage' | 'lastUserMessage' | 'generatedTitle' | 'ticketId' | 'prUrl' | 'prNumber' | 'prUrls' | 'harness' |
   'tokenCount' | 'durationMs' | 'subAgentCount' | 'lastActivity'
 >;
+
+export function prsFromUrls(urls: string[]): DetectedPr[] {
+  return urls.map((url) => extractPrUrl(url) ?? { url });
+}
 
 export function backfillActiveRowsFromMeta(
   sessions: ActiveSession[],
@@ -139,6 +143,7 @@ export function backfillActiveRowsFromMeta(
     if (!s.generatedTitle && m.generatedTitle) s.generatedTitle = m.generatedTitle;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
+    if (m.prUrls && m.prUrls.length > (s.prs?.length ?? 0)) s.prs = prsFromUrls(m.prUrls);
     if (!s.startedAtMs && m.timestamp) {
       const ts = new Date(m.timestamp).getTime();
       if (!Number.isNaN(ts)) s.startedAtMs = ts;

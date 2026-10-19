@@ -213,6 +213,7 @@ interface ClaudeSessionScan {
   assistantText?: string;
   prUrl?: string;
   prNumber?: number;
+  prUrls?: string[];
   worktreeSlug?: string;
   ticketId?: string;
   createdTickets?: string[];
@@ -249,6 +250,7 @@ interface CodexSessionScan {
   assistantText?: string;
   prUrl?: string;
   prNumber?: number;
+  prUrls?: string[];
   worktreeSlug?: string;
   ticketId?: string;
   createdTickets?: string[];
@@ -1068,6 +1070,7 @@ async function readClaudeMeta(
       isTeamOrigin,
       prUrl: scan.prUrl,
       prNumber: scan.prNumber,
+      prUrls: scan.prUrls,
       worktreeSlug: scan.worktreeSlug,
       ticketId: scan.ticketId,
       createdTickets: scan.createdTickets,
@@ -1109,6 +1112,7 @@ async function readClaudeMeta(
       isTeamOrigin,
       prUrl: scan.prUrl,
       prNumber: scan.prNumber,
+      prUrls: scan.prUrls,
       worktreeSlug: scan.worktreeSlug,
       ticketId: scan.ticketId,
       createdTickets: scan.createdTickets,
@@ -1381,6 +1385,7 @@ export async function readCodexMeta(
     account: resolveAccount?.(),
     prUrl: scan.prUrl,
     prNumber: scan.prNumber,
+    prUrls: scan.prUrls,
     worktreeSlug: scan.worktreeSlug,
     ticketId: scan.ticketId,
     createdTickets: scan.createdTickets,
@@ -2542,6 +2547,7 @@ interface ClaudeParseState {
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
+  prUrls: string[];
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
   spawnedTeam?: string;
@@ -2589,6 +2595,7 @@ export function initClaudeParseState(): ClaudeParseState {
     sawPrCreate: false,
     prUrl: undefined,
     prNumber: undefined,
+    prUrls: [],
     createdTickets: new Set<string>(),
     pendingTicketTools: new Set<string>(),
     spawnedTeam: undefined,
@@ -2678,23 +2685,20 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
     }
   }
 
-  if (!state.prUrl) {
-    if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-      for (const b of parsed.message.content) {
-        if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
-          state.sawPrCreate = true;
-        }
+  if (!state.sawPrCreate && parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type === 'tool_use' && typeof b?.input?.command === 'string' && isPrCreateCommand(b.input.command)) {
+        state.sawPrCreate = true;
       }
     }
-    if (state.sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
-      for (const b of parsed.message.content) {
-        if (b?.type !== 'tool_result') continue;
-        const text = typeof b.content === 'string'
-          ? b.content
-          : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
-        const pr = extractPrUrl(text);
-        if (pr) { state.prUrl = pr.url; state.prNumber = pr.number; }
-      }
+  }
+  if (state.sawPrCreate && parsed.type === 'user' && Array.isArray(parsed.message?.content)) {
+    for (const b of parsed.message.content) {
+      if (b?.type !== 'tool_result') continue;
+      const text = typeof b.content === 'string'
+        ? b.content
+        : Array.isArray(b.content) ? b.content.map((c: any) => c?.text || '').join('\n') : '';
+      recordCreatedPr(state, extractPrUrl(text));
     }
   }
 
@@ -2828,6 +2832,7 @@ export function finalizeClaudeScan(state: ClaudeParseState, sessionFile?: string
     assistantText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
+    prUrls: state.prUrls.length > 1 ? [...state.prUrls] : undefined,
     worktreeSlug: worktree?.slug,
     ticketId: ticket?.id,
     createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
@@ -2905,6 +2910,7 @@ export interface ClaudeParserState {
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
+  prUrls?: string[];
   pendingTicketTools: string[];
   createdTickets: string[];
   spawnedTeam?: string;
@@ -2966,6 +2972,7 @@ export function serializeClaudeParserState(
     sawPrCreate: state.sawPrCreate,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
+    prUrls: state.prUrls,
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
@@ -3021,6 +3028,7 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     sawPrCreate: prior.sawPrCreate,
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
+    prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
     createdTickets: new Set<string>(prior.createdTickets),
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
@@ -3112,6 +3120,13 @@ async function claudeSessionIdentityAt(filePath: string, maxBytes = 1_048_576): 
   return state.timestamp;
 }
 
+function recordCreatedPr(state: { sawPrCreate: boolean; prUrl?: string; prNumber?: number; prUrls: string[] }, pr: { url: string; number?: number } | null | undefined): void {
+  if (!pr) return;
+  if (!state.prUrl) { state.prUrl = pr.url; state.prNumber = pr.number; }
+  if (!state.prUrls.includes(pr.url)) state.prUrls.push(pr.url);
+  state.sawPrCreate = false;
+}
+
 function parsePriorClaudeState(row: { parserState: string | null } | undefined): ClaudeParserState | null {
   if (!row?.parserState) return null;
   try {
@@ -3154,6 +3169,7 @@ interface CodexParseState {
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
+  prUrls: string[];
   createdTickets: Set<string>;
   pendingTicketTools: Set<string>;
   spawnedTeam?: string;
@@ -3184,6 +3200,7 @@ export function initCodexParseState(): CodexParseState {
     sawPrCreate: false,
     prUrl: undefined,
     prNumber: undefined,
+    prUrls: [],
     createdTickets: new Set<string>(),
     pendingTicketTools: new Set<string>(),
     spawnedTeam: undefined,
@@ -3210,7 +3227,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
         type: 'tool_use', agent: 'codex', timestamp: parsed.timestamp || '', tool: p.name, args,
         path: args.file_path || args.path, command: cmd || undefined,
       });
-      if (!state.prUrl && !state.sawPrCreate && isPrCreateCommand(cmd)) state.sawPrCreate = true;
+      if (!state.sawPrCreate && isPrCreateCommand(cmd)) state.sawPrCreate = true;
       if (!state.spawnedTeam) {
         const team = detectSpawnedTeam(cmd);
         if (team) state.spawnedTeam = team;
@@ -3220,10 +3237,7 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
       }
     }
     if (p.type === 'function_call_output') {
-      if (!state.prUrl && state.sawPrCreate) {
-        const pr = extractPrUrl(String(p.output || ''));
-        if (pr) { state.prUrl = pr.url; state.prNumber = pr.number; }
-      }
+      if (state.sawPrCreate) recordCreatedPr(state, extractPrUrl(String(p.output || '')));
       if (typeof p.call_id === 'string' && state.pendingTicketTools.has(p.call_id)) {
         state.pendingTicketTools.delete(p.call_id);
         const t = extractCreatedTicket(String(p.output || ''));
@@ -3346,6 +3360,7 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     assistantText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
+    prUrls: state.prUrls.length > 1 ? [...state.prUrls] : undefined,
     worktreeSlug: worktree?.slug,
     ticketId: ticket?.id,
     createdTickets: state.createdTickets.size > 0 ? [...state.createdTickets] : undefined,
@@ -3402,6 +3417,7 @@ export interface CodexParserState {
   sawPrCreate: boolean;
   prUrl?: string;
   prNumber?: number;
+  prUrls?: string[];
   pendingTicketTools: string[];
   createdTickets: string[];
   spawnedTeam?: string;
@@ -3439,6 +3455,7 @@ export function serializeCodexParserState(
     sawPrCreate: state.sawPrCreate,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
+    prUrls: state.prUrls,
     pendingTicketTools: [...state.pendingTicketTools],
     createdTickets: [...state.createdTickets],
     spawnedTeam: state.spawnedTeam,
@@ -3473,6 +3490,7 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     sawPrCreate: prior.sawPrCreate,
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
+    prUrls: prior.prUrls ?? (prior.prUrl ? [prior.prUrl] : []),
     createdTickets: new Set<string>(prior.createdTickets),
     pendingTicketTools: new Set<string>(prior.pendingTicketTools),
     spawnedTeam: prior.spawnedTeam,
