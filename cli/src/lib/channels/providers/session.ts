@@ -1,5 +1,7 @@
 import { injectIntoTerminal, type InjectTarget } from '../../terminal/index.js';
 import { resolveLiveInjectTarget } from '../../session/inject-target.js';
+import { deliverToTab } from '../../feed/tab-delivery.js';
+import { typedByEditorTab } from '../../terminal/resolve.js';
 import type { ChannelProvider, SendOptions, SendResult } from '../registry.js';
 
 export const SESSION_CHANNEL = 'session';
@@ -19,6 +21,17 @@ export const sessionProvider: ChannelProvider = {
       target = { backend: 'tmux', pane: terminal.pane, socket: terminal.socket };
     } else {
       const resolved = await resolveLiveInjectTarget(id);
+      const sessionId = resolved.session?.sessionId;
+      // An editor tab, or a terminal this machine cannot address: the AGI EXT window that binds the session types it.
+      if (sessionId && !resolved.target && resolved.session && typedByEditorTab(resolved.session)) {
+        if (opts.dryRun) return { ok: true, channel: SESSION_CHANNEL, id, backend: 'tab', writes: 0, confirmed: false };
+        const res = await deliverToTab({
+          sessionId, text, enter: terminal.enter !== false, transcript: resolved.session?.sessionFile,
+        });
+        return res.delivered
+          ? { ok: true, channel: SESSION_CHANNEL, id, backend: 'tab', writes: 1, confirmed: true }
+          : { ...fail(res.reason), backend: 'tab', writes: 1, confirmed: false };
+      }
       if (!resolved.target) {
         return fail(resolved.hint ? `${resolved.reason}\n${resolved.hint}` : resolved.reason ?? 'session not addressable');
       }

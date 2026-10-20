@@ -13,6 +13,7 @@ import {
 } from './events.js';
 import { extractRefs, enrichTickets } from './refs.js';
 import { mintConfirm, sweepExpiredConfirms, type HeldAction } from './confirm.js';
+import { writeLeadDraft } from './drafts.js';
 import {
   FeedRoster, filterProject, formatAttention, formatRosterRow, rosterDelta, type LeadAttention, type RosterRow, type RosterSnapshot,
 } from './roster.js';
@@ -38,6 +39,8 @@ export const CONFIRM_SWEEP_MS = 5 * 60 * 1000;
 const CHILD_STOP_GRACE_MS = 5_000;
 const FEED_BACKOFF_MIN_MS = 2_000;
 const FEED_BACKOFF_MAX_MS = 60_000;
+/** New asks that arrive together are drafted in one Lead turn. */
+const DRAFT_BATCH_MS = 20_000;
 const STDERR_TAIL_CHARS = 4_000;
 const RESUME_MISSING_RE = /No session matching|No conversation found/i;
 
@@ -206,6 +209,9 @@ export class LeadHost {
   private readonly ticketPrefixes = new Set<string>();
   private rotatedFrom: string | undefined;
   private resolveClosed!: () => void;
+  private readonly draftedAsks = new Set<string>();
+  private draftBatch: LeadAttention[] = [];
+  private draftTimer: NodeJS.Timeout | null = null;
   readonly closed = new Promise<void>((resolve) => { this.resolveClosed = resolve; });
 
   constructor(private readonly opts: LeadHostOptions) {
@@ -284,6 +290,7 @@ export class LeadHost {
       }
       this.feedBackoffMs = FEED_BACKOFF_MIN_MS;
       this.roster.apply(envelope);
+      this.noteNewAsks();
     });
     feed.stderr!.on('data', (d: Buffer) => this.log(`feed stderr: ${d.toString().trim().slice(0, 300)}`));
     feed.on('exit', (code, signal) => {
@@ -370,10 +377,10 @@ export class LeadHost {
     return { type: 'roster', text: [`Live sessions for ${project} (${rows.length}):`, ...lines, this.fleetSummary()].join('\n') };
   }
 
-  private resolveReply(session: string): { type: 'session'; id: string; title: string } {
+  private resolveReply(session: string): { type: 'session'; id: string; title: string; host: string } {
     const row = this.findRow(session, Object.values(this.projectRoster()));
     if (!row) throw new Error(`No live session '${session}' in ${this.opts.project}; check the roster tool.`);
-    return { type: 'session', id: row.id, title: row.title };
+    return { type: 'session', id: row.id, title: row.title, host: row.host };
   }
 
   private holdStop(session: string): { type: 'held'; token: string; label: string } {
@@ -394,6 +401,14 @@ export class LeadHost {
       throw new Error(`The ask ${held.argv[2]} is no longer open; check the attention tool.`);
     }
     const record = mintConfirm(held);
+    if (held.action === 'answer') {
+      // The same answer shows on the session's card, where Send runs `agents feed answer` itself.
+      const [, , key, flag, value] = held.argv;
+      writeLeadDraft({
+        key, label: held.detail ?? value, project: this.opts.project, at: new Date().toISOString(),
+        ...(flag === '--choice' ? { choiceId: value } : { text: value }),
+      });
+    }
     this.active?.emit({
       type: 'confirm',
       token: record.token,
@@ -404,6 +419,30 @@ export class LeadHost {
     });
     this.log(`held ${record.action} (${record.label}) as ${record.token}`);
     return { type: 'held', token: record.token, label: record.label };
+  }
+
+  /** Each new open ask in this project gets one drafting turn, batched over DRAFT_BATCH_MS. */
+  private noteNewAsks(): void {
+    if (!this.roster.ready || this.stopping) return;
+    const mine = this.projectRoster();
+    for (const ask of this.roster.openAttention()) {
+      if (this.draftedAsks.has(ask.key) || !mine[ask.sessionId]) continue;
+      this.draftedAsks.add(ask.key);
+      this.draftBatch.push(ask);
+    }
+    if (this.draftBatch.length === 0 || this.draftTimer) return;
+    this.draftTimer = setTimeout(() => {
+      this.draftTimer = null;
+      const open = this.draftBatch.filter((a) => this.openAsk(a.key));
+      this.draftBatch = [];
+      if (open.length === 0) return;
+      const rows = this.roster.snapshot();
+      void this.enqueue(draftTurnText(open.map((a) => formatAttention(a, rows[a.sessionId]))), undefined, (e) => {
+        if (e.type === 'error') this.log(`draft turn failed: ${e.message}`);
+      });
+    }, DRAFT_BATCH_MS);
+    this.draftTimer.unref?.();
+    this.timers.push(this.draftTimer);
   }
 
   private openAsk(key: string): LeadAttention | undefined {
@@ -749,4 +788,16 @@ export class LeadHost {
     this.log('host stopped');
     this.resolveClosed();
   }
+}
+
+export function draftTurnText(asks: string[]): string {
+  return [
+    '[New asks] These agents in this project stopped and are waiting on the owner. For each one, draft the reply the owner would most likely send, from the goals, the project rules, your memory and what the agent said (`agents lead tool roster --session <id>` shows its last turns when you need more).',
+    '- Draft with `agents lead tool answer --key <key> --text "<one line>"` (or `--choice <id>`). It is shown on that agent\'s card for the owner to send; nothing is delivered until they do.',
+    '- An agent that stopped before finishing ("Not done") gets the specific next step, never a bare "continue".',
+    '- Draft nothing when the decision is the owner\'s: spending or cancelling money, publishing or releasing, deleting, credentials, or a taste call you cannot infer. Say why in one line instead.',
+    '- Do not use send, start, dispatch or stop for these.',
+    '',
+    ...asks,
+  ].join('\n');
 }

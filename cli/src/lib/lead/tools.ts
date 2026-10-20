@@ -11,6 +11,9 @@ import {
 } from './shapes.js';
 import { ensureLeadDir, type LeadPaths } from './paths.js';
 import { readMemory } from './store.js';
+import { execFile } from 'node:child_process';
+import { invocation, resolveSessionsBin } from '../sessions-client.js';
+import { machineId, normalizeHost } from '../machine-id.js';
 
 export * from './shapes.js';
 
@@ -46,6 +49,27 @@ async function hold(ctx: LeadToolContext, held: Omit<HeldAction, 'project'>): Pr
 export async function toolRoster(ctx: LeadToolContext, project?: string): Promise<string> {
   const reply = await hostRequest(ctx.project, { op: 'roster', project: project ?? ctx.project });
   return String(reply.text);
+}
+
+const SESSION_TURNS_CHARS = 12_000;
+
+/** One session's last two turns of conversation (the owner's and the agent's words, no tool calls). */
+export async function toolRosterSession(ctx: LeadToolContext, session: string): Promise<string> {
+  assertSessionId(session);
+  const reply = await hostRequest(ctx.project, { op: 'resolve', session });
+  const id = String(reply.id);
+  const host = String(reply.host ?? '');
+  const remote = host && normalizeHost(host) !== machineId() ? ['-H', host] : [];
+  const { command, prefix } = invocation(resolveSessionsBin());
+  const text = await new Promise<string>((resolve, reject) => {
+    execFile(command, [...prefix, id, '--include', 'user,assistant', '--last', '2', '--markdown', ...remote],
+      { timeout: 30_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (err) reject(new LeadToolError(`sessions ${id.slice(0, 8)} failed: ${(stderr || err.message).trim().slice(0, 300)}`));
+        else resolve(stdout);
+      });
+  });
+  const body = text.length > SESSION_TURNS_CHARS ? `…${text.slice(-SESSION_TURNS_CHARS)}` : text;
+  return `Last two turns of “${String(reply.title)}” (${id.slice(0, 8)}):\n${body}`;
 }
 
 export async function toolAttention(ctx: LeadToolContext): Promise<string> {

@@ -21,7 +21,7 @@ import {
   type PidSessionEntry,
 } from './pid-registry.js';
 import { readSessionActorRecord, writeSessionAliasRecord } from './actor-sidecar.js';
-import { loadHookSessionIndex, resolveHookSessionRecord, readDoneVerdict, type DoneVerdict, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionRecord, readSessionVerdicts, type DoneVerdict, type TurnVerdict, type HookSessionIndex, type HookSessionRecord } from './hook-sessions.js';
 import { extractClaudeUserText, getAgentSessionDirs, readClaudeLiveNames } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { cleanDisplayTitle, isPlaceholderSessionName, resolveSessionName, startedAsFromUserTurn, type SessionRecap } from './title.js';
@@ -425,6 +425,7 @@ export interface ActiveSession {
   summaryChecklist?: import('@phnx-labs/sessions-cli/reader').SessionChecklistItem[];
   summaryState?: import('@phnx-labs/sessions-cli/reader').SummaryState;
   doneVerdict?: DoneVerdict;
+  turnVerdict?: TurnVerdict;
 }
 
 export function activeStatusFromCloudStatus(status: CloudTaskStatus): ActiveStatus {
@@ -1819,11 +1820,13 @@ export function derivePhase(status: ActiveStatus | undefined): SessionPhase {
 
 export function foldDoneVerdict(rows: ActiveSession[]): void {
   for (const s of rows) {
-    const verdict = s.pid && s.sessionId && s.pidAlive !== false
-      ? readDoneVerdict(s.pid, s.sessionId, s.processStartedAtMs ?? readPidSessionEntry(s.pid)?.startedAtMs)
-      : undefined;
-    if (verdict) s.doneVerdict = verdict;
+    const { done, turn } = s.pid && s.sessionId && s.pidAlive !== false
+      ? readSessionVerdicts(s.pid, s.sessionId, s.processStartedAtMs ?? readPidSessionEntry(s.pid)?.startedAtMs)
+      : {};
+    if (done) s.doneVerdict = done;
     else delete s.doneVerdict;
+    if (turn) s.turnVerdict = turn;
+    else delete s.turnVerdict;
   }
 }
 

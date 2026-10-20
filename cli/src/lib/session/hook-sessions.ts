@@ -25,6 +25,18 @@ export interface DoneVerdict {
 
 const VERDICT_STATES = new Set(['done', 'open', 'unchecked']);
 
+/** Whose move it is after the last turn, from the Stop hook's model judge
+ * (`stop/08-stop-judge.py` in the companion `.agents` repo). */
+export interface TurnVerdict {
+  kind: 'asks' | 'waiting' | 'not_done' | 'done' | 'unjudged';
+  quote: string;
+  choices: string[];
+  /** Epoch ms the judge wrote it; a transcript event after this makes it stale. */
+  atMs: number;
+}
+
+const TURN_KINDS = new Set(['asks', 'waiting', 'not_done', 'done', 'unjudged']);
+
 export interface HookSessionIndex {
   byLaunchId: Map<string, HookSessionRecord>;
   byTerminalId: Map<string, HookSessionRecord>;
@@ -35,15 +47,35 @@ function hookSessionsDir(): string {
   return path.join(getTerminalsDir(), 'sessions');
 }
 
-export function readDoneVerdict(pid: number, sessionId: string, processStartedAtMs?: number): DoneVerdict | undefined {
+export function readSessionVerdicts(
+  pid: number,
+  sessionId: string,
+  processStartedAtMs?: number,
+): { done?: DoneVerdict; turn?: TurnVerdict } {
   const rec = readStateSessionRecord(pid, processStartedAtMs);
-  if (!rec || rec.pid !== pid || rec.session_id !== sessionId) return undefined;
+  if (!rec || rec.pid !== pid || rec.session_id !== sessionId) return {};
+  const current = (at: unknown): at is number =>
+    typeof at === 'number' && Number.isFinite(at) && (processStartedAtMs === undefined || at >= processStartedAtMs - RECORD_SKEW_MS);
+  const out: { done?: DoneVerdict; turn?: TurnVerdict } = {};
   const v = rec.verdict as { state?: unknown; gaps?: unknown; at?: unknown } | undefined;
-  if (!v || typeof v !== 'object' || typeof v.state !== 'string' || !VERDICT_STATES.has(v.state)) return undefined;
-  if (typeof v.at !== 'number' || !Number.isFinite(v.at)) return undefined;
-  if (processStartedAtMs !== undefined && v.at < processStartedAtMs - RECORD_SKEW_MS) return undefined;
-  const gaps = Array.isArray(v.gaps) ? v.gaps.filter((g): g is string => typeof g === 'string' && g.length > 0) : [];
-  return { state: v.state as DoneVerdict['state'], gaps, at: new Date(v.at).toISOString() };
+  if (v && typeof v === 'object' && typeof v.state === 'string' && VERDICT_STATES.has(v.state) && current(v.at)) {
+    const gaps = Array.isArray(v.gaps) ? v.gaps.filter((g): g is string => typeof g === 'string' && g.length > 0) : [];
+    out.done = { state: v.state as DoneVerdict['state'], gaps, at: new Date(v.at).toISOString() };
+  }
+  const t = rec.turnVerdict as { kind?: unknown; quote?: unknown; choices?: unknown; at?: unknown } | undefined;
+  if (t && typeof t === 'object' && typeof t.kind === 'string' && TURN_KINDS.has(t.kind) && current(t.at)) {
+    out.turn = {
+      kind: t.kind as TurnVerdict['kind'],
+      quote: typeof t.quote === 'string' ? t.quote : '',
+      choices: Array.isArray(t.choices) ? t.choices.filter((c): c is string => typeof c === 'string' && c.trim().length > 0) : [],
+      atMs: t.at,
+    };
+  }
+  return out;
+}
+
+export function readDoneVerdict(pid: number, sessionId: string, processStartedAtMs?: number): DoneVerdict | undefined {
+  return readSessionVerdicts(pid, sessionId, processStartedAtMs).done;
 }
 
 function keepNewest(map: Map<string | number, HookSessionRecord>, key: string | number, rec: HookSessionRecord): void {

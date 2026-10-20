@@ -26,6 +26,7 @@ import {
 } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { readPullRequestStatus } from './pr-status.js';
+import { deliverToTab } from './tab-delivery.js';
 import { getAgentsInvocation } from '../daemon/daemon.js';
 
 export const ANSWER_DEADLINE_MS = 20_000;
@@ -410,9 +411,30 @@ async function deliverInject(
   return { receipt: { msgId: `inject-${block.blockId}-${claimedAt}`, status: 'queued', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
+async function deliverTab(
+  route: AnswerRoute, block: OpenBlock, session: ActiveSession | undefined, operator: VerifiedOperator,
+  origin: ReceiptOrigin, deadline: Deadline, feedRoot?: string,
+): Promise<DeliveryOutcome> {
+  const result = await deliverToTab({
+    sessionId: block.sessionId,
+    text: route.payload as string,
+    enter: route.enter ?? true,
+    transcript: session?.sessionFile,
+    root: feedRoot,
+    // Inside the answer's deadline, so this says why instead of the deadline saying 'unknown'.
+    timeoutMs: Math.max(0, remainingMs(deadline) - 500),
+  });
+  if (!result.delivered) throw new AnswerUnknownError(result.reason);
+  return { receipt: { msgId: result.id, status: 'consumed', at: new Date().toISOString(), from: operator.label, ...origin } };
+}
+
 function preflightRoute(route: AnswerRoute, answer: string, attentionKey: string): void {
   if (route.kind === 'refuse') throw new AnswerError(route.reason, 'refused');
   if (route.kind === 'mailbox' || route.kind === 'resume') return;
+  if (route.kind === 'tab') {
+    if (route.payload == null) throw new AnswerError(`Incomplete tab reply rail for '${attentionKey}'.`, 'refused');
+    return;
+  }
   if (!route.inject || route.payload == null) throw new AnswerError(`Incomplete ${route.kind} reply rail.`, 'refused');
   if (isMultilineFreeText(route, answer) && !backendCarriesPaste(route.inject.backend)) {
     throw new AnswerError(
@@ -527,7 +549,9 @@ export async function claimAndRouteAttentionAnswer(input: {
         ? deliverMailbox(block, answer, input.operator, outcome.adopted, origin, input.mailboxRoot)
         : route.kind === 'resume'
           ? deliverResume(route, block, claim.answeredAt, input.operator, input.attentionKey, deadline, origin)
-          : deliverInject(route, block, answer, claim.answeredAt, input.operator, origin, deadline),
+          : route.kind === 'tab'
+            ? deliverTab(route, block, session, input.operator, origin, deadline, input.feedRoot)
+            : deliverInject(route, block, answer, claim.answeredAt, input.operator, origin, deadline),
       deadline,
       `Delivering '${input.attentionKey}' over ${route.kind}`,
     );

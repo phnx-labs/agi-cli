@@ -13,7 +13,7 @@ import { readHistory } from '../lib/lead/store.js';
 import type { LeadEvent } from '../lib/lead/events.js';
 import {
   LINEAR_STATUSES, LeadToolError, MAX_TASKS_LIMIT, PR_VERBS, leadToolContext, parseEditorContext, toolAnswer, toolAttention,
-  toolDispatch, toolLinearCreate, toolLinearTasks, toolLinearView, toolPrAct, toolPrsList, toolRemember, toolRoster, toolSend,
+  toolDispatch, toolLinearCreate, toolLinearTasks, toolLinearView, toolPrAct, toolPrsList, toolRemember, toolRoster, toolRosterSession, toolSend,
   toolStart, toolStop, type EditorContext,
 } from '../lib/lead/tools.js';
 
@@ -45,9 +45,11 @@ export function registerLeadToolCommands(lead: Command): void {
   const strict = (c: Command) => c.allowExcessArguments(false).allowUnknownOption(false);
 
   strict(tool.command('roster'))
-    .description('List live sessions for this project (or --project) from the Lead host\'s live feed')
+    .description('List live sessions for this project (or --project) from the Lead host\'s live feed; --session shows one session\'s last two turns')
     .option('--project <name>', 'Another project')
-    .action(toolAction(async (opts: { project?: string }) => toolRoster(leadToolContext(), opts.project)));
+    .option('--session <id>', 'Show this session\'s last two turns of conversation (no tool calls)')
+    .action(toolAction(async (opts: { project?: string; session?: string }) =>
+      opts.session ? toolRosterSession(leadToolContext(), opts.session) : toolRoster(leadToolContext(), opts.project)));
 
   strict(tool.command('attention'))
     .description('List every open ask across the fleet from the Lead host\'s live feed: key, session, host, project, age, question, choices')

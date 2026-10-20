@@ -14,7 +14,7 @@ export function matchInjectSelector(session: ActiveSession, token: string): bool
 
 export async function resolveLiveInjectTarget(
   selector: string,
-): Promise<{ target: InjectTarget | null; reason?: string; hint?: string }> {
+): Promise<{ target: InjectTarget | null; session?: ActiveSession; reason?: string; hint?: string }> {
   const sessions = await getActiveSessions();
   const matches = sessions.filter((s) => matchInjectSelector(s, selector));
   if (matches.length === 0) return { target: null, reason: `No active session matches "${selector}".` };
@@ -33,9 +33,10 @@ export async function resolveLiveInjectTarget(
   if (!resolution.addressable) {
     return {
       target: null,
+      session: match,
       reason: `Session "${selector}": ${resolution.reason}`,
       hint: resolution.hint,
     };
   }
-  return { target: resolution.target };
+  return { target: resolution.target, session: match };
 }

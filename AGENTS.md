@@ -125,7 +125,8 @@ and [`architecture.md`](cli/docs/architecture.md).
   a timer, watcher, or loop that detects a condition and acts on it. Detection and
   decision live in the CLI, which holds the first-party state (sessions.db, usage
   snapshots, the device registry). Where an action needs a UI-owned surface, the UI
-  exposes a narrow endpoint the CLI drives (the `/inject` verb is the precedent) — the
+  exposes a narrow endpoint the CLI drives (the precedent: a row's `delivery`, which the
+  AGI EXT window binding that session types, `cli/src/lib/feed/tab-delivery.ts`) — the
   trigger stays in the CLI. The daemon's pid-claimed timers
   (`cli/src/lib/daemon/daemon.ts`) are the only loop that fires them; a UI button may
   *request* an action, never *schedule* one. **Multiple devices are fine, shared
@@ -447,7 +448,7 @@ right home if one is staged.
 - **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
   The extension itself lives in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)
   (its frozen publish identity is documented there), but the CLI emits into that
-  URI (`cli/src/lib/terminal/inject.ts`, `backends/vscodium-agent.ts`) — a
+  URI (`backends/vscodium-agent.ts`) — a
   CLI change must never assume a different extension id.
 
 ## Code review conventions (the reviewer must enforce these)

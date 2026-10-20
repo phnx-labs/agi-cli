@@ -13,8 +13,6 @@ import {
   itermInjectScript,
   ghosttyInjectScript,
   appleScriptInjectSpec,
-  vscodiumInjectUri,
-  vscodiumInjectSpec,
 } from './inject.js';
 
 const linuxCtx: EngineContext = { platform: 'linux', env: {} as NodeJS.ProcessEnv };
@@ -95,36 +93,6 @@ describe('itermInjectScript', () => {
   });
 });
 
-describe('vscodiumInjectUri', () => {
-  it('builds a base64url /inject URL whose decoded payload carries id + text + flags', () => {
-    const uri = vscodiumInjectUri('vscodium', 'sess-uuid', 'continue', { enter: true, combined: false });
-    expect(uri.startsWith('vscodium://swarmify.swarm-ext/inject?p=')).toBe(true);
-    const p = uri.split('p=')[1];
-    expect(p).toMatch(/^[A-Za-z0-9_-]+$/);
-    const payload = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
-    expect(payload).toEqual({ terminalId: 'sess-uuid', text: 'continue', enter: true, combined: false });
-  });
-
-  it('round-trips a text containing & and = untouched (the reason for base64url)', () => {
-    const uri = vscodiumInjectUri('cursor', 't1', 'echo a && b = c', { enter: true, combined: false });
-    const payload = JSON.parse(Buffer.from(uri.split('p=')[1], 'base64url').toString('utf8'));
-    expect(payload.text).toBe('echo a && b = c');
-  });
-});
-
-describe('vscodiumInjectSpec', () => {
-  it('invokes the editor CLI with --open-url and the inject URI', () => {
-    const spec = vscodiumInjectSpec(
-      { backend: 'vscodium', terminalId: 't1', cli: 'codium', scheme: 'vscodium' },
-      'hi',
-      { enter: true, combined: false },
-    );
-    expect(spec.argv[0]).toBe('codium');
-    expect(spec.argv[1]).toBe('--open-url');
-    expect(spec.argv[2].startsWith('vscodium://swarmify.swarm-ext/inject?p=')).toBe(true);
-  });
-});
-
 describe('ghosttyInjectScript', () => {
   it('raises the ghostty process and keystrokes text + separate Return', () => {
     const s = ghosttyInjectScript('continue', { enter: true });
@@ -176,31 +144,6 @@ describe('injectIntoTerminal — macOS backends off-darwin', () => {
     expect(combined.writes).toBe(2);
     const noEnter = await injectIntoTerminal({ backend: 'ghostty' }, 'hi', { dryRun: true, enter: false });
     expect(noEnter.writes).toBe(1);
-  });
-});
-
-describe('injectIntoTerminal — vscodium routing', () => {
-  it('dryRun returns the editor-CLI --open-url spec and the Ink-safe two-write count', async () => {
-    const res = await injectIntoTerminal(
-      { backend: 'vscodium', terminalId: 't1', cli: 'codium', scheme: 'vscodium' },
-      'continue',
-      { dryRun: true },
-    );
-    expect(res.ok).toBe(true);
-    expect(res.backend).toBe('vscodium');
-    expect(res.writes).toBe(2);
-    expect(res.specs?.[0].argv[0]).toBe('codium');
-    expect(res.specs?.[0].argv[1]).toBe('--open-url');
-    expect(res.specs?.[0].argv[2]).toContain('swarmify.swarm-ext/inject');
-  });
-
-  it('combined collapses to a single write on the extension side', async () => {
-    const res = await injectIntoTerminal(
-      { backend: 'vscodium', terminalId: 't1', cli: 'cursor', scheme: 'cursor' },
-      'ls',
-      { dryRun: true, combined: true },
-    );
-    expect(res.writes).toBe(1);
   });
 });
 

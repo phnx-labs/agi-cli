@@ -42,8 +42,6 @@ export {
   itermInjectScript,
   ghosttyInjectScript,
   appleScriptInjectSpec,
-  vscodiumInjectUri,
-  vscodiumInjectSpec,
   type InjectTarget,
   type InjectBackend,
   type InjectOptions,

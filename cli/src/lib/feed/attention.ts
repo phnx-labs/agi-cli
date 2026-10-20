@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ActiveSession } from '../session/active.js';
+import type { TurnVerdict } from '../session/hook-sessions.js';
 import type { StructuredQuestion } from '@phnx-labs/sessions-cli/reader';
 import {
   blockGeneration,
@@ -53,6 +54,8 @@ export interface AttentionItem {
   sourceCursor?: SourceCursor;
   urgency: AttentionUrgency;
   urgencyReason?: string;
+  /** The project Lead's suggested answer (lead/drafts.ts); attached on the machine the Lead runs on. */
+  draft?: { text?: string; choiceId?: string; label: string; at: string };
 }
 
 export interface PullRequestAttentionSignal {
@@ -237,6 +240,43 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
   return { item, generation };
 }
 
+/** The Stop hook's turn verdict, while nothing has happened in the transcript since
+ * the judge wrote it and the agent is not working again. */
+export function currentTurnVerdict(session: ActiveSession): TurnVerdict | undefined {
+  const v = session.turnVerdict;
+  if (!v || session.activity === 'working') return undefined;
+  if (session.lastEventMs != null && session.lastEventMs > v.atMs) return undefined;
+  return v;
+}
+
+function attentionFromTurnVerdict(session: ActiveSession): AttentionCandidate | undefined {
+  const v = currentTurnVerdict(session);
+  if (!v || (v.kind !== 'asks' && v.kind !== 'not_done')) return undefined;
+  const question: BlockQuestion = v.kind === 'asks'
+    ? { text: v.quote || 'The agent is waiting for your answer.', ...(v.choices.length ? { options: v.choices.map((label) => ({ label })) } : {}) }
+    : { text: v.quote || 'The agent stopped before finishing.', header: 'Not done' };
+  const host = session.host ?? 'unknown';
+  const sessionId = session.sessionId ?? '';
+  const generation = `v${v.atMs}`;
+  const item: UnrankedAttentionItem = {
+    key: attentionKey(host, sessionId, generation),
+    sessionId,
+    mailboxId: sessionId,
+    host,
+    project: session.project ?? undefined,
+    kind: 'question',
+    source: 'lifecycle',
+    state: 'open',
+    openedAt: new Date(v.atMs).toISOString(),
+    question,
+    choices: questionChoices(question),
+    replyCapability: replyCapabilityForSession(session),
+    fingerprint: attentionFingerprint('question', question),
+    sourceCursor: { lastActivityMs: v.atMs },
+  };
+  return { item, generation };
+}
+
 function attentionFromSession(session: ActiveSession, nowMs: number): AttentionCandidate | undefined {
   if (session.activity !== 'waiting_input') return undefined;
   const reason = session.awaitingReason;
@@ -246,6 +286,9 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
     reason === 'plan_review' ? 'plan_review' : reason === 'permission' ? 'unverified' : 'question';
   const sq = session.question;
   const structural = kind === 'plan_review' || (kind === 'question' && (sq?.options?.length ?? 0) > 0);
+  // Claude's Stop hook judges every turn (turnVerdict), so a prose question there is the
+  // verdict's to call; harnesses without that judge keep the last-line reading.
+  if (!structural && kind === 'question' && harnessOf(session) === 'claude') return undefined;
   const source: AttentionSource = structural ? 'lifecycle' : 'heuristic';
   const question = sq ? structuredToBlockQuestion(sq) : undefined;
 
@@ -397,6 +440,7 @@ export function reconcileAttention(input: {
   const candidate =
     fromBlock ??
     attentionFromSession(input.session, input.nowMs) ??
+    attentionFromTurnVerdict(input.session) ??
     attentionFromPullRequest(input.session, input.nowMs, input.pullRequest);
   if (!candidate) return undefined;
   if (coveredByResolution(candidate, input.resolution)) return undefined;

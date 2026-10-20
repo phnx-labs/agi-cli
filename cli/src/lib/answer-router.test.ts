@@ -176,7 +176,7 @@ describe('resolveAnswerRoute', () => {
     expect(r.payload).toBe('Production');
   });
 
-  it('types the answer into the VSCodium tab the session runs in (agi-cli#3989)', () => {
+  it('hands the answer to the editor tab the session runs in (agi-cli#3989)', () => {
     const r = resolveAnswerRoute({
       mailboxId: 's1',
       answer: 'Production',
@@ -189,11 +189,12 @@ describe('resolveAnswerRoute', () => {
         provenance: { host: 'zion', transport: 'local', reply: null },
       }),
     });
-    expect(r.kind).toBe('vscodium');
-    expect(r.inject).toEqual({ backend: 'vscodium', terminalId: 's1', cli: 'codium', scheme: 'vscodium' });
+    expect(r.kind).toBe('tab');
+    expect(r.inject).toBeUndefined();
+    expect(r.payload).toBe('2');
   });
 
-  it('refuses a parked interactive agent with no rail and surfaces a recovery hint', () => {
+  it('hands a terminal this machine never saw (an agent started from an editor elsewhere) to the editor tab', () => {
     const r = resolveAnswerRoute({
       mailboxId: 's1',
       answer: 'Staging',
@@ -201,6 +202,32 @@ describe('resolveAnswerRoute', () => {
       session: session({
         context: 'terminal',
         tty: 'ttys001',
+        activity: 'waiting_input',
+        provenance: { host: 'zion', transport: 'local', reply: null },
+      }),
+    });
+    expect(r.kind).toBe('tab');
+  });
+
+  it('a finished turn the stop judge says asks is parked, even with no structured question', () => {
+    const idle = session({
+      context: 'terminal', tty: 'ttys001', activity: 'idle', host: 'codium', lastEventMs: 1_000,
+      turnVerdict: { kind: 'asks', quote: 'Tell me which ones to cancel.', choices: [], atMs: 2_000 },
+    });
+    expect(isParkedOnInput(idle)).toBe(true);
+    expect(isParkedOnInput({ ...idle, lastEventMs: 3_000 })).toBe(false);
+    expect(isParkedOnInput({ ...idle, turnVerdict: { ...idle.turnVerdict!, kind: 'done' } })).toBe(false);
+  });
+
+  it('refuses a parked Ghostty agent with no rail and surfaces a recovery hint', () => {
+    const r = resolveAnswerRoute({
+      mailboxId: 's1',
+      answer: 'Staging',
+      block: block(),
+      session: session({
+        context: 'terminal',
+        tty: 'ttys001',
+        host: 'ghostty',
         activity: 'waiting_input',
         provenance: { host: 'zion', transport: 'local', reply: null },
       }),

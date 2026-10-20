@@ -22,7 +22,7 @@ export interface SendResult {
   attachments?: string[];
   msgId?: string;
   body?: string;
-  backend?: InjectResult['backend'];
+  backend?: InjectResult['backend'] | 'tab';
   writes?: number;
   confirmed?: boolean;
 }

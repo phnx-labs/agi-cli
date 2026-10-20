@@ -94,14 +94,17 @@ describe('reconcileAttention', () => {
       expect(reconcileAttention({ block, session: pending({ activity: 'idle' }), nowMs: now })).toBeUndefined();
     });
 
-    it('idle_prompt falls through to the lifecycle, so a real trailing question is still surfaced as inferred', () => {
+    it('idle_prompt falls through to the turn verdict, so a real question is still surfaced', () => {
       const block = notification({ notificationType: 'idle_prompt' });
       const item = reconcileAttention({
         block,
-        session: pending({ activity: 'waiting_input', awaitingReason: 'question', question: { text: 'Which data directory should I use?', reason: 'question' } }),
+        session: pending({
+          activity: 'idle', lastEventMs: Date.parse('2026-09-10T10:00:05.000Z'),
+          turnVerdict: { kind: 'asks', quote: 'Which data directory should I use?', choices: [], atMs: Date.parse('2026-09-10T10:00:09.000Z') },
+        }),
         nowMs: now,
       });
-      expect(item).toMatchObject({ kind: 'question', source: 'heuristic' });
+      expect(item).toMatchObject({ kind: 'question', source: 'lifecycle', question: { text: 'Which data directory should I use?' } });
       expect(item!.choices).toBeUndefined();
     });
 
@@ -231,19 +234,48 @@ describe('reconcileAttention', () => {
     expect(item!.key).toBe('zion/sess-2/t4000');
   });
 
-  it('lifecycle fallback: a bare prose question is the decaying heuristic source', () => {
-    const item = reconcileAttention({
-      session: session({
-        sessionId: 'sess-3',
-        activity: 'waiting_input',
-        awaitingReason: 'question',
-        question: { text: 'Did that work?', reason: 'question' },
-        lastActivityMs: 4000,
-      }),
-      nowMs: 10_000,
+  it('a Claude prose question is the turn verdict\'s to call, never the last-line guess', () => {
+    const prose = session({
+      sessionId: 'sess-3', kind: 'claude', activity: 'waiting_input', awaitingReason: 'question',
+      question: { text: 'Did that work?', reason: 'question' }, lastActivityMs: 4000,
     });
-    expect(item!.source).toBe('heuristic');
-    expect(item!.kind).toBe('question');
+    expect(reconcileAttention({ session: prose, nowMs: 10_000 })).toBeUndefined();
+    const other = reconcileAttention({ session: { ...prose, kind: 'opencode' }, nowMs: 10_000 });
+    expect(other).toMatchObject({ source: 'heuristic', kind: 'question' });
+  });
+
+  describe('the Stop hook\'s turn verdict', () => {
+    const judged = (turnVerdict: ActiveSession['turnVerdict'], over: Partial<ActiveSession> = {}) => session({
+      sessionId: 'sess-tv', kind: 'claude', activity: 'idle', lastEventMs: 5_000, lastActivityMs: 5_000, turnVerdict, ...over,
+    });
+
+    it('asks: an open question with the choices the agent offered, keyed by the verdict', () => {
+      const item = reconcileAttention({ session: judged({ kind: 'asks', quote: 'Tell me which ones to cancel.', choices: ['8090', 'Apollo'], atMs: 6_000 }), nowMs: 10_000 });
+      expect(item).toMatchObject({ kind: 'question', source: 'lifecycle', state: 'open', key: 'zion/sess-tv/v6000', question: { text: 'Tell me which ones to cancel.' } });
+      expect(item!.choices!.map((c) => c.label)).toEqual(['8090', 'Apollo']);
+    });
+
+    it('not done: an open item headed Not done, so the card turns red', () => {
+      const item = reconcileAttention({ session: judged({ kind: 'not_done', quote: 'Waiting for the queue to drain.', choices: [], atMs: 6_000 }), nowMs: 10_000 });
+      expect(item).toMatchObject({ kind: 'question', question: { header: 'Not done', text: 'Waiting for the queue to drain.' } });
+    });
+
+    it('done, waiting and unjudged open nothing', () => {
+      for (const kind of ['done', 'waiting', 'unjudged'] as const) {
+        expect(reconcileAttention({ session: judged({ kind, quote: '', choices: [], atMs: 6_000 }), nowMs: 10_000 })).toBeUndefined();
+      }
+    });
+
+    it('anything after the verdict, or the agent working again, makes it stale', () => {
+      const v = { kind: 'asks' as const, quote: 'Ship it?', choices: [], atMs: 6_000 };
+      expect(reconcileAttention({ session: judged(v, { lastEventMs: 7_000 }), nowMs: 10_000 })).toBeUndefined();
+      expect(reconcileAttention({ session: judged(v, { activity: 'working' }), nowMs: 10_000 })).toBeUndefined();
+    });
+
+    it('an unanswered ask never expires on a clock', () => {
+      const item = reconcileAttention({ session: judged({ kind: 'asks', quote: 'Ship it?', choices: [], atMs: 6_000 }), nowMs: 6_000 + 3 * 60 * 60_000 });
+      expect(item?.state).toBe('open');
+    });
   });
 
   it('a structural question that carried options is lifecycle, not heuristic', () => {

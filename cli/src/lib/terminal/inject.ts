@@ -7,7 +7,6 @@ import { currentContext, type LaunchSpec, type EngineContext } from './types.js'
 export type InjectTarget =
   | { backend: 'tmux'; pane: string; socket?: string }
   | { backend: 'iterm'; session?: string }
-  | { backend: 'vscodium'; terminalId: string; cli: string; scheme: string }
   | { backend: 'ghostty'; window?: string };
 
 export type InjectBackend = InjectTarget['backend'];
@@ -32,11 +31,6 @@ export interface InjectResult {
   started: number;
   specs?: LaunchSpec[];
   error?: string;
-}
-
-function backendConfirmsDelivery(backend: InjectBackend): boolean {
-
-  return backend !== 'vscodium';
 }
 
 const CR = '\r';
@@ -126,28 +120,6 @@ export function appleScriptInjectSpec(
 }
 
 
-const EXTENSION_AUTHORITY = 'swarmify.swarm-ext';
-
-export function vscodiumInjectUri(
-  scheme: string,
-  terminalId: string,
-  text: string,
-  opts: { enter: boolean; combined: boolean },
-): string {
-  const payload = { terminalId, text, enter: opts.enter, combined: opts.combined };
-  const p = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-  return `${scheme}://${EXTENSION_AUTHORITY}/inject?p=${p}`;
-}
-
-export function vscodiumInjectSpec(
-  target: Extract<InjectTarget, { backend: 'vscodium' }>,
-  text: string,
-  opts: { enter: boolean; combined: boolean },
-): LaunchSpec {
-  return { argv: [target.cli, '--open-url', vscodiumInjectUri(target.scheme, target.terminalId, text, opts)] };
-}
-
-
 export async function injectIntoTerminal(
   target: InjectTarget,
   text: string,
@@ -167,9 +139,7 @@ export async function injectIntoTerminal(
   const specs =
     target.backend === 'tmux'
       ? tmuxInjectSpecs(target, payload, { enter, combined, socket: opts.socket })
-      : target.backend === 'vscodium'
-        ? [vscodiumInjectSpec(target, payload, { enter, combined })]
-        : [appleScriptInjectSpec(target, payload, enter, combined)];
+      : [appleScriptInjectSpec(target, payload, enter, combined)];
 
   const writes =
     target.backend === 'tmux'
@@ -178,7 +148,7 @@ export async function injectIntoTerminal(
         ? enter ? 2 : 1
         : enter && !combined ? 2 : 1;
 
-  const confirmed = backendConfirmsDelivery(target.backend);
+  const confirmed = true;
 
   if (opts.dryRun) return { ok: true, confirmed, backend: target.backend, writes, started: 0, specs };
 
