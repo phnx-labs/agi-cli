@@ -39,7 +39,6 @@ export const CONFIRM_SWEEP_MS = 5 * 60 * 1000;
 const CHILD_STOP_GRACE_MS = 5_000;
 const FEED_BACKOFF_MIN_MS = 2_000;
 const FEED_BACKOFF_MAX_MS = 60_000;
-/** New asks that arrive together are drafted in one Lead turn. */
 const DRAFT_BATCH_MS = 20_000;
 const STDERR_TAIL_CHARS = 4_000;
 const RESUME_MISSING_RE = /No session matching|No conversation found/i;
@@ -402,7 +401,6 @@ export class LeadHost {
     }
     const record = mintConfirm(held);
     if (held.action === 'answer') {
-      // The same answer shows on the session's card, where Send runs `agents feed answer` itself.
       const [, , key, flag, value] = held.argv;
       writeLeadDraft({
         key, label: held.detail ?? value, project: this.opts.project, at: new Date().toISOString(),
@@ -421,7 +419,6 @@ export class LeadHost {
     return { type: 'held', token: record.token, label: record.label };
   }
 
-  /** Each new open ask in this project gets one drafting turn, batched over DRAFT_BATCH_MS. */
   private noteNewAsks(): void {
     if (!this.roster.ready || this.stopping) return;
     const mine = this.projectRoster();

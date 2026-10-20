@@ -421,7 +421,6 @@ async function deliverTab(
     enter: route.enter ?? true,
     transcript: session?.sessionFile,
     root: feedRoot,
-    // Inside the answer's deadline, so this says why instead of the deadline saying 'unknown'.
     timeoutMs: Math.max(0, remainingMs(deadline) - 500),
   });
   if (!result.delivered) throw new AnswerUnknownError(result.reason);

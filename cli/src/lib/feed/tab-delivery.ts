@@ -3,22 +3,14 @@ import path from 'node:path';
 import { atomicWriteJsonSync } from '../fs-atomic.js';
 import { getFeedDir } from '../state.js';
 
-/**
- * Text waiting to be typed into a session's editor tab. The CLI cannot reach a VSCodium
- * tab (the agent may run on another machine than the editor), so it records the text on
- * the session's row and the one AGI EXT window that binds the session types it. The
- * agent's transcript moving past the hand-off is the receipt.
- */
 export interface TabDelivery {
   id: string;
   sessionId: string;
   text: string;
-  /** Submit after typing; false leaves the text in the prompt. */
   enter: boolean;
   at: string;
 }
 
-/** A window types a delivery only this long after it was written, so a late window never types an abandoned one. */
 export const TAB_DELIVERY_TTL_MS = 15_000;
 const POLL_MS = 250;
 
@@ -63,7 +55,6 @@ function transcriptTail(file: string, bytes = 256 * 1024): string {
   }
 }
 
-/** True once the transcript grew after the hand-off and, for typed text, holds it. */
 function received(transcript: string, sinceMs: number, text: string): boolean {
   let stat: fs.Stats;
   try { stat = fs.statSync(transcript); } catch { return false; }
@@ -77,10 +68,6 @@ export type TabDeliveryResult =
   | { delivered: true; id: string }
   | { delivered: false; id: string; reason: string };
 
-/**
- * Record the text on the session's row, wait for the receipt, then clear it. On no
- * receipt the record is removed too, so nothing types it later.
- */
 export async function deliverToTab(input: {
   sessionId: string;
   text: string;

@@ -4,15 +4,10 @@ import { createHash } from 'node:crypto';
 import { atomicWriteJsonSync } from '../fs-atomic.js';
 import { leadRoot } from './paths.js';
 
-/**
- * The Lead's suggested answer to one open ask. The card shows it under the question and
- * Send runs the ordinary `agents feed answer`; the Lead itself never delivers it.
- */
 export interface LeadDraft {
   key: string;
   text?: string;
   choiceId?: string;
-  /** What the card shows: the text, or the chosen option's label. */
   label: string;
   project: string;
   at: string;

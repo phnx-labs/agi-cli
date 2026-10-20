@@ -15,8 +15,6 @@ export interface ResolveOptions {
 
 const IDE_HOSTS = new Set(['codium', 'cursor', 'code']);
 
-/** An editor tab, or a terminal whose host this machine never saw (an agent here started
- * from an editor on another machine): the AGI EXT window that binds it can type into it. */
 export function typedByEditorTab(session: Pick<ActiveSession, 'host' | 'sessionId' | 'context'>): boolean {
   if (!session.sessionId || session.context === 'headless' || session.context === 'teams') return false;
   return !session.host || IDE_HOSTS.has(session.host);

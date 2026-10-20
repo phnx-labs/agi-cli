@@ -828,7 +828,6 @@ describe('an answer typed into the editor tab a session runs in', () => {
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
 
-    // The editor window: it sees the delivery on the row and types it; the transcript records the prompt.
     const seen: unknown[] = [];
     const window = setInterval(() => {
       const d = readTabDelivery('codium-tab', feedRoot);

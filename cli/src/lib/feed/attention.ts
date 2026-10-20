@@ -54,7 +54,6 @@ export interface AttentionItem {
   sourceCursor?: SourceCursor;
   urgency: AttentionUrgency;
   urgencyReason?: string;
-  /** The project Lead's suggested answer (lead/drafts.ts); attached on the machine the Lead runs on. */
   draft?: { text?: string; choiceId?: string; label: string; at: string };
 }
 
@@ -240,8 +239,6 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
   return { item, generation };
 }
 
-/** The Stop hook's turn verdict, while nothing has happened in the transcript since
- * the judge wrote it and the agent is not working again. */
 export function currentTurnVerdict(session: ActiveSession): TurnVerdict | undefined {
   const v = session.turnVerdict;
   if (!v || session.activity === 'working') return undefined;
@@ -286,8 +283,6 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
     reason === 'plan_review' ? 'plan_review' : reason === 'permission' ? 'unverified' : 'question';
   const sq = session.question;
   const structural = kind === 'plan_review' || (kind === 'question' && (sq?.options?.length ?? 0) > 0);
-  // Claude's Stop hook judges every turn (turnVerdict), so a prose question there is the
-  // verdict's to call; harnesses without that judge keep the last-line reading.
   if (!structural && kind === 'question' && harnessOf(session) === 'claude') return undefined;
   const source: AttentionSource = structural ? 'lifecycle' : 'heuristic';
   const question = sq ? structuredToBlockQuestion(sq) : undefined;
