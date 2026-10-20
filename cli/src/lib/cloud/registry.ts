@@ -37,13 +37,15 @@ function loadCloudConfig(): CloudConfig {
 }
 
 const providers: Map<CloudProviderId, CloudProvider> = new Map();
+let rush: RushCloudProvider | null = null;
 
 function initProviders(): void {
   if (providers.size > 0) return;
 
   const config = loadCloudConfig();
 
-  providers.set('rush', new RushCloudProvider());
+  rush = new RushCloudProvider(config.providers?.rush);
+  providers.set('rush', rush);
   providers.set('codex', new CodexCloudProvider(config.providers?.codex));
   providers.set('factory', new FactoryCloudProvider(config.providers?.factory));
   providers.set('antigravity', new AntigravityCloudProvider(config.providers?.antigravity));
@@ -63,6 +65,11 @@ export function getProvider(id: CloudProviderId): CloudProvider {
     throw new Error(`Unknown cloud provider: ${id}. Available: ${[...providers.keys()].join(', ')}`);
   }
   return provider;
+}
+
+export function getRushProvider(): RushCloudProvider {
+  initProviders();
+  return rush!;
 }
 
 export function getDefaultProviderId(): CloudProviderId {

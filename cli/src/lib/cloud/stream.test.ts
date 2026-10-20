@@ -49,8 +49,8 @@ describe('parseSSE', () => {
     if (e.type === 'text') expect(e.content).toBe('direct text');
   });
 
-  it('parses a done event with status and summary', async () => {
-    const raw = 'event: done\ndata: {"status":"completed","output":"fixed the bug"}\n\n';
+  it('parses a done event with status and the answer as summary', async () => {
+    const raw = 'event: done\ndata: {"status":"completed","output":"runtime: guest harness completed","result":{"text":"fixed the bug","structured":null,"schema_valid":null}}\n\n';
     const [e] = await collect(raw);
     expect(e.type).toBe('done');
     if (e.type === 'done') {
@@ -59,11 +59,10 @@ describe('parseSSE', () => {
     }
   });
 
-  it('parses a done event with prUrl', async () => {
-    const raw = 'event: done\ndata: {"status":"completed","prUrl":"https://github.com/org/repo/pull/1"}\n\n';
-    const [e] = await collect(raw);
-    expect(e.type).toBe('done');
-    if (e.type === 'done') expect(e.prUrl).toBe('https://github.com/org/repo/pull/1');
+  it('normalizes Rush wire statuses on status and done frames', async () => {
+    const [status, done] = await collect('event: status\ndata: {"status":"paused"}\n\nevent: done\ndata: {"status":"expired","result":null}\n\n');
+    expect(status).toMatchObject({ type: 'status', status: 'idle' });
+    expect(done).toMatchObject({ type: 'done', status: 'failed', summary: undefined });
   });
 
   it('parses an error event', async () => {
@@ -81,7 +80,7 @@ describe('parseSSE', () => {
   });
 
   it('parses a tool_use event', async () => {
-    const raw = 'event: tool_use\ndata: {"tool":"Bash","input":{"command":"ls"}}\n\n';
+    const raw = 'event: tool_use\ndata: {"tool":"Bash","args":{"command":"ls"},"call_id":"c1"}\n\n';
     const [e] = await collect(raw);
     expect(e.type).toBe('tool_use');
     if (e.type === 'tool_use') {
@@ -158,9 +157,9 @@ describe('parseSSE', () => {
     expect(() => new Date(e.timestamp!)).not.toThrow();
   });
 
-  it('truncates output field on done event to 2000 chars', async () => {
+  it('truncates the answer on done event to 2000 chars', async () => {
     const longOutput = 'x'.repeat(3000);
-    const raw = `event: done\ndata: ${JSON.stringify({ status: 'completed', output: longOutput })}\n\n`;
+    const raw = `event: done\ndata: ${JSON.stringify({ status: 'completed', result: { text: longOutput } })}\n\n`;
     const [e] = await collect(raw);
     expect(e.type).toBe('done');
     if (e.type === 'done') {

@@ -1,6 +1,7 @@
 
 import chalk from 'chalk';
-import type { CloudEvent, CloudTaskStatus } from './types.js';
+import type { CloudEvent } from './types.js';
+import { normalizeProviderStatus } from './types.js';
 
 function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEvent {
   let parsed: Record<string, unknown> = {};
@@ -11,7 +12,7 @@ function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEve
 
   switch (name) {
     case 'status':
-      return { type: 'status', status: (parsed.status as CloudTaskStatus) ?? 'running', timestamp };
+      return { type: 'status', status: normalizeProviderStatus('rush', parsed.status as string | undefined), timestamp };
     case 'text':
     case 'output':
     case 'message':
@@ -19,7 +20,7 @@ function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEve
     case 'thinking':
       return { type: 'thinking', content: (parsed.content as string) ?? data, timestamp };
     case 'tool_use':
-      return { type: 'tool_use', tool: (parsed.tool as string) ?? '', input: parsed.input, timestamp };
+      return { type: 'tool_use', tool: (parsed.tool as string) ?? '', input: parsed.args, timestamp };
     case 'tool_result':
       return { type: 'tool_result', tool: (parsed.tool as string) ?? '', output: parsed.output, timestamp };
     case 'usage':
@@ -30,14 +31,15 @@ function decodeSSEFrame(name: string, data: string, timestamp: string): CloudEve
         outputTokens: parsed.outputTokens as number | undefined,
         timestamp,
       };
-    case 'done':
+    case 'done': {
+      const answer = (parsed.result as { text?: unknown } | null | undefined)?.text;
       return {
         type: 'done',
-        status: parsed.status as CloudTaskStatus | undefined,
-        prUrl: parsed.prUrl as string | undefined,
-        summary: typeof parsed.output === 'string' ? parsed.output.slice(0, 2000) : (parsed.summary as string | undefined),
+        status: typeof parsed.status === 'string' ? normalizeProviderStatus('rush', parsed.status) : undefined,
+        summary: typeof answer === 'string' ? answer.slice(0, 2000) : undefined,
         timestamp,
       };
+    }
     case 'error':
       return { type: 'error', message: (parsed.message as string) ?? data, timestamp };
     default:

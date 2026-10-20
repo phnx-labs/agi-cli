@@ -7,7 +7,7 @@ Run agent tasks on remote infrastructure across multiple cloud backends, with un
 
 `agents cloud` dispatches tasks to remote agent environments without requiring
 a local CLI session. **Each agent runs in its own cloud** — five managed providers ship
-today: Rush Cloud (Claude against a GitHub repo → PR), Codex Cloud (pre-built
+today: Rush Cloud (Claude Code, Codex or OpenCode through the Rush developer API, with an optional repo → PR), Codex Cloud (pre-built
 Codex environments), Factory (Droid on a cloud Droid Computer), and Antigravity
 (Gemini Managed Agents), plus Cursor Cloud Agents. Pass `--agent` and the provider is auto-selected;
 `--provider` overrides. Every dispatched task is tracked in a local SQLite store
@@ -26,7 +26,7 @@ in `~/.agents/agents.yaml` > `rush`.
 
 | Agent | Native cloud | Why |
 |---|---|---|
-| `claude` | `rush` | Rush runs Claude against a repo → PR. (Claude Code does have a native `claude --cloud` on Anthropic-managed infra since 2026-08; routing to Rush is deliberate — one tracked fleet for every harness.) |
+| `claude` | `rush` | Rush runs Claude against an optional repo → PR. (Claude Code does have a native `claude --cloud` on Anthropic-managed infra since 2026-08; routing to Rush is deliberate — one tracked fleet for every harness.) |
 | `codex` | `codex` | `codex cloud exec` — first-class native CLI. |
 | `droid` | `factory` | Factory Droid Computer (cloud VM) via `droid computer ssh` + remote `droid exec`. |
 | `antigravity` | `antigravity` | Gemini Managed Agents Interactions API (remote sandbox). |
@@ -68,7 +68,7 @@ you provision once:
 - **Factory** runs on a **Droid Computer** (a persistent cloud VM). Dispatch
   requires `--computer`.
 
-(Rush is per-repo via `--repo`; Antigravity spins up an on-demand sandbox — no
+(Rush takes an optional `--repo`, one per session; Antigravity spins up an on-demand sandbox — no
 pre-provisioned target.)
 
 So you supply the target one of three ways: per-run (`--env` / `--computer`), a
@@ -136,7 +136,7 @@ agents cloud providers
 |---|---|
 | `--provider <id>` | Cloud backend: `rush`, `codex`, `cursor`, `factory`, `antigravity`, `host` |
 | `--agent <name>` | Agent to run; native cloud routing includes `claude`, `codex`, `cursor`, `droid`, and `antigravity` |
-| `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Rush or Cursor Cloud) |
+| `--repo <owner/repo>` | GitHub repository. Repeatable for multi-repo dispatch (Cursor Cloud); Rush Cloud takes one |
 | `--branch <name>` | Target git branch |
 | `-p, --prompt <text>` | Inline prompt (alternative to positional argument) |
 | `--timeout <duration>` | Kill after duration (e.g., `30m`, `2h`) |
@@ -147,11 +147,8 @@ agents cloud providers
 | `--remote-cwd <dir>` | Working directory on the device (`--provider host` only) |
 | `--any` | With a capability-tag `--device`, pick any matching device instead of erroring |
 | `--autonomy <level>` | Factory/Droid autonomy: `low`, `medium`, `high` (default `high`) |
-| `--mode <mode>` | Execution mode (`plan`, `edit`, `full`) |
 | `--image <path>` | Attach an image (`.png`/`.jpg`/`.webp`); repeatable, up to 5 (Rush Cloud only) |
-| `--skill <id>` | Ride-along skill by id (or `id@version`); repeatable (Rush Cloud only) |
-| `-b, --balanced` | Shortcut for `--strategy balanced` |
-| `--strategy <strategy>` | Account selection strategy for factory: `balanced` — rotates across all healthy accounts on rate-limit |
+| `--skill <url>` | Skill by public URL: a GitHub `tree` URL to a directory with `SKILL.md`, a `SKILL.md` file, or a `.zip`; repeatable (Rush Cloud only) |
 | `--json` | Structured JSON output |
 | `--no-follow` | Dispatch and exit without streaming output |
 
@@ -179,14 +176,13 @@ agents cloud providers
 
 ### `cloud transcripts` options
 
-Lists captured Rush Cloud runs through your `rush login` session, or renders the
-one whose id, short id, or id prefix matches `[selector]`. Runs come from every
-project in your Rush organization: the `org` saved in `~/.rush/user.yaml`, else
-your personal organization from `GET /me`, the same order `rush` uses. Each run is
-parsed by its captured harness (`claude`, `codex` or `opencode`); a run with
-none is not listed. A missing or ambiguous
-selector, or a failed login, exits 1; it never falls back to local sessions.
-Every render fetches the transcript again into the agents cache. It reads
+Lists Rush Cloud runs with your Rush API key (see [Rush Cloud credentials](#rush-cloud-credentials)),
+or renders the one whose id, short id, or id prefix matches `[selector]`. Runs are
+the sessions the key can read in `RUSH_ORG` (`GET /o/{org}/sessions`, newest first,
+at most 100); a run whose harness is not `claude`, `codex` or `opencode` is not
+listed. A missing or ambiguous selector, or a missing or rejected key, exits 1; it
+never falls back to local sessions. Every render fetches the transcript again from
+`GET /o/{org}/sessions/{id}/messages`; nothing is cached. It reads
 transcripts only: the job commands above (`list`, `status`, `logs`) do not, and
 this command has no artifact or preview mode.
 
@@ -205,7 +201,7 @@ Six providers, including the `host` machine backend, are registered at startup (
 
 | ID | Name | Dispatch target | Multi-repo |
 |---|---|---|---|
-| `rush` | Rush Cloud | GitHub repo + branch | Yes — clones each repo into `/workspace/<owner>/<name>/` |
+| `rush` | Rush Cloud | Developer API session, optional GitHub repo + branch | No — one repository per session |
 | `codex` | Codex Cloud | Pre-built Codex environment (`--env`) | No — bundle the repos into the env |
 | `factory` | Factory (Droid) | Droid Computer (`--computer`) via relay SSH + `droid exec` | No |
 | `antigravity` | Antigravity (Gemini) | Gemini Managed Agents remote sandbox | No — raw sandbox, no repo → PR |
@@ -253,10 +249,30 @@ cloud:
       # model: antigravity-preview-05-2026   # optional managed-agent override
     cursor:
       secretsBundle: cursor    # secrets bundle holding CURSOR_API_KEY
+    rush:
+      secretsBundle: getrush.ai   # secrets bundle holding RUSH_API_KEY and RUSH_ORG
 ```
 
-Rush Cloud reads the session token from `~/.rush/user.yaml` (written by
-`rush login`); no separate config key is needed.
+### Rush Cloud credentials
+
+Rush Cloud is called through its developer API at `https://api.prix.dev/o/{org}/sessions`
+with an API key (`rk_live_…`), the way any customer calls it: start
+(`POST /o/{org}/sessions`), read, list, the `…/events` stream, follow-ups and the
+transcript (`…/messages`), and cancel. It does not read the deprecated `rush login`
+session. Create a key on the Developers page of `cloud.getrush.ai`, then:
+
+```bash
+secrets add getrush.ai RUSH_API_KEY            # paste the rk_live_… secret
+secrets add getrush.ai RUSH_ORG --value acme   # the org the key belongs to
+```
+
+and set `cloud.providers.rush.secretsBundle: getrush.ai`, or run a command under
+`secrets exec getrush.ai --`, which puts both in the environment. A key acts as the
+admin who created it and runs on that admin's own model accounts. The developer
+API takes one repository per session (sent as a `resources` URL, with `--branch` as
+its `tree/<branch>`), skills by public URL, and images as input blocks; it has no
+execution mode and no per-run environment, so `--mode` is refused and an injected
+share token is not sent (the CLI says so on stderr).
 
 ## Task Lifecycle
 
@@ -316,15 +332,10 @@ agents cloud run "fix the flaky e2e in tests/checkout.spec.ts" \
   --branch main
 ```
 
-### 2. Multi-repo dispatch (Rush Cloud)
-
-Each repo is cloned into `/workspace/<owner>/<name>/` in the pod.
+### 2. A Rush Cloud run with no repository
 
 ```bash
-agents cloud run "rename POST /v1/charge -> /v2/charge across server + extension" \
-  --provider rush \
-  --repo acme/server \
-  --repo acme/extension
+secrets exec getrush.ai -- agents cloud run "reply with the word ok" --provider rush
 ```
 
 ### 3. Fire-and-forget, then tail logs later

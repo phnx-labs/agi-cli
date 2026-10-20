@@ -44,6 +44,7 @@ function normalizeCursorStatus(s: string): CloudTaskStatus {
 
 function normalizeRushStatus(s: string): CloudTaskStatus {
   switch (s) {
+    case 'queued': return 'queued';
     case 'allocating': return 'allocating';
     case 'running': return 'running';
     case 'idle':
@@ -51,7 +52,9 @@ function normalizeRushStatus(s: string): CloudTaskStatus {
     case 'needs_review': return 'idle';
     case 'input_required': return 'input_required';
     case 'completed': return 'completed';
-    case 'failed': return 'failed';
+    case 'failed':
+    case 'expired': return 'failed';
+    case 'cancelling':
     case 'cancelled': return 'cancelled';
     default: return 'running';
   }
@@ -105,11 +108,6 @@ export type CloudEvent =
   | { type: 'error'; message: string; timestamp?: string }
   | { type: 'unknown'; name: string; data: string; timestamp?: string };
 
-export interface SkillRef {
-  id: string;
-  version?: string;
-}
-
 export interface ImageAttachment {
   data: string;
   mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
@@ -125,7 +123,7 @@ export interface DispatchOptions {
   branch?: string;
   timeout?: string;
   model?: string;
-  skills?: SkillRef[];
+  skills?: string[];
   images?: ImageAttachment[];
   providerOptions?: Record<string, unknown>;
   env?: Record<string, string>;
@@ -200,7 +198,7 @@ export interface CloudProvider {
 export type DroidAutonomy = 'low' | 'medium' | 'high';
 
 export interface CloudProviderConfig {
-  rush?: Record<string, string>;
+  rush?: { secretsBundle?: string };
   codex?: { env?: string };
   factory?: { computer?: string; autonomy?: DroidAutonomy };
   antigravity?: { secretsBundle?: string; model?: string };

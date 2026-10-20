@@ -60,8 +60,9 @@ describe('resolveDispatchRepos', () => {
 });
 
 describe('normalizeProviderStatus', () => {
-  describe('rush (Factory Floor switch; default running; has allocating, no queued)', () => {
-    it('maps the known Factory Floor strings', () => {
+  describe('rush (developer API SessionStatus; default running)', () => {
+    it('maps every SessionStatus the developer API sends', () => {
+      expect(normalizeProviderStatus('rush', 'queued')).toBe('queued');
       expect(normalizeProviderStatus('rush', 'allocating')).toBe('allocating');
       expect(normalizeProviderStatus('rush', 'running')).toBe('running');
       expect(normalizeProviderStatus('rush', 'idle')).toBe('idle');
@@ -70,10 +71,11 @@ describe('normalizeProviderStatus', () => {
       expect(normalizeProviderStatus('rush', 'input_required')).toBe('input_required');
       expect(normalizeProviderStatus('rush', 'completed')).toBe('completed');
       expect(normalizeProviderStatus('rush', 'failed')).toBe('failed');
+      expect(normalizeProviderStatus('rush', 'cancelling')).toBe('cancelled');
       expect(normalizeProviderStatus('rush', 'cancelled')).toBe('cancelled');
+      expect(normalizeProviderStatus('rush', 'expired')).toBe('failed');
     });
-    it('defaults unknown/empty to running (no queued, exact-match only)', () => {
-      expect(normalizeProviderStatus('rush', 'queued')).toBe('running');
+    it('defaults unknown/empty to running (exact-match only)', () => {
       expect(normalizeProviderStatus('rush', 'weird')).toBe('running');
       expect(normalizeProviderStatus('rush', '')).toBe('running');
       expect(normalizeProviderStatus('rush', undefined)).toBe('running');

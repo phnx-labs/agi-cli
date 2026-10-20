@@ -34,7 +34,7 @@ Each agent runs in its own cloud. Pass --agent and the provider is auto-selected
 (claude→rush, codex→codex, cursor→cursor, droid→factory, antigravity→antigravity); --provider overrides.
 
 Providers:
-  rush         Rush Cloud — Claude against a GitHub repo + branch → PR
+  rush         Rush Cloud — Claude, Codex or OpenCode via the developer API (API key), optional repo → PR
   codex        Codex Cloud — runs in a pre-built Codex environment (--env)
   cursor       Cursor Cloud Agents — v1 REST API, with optional GitHub repos
   factory      Factory Droid Computer — droid exec on a cloud VM (--computer)
@@ -46,9 +46,6 @@ Examples:
 
   # Fire-and-forget (returns the task id, no streaming)
   agents cloud run "bump tailwind to v4 and fix the breaks" --provider rush --repo acme/example --no-follow
-
-  # Multi-repo dispatch: touch both rush and rush-extension in one task
-  agents cloud run "rename POST /v1/charge -> /v2/charge across server + extension" --provider rush --repo acme/example --repo acme/example-extension
 
   # Codex Cloud against a saved environment
   agents cloud run "add pytest fixtures for the new billing module" --provider codex --env env_a1b2c3 --agent codex --timeout 30m
@@ -88,7 +85,7 @@ Examples:
     .option('--agent <name>', 'Agent to run: claude, codex, cursor, droid, antigravity (auto-routes to its native cloud)')
     .option(
       '--repo <owner/repo>',
-      'GitHub repository. Repeatable for multi-repo dispatch (Rush or Cursor Cloud).',
+      'GitHub repository. Repeatable for multi-repo dispatch (Cursor Cloud); Rush Cloud takes one.',
       (value: string, previous: string[] | undefined) => {
         const acc = Array.isArray(previous) ? previous : [];
         acc.push(value);
@@ -105,7 +102,6 @@ Examples:
     .option('--remote-cwd <dir>', 'Working directory on the device (--provider host only)')
     .option('--any', 'With --device <cap> (a capability tag), pick any matching device instead of erroring when several match')
     .option('--autonomy <level>', 'Factory/Droid autonomy: low, medium, high (default high)')
-    .option('--mode <mode>', 'Execution mode (e.g., plan, edit, full)')
     .option(
       '--image <path>',
       `Attach an image (.png/.jpg/.webp) for vision dispatch. Repeatable, up to ${MAX_IMAGES_PER_DISPATCH} (Rush Cloud only).`,
@@ -116,21 +112,13 @@ Examples:
       },
     )
     .option(
-      '--skill <id>',
-      'Ride-along skill by id (or id@version). Repeatable (Rush Cloud only).',
+      '--skill <url>',
+      'Skill by public URL: a GitHub tree URL to a directory with SKILL.md, a SKILL.md file, or a .zip. Repeatable (Rush Cloud only).',
       (value: string, previous: string[] | undefined) => {
         const acc = Array.isArray(previous) ? previous : [];
         acc.push(value);
         return acc;
       },
-    )
-    .option(
-      '-b, --balanced',
-      'Shortcut for --strategy balanced. Route the factory run across all healthy accounts.',
-    )
-    .option(
-      '--strategy <strategy>',
-      'Account selection strategy for the factory: balanced. Sends all healthy accounts so the factory pod rotates between them on rate-limit.',
     )
     .option('--json', 'Structured JSON output')
     .option('--no-follow', 'Dispatch and exit without streaming output')
@@ -140,8 +128,8 @@ Examples:
   agents cloud run "fix the flaky test" --provider rush --repo user/repo
   agents cloud run task.md --provider rush --repo org/project --agent codex
 
-  # Rush Cloud — multi-repo (clones each into /workspace/<owner>/<name>/)
-  agents cloud run "refactor shared logger" --provider rush --repo user/rush --repo user/agents
+  # Rush Cloud with no repository
+  agents cloud run "summarize the attached screenshot" --provider rush --image shot.png
 
   # Codex Cloud
   agents cloud run "add auth tests" --provider codex --env env_abc123
@@ -192,16 +180,12 @@ Examples:
       if (options.remoteCwd) dispatchOptions.providerOptions!.remoteCwd = options.remoteCwd as string;
       if (options.any) dispatchOptions.providerOptions!.any = true;
       if (options.autonomy) dispatchOptions.providerOptions!.autonomy = options.autonomy as string;
-      if (options.mode) dispatchOptions.providerOptions!.mode = options.mode as string;
-      if (options.balanced || (options.strategy as string) === 'balanced') {
-        dispatchOptions.providerOptions!.strategy = 'balanced';
-      }
 
       await executeCloudDispatch({
         provider,
         dispatchOptions,
         imagePaths: Array.isArray(options.image) ? (options.image as string[]) : [],
-        skillIds: Array.isArray(options.skill) ? (options.skill as string[]) : [],
+        skillUrls: Array.isArray(options.skill) ? (options.skill as string[]) : [],
         follow: options.follow !== false,
         json,
       });
