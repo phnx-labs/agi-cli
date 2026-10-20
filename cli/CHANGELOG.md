@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.23.42
+
+- **A session that reconnects after an ssh drop keeps its editor tab.** `agents run --device` exports `AGENT_TERMINAL_ID`, `AGENTS_ORIGIN_TERMINAL_ID` and `AGENTS_ORIGIN_DEVICE` so the remote session's row links back to the tab it was launched from. The automatic reattach after a dropped connection (`agents ps focus --reconnect-reattach`) ran without them, so the reattached session had no tab. The extension then saw a running session with no tab here, resumed it, and started a second Claude on the same conversation (owner video, 2026-10-19). The reattach now runs behind the same `remoteRunShellPrelude` as the launch. Source: `cli/src/lib/hosts/reconnect.ts`, `cli/src/commands/exec.ts`.
+
+- **A turn the Stop judge could not read no longer hides the agent's question.** An `unjudged` `turnVerdict` (model error, the account's usage limit, every judge slot busy) also switched off the last-line question read, so a session whose judge failed showed no ask at all. `currentTurnVerdict` now treats `unjudged` as no verdict. Source: `cli/src/lib/feed/attention.ts`.
+
 ## 1.23.41
 
 - **The daemon no longer scans the whole search index after every indexing pass.** The check that decides whether the session search index needs compacting counted every row of FTS5's `_data` table, which is one row per index page, not one per segment. On one Mac that was 809,183 rows in 3 GB against 14 real segments, so the 512-segment threshold was always crossed: each pass ran two full scans of that table (1 to 2 s each with the machine idle, far longer under load) plus a `merge`, all on the daemon's main thread. A `sample` of the daemon showed 71% of its main thread in that count, its event loop was stalled 36 to 56 minutes of every hour, and the watchdog restarted it 57 times in a day. The count now reads the segment total FTS5 keeps in its structure record: 0.03 ms on the same index, and no merge while it is healthy. `agents daemon index optimize` reports the same real segment counts. Source: `cli/src/lib/session/db.ts`
