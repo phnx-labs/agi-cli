@@ -20,7 +20,7 @@ export function leadDraftsDir(): string {
 }
 
 function draftPath(key: string): string {
-  return path.join(leadDraftsDir(), `${createHash('sha1').update(key).digest('hex').slice(0, 20)}.json`);
+  return path.join(leadDraftsDir(), `${createHash('sha256').update(key).digest('hex').slice(0, 20)}.json`);
 }
 
 export function writeLeadDraft(draft: LeadDraft): void {
