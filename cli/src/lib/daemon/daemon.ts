@@ -530,7 +530,6 @@ export async function runDaemon(): Promise<void> {
     { SessionSummarizerService },
     { SessionTitleService },
     { AccountUsageService, AccountAuthService },
-    { WatchdogService },
     { DeviceProbeService },
     { SelfHealService },
     { SelfUpdateService },
@@ -549,7 +548,6 @@ export async function runDaemon(): Promise<void> {
     import('./session-summarizer-service.js'),
     import('./session-title-service.js'),
     import('./account-state-daemon-service.js'),
-    import('./watchdog-service.js'),
     import('./device-probe-service.js'),
     import('./self-heal-service.js'),
     import('./self-update-service.js'),
@@ -665,9 +663,6 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('session-title')) supervisor.register(new SessionTitleService());
   else log('INFO', 'Session-title service disabled');
-
-  if (isEnabled('watchdog')) supervisor.register(new WatchdogService());
-  else log('INFO', 'Watchdog service disabled');
 
   if (isEnabled('device-probe')) supervisor.register(new DeviceProbeService());
   else log('INFO', 'Device-probe service disabled');

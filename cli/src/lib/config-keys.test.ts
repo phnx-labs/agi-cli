@@ -194,7 +194,6 @@ describe('config-keys', () => {
     it('maps friendly names to internal config keys', () => {
       expect(devicePropertyToConfigName('max-agents')).toBe('agents.max-concurrent');
       expect(devicePropertyToConfigName('daemon')).toBe('daemon.enabled');
-      expect(devicePropertyToConfigName('watchdog')).toBe('watchdog.enabled');
       expect(devicePropertyToConfigName('tmux')).toBe('tmux.enabled');
       expect(devicePropertyToConfigName('browser.remote-control')).toBe('browser.remote-control');
       expect(devicePropertyToConfigName('browser.task-idle-minutes')).toBe('browser.task-idle-minutes');

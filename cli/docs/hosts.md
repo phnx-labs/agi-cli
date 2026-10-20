@@ -222,7 +222,7 @@ harness exits nonzero naming each harness's exclusion reason and the earliest
 window reset; zero healthy accounts within the picked harness exits nonzero
 with `agents: no healthy <agent> account under strategy '<strategy>' — excluded:
 …; earliest window resets <iso-time>. Use --strategy pinned to force the
-default.` (the daemon watchdog tail-detects this text for rotate cooldowns).
+default.`
 `--session-id` keeps its claude-only semantics — honored when auto picks
 claude, ignored with a stderr note otherwise.
 

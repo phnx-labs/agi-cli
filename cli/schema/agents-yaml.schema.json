@@ -47,10 +47,6 @@
           "type": "boolean",
           "description": "Device scope, machine-local. Whether AGI Menu runs on this Mac (menubar.enabled). Default true."
         },
-        "watchdogEnabled": {
-          "type": "boolean",
-          "description": "Device scope. Whether the daemon runs the watchdog pass on this device (watchdog.enabled)."
-        },
         "tmuxEnabled": {
           "type": "boolean",
           "description": "Device scope, machine-local. Whether an interactive `agents run` on this device is wrapped in tmux (tmux.enabled)."
@@ -210,7 +206,7 @@
           "properties": {
             "config": {
               "type": "object",
-              "description": "Fleet-wide config defaults (`agents devices config --fleet <key> <value>`). Every device inherits these unless its own devices/<name>/agents.yaml config: overrides the key. Inert to `agents apply` (the reconcile engine never pushes it). Keys: the device-scope entries of the top-level config property (maxAgents, daemonEnabled, watchdogEnabled, tmuxEnabled, browserRemoteControl, defaultBrowserProfile, browserTaskIdleMinutes, notes, sshUser, sshAuth, sshBundle, sshBundleKey, sshIdentityFile, platform, role, autoLaunchEnabled, autoLaunchPreferred).",
+              "description": "Fleet-wide config defaults (`agents devices config --fleet <key> <value>`). Every device inherits these unless its own devices/<name>/agents.yaml config: overrides the key. Inert to `agents apply` (the reconcile engine never pushes it). Keys: the device-scope entries of the top-level config property (maxAgents, daemonEnabled, tmuxEnabled, browserRemoteControl, defaultBrowserProfile, browserTaskIdleMinutes, notes, sshUser, sshAuth, sshBundle, sshBundleKey, sshIdentityFile, platform, role, autoLaunchEnabled, autoLaunchPreferred).",
               "additionalProperties": true
             }
           }

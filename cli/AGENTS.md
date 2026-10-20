@@ -16,7 +16,7 @@ module map, build, and release mechanics the README does not.
 > lives in the root [AGENTS.md](../AGENTS.md).
 
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
-core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences, then
+core, browser, computer, secrets, term, accounts, fleet, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 `agents setup tools` installs or upgrades the standalone `sessions`, `browser`,
@@ -1991,7 +1991,7 @@ which is what a cleaned dev prefix leaves behind). A dev build that answered to
 `agents` made PATH order decide which code ran — see the root
 [AGENTS.md](../AGENTS.md) §Never install a dev build over the user's `agents`.
 
-The daemon is **shared** (watchdog, feed stream, session/usage sync, and
+The daemon is **shared** (feed stream, session/usage sync, and
 more), so the install leaves it on production code. `--bounce-daemon`
 restarts it onto the dev build when you need that, and says plainly that it
 changes what the user's everyday `agents` talks to. (The secrets broker is a
@@ -2481,8 +2481,8 @@ Requirement ids are section-namespaced — `SES-*` / `SEC-*` / `EXEC-*`, with th
 `-GAP-` (known gap) families — and a requirement the code does not yet fully meet
 carries a trailing `Status: [Intended]` or `[Drift]` line naming its `-GAP-`.
 
-Beyond the two above, the document also specifies **§Agent execution**,
-**§Scheduling & execution singularity**, and **§Watchdog**. It does **not** cover
+Beyond the two above, the document also specifies **§Agent execution** and
+**§Scheduling & execution singularity**. It does **not** cover
 every command group — `teams` and `cloud` have design docs but zero
 RFC-2119 requirements, and surfaces like `sync`, `feed`, and `send`
 have neither. The

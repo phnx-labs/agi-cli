@@ -21,7 +21,7 @@ describe('agents setup command group', () => {
 
 
 
-    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'session-backup', 'status', 'term', 'tools', 'url-scheme', 'watchdog']);
+    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'session-backup', 'status', 'term', 'tools', 'url-scheme']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
@@ -43,7 +43,7 @@ describe('agents setup command group', () => {
     expect(rows.find((row) => row.phase === 'browser')?.state).toBe('missing');
     expect(rows.find((row) => row.phase === 'computer')).toBeDefined();
     expect(rows.map((row) => row.phase)).toEqual([
-      'core', 'browser', 'computer', 'secrets', 'term', 'accounts', 'fleet', 'watchdog', 'preferences',
+      'core', 'browser', 'computer', 'secrets', 'term', 'accounts', 'fleet', 'preferences',
     ]);
   });
 

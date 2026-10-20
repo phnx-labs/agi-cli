@@ -39,7 +39,7 @@ over-aggressive docs sweep removed them (2026-08-25); kept concise.
 - State & security: [secrets-agent-process-model](secrets-agent-process-model.md),
   [secrets-trust-boundaries](secrets-trust-boundaries.md),
   [credential-management](credential-management.md), [projects](projects.md),
-  [watchdog](watchdog.md), [menubar](menubar.md), [terminal-engine](terminal-engine.md)
+  [menubar](menubar.md), [terminal-engine](terminal-engine.md)
 
 ## Audits
 

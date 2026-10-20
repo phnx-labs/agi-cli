@@ -1307,23 +1307,6 @@ export function migrateExtrasExtrasToAgentsExtras(historyDir: string = HISTORY_D
   }
 }
 
-export function migrateWatchdogSentinelToConfig(
-  sentinelPath: string = path.join(CACHE_DIR, 'state', 'watchdog', 'enabled'),
-  enable: (value: boolean) => void = (value) => setConfigValue('watchdog.enabled', value),
-): void {
-  if (!fs.existsSync(sentinelPath)) return;
-  try {
-    enable(true);
-  } catch (err) {
-    console.error(
-      `watchdog sentinel migration: could not set watchdog.enabled (${(err as Error).message}); leaving the sentinel for a later retry`,
-    );
-    return;
-  }
-  try { fs.rmSync(sentinelPath); } catch {  }
-  console.error('Migrated watchdog: legacy enable sentinel → watchdog.enabled config (kept enabled)');
-}
-
 export function migrateMenubarSentinelToConfig(
   sentinelPath: string = path.join(CACHE_DIR, 'state', 'menubar.disabled'),
   disable: () => void = () => setConfigValue('menubar.enabled', false),
@@ -1595,7 +1578,6 @@ export async function runMigration(): Promise<void> {
 
   migrateExtrasExtrasToAgentsExtras();
 
-  migrateWatchdogSentinelToConfig();
   migrateMenubarSentinelToConfig();
   removeHomeCompiledProjectRules();
 

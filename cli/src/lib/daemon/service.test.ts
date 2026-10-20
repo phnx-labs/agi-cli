@@ -114,7 +114,7 @@ describe('isPeriodicService', () => {
 
   it('rejects a plain DaemonService with no periodic fields', () => {
     const bare = {
-      id: 'watchdog' as DaemonServiceId,
+      id: 'auth-sync' as DaemonServiceId,
       start: async () => {},
       stop: async () => {},
       restart: async () => {},

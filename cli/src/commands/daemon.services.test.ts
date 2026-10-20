@@ -41,7 +41,7 @@ describeDaemon('agents daemon — services, broker', () => {
     expect(res.status).toBe(0);
     expect(res.stdout).toContain('Daemon services');
     expect(res.stdout).toContain('session-index');
-    expect(res.stdout).toContain('watchdog');
+    expect(res.stdout).toContain('device-probe');
     expect(res.stdout).not.toContain('monitors');
     expect(res.stdout).toContain('Hosted sockets');
   });
@@ -59,7 +59,7 @@ describeDaemon('agents daemon — services, broker', () => {
   it('services list shows every service enabled by default', () => {
     const res = run(makeHome(), ['services', 'list']);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain('watchdog');
+    expect(res.stdout).toContain('device-probe');
     expect(res.stdout).not.toContain('monitors');
     expect(res.stdout).toContain('daemon-heartbeat');
     expect(res.stdout).toContain('enabled');
@@ -67,30 +67,30 @@ describeDaemon('agents daemon — services, broker', () => {
 
   it('services disable writes the config and services list reflects it', () => {
     const home = makeHome();
-    const disable = run(home, ['services', 'disable', 'watchdog']);
+    const disable = run(home, ['services', 'disable', 'device-probe']);
     expect(disable.status).toBe(0);
-    expect(disable.stdout).toContain("Disabled 'watchdog'");
+    expect(disable.stdout).toContain("Disabled 'device-probe'");
 
     const list = run(home, ['services', 'list', '--json']);
     expect(list.status).toBe(0);
     const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    const watchdogSvc = services.find((s) => s.id === 'watchdog');
-    expect(watchdogSvc).toBeDefined();
-    expect(watchdogSvc!.enabled).toBe(false);
+    const deviceProbeSvc = services.find((s) => s.id === 'device-probe');
+    expect(deviceProbeSvc).toBeDefined();
+    expect(deviceProbeSvc!.enabled).toBe(false);
 
     const cfgPath = path.join(home, '.agents', 'daemon', 'services.yaml');
-    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('watchdog: false');
+    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('device-probe: false');
   });
   it('services enable re-enables a disabled service', () => {
     const home = makeHome();
-    run(home, ['services', 'disable', 'watchdog']);
-    const enable = run(home, ['services', 'enable', 'watchdog']);
+    run(home, ['services', 'disable', 'device-probe']);
+    const enable = run(home, ['services', 'enable', 'device-probe']);
     expect(enable.status).toBe(0);
-    expect(enable.stdout).toContain("Enabled 'watchdog'");
+    expect(enable.stdout).toContain("Enabled 'device-probe'");
 
     const list = run(home, ['services', 'list', '--json']);
     const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    expect(services.find((s) => s.id === 'watchdog')!.enabled).toBe(true);
+    expect(services.find((s) => s.id === 'device-probe')!.enabled).toBe(true);
   });
   it('services enable|disable reject unknown service ids', () => {
     const home = makeHome();

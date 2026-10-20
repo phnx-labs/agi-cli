@@ -505,9 +505,6 @@ export interface Meta {
   model?: {
     tiers?: Record<string, Partial<Record<'cheap' | 'default' | 'best' | 'ultra', string>>>;
   };
-  watchdog?: {
-    rotate?: 'on' | 'off';
-  };
   lease?: {
     secretsBundle?: string;
   };

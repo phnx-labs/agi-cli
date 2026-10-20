@@ -50,14 +50,14 @@ describe('ServiceSupervisor instrumentation', () => {
   it('a tick over half its deadline is a tick.slow warning with its duration and what else was in flight', async () => {
     const { lines, ctx } = capture();
     const sup = new ServiceSupervisor({ exit: (() => {}) as never });
-    sup.register(new TimedService('watchdog', 300, () => sleep(200)));
+    sup.register(new TimedService('auth-sync', 300, () => sleep(200)));
     sup.register(new TimedService('device-probe', 5_000, () => sleep(400)));
     await sup.startAll(ctx);
     await sleep(300);
     await sup.stopAll();
     const slow = lines.find((l) => l.fields?.event === 'tick.slow');
     expect(slow?.level).toBe('WARN');
-    expect(slow?.fields).toMatchObject({ service: 'watchdog', deadlineMs: 300 });
+    expect(slow?.fields).toMatchObject({ service: 'auth-sync', deadlineMs: 300 });
     expect(slow?.fields?.durMs as number).toBeGreaterThanOrEqual(150);
     expect(slow?.fields?.inFlight).toContainEqual(expect.objectContaining({ service: 'device-probe' }));
   });
@@ -65,7 +65,7 @@ describe('ServiceSupervisor instrumentation', () => {
   it('a fast tick is logged at debug with its duration, so debug traces every tick', async () => {
     const { lines, ctx } = capture();
     const sup = new ServiceSupervisor({ exit: (() => {}) as never });
-    sup.register(new TimedService('watchdog', 5_000, async () => {}));
+    sup.register(new TimedService('auth-sync', 5_000, async () => {}));
     await sup.startAll(ctx);
     await sleep(20);
     await sup.stopAll();
@@ -75,12 +75,12 @@ describe('ServiceSupervisor instrumentation', () => {
   it('a throwing tick is a tick.failed warning carrying the error and duration', async () => {
     const { lines, ctx } = capture();
     const sup = new ServiceSupervisor({ exit: (() => {}) as never });
-    sup.register(new TimedService('watchdog', 5_000, async () => { throw new Error('probe refused'); }));
+    sup.register(new TimedService('auth-sync', 5_000, async () => { throw new Error('probe refused'); }));
     await sup.startAll(ctx);
     await sleep(20);
     await sup.stopAll();
     const failed = lines.find((l) => l.fields?.event === 'tick.failed');
-    expect(failed?.fields).toMatchObject({ service: 'watchdog', error: 'probe refused', consecutiveFailures: 1 });
+    expect(failed?.fields).toMatchObject({ service: 'auth-sync', error: 'probe refused', consecutiveFailures: 1 });
     expect(typeof failed?.fields?.durMs).toBe('number');
   });
 

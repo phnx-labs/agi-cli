@@ -25,7 +25,7 @@ guarantee, the reference for the mechanism.
   [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174), and only when capitalized.
 - **Requirement id families are section-namespaced** so an id is globally unique.
   Each family is prefixed with its section (`SES` sessions, `SEC` secrets, `EXEC`
-  agent execution, `SING` scheduling singularity, `WD` watchdog):
+  agent execution, `SING` scheduling singularity):
   - `<SEC>-<n>` — a normative behavioral requirement (e.g. `SES-8`, `SEC-13`, `EXEC-1`).
   - `<SEC>-IF-<n>` — an interface / output / exit-code contract.
   - `<SEC>-CROSS-<n>` — a cross-platform parity requirement.
@@ -54,7 +54,6 @@ guarantee, the reference for the mechanism.
 - [Secrets](#secrets) — `agents run --secrets` and the standalone `secrets` CLI: storage & materialization boundaries, sharing, no-noise
 - [Agent execution](#agent-execution) — `agents run`: the one execution engine, env, isolation, fallback, dispatch
 - [Scheduling & execution singularity](#scheduling--execution-singularity) — one scheduler, one executor for anything fleet-affecting; UIs are thin wrappers
-- [Watchdog](#watchdog) — `agents watchdog`: detect idle agents, decide nudge/skip, deliver to the exact split
 
 ## Coverage inventory
 
@@ -64,12 +63,12 @@ loaders** — the difference is aliases and multi-command modules (`ssh`/`device
 share one; `add`/`use`/`remove`/`rm`/`purge` another) — in `COMMAND_LOADERS`
 (`cli/command-registry.ts:81`); retired names are refused through
 `RETIRED_TOP_LEVEL_COMMANDS` (`lib/startup/command-registry.ts:25`).
-Five subsystems have a normative contract. Before relying on a behavior, check which
+Four subsystems have a normative contract. Before relying on a behavior, check which
 row its surface sits in.
 
 | Coverage | Surfaces | What that means |
 |---|---|---|
-| **Specified here** | sessions (index, `ps`, resume), secrets (`run --secrets`, reserved stores), `run`, the scheduling/executor singularity, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
+| **Specified here** | sessions (index, `ps`, resume), secrets (`run --secrets`, reserved stores), `run`, the scheduling/executor singularity | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `doctor`, `daemon` | One requirement reaches them, no command contract does. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
 | **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `feed`, `send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
@@ -2416,7 +2415,7 @@ schema (`--json` passes through each agent's native stream format).
     `return null` — it MUST NOT read the interactive OAuth login (keychain /
     `.credentials.json`). This is the RUSH-1822 guarantee and the behavior for
     background callers other than the headed usage poller below (auth-health probe
-    `auth-health.ts`, watchdog, `collectRunCandidates`).
+    `auth-health.ts`, `collectRunCandidates`).
   - **W3 exception (PHNX-3940):** the headed daemon usage poller (`usage-refresh.ts`
     `nativeFileLogin: true`) MAY read the file-based native rotating blob at
     `<home>/.claude/.credentials.json` (access + refresh token) so it can poll
@@ -3267,7 +3266,7 @@ nothing but its own view cache.
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agents-cli daemon (`agents __daemon-run`,
   `cli/src/lib/daemon/daemon.ts`) or a CLI command the daemon or the user drives.
-  Status: **Current** for rotate (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
+  Status: **Current**. `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
   `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
   controls the one daemon SING-1 requires, never a second one. Usage and
@@ -3279,9 +3278,8 @@ nothing but its own view cache.
   exits the daemon for a supervised systemd/launchd restart instead of latching
   forever (PHNX-4116 — no `parked` state, no in-process backoff); explicit CLI refreshes
   enter the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
-  watchdog and device-probe ticks run as supervised `WatchdogService`/
-  `DeviceProbeService` (`lib/daemon/watchdog-service.ts`, `device-probe-service.ts`,
-  RUSH-3193 P3), and `session-cache-warm` runs as the supervised `session-state`
+  device-probe tick runs as the supervised `DeviceProbeService`
+  (`lib/daemon/device-probe-service.ts`, RUSH-3193 P3), and `session-cache-warm` runs as the supervised `session-state`
   service (`lib/daemon/session-state-service.ts`, PHNX-3265): it owns the 15-second
   publish cadence and the reader-presence edge that requests an immediate
   supervised tick. Nothing else calls them, so each is the single daemon-owned
@@ -3318,18 +3316,18 @@ nothing but its own view cache.
   `live-terminals.json`, driven by `cli/src/lib/terminal/inject.ts`; the
   terminal engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
-  or off MUST flip the CLI's own state (`agents watchdog enable|disable|rotate`,
-  `agents daemon services enable|disable`), so every surface observes one truth. A UI-local toggle that
+  or off MUST flip the CLI's own state (`agents daemon services enable|disable`,
+  a typed config key), so every surface observes one truth. A UI-local toggle that
   gates only the UI's view of an action MUST NOT exist.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
   daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`) and every call site
-  that goes through it (`agents feed watch`, `agents watchdog`, `agents recordings`).
+  that goes through it (`agents feed watch`, `agents recordings`).
   It MUST NOT
   stop an already-running daemon and MUST NOT block the explicit override
   (`agents daemon start`), mirroring `systemctl disable` — a disabled unit still
   starts on a direct `systemctl start`. `daemon.enabled` gates whether the
-  daemon itself may be auto-started at all (the watchdog and every other hosted service
+  daemon itself may be auto-started at all (every hosted service
   with it — never a secrets broker or the browser IPC service, which the standalone
   `secrets` (OWN-1) and `browser` (PHNX-4101) CLIs own).
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
@@ -3350,8 +3348,8 @@ is not two daemons existing — it is two daemons consuming the **same** input.
 
 - **SING-8 (MUST).** Daemon work that runs on every device MUST be per-device in
   scope: its input MUST be the firing device's own state (its repos, sessions,
-  caches, accounts). The watchdog rotating its own machine's sessions and
-  `tmux-reap` sweeping its own panes are the canonical legal shapes.
+  caches, accounts). `tmux-reap` sweeping its own panes is the canonical legal
+  shape.
 - **SING-9 (MUST).** Work that consumes **shared** input — a ticket tracker, a PR
   queue, the feed, an R2/sync bucket, another device's sessions — MUST have exactly
   one executor per work item, achieved one of three ways: (a) **owner pin** — the
@@ -3495,9 +3493,6 @@ a machine-wide process sweep.)
 
 ### 4. Given/When/Then scenarios
 
-- **GIVEN** a session hits its weekly account limit, **WHEN** the daemon watchdog
-  tick detects it, **THEN** the daemon alone decides and executes the rotate (or the
-  skip) — no UI surface fires a second rotate for the same session.
 - **GIVEN** a daemon already owns the pid file, **WHEN** a second `agents __daemon-run`
   starts — from the same install or a different one — **THEN** last-wins takeover
   makes the newcomer the survivor: `claimDaemonInstance` SIGTERMs the incumbent,
@@ -3527,11 +3522,8 @@ a machine-wide process sweep.)
   (SING-14, PHNX-4116).
 - **GIVEN** a user disables a fleet-affecting capability from the ext's command palette,
   **WHEN** the command completes, **THEN** the CLI's config is the state that
-  changed (`agents watchdog rotate off`; `enable`/`disable` alias `on`/`off`), and the daemon, the menubar, and every
+  changed (`agents daemon services disable <id>`), and the daemon, the menubar, and every
   other surface observe the same off state.
-- **GIVEN** a limited session lives in an AGI EXT editor tab, **WHEN** the daemon
-  rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
-  in that tab — the extension performs no detection or decision of its own.
 - **GIVEN** a contributor adds a `setInterval` in agi-ext, **WHEN** the
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
@@ -3557,8 +3549,8 @@ a machine-wide process sweep.)
   (agi-ext `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
   (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
-  it is a second coordination fabric where the daemon's presence tracking
-  (`lib/session/presence.ts`) would be the singular home. Informative; a future
+  it is a second coordination fabric where the daemon would be the singular
+  home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
 - **SING-GAP-4 (resolved, RUSH-2419; moved out, PHNX-3989).** SING-11b's leak-freedom guarantee
   once had one hole: the keychain `watch-lock` watcher was excluded from the periodic keychain
@@ -3597,187 +3589,6 @@ a machine-wide process sweep.)
   keeping the pacing interval and the `ensureDaemonStarted` breaker: a wedged daemon
   must always recover on its own, so the OS unit restart is paced but unbounded (see
   SING-14).
-
----
-
-## Watchdog
-
-The normative contract for `agents watchdog` — the daemon-owned service that detects **idle** agents
-and steers them to completion. The architectural companion is [automation.md](automation.md).
-Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are
-Given/When/Then so they map 1:1 to tests.
-
-### 1. Purpose & scope
-
-The watchdog exists to get **idle** agents moving to completion. In scope: detecting a
-stalled/idle session, deciding nudge-vs-skip, and delivering a steering message to the
-exact terminal split. Out of scope: sessions that explicitly stopped for the human
-(`waiting_input`) — those surface in the user's feed and are the feed's responsibility,
-not the watchdog's.
-
-### 2. Requirements
-
-#### 2.1 Trigger & lifecycle
-
-- **WD-1 (MUST).** The agents daemon MUST be the sole automatic watchdog scheduler and
-  executor. When device-local `watchdog.enabled` is true it MUST run one bounded,
-  non-overlapping pass every three minutes. UI surfaces MUST only render persisted state.
-  The daemon fires this pass from `WatchdogService`, a `PeriodicService` registered on
-  `ServiceSupervisor` (`lib/daemon/watchdog-service.ts`, RUSH-3193 P3 — previously a bare
-  `setInterval(WATCHDOG_TICK_MS)` with a hand-rolled in-flight guard directly in
-  `daemon.ts`), re-checking `watchdog.enabled` inside each tick — the daemon remains the
-  sole scheduler/executor; the supervisor now also owns the per-tick deadline and error
-  boundary for this pass. A thrown pass is recorded and re-runs on the next tick; a pass
-  that overruns its deadline is aborted and skipped until it settles (PHNX-4225), and only
-  a pass that hangs (unsettled at 10x its deadline) exits the daemon for a supervised OS
-  restart (PHNX-4116), with no `parked` state or in-process backoff.
-- **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
-  dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
-- **WD-3 (MUST).** `enable`/`disable` (aliases `on`/`off`) MUST write the typed device-local `watchdog.enabled`
-  setting, and `status` MUST reflect that setting (`commands/watchdog.ts`).
-
-#### 2.2 Detection — idle is the target
-
-- **WD-4 (MUST).** A candidate MUST be a session idle at least `WATCHDOG_STALL_MS` and less
-  than `WATCHDOG_DORMANT_MS`, past its per-session cooldown (thresholds in
-  `lib/watchdog/read.ts:8-10`; the gate `classifyTerminal` in `lib/watchdog/watchdog.ts:36`).
-  Idle age is derived from the transcript's last-write time.
-- **WD-5 (MUST).** A session whose inferred activity is `working` MUST NOT be nudged
-  (`sessions-cli/src/lib/session/state.ts`).
-- **WD-6 (MUST NOT).** The watchdog MUST NOT fight the feed: a session in `waiting_input`
-  (asked a question / permission prompt) is the feed's to surface; the agent decider MUST
-  judge it (drive-forward vs leave-for-human) from its task + tail — never blind-nudge it
-  as if idle.
-- **WD-7 (SHOULD).** When several candidates exist, the watchdog SHOULD prioritize the ones
-  active most recently (a warm session is likeliest to be steerable).
-- **WD-8 (MUST).** A session whose transcript cannot be located (no timestamp) MUST be
-  skipped, not guessed — and transcript resolution MUST search every version home, not just
-  the live `~/.claude`. Both resolvers do so via `getAgentSessionDirs`: the status/timestamp
-  path (`findClaudeSessionFile`, `lib/session/active.ts:580`, which sets the row's
-  last-activity time) and the tail-read path (`resolveWatchdogSessionPath`,
-  `lib/watchdog/read.ts:93`). So an agent-version upgrade does not blind the watchdog.
-
-#### 2.3 Decision — nudge vs skip
-
-- **WD-9 (MUST).** The per-tick decision MUST be made by an agent, not a heuristic script.
-  Every idle candidate (its originating task + transcript tail) MUST be judged in a SINGLE
-  `agents run … --mode plan` invocation per tick (`makeWatchdogAgentDecider`,
-  `lib/watchdog/watchdog-agent.ts`) — never one subprocess per candidate. The agent decides
-  idle-but-unfinished → nudge vs idle-and-done / needs-human → skip. A decider failure or a
-  candidate with no returned verdict MUST resolve to a safe skip, never a blind nudge. The
-  agent MUST NOT be invoked when nothing is idle.
-- **WD-10 (MUST).** The agent MUST skip (leave for the human, `needsHuman: true`) on:
-  credentials/auth, an irreversible or outward-facing action needing sign-off
-  (publish/release, delete prod, spend, external message), a genuine product/intent
-  decision, or an unreadable state; and MUST skip with `needsHuman: false` on a completed
-  task, so a finished session is never poked (`WATCHDOG_SYSTEM_PROMPT`,
-  `lib/watchdog/watchdog.ts`).
-- **WD-11 (MUST).** A nudge message MUST carry context — restate the goal and name ONE
-  concrete next step (the specific action, a forgotten tool, or the sensible default). A
-  generic "use your judgment and finish" with no concrete step MUST NOT be emitted.
-- **WD-12 (SHOULD).** When the blocker is resolvable by a tool the agent already has
-  (`computer`, `browser`, `agents ssh <mac> "computer …"`), the nudge
-  SHOULD name that tool rather than escalating to the human.
-- **WD-13 (MAY).** A user playbook at `~/.agents/playbooks/watchdog.md` MAY be appended as
-  House Rules to tune the nudge/skip line per fleet (`composePromptWithPlaybook`).
-
-#### 2.4 Delivery
-
-- **WD-14 (MUST).** A nudge MUST be delivered into the exact split the session lives in,
-  resolved by the single canonical `resolveInjectTargetForSession`
-  (`lib/terminal/resolve.ts`, precedence `tmux > iterm > vscodium`) and injected by
-  `injectIntoTerminal` (`lib/terminal/inject.ts`).
-- **WD-15 (MUST).** `agents send --channel session` (and the legacy `agents send --channel session`)
-  MUST resolve targets through the same
-  `resolveInjectTargetForSession` as the watchdog, so the manual unblock path and the
-  watchdog agree on which sessions are addressable (no duplicate weaker resolver).
-- **WD-16 (MUST).** When no addressable split exists, the tick MUST fall back (mailbox or
-  headless `--resume`) or refuse-and-flag — it MUST NOT silently claim delivery.
-- **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the ext event
-  shape, with persisted transcript context bounded so it cannot consume the audit window
-  (`lib/watchdog/log.ts`).
-- **WD-21 (MUST).** A nudge MUST be booked in the cooldown ledger (`nudges.json`) and
-  logged as a `nudge` event ONLY when delivery is CONFIRMED. tmux / iterm self-confirm
-  (a successful transport IS delivery); vscodium's `--open-url` is fire-and-forget, so it is
-  `confirmed: false` until the swarm-ext extension acks the verb (`backendConfirmsDelivery`,
-  `lib/terminal/inject.ts`). An unconfirmed-but-dispatched delivery MUST be logged as an
-  `undelivered` event and MUST NOT be reported as a landed nudge; it MAY still start the
-  cooldown so a possibly-working session is not re-hit every tick.
-
-#### 2.5 Per-session policy
-
-- **WD-18 (MUST).** `agents watchdog policy <id> off|keep|handsoff` MUST be honored:
-  `off` excludes the session; `handsoff` detects+flags but never delivers; `keep` is the
-  default path (`readPolicySentinel`/`writePolicySentinel`, `lib/watchdog/runner.ts`).
-
-#### 2.6 Audit history
-
-- **WD-19 (MUST).** `agents watchdog history [sessionId]` MUST expose the persisted audit
-  trail newest-first, including non-action session inspections, MUST support machine-readable output, and MUST NOT return raw
-  transcript `tailLines` or message excerpts (`lib/watchdog/history.ts`, `commands/watchdog.ts`).
-- **WD-20 (MUST).** The human one-shot tick output MUST show the tick timestamp and
-  actionable session identity/location/activity metadata already present in the active
-  snapshot. It MUST summarize healthy/non-actionable inspections by default and restore
-  every row with `--verbose`, without performing another session scan
-  (`lib/watchdog/runner.ts`, `commands/watchdog.ts`).
-
-### 3. Given/When/Then scenarios
-
-**GWT-W1 — Idle promise-without-toolcall is nudged with a concrete step.**
-Given a session idle past `WATCHDOG_STALL_MS` whose tail shows an announced action and no
-following tool call; When a `--nudge` tick runs; Then the brain returns `nudge` and the
-message restates the goal and names the next step (WD-11), delivered into the session's
-exact split (WD-14).
-
-**GWT-W2 — A release ask is left for the human.**
-Given an idle session whose last turn asks to publish/release; When the tick runs; Then the
-brain returns `skip` (WD-10) and nothing is delivered.
-
-**GWT-W3 — A working session is never nudged.**
-Given a session whose inferred activity is `working` (fresh transcript writes); When the
-tick runs; Then it is not a candidate and no nudge is sent (WD-5).
-
-**GWT-W4 — VSCodium session is addressable by both paths.**
-Given a live `codium`-hosted session with a session id; When either the watchdog or
-`agents send --channel session --to <id>` resolves a target; Then both return an addressable `vscodium`
-rail via `resolveInjectTargetForSession` (WD-14, WD-15).
-
-**GWT-W5 — Upgrade does not blind the watchdog.**
-Given a running session whose transcript lives under an earlier version home while
-`~/.claude` points at a newer version; When the tick classifies it; Then the transcript is
-found via `getAgentSessionDirs` and the session is evaluated, not skipped as "no activity
-timestamp" (WD-8).
-
-**GWT-W6 — Audit history is useful without disclosing transcript content.**
-Given persisted decisions and heartbeat ticks; When an operator runs
-`agents watchdog history <sessionId> --json`; Then matching decisions are returned newest
-first alongside compact inspection results, without raw transcript tails or message excerpts,
-and heartbeat rows appear only with `--all`
-(WD-19).
-
-**GWT-W7 — A dry tick explains what needs attention.**
-Given a tick containing stalled and healthy sessions; When an operator runs `agents watchdog`;
-Then the output names when the tick ran and identifies every actionable session with its
-location/activity context, while healthy rows are summarized until `--verbose` is passed
-(WD-20).
-
-### 4. Known gaps
-
-- **WD-GAP-1 (resolved).** The decider now sees every idle session at once: the tick
-  batches all idle candidates (each with its originating task + tail) into one
-  `agents run --mode plan` call, rather than judging a lone per-candidate tail
-  (`makeWatchdogAgentDecider`, `lib/watchdog/watchdog-agent.ts`). It is scoped to the
-  machine's idle set, not the entire fleet snapshot.
-- **WD-GAP-2.** There is no distinct `done` state — a completed session is inferred as
-  `idle` and the agent skips it with `needsHuman: false` rather than a first-class status.
-  Planned.
-- **WD-GAP-3.** Live status inference covers Claude/Codex and the tracked harnesses
-  whose transcript the index has reached; the rest report `unknown` (SES-18) and are
-  not yet steered (`findSessionFileForKind`,
-  `lib/session/active.ts`). Planned.
-- **WD-GAP-4.** No default `watchdog/WORKFLOW.md` decider ships in this repo; absent
-  one, the built-in `WATCHDOG_SYSTEM_PROMPT` runs.
-
 
 #### PHNX-3939 registry ownership constraint
 

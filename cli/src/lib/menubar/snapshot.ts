@@ -1,6 +1,4 @@
 import { getMenubarUpdateStatus, type MenubarUpdateResult } from './install-menubar.js';
-import * as fs from 'fs';
-import * as path from 'path';
 
 import { httpsUrl } from '../actor.js';
 import { cachedViewer, emailDigest, type GithubViewer } from '../github/viewer.js';
@@ -15,10 +13,8 @@ import { loadDevices } from '../devices/registry.js';
 import { machineId } from '../machine-id.js';
 import { querySessions } from '../session/db.js';
 import { readActiveSessionsCache } from '../session/session-cache.js';
-import { getRuntimeStateDir } from '../state.js';
 import { getCliVersion } from '../version.js';
 import type { DeviceStats } from '../devices/health.js';
-import type { WatchdogTickResult } from '../watchdog/runner.js';
 
 interface MenubarDevice {
   name: string;
@@ -85,10 +81,6 @@ interface MenubarSnapshot {
   me: MenubarMe | null;
   menuPreferences: Record<string, unknown>;
   menuListPreferences: Record<string, string[]>;
-  watchdog: {
-    enabled: boolean;
-    lastTick: Pick<WatchdogTickResult, 'didNudge' | 'counts'> | null;
-  };
 }
 
 export function buildMenuPreferences(): Record<string, unknown> {
@@ -164,16 +156,6 @@ export function projectDeviceStats(row: DeviceStats | undefined): MenubarDeviceS
   };
 }
 
-export function readLastWatchdogTick(
-  stateDir = path.join(getRuntimeStateDir(), 'watchdog'),
-): WatchdogTickResult | null {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(stateDir, 'last-tick.json'), 'utf-8')) as WatchdogTickResult;
-  } catch {
-    return null;
-  }
-}
-
 export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
   migrateMenubarPreferencesFromUserDefaults();
   const viewerRead = cachedViewer();
@@ -199,12 +181,5 @@ export async function computeMenubarSnapshot(): Promise<MenubarSnapshot> {
     me: resolveMenubarMe(readSession(), viewer),
     menuPreferences: buildMenuPreferences(),
     menuListPreferences: buildMenuListPreferences(),
-    watchdog: {
-      enabled: getConfigValue('watchdog.enabled').value === true,
-      lastTick: (() => {
-        const tick = readLastWatchdogTick();
-        return tick ? { didNudge: tick.didNudge, counts: tick.counts } : null;
-      })(),
-    },
   };
 }

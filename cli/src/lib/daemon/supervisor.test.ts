@@ -64,7 +64,7 @@ class HealthyService implements PeriodicService {
 }
 
 class ThrowingService implements PeriodicService {
-  readonly id: DaemonServiceId = 'watchdog';
+  readonly id: DaemonServiceId = 'auth-sync';
   readonly intervalMs = 1_000;
   readonly deadlineMs = 500;
   ticks = 0;
@@ -192,9 +192,9 @@ describe('ServiceSupervisor', () => {
 
     const health = supervisor.health();
     expect(bad.ticks).toBe(3);
-    expect(health['watchdog'].state).toBe('running');
-    expect(health['watchdog'].consecutiveFailures).toBeGreaterThanOrEqual(3);
-    expect(health['watchdog'].lastError).toMatch(/boom/);
+    expect(health['auth-sync'].state).toBe('running');
+    expect(health['auth-sync'].consecutiveFailures).toBeGreaterThanOrEqual(3);
+    expect(health['auth-sync'].lastError).toMatch(/boom/);
     expect(exit).not.toHaveBeenCalled();
     expect(good.ticks).toBeGreaterThanOrEqual(3);
     expect(health['tmux-reap'].state).toBe('running');
@@ -264,7 +264,7 @@ describe('ServiceSupervisor', () => {
   it('health() returns a record for every registered service', async () => {
     const supervisor = new ServiceSupervisor();
     const a = new HealthyService('tmux-reap');
-    const b = new HealthyService('watchdog');
+    const b = new HealthyService('auth-sync');
     const c = new HealthyService('self-heal');
     supervisor.register(a);
     supervisor.register(b);
@@ -274,8 +274,8 @@ describe('ServiceSupervisor', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     const health = supervisor.health();
-    expect(Object.keys(health).sort()).toEqual(['self-heal', 'tmux-reap', 'watchdog']);
-    for (const id of ['tmux-reap', 'watchdog', 'self-heal'] as const) {
+    expect(Object.keys(health).sort()).toEqual(['auth-sync', 'self-heal', 'tmux-reap']);
+    for (const id of ['tmux-reap', 'auth-sync', 'self-heal'] as const) {
       expect(health[id].state).toBe('running');
       expect(health[id].consecutiveFailures).toBe(0);
     }
@@ -400,7 +400,7 @@ describe('ServiceSupervisor', () => {
   });
 
   describe('RUSH-3193 P3 migrated ids: throw keeps ticking, hang exits (PHNX-4116)', () => {
-    const P3_IDS: DaemonServiceId[] = ['watchdog', 'device-probe', 'self-heal', 'state-dir-check'];
+    const P3_IDS: DaemonServiceId[] = ['device-probe', 'self-heal', 'state-dir-check'];
 
     it.each(P3_IDS)('%s: a throwing tick keeps ticking without exiting or crashing a healthy sibling', async (id) => {
       const exit = makeExit();
@@ -469,7 +469,7 @@ describe('ServiceSupervisor', () => {
     await vi.advanceTimersByTimeAsync(3_000);
 
     expect(bad.ticks).toBeGreaterThan(0);
-    expect(supervisor.health()['watchdog'].consecutiveFailures).toBeGreaterThan(0);
+    expect(supervisor.health()['auth-sync'].consecutiveFailures).toBeGreaterThan(0);
     expect(healthy.ticks).toBeGreaterThan(0);
     expect(supervisor.health()['tmux-reap'].state).toBe('running');
     expect(exit).not.toHaveBeenCalled();

@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
-  "groups": 45,
-  "commands": 342,
+  "groups": 44,
+  "commands": 334,
   "root": {
     "name": "agents",
     "path": "",
@@ -1715,7 +1715,7 @@
       "name": "daemon",
       "path": "daemon",
       "aliases": [],
-      "description": "The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.",
+      "description": "The always-on daemon: session index, feed stream, session/usage sync, and account health. Bare `agents daemon` shows status.",
       "args": [],
       "options": [
         {
@@ -1738,8 +1738,8 @@
           "negate": false
         }
       ],
-      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up service toggles\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# watchdog, device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# Trace every service tick and slow section while diagnosing (applies live)\nagents daemon logs level debug\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
-      "notes": "'disable' is a persisted kill switch: it stops feed watch,\nwatchdog, and recordings from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. Any other boot-disabled service still needs an operator\n'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
+      "examples": "# Identity, duplicates, and per-service health in one view\nagents daemon status\n\n# Machine-readable status (for scripts / AGI EXT)\nagents daemon status --json\n\n# Start / stop / restart the daemon process\nagents daemon start\nagents daemon stop\nagents daemon restart\n\n# Persist the daemon off — nothing auto-starts it until re-enabled\nagents daemon disable\nagents daemon enable\n\n# Reload config (SIGHUP) without restarting — picks up service toggles\nagents daemon reload\n\n# Every registered service — state, enabled, failures, last error\nagents daemon services\n\n# Toggle or restart a service live — applies without a daemon restart\n# for supervisor-managed services (account-state, session-index,\n# device-probe, self-heal, state-dir-check)\nagents daemon services disable account-state\nagents daemon services enable account-state\nagents daemon services restart account-state\n\n# Tail the daemon's own log, warnings and up, from the last hour\nagents daemon logs -f --level warn --since 1h\n\n# Trace every service tick and slow section while diagnosing (applies live)\nagents daemon logs level debug\n\n# One-shot health check for scripts (non-zero exit on problems)\nagents daemon doctor\n\n# Session-index maintenance, in the foreground (never starts the daemon)\nagents daemon index optimize\nagents daemon index backfill tools --fleet",
+      "notes": "'disable' is a persisted kill switch: it stops feed watch\nand recordings from auto-starting\nthe daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).\n'agents daemon start' still starts it explicitly, same as\n'systemctl start' on a disabled unit.\n\nUnder a redirected HOME (a test/e2e harness), 'agents daemon start'\nREFUSES to launch: a daemon started there keeps its own pid file under\nthe temp home and leaks, invisible to the real install (W4, PHNX-3736).\n'daemon restart' inherits the same guard — it stops first, so run it\nwith the same opt-in. A deliberate test launch sets\nAGENTS_ALLOW_TEST_DAEMON=1 — and the harness owns stopping what it\nstarted. 'agents doctor' flags any leaked daemon that already exists,\nwith its HOME and start time.\n\n'agents daemon services enable|disable|restart <id>' applies live (no\ndaemon restart) for supervisor-managed services that were registered at\nboot. Any other boot-disabled service still needs an operator\n'agents daemon restart'. 'agents\ndaemon services' names which case you're in per row.",
       "subcommands": [
         {
           "name": "disable",
@@ -2894,8 +2894,8 @@
               "negate": false
             }
           ],
-          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\nagents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents on mac-mini\nagents devices config mac-mini watchdog.enabled on        # nudge stalled sessions there\nagents devices config mac-mini watchdog.enabled           # read the effective value back\nagents devices config mac-mini watchdog.enabled --unset   # inherit the fleet default again\nagents devices config --fleet watchdog.enabled on         # fleet-wide default (all devices)\nagents devices config --fleet agents.max-concurrent 2     # every box caps at 2 unless it overrides\nagents devices config --fleet                             # print the fleet defaults layer\nagents devices config mac-mini notes \"runs the releases\"  # append an operator note\nagents devices config win-mini ssh.auth password          # password auth…\nagents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\nagents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\nagents devices config mac-mini role worker                 # same as `agents devices role mac-mini worker`\nagents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\nagents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\nagents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\nagents devices config mac-mini --json                     # machine-readable, per-key source",
-          "notes": "Keys: role (worker|personal), see 'agents devices role',\ndescription (one line saying what the box is for — see\n'agents devices describe'; renders in the devices list tail),\nagents.max-concurrent, daemon.enabled,\nwatchdog.enabled, tmux.enabled, browser.remote-control,\nbrowser.task-idle-minutes, browser.profile,\nnotes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\nssh.identity-file, platform (windows|linux|macos|unknown),\nauto-launch.enabled, auto-launch.preferred — plus the user-scope\ninteractive.host (stored centrally; the device name is syntax only).\n\nThree layers, read in order — built-in default < fleet default\n(--fleet, central fleet.defaults.config) < per-device value\n(devices/<name>/agents.yaml config:). Both files are tracked and sync\nwith 'agents repo push/pull'; per-device files are conflict-free because\neach machine writes only its own folder. --unset removes the value at\nthe targeted layer, so a device key falls back to the fleet default.\n\nBooleans take on/off (or true/false). 'notes' appends one entry per\ninvocation. ssh.* / platform / user overlay the discovered registry\nprofile at dial time. daemon.enabled takes effect\nwhen the daemon reloads or restarts on that device. Machine-local keys\n(daemon.enabled, tmux.enabled, browser.remote-control,\nbrowser.task-idle-minutes, browser.profile) can only be read or set on\nthe device itself; --fleet still writes a fleet-wide default those boxes\ninherit until they override.\n\nconfigure, note, set, set-interactive, prefer, and unprefer are deleted;\nuse this command directly (auto-launch.preferred, interactive.host, or\nany other key). enable/disable stay as first-class sugar over\nauto-launch.enabled.",
+          "examples": "agents devices config mac-mini                            # settings menu (TTY) / print config (piped)\nagents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents on mac-mini\nagents devices config mac-mini auto-launch.enabled        # read the effective value back\nagents devices config mac-mini auto-launch.enabled --unset # inherit the fleet default again\nagents devices config --fleet auto-launch.enabled off     # fleet-wide default (all devices)\nagents devices config --fleet agents.max-concurrent 2     # every box caps at 2 unless it overrides\nagents devices config --fleet                             # print the fleet defaults layer\nagents devices config mac-mini notes \"runs the releases\"  # append an operator note\nagents devices config win-mini ssh.auth password          # password auth…\nagents devices config win-mini ssh.bundle muqsit          # …from this secrets bundle\nagents devices config worker ssh.identity-file ~/.ssh/worker_ed25519\nagents devices config mac-mini role worker                 # same as `agents devices role mac-mini worker`\nagents devices config mac-mini auto-launch.enabled off    # exclude from AGI EXT auto-launch\nagents devices config mac-mini auto-launch.preferred on   # boost in auto-launch ranking\nagents devices config zion interactive.host zion          # user scope: where agents show YOU artifacts\nagents devices config mac-mini --json                     # machine-readable, per-key source",
+          "notes": "Keys: role (worker|personal), see 'agents devices role',\ndescription (one line saying what the box is for — see\n'agents devices describe'; renders in the devices list tail),\nagents.max-concurrent, daemon.enabled,\ntmux.enabled, browser.remote-control,\nbrowser.task-idle-minutes, browser.profile,\nnotes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,\nssh.identity-file, platform (windows|linux|macos|unknown),\nauto-launch.enabled, auto-launch.preferred — plus the user-scope\ninteractive.host (stored centrally; the device name is syntax only).\n\nThree layers, read in order — built-in default < fleet default\n(--fleet, central fleet.defaults.config) < per-device value\n(devices/<name>/agents.yaml config:). Both files are tracked and sync\nwith 'agents repo push/pull'; per-device files are conflict-free because\neach machine writes only its own folder. --unset removes the value at\nthe targeted layer, so a device key falls back to the fleet default.\n\nBooleans take on/off (or true/false). 'notes' appends one entry per\ninvocation. ssh.* / platform / user overlay the discovered registry\nprofile at dial time. daemon.enabled takes effect\nwhen the daemon reloads or restarts on that device. Machine-local keys\n(daemon.enabled, tmux.enabled, browser.remote-control,\nbrowser.task-idle-minutes, browser.profile) can only be read or set on\nthe device itself; --fleet still writes a fleet-wide default those boxes\ninherit until they override.\n\nconfigure, note, set, set-interactive, prefer, and unprefer are deleted;\nuse this command directly (auto-launch.preferred, interactive.host, or\nany other key). enable/disable stay as first-class sugar over\nauto-launch.enabled.",
           "subcommands": []
         },
         {
@@ -4261,7 +4261,7 @@
         },
         {
           "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, watchdog, browser)",
+          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
           "long": "--module",
           "required": true,
           "optional": false,
@@ -4409,7 +4409,7 @@
             },
             {
               "flags": "--module <name>",
-              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, watchdog, browser)",
+              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, browser)",
               "long": "--module",
               "required": true,
               "optional": false,
@@ -13346,8 +13346,8 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\nagents setup\n\n# Re-run after corruption or to repair ~/.agents/.system/\nagents setup --force\n\n# Set up a specific capability on its own\nagents setup browser\nagents setup computer\nagents setup secrets\nagents setup term\nagents setup tools\nagents setup accounts\nagents setup fleet\nagents setup watchdog\nagents setup alias add teams\nagents setup beta enable factory",
-      "notes": "What it does:\n  1. Clones the system repo into ~/.agents/.system/\n  2. Imports any unmanaged agent installations it finds\n  3. Opens a re-runnable capability menu with live ready/missing status\n  4. Delegates each selection to its existing setup wizard\n\nCapability setup can also be run any time on its own:\n  agents setup browser    # detect a browser + create the default profile\n  agents setup computer    # install the signed macOS helper + grant permissions\n  agents setup secrets     # choose secrets backend/policy defaults + import\n  agents setup term        # install the standalone term CLI (PTY engine agents accounts add/login spawn)\n  agents setup accounts    # mint a Claude setup-token for unattended usage/probe\n  agents setup fleet       # discover Tailscale devices + configure SSH access\n  agents setup watchdog    # choose which devices run the daemon watchdog pass\n  agents setup alias add teams  # PATH shorthand: teams runs agents teams\n  agents setup beta enable factory  # opt into preview features\n\nTo install CLIs from agents.yaml and sync resources into version homes:\n  agents sync --local -y",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\nagents setup\n\n# Re-run after corruption or to repair ~/.agents/.system/\nagents setup --force\n\n# Set up a specific capability on its own\nagents setup browser\nagents setup computer\nagents setup secrets\nagents setup term\nagents setup tools\nagents setup accounts\nagents setup fleet\nagents setup alias add teams\nagents setup beta enable factory",
+      "notes": "What it does:\n  1. Clones the system repo into ~/.agents/.system/\n  2. Imports any unmanaged agent installations it finds\n  3. Opens a re-runnable capability menu with live ready/missing status\n  4. Delegates each selection to its existing setup wizard\n\nCapability setup can also be run any time on its own:\n  agents setup browser    # detect a browser + create the default profile\n  agents setup computer    # install the signed macOS helper + grant permissions\n  agents setup secrets     # choose secrets backend/policy defaults + import\n  agents setup term        # install the standalone term CLI (PTY engine agents accounts add/login spawn)\n  agents setup accounts    # mint a Claude setup-token for unattended usage/probe\n  agents setup fleet       # discover Tailscale devices + configure SSH access\n  agents setup alias add teams  # PATH shorthand: teams runs agents teams\n  agents setup beta enable factory  # opt into preview features\n\nTo install CLIs from agents.yaml and sync resources into version homes:\n  agents sync --local -y",
       "subcommands": [
         {
           "name": "accounts",
@@ -14061,7 +14061,7 @@
           "name": "status",
           "path": "setup status",
           "aliases": [],
-          "description": "Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.",
+          "description": "Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, and preferences.",
           "args": [],
           "options": [
             {
@@ -14272,26 +14272,6 @@
               "subcommands": []
             }
           ]
-        },
-        {
-          "name": "watchdog",
-          "path": "setup watchdog",
-          "aliases": [],
-          "description": "Choose the devices where the daemon watchdog pass runs.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
         }
       ]
     },
@@ -17096,331 +17076,6 @@
         }
       ],
       "subcommands": []
-    },
-    {
-      "name": "watchdog",
-      "path": "watchdog",
-      "aliases": [],
-      "description": "Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject \"Continue.\" — no menu-bar needed.",
-      "args": [],
-      "options": [
-        {
-          "flags": "--nudge",
-          "description": "Actually inject (default is a dry run that only reports what it would do)",
-          "long": "--nudge",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--watch",
-          "description": "Manual poll loop: run a tick every --interval (dry unless --nudge; the always-on path is `watchdog enable`)",
-          "long": "--watch",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--interval <dur>",
-          "description": "Poll interval in --watch mode (e.g. 30s, 1m)",
-          "long": "--interval",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "30s"
-        },
-        {
-          "flags": "--stall <dur>",
-          "description": "Idle time before a session counts as stalled",
-          "long": "--stall",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "5m"
-        },
-        {
-          "flags": "--cooldown <dur>",
-          "description": "Minimum time between nudges to the same session",
-          "long": "--cooldown",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "20m"
-        },
-        {
-          "flags": "--dormant <dur>",
-          "description": "Idle time after which a session is left alone (dormant)",
-          "long": "--dormant",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "1h"
-        },
-        {
-          "flags": "--text <text>",
-          "description": "Nudge text delivered into the terminal",
-          "long": "--text",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "Continue."
-        },
-        {
-          "flags": "--smart-agent <agent>",
-          "description": "Agent the watchdog decider runs as",
-          "long": "--smart-agent",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "claude"
-        },
-        {
-          "flags": "--allow-ghostty-focus",
-          "description": "Permit the coarse, focus-stealing Ghostty path (off by default)",
-          "long": "--allow-ghostty-focus",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--verbose",
-          "description": "Show healthy and non-actionable session inspections too",
-          "long": "--verbose",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Emit the tick result as JSON (for the menu-bar / scripts)",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# One tick, dry — see what it WOULD nudge and why (safe, no injection)\nagents watchdog\n\n# One tick, actually inject \"Continue.\" into stalled+addressable splits\nagents watchdog --nudge\n\n# Manual watch loop every 30s, tighter stall threshold (ad-hoc; dry unless --nudge)\nagents watchdog --watch --nudge --interval 30s --stall 60s --cooldown 5m\n\n# Machine-readable for the menu-bar\nagents watchdog --json\n\n# Turn on the daemon-owned watchdog pass (every three minutes)\nagents watchdog enable\n\n# Show device enablement, rotate config, and in-flight rotates\nagents watchdog status\n\n# Show what Watchdog decided and acted on during the last day\nagents watchdog history --since 24h\n\n# Follow one session's Watchdog decisions\nagents watchdog history <sessionId>\n\n# Leave one session detected-but-untouched\nagents watchdog policy <sessionId> handsoff\n\n# Opt out of in-place rotate only (nudging stays on)\nagents watchdog rotate off",
-      "notes": "Decision path: the watchdog is an AGENT, not a heuristic script. Every idle\nsession on this machine (its task + transcript tail) is handed to ONE\n'agents run --mode plan' call per tick, which judges each: idle-but-unfinished\n(was given a task, went quiet, not finished/handed off) -> NUDGE that drives\nit to finish; idle-and-done or genuinely-needs-human -> SKIP. The agent is a\ncustomizable 'watchdog' workflow (drop a WORKFLOW.md in project/user\nworkflows/ to override the prompt + model); absent one, the built-in prompt\nruns. Nothing is nudged when nothing is idle (no agent is spawned).\n\nDelivery (answer-router): a running agent is steered via its mailbox; a\nparked-on-question agent is answered into its EXACT split -- tmux / iTerm /\nan IDE integrated terminal (VS Codium / Cursor / VS Code) -- or re-entered\nvia resume when headless. A parked agent with no addressable rail (e.g.\nGhostty with no tmux) is flagged for the menu-bar and SKIPPED -- never a\nguessed or frontmost target.\n\nRotate: a stalled session whose tail shows a HARD account limit (\"You've\nhit your weekly limit - resets ...\") is ROTATED IN PLACE instead of nudged:\nthe tick gates on the same healthy-account selection 'agents run auto'\nmakes (zero healthy -> one skip event per cooldown window, terminal\nuntouched), injects the harness's exit sequence, relaunches\n'agents run auto --interactive --session-id <uuid>' in the SAME tab, waits\n(bounded, 60s) for the new TUI, then injects the resume replay for the old\nsession. On timeout the session is flagged and never blind-typed into; the\nflag says the terminal may sit at a bare shell and needs a manual\n'agents run auto'. A failed rotate is suppressed for 15m before retry.\nDefault ON; disable with 'agents watchdog rotate off' (writes\n'watchdog.rotate: off' to ~/.agents/agents.yaml; nudging stays on).\nState machine: ~/.agents/.cache/state/watchdog/rotate/<sessionId>.json.\n\nAlways-on: 'agents watchdog enable' enables one daemon-owned pass every three\nminutes on this device and reloads the daemon; 'off' disables it here.\nDefaults OFF. Per-session policy: off (ignore), keep (default), handsoff\n(detect + flag).\n\nState (tray-readable): ~/.agents/.cache/state/watchdog/{nudges,flags,last-tick}.json",
-      "subcommands": [
-        {
-          "name": "disable",
-          "path": "watchdog disable",
-          "aliases": [
-            "off"
-          ],
-          "description": "Disable the daemon watchdog pass on this device.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "enable",
-          "path": "watchdog enable",
-          "aliases": [
-            "on"
-          ],
-          "description": "Enable the daemon watchdog pass on this device.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "history",
-          "path": "watchdog history",
-          "aliases": [],
-          "description": "Show persisted Watchdog decisions and actions, newest first.",
-          "args": [
-            {
-              "name": "sessionId",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--limit <count>",
-              "description": "Maximum events to show",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "50"
-            },
-            {
-              "flags": "--since <duration>",
-              "description": "Only events within a duration such as 2h or 7d",
-              "long": "--since",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--all",
-              "description": "Include heartbeat tick events",
-              "long": "--all",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Emit safe structured history (transcript content is excluded)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "policy",
-          "path": "watchdog policy",
-          "aliases": [],
-          "description": "Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).",
-          "args": [
-            {
-              "name": "sessionId",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "policy",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rotate",
-          "path": "watchdog rotate",
-          "aliases": [],
-          "description": "Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). Rotate-only: nudging stays on — unlike `watchdog disable`, which disables the whole watchdog on this device.",
-          "args": [
-            {
-              "name": "state",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "status",
-          "path": "watchdog status",
-          "aliases": [],
-          "description": "Show whether the daemon watchdog pass is enabled and where state is written.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit status as JSON (for the menu-bar / scripts)",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "workflows",

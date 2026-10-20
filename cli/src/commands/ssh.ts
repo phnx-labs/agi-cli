@@ -1416,10 +1416,9 @@ function registerDevicesCommands(program: Command): void {
     examples: `
       agents devices config mac-mini                            # settings menu (TTY) / print config (piped)
       agents devices config mac-mini agents.max-concurrent 4    # cap concurrent agents on mac-mini
-      agents devices config mac-mini watchdog.enabled on        # nudge stalled sessions there
-      agents devices config mac-mini watchdog.enabled           # read the effective value back
-      agents devices config mac-mini watchdog.enabled --unset   # inherit the fleet default again
-      agents devices config --fleet watchdog.enabled on         # fleet-wide default (all devices)
+      agents devices config mac-mini auto-launch.enabled        # read the effective value back
+      agents devices config mac-mini auto-launch.enabled --unset # inherit the fleet default again
+      agents devices config --fleet auto-launch.enabled off     # fleet-wide default (all devices)
       agents devices config --fleet agents.max-concurrent 2     # every box caps at 2 unless it overrides
       agents devices config --fleet                             # print the fleet defaults layer
       agents devices config mac-mini notes "runs the releases"  # append an operator note
@@ -1437,7 +1436,7 @@ function registerDevicesCommands(program: Command): void {
       description (one line saying what the box is for — see
       'agents devices describe'; renders in the devices list tail),
       agents.max-concurrent, daemon.enabled,
-      watchdog.enabled, tmux.enabled, browser.remote-control,
+      tmux.enabled, browser.remote-control,
       browser.task-idle-minutes, browser.profile,
       notes, ssh.user, ssh.auth (key|password), ssh.bundle, ssh.bundle-key,
       ssh.identity-file, platform (windows|linux|macos|unknown),

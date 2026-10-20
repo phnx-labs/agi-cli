@@ -10,8 +10,6 @@ flowchart LR
   E --> S[Sessions and history]
   F[Fleet and placement] --> E
   T[Teams and workflows] --> E
-  A[Watchdog] --> E
-  S --> A
 ```
 
 ## Resources and resolution
@@ -61,10 +59,8 @@ can instantiate work. A subagent is a portable role definition that a capable ha
 can invoke. Separating them prevents declarative resources from becoming process
 supervisors and keeps every launched agent on the same execution path.
 
-## Watchdog and scheduled work
+## Scheduled work
 
-The watchdog advances unfinished sessions that have stopped progressing. It is a
-daemon-owned decision loop and submits work through the ordinary execution engine.
 The CLI does not schedule agent runs itself: recurring work is an OS cron job, systemd
 timer, or launchd agent that calls `agents run`.
 

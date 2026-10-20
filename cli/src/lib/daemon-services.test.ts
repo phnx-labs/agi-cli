@@ -39,11 +39,11 @@ describe('daemon-services', () => {
   });
 
   it('persists a disabled toggle and reads it back', () => {
-    setDaemonServiceEnabled('watchdog', false);
-    expect(isDaemonServiceEnabled('watchdog')).toBe(false);
+    setDaemonServiceEnabled('device-probe', false);
+    expect(isDaemonServiceEnabled('device-probe')).toBe(false);
 
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['watchdog']).toBe(false);
+    expect(cfg.services['device-probe']).toBe(false);
     expect(cfg.services['session-index']).toBe(true);
   });
 
@@ -54,15 +54,16 @@ describe('daemon-services', () => {
     expect(sessionIndex).toBeDefined();
     expect(sessionIndex!.enabled).toBe(false);
 
-    const watchdog = states.find((s) => s.id === 'watchdog');
-    expect(watchdog!.enabled).toBe(true);
+    const deviceProbe = states.find((s) => s.id === 'device-probe');
+    expect(deviceProbe!.enabled).toBe(true);
   });
 
   it('ignores unknown service ids without throwing', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'services:\n  watchdog: false\n  monitors: false\n  browser-ipc: false\n  scheduler: false\n  catchup: false\n  unknown-service: false\n', 'utf-8');
+    fs.writeFileSync(filePath, 'services:\n  device-probe: false\n  watchdog: false\n  monitors: false\n  browser-ipc: false\n  scheduler: false\n  catchup: false\n  unknown-service: false\n', 'utf-8');
     const cfg = readDaemonServicesConfig();
-    expect(cfg.services['watchdog']).toBe(false);
+    expect(cfg.services['device-probe']).toBe(false);
+    expect((cfg.services as Record<string, boolean>)['watchdog']).toBeUndefined();
     expect((cfg.services as Record<string, boolean>)['monitors']).toBeUndefined();
     expect((cfg.services as Record<string, boolean>)['browser-ipc']).toBeUndefined();
     expect((cfg.services as Record<string, boolean>)['scheduler']).toBeUndefined();
@@ -72,10 +73,10 @@ describe('daemon-services', () => {
 
   it('writeDaemonServicesConfig preserves extra top-level fields', () => {
     const filePath = getDaemonServicesConfigPath();
-    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  watchdog: false\n', 'utf-8');
-    setDaemonServiceEnabled('watchdog', true);
+    fs.writeFileSync(filePath, 'notes: "do not clobber"\nservices:\n  device-probe: false\n', 'utf-8');
+    setDaemonServiceEnabled('device-probe', true);
     const raw = fs.readFileSync(filePath, 'utf-8');
     expect(raw).toContain('notes: do not clobber');
-    expect(raw).toContain('watchdog: true');
+    expect(raw).toContain('device-probe: true');
   });
 });

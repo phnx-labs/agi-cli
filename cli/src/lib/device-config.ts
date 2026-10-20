@@ -228,19 +228,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'bool',
     defaultValue: true,
     description:
-      'Whether the daemon may run on this device at all (watchdog, session/usage sync, and the ' +
+      'Whether the daemon may run on this device at all (session/usage sync, the feed stream, and the ' +
       'other daemon services). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
-      'is set, including `feed watch`, `watchdog`, and `recordings`. ' +
+      'is set, including `feed watch` and `recordings`. ' +
       '`agents daemon start` still starts it explicitly.',
-  },
-  {
-    name: 'watchdog.enabled',
-    yamlKey: 'watchdogEnabled',
-    scope: 'device',
-    visibility: 'shared',
-    type: 'bool',
-    defaultValue: false,
-    description: 'Whether the daemon runs the watchdog pass on this device.',
   },
   {
     name: 'tmux.enabled',

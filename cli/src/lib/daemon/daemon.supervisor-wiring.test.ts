@@ -100,13 +100,13 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
   }, 20_000);
 
   const PERIODIC_SERVICE_IDS = [
-    'watchdog', 'device-probe', 'self-heal', 'state-dir-check',
+    'device-probe', 'self-heal', 'state-dir-check',
     'session-state', 'daemon-heartbeat', 'tmux-reap',
   ] as const;
 
   const ALL_SUPERVISED_SERVICE_IDS = [
     'session-state', 'account-state',
-    'account-auth', 'session-index', 'watchdog',
+    'account-auth', 'session-index',
     'device-probe', 'self-heal', 'self-update', 'auth-sync',
     'usage-sync', 'daemon-heartbeat', 'tmux-reap',
     'state-dir-check', 'attention-notify',
@@ -198,7 +198,6 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
 
     try {
       const expectedDisabledLines = [
-        'Watchdog service disabled',
         'Device-probe service disabled',
         'Self-heal service disabled',
         'State-dir self-check disabled',

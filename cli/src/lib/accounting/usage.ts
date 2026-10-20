@@ -253,7 +253,7 @@ interface UsageOptions {
    * `user:profile`, which `/api/oauth/usage` requires). OFF by default and set
    * ONLY by a foreground human `agents view` on a headed device (personal or
    * desktop; see USAGE-READ-2). Every background caller — daemon usage warm, auth-health
-   * probe, watchdog — leaves it unset, preserving the RUSH-1822 guarantee that
+   * probe — leaves it unset, preserving the RUSH-1822 guarantee that
    * an unattended loop never transmits the interactive login to Anthropic.
    */
   allowInteractiveLogin?: boolean;

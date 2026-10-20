@@ -63,7 +63,7 @@ count — and those facts are lost the moment the process exits unless we persis
 ### Cross-surface active-session cache (RUSH-2062)
 
 `session-cache.ts` is the daemon-warmed shared snapshot menubar / extension /
-watchdog / CLI read so they do not each re-fan-out a full gather. Each canonical
+CLI read so they do not each re-fan-out a full gather. Each canonical
 snapshot write also appends only changed rows/removals to the active-session
 journal. `agents ps watch --json` reads one startup snapshot and then tails
 that journal; watcher heartbeats never invoke another gather. Live status fields

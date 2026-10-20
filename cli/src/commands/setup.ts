@@ -23,7 +23,6 @@ import { registerSetupToolsCommand } from './setup-tools.js';
 import { registerSetupTermCommand, runTermWizard, isTermCliInstalled } from './setup-term.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupAccountsCommand, runAccountsSetupWizard } from './setup-accounts.js';
-import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
 import { registerSetupSessionBackupCommand } from './setup-session-backup.js';
 import { hasMintedSetupToken } from '../lib/auth-mint.js';
 import { registerAliasCommand } from './alias.js';
@@ -266,7 +265,7 @@ export async function ensureInitialized(program: Command): Promise<void> {
   await runSetup(program, { suppressFooter: true });
 }
 
-type SetupPhase = 'browser' | 'computer' | 'secrets' | 'term' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
+type SetupPhase = 'browser' | 'computer' | 'secrets' | 'term' | 'accounts' | 'fleet' | 'preferences';
 type SetupStatusState = 'ready' | 'missing' | 'n/a';
 interface SetupStatusRow {
   phase: 'core' | SetupPhase;
@@ -284,7 +283,6 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const secretsReady = fs.existsSync(setupSecretsPrefsPath());
   const termReady = isTermCliInstalled();
   const minted = hasMintedSetupToken();
-  const watchdogEnabled = getConfigValue('watchdog.enabled').value === true;
   const interactiveHost = getConfigValue('interactive.host').value;
   const defaultBrowser = getConfigValue('browser.profile').value;
   return [
@@ -295,7 +293,6 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
     { phase: 'term', state: termReady ? 'ready' : 'missing', detail: termReady ? 'installed' : 'not installed (accounts add/login spawn it)' },
     { phase: 'accounts', state: minted.ready ? 'ready' : 'missing', detail: minted.detail },
     { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },
-    { phase: 'watchdog', state: watchdogEnabled ? 'ready' : 'missing', detail: watchdogEnabled ? 'enabled on this device' : 'disabled on this device' },
     { phase: 'preferences', state: interactiveHost || defaultBrowser ? 'ready' : 'missing', detail: [interactiveHost && `host ${interactiveHost}`, defaultBrowser && `browser ${defaultBrowser}`].filter(Boolean).join(' · ') || 'interactive host and browser unset' },
   ];
 }
@@ -316,7 +313,6 @@ async function runSetupPhase(phase: SetupPhase): Promise<void> {
   else if (phase === 'term') await runTermWizard();
   else if (phase === 'accounts') await runAccountsSetupWizard();
   else if (phase === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
-  else if (phase === 'watchdog') await runWatchdogSetupWizard();
   else await runPreferencesStep();
 }
 
@@ -377,7 +373,6 @@ export function registerSetupCommand(program: Command): void {
   registerSetupSecretsCommand(setupCmd);
   registerSetupAccountsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
-  registerSetupWatchdogCommand(setupCmd);
   registerSetupSessionBackupCommand(setupCmd);
   registerAliasCommand(setupCmd);
   registerBetaCommands(setupCmd);
@@ -400,7 +395,7 @@ export function registerSetupCommand(program: Command): void {
   });
 
   setupCmd.command('status')
-    .description('Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.')
+    .description('Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, and preferences.')
     .option('--json', 'print machine-readable JSON')
     .option('--tool <name>', 'Read cached standalone tool status: browser, computer, secrets, term, or all')
     .option('--refresh', 'Explicitly refresh only the selected standalone tool health checks')
@@ -437,7 +432,6 @@ export function registerSetupCommand(program: Command): void {
       agents setup tools
       agents setup accounts
       agents setup fleet
-      agents setup watchdog
       agents setup alias add teams
       agents setup beta enable factory
     `,
@@ -455,7 +449,6 @@ export function registerSetupCommand(program: Command): void {
         agents setup term        # install the standalone term CLI (PTY engine agents accounts add/login spawn)
         agents setup accounts    # mint a Claude setup-token for unattended usage/probe
         agents setup fleet       # discover Tailscale devices + configure SSH access
-        agents setup watchdog    # choose which devices run the daemon watchdog pass
         agents setup alias add teams  # PATH shorthand: teams runs agents teams
         agents setup beta enable factory  # opt into preview features
 

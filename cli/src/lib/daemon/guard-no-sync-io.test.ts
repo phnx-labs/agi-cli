@@ -83,14 +83,6 @@ describe('daemon tick call sites use the async, non-blocking helper variants', (
   const daemonDir = __dirname;
   const read = (rel: string) => stripNonCode(fs.readFileSync(path.join(daemonDir, rel), 'utf-8')).join('\n');
 
-  it('watchdog tick reads config + emits asynchronously (not getConfigValue/emit)', () => {
-    const src = read('watchdog-service.ts');
-    expect(src).toMatch(/getConfigValueAsync\(/);
-    expect(src).toMatch(/emitAsync\(/);
-    expect(src).not.toMatch(/\bgetConfigValue\(/);
-    expect(src).not.toMatch(/\bemit\(/);
-  });
-
   it('usage-sync tick awaits the async own-state publish, whose writers are all the async variants', () => {
     expect(read('usage-sync-service.ts')).toMatch(/await publishOwnFleetState\(/);
     const helper = stripNonCode(fs.readFileSync(path.join(daemonDir, '..', 'accounting', 'usage-sync.ts'), 'utf-8')).join('\n');

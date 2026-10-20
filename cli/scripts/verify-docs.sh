@@ -26,7 +26,7 @@ else
   fail "AGENTS.md should link to docs/README.md"
 fi
 
-for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity" "Watchdog"; do
+for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity"; do
   if grep -qF "## $heading" docs/specifications.md; then
     log "✓ specifications.md retains $heading"
   else
@@ -49,14 +49,13 @@ for doc in architecture concepts resources execution sessions fleet orchestratio
   fi
 done
 
-for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity watchdog; do
+for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity; do
   case "$anchor" in
     coverage-inventory) heading='Coverage inventory' ;;
     sessions) heading='Sessions' ;;
     secrets) heading='Secrets' ;;
     agent-execution) heading='Agent execution' ;;
     scheduling--execution-singularity) heading='Scheduling & execution singularity' ;;
-    watchdog) heading='Watchdog' ;;
   esac
   if ! grep -qF "## $heading" docs/specifications.md; then
     fail "broken specifications anchor referenced by repo entry points: #$anchor"

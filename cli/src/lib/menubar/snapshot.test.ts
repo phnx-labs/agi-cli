@@ -7,7 +7,7 @@ import type { ActiveSession } from '../session/active.js';
 import { setActiveSessionsSnapshotPathForTest, setImmutableMemoPathForTest, writeActiveSessionsCache } from '../session/session-cache.js';
 import { closeDB } from '../session/db.js';
 import { emailDigest } from '../github/viewer.js';
-import { computeMenubarSnapshot, readLastWatchdogTick } from './snapshot.js';
+import { computeMenubarSnapshot } from './snapshot.js';
 
 process.env.AGENTS_SKIP_MIGRATION = '1';
 
@@ -18,25 +18,6 @@ afterEach(() => {
 });
 
 describe('menubar snapshot', () => {
-  it('reads the daemon-owned watchdog result without running a watchdog tick', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-'));
-    dirs.push(dir);
-    const tick = {
-      didNudge: true,
-      counts: { total: 2, stalled: 1, nudged: 1, unaddressable: 0, skipped: 1 },
-      outcomes: [],
-    };
-    fs.writeFileSync(path.join(dir, 'last-tick.json'), JSON.stringify(tick));
-
-    expect(readLastWatchdogTick(dir)).toEqual(tick);
-  });
-
-  it('returns null when the daemon has not published a watchdog result', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-snapshot-'));
-    dirs.push(dir);
-    expect(readLastWatchdogTick(dir)).toBeNull();
-  });
-
   it('list preferences ride menuListPreferences; menuPreferences stays scalar so a shipped menu still decodes it', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'menubar-prefs-home-'));
     dirs.push(home);

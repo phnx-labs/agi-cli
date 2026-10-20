@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { fileURLToPath } from 'url';
 
-import { detrackUserChangelog, migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateMenubarSentinelToConfig, migrateWatchdogSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
+import { detrackUserChangelog, migrateCliDirToClis, migrateExtrasExtrasToAgentsExtras, migrateKimiSubagentsToMarkdown, migrateMachineLocalBrowserProfileOutOfCentral, migrateMenubarSentinelToConfig, repairSelfReferentialBinShims, seedActiveCursorLoginPerVersion } from './migrate.js';
 import { execFileSync } from 'child_process';
 import { toPosix } from '../platform/index.js';
 import * as yaml from 'yaml';
@@ -305,34 +305,6 @@ describe('repairSelfReferentialBinShims', () => {
     withPath([realBinDir], () => repairSelfReferentialBinShims(versionsRoot, shimsDir));
 
     expect(fs.readlinkSync(binLink)).toBe(realBin);
-  });
-});
-
-describe('migrateWatchdogSentinelToConfig', () => {
-  it('no sentinel on disk -> no-op (never sets the config)', () => {
-    const dir = makeTempHistoryDir();
-    const sentinel = path.join(dir, 'enabled');
-    let called = false;
-    migrateWatchdogSentinelToConfig(sentinel, () => { called = true; });
-    expect(called).toBe(false);
-  });
-
-  it('sentinel present -> sets watchdog.enabled true and deletes the sentinel', () => {
-    const dir = makeTempHistoryDir();
-    const sentinel = path.join(dir, 'enabled');
-    fs.writeFileSync(sentinel, 'enabled\n');
-    const calls: boolean[] = [];
-    migrateWatchdogSentinelToConfig(sentinel, (enabled) => { calls.push(enabled); });
-    expect(calls).toEqual([true]);
-    expect(fs.existsSync(sentinel)).toBe(false);
-  });
-
-  it('leaves the sentinel in place if setting the config throws (retry next run)', () => {
-    const dir = makeTempHistoryDir();
-    const sentinel = path.join(dir, 'enabled');
-    fs.writeFileSync(sentinel, 'enabled\n');
-    migrateWatchdogSentinelToConfig(sentinel, () => { throw new Error('config unwritable'); });
-    expect(fs.existsSync(sentinel)).toBe(true);
   });
 });
 

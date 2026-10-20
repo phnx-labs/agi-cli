@@ -1,7 +1,7 @@
 # Daemon module
 
 The background process behind `agents __daemon-run` — the interval-driven
-services that keep sessions, watchdog checks, device probes,
+services that keep sessions, device probes,
 self-heal, and reapers running on each machine without a human polling them.
 
 ## Current architecture
@@ -34,7 +34,7 @@ detects HOME pointing away from the account's real home, unless the caller opted
 in with `AGENTS_ALLOW_TEST_DAEMON=1` (the deliberate test/e2e seam — a harness
 that sets it owns stopping what it starts). The explicit start commands
 (`daemon start`) fail loud; auto-start side effects
-(`feed watch`, `watchdog`, `recordings`) catch the refusal, state it,
+(`feed watch`, `recordings`) catch the refusal, state it,
 and leave the foreground command green — the same tier split as the auto-start
 circuit breaker. A daemon launched under a temp HOME
 keeps its own pid file there, so the real install's pid-file takeover can never
@@ -63,8 +63,7 @@ record of `null` for it.
   account-state service into `AccountUsageService` and `AccountAuthService`, two
   periodic services with INDEPENDENT circuit breakers so a run of usage-refresh
   failures parks only usage and never starves the slower auth refresh), `session-index`
-  (`session-index-service.ts`) (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
-  `device-probe` (`device-probe-service.ts`), `self-heal`
+  (`session-index-service.ts`) (all P1/P2), and — since P3 — `device-probe` (`device-probe-service.ts`), `self-heal`
   (`self-heal-service.ts`), and
   `state-dir-check` (`state-dir-check-service.ts`), `session-state`
   (`session-state-service.ts`), `feed-stream` (`feed-stream-service.ts`: owns the
@@ -190,13 +189,11 @@ record of `null` for it.
   (`daemon.ts` `log()` mirrors into `emit()`). The fix is `withFileLockAsync` +
   `emitAsync` (`fs-atomic.ts`, `feed/events.ts`): the async
   lock yields with a real timer between retries instead of `sleepSync`. `log()`'s
-  event mirror is now a fire-and-forget `emitAsync`; the watchdog tick emits with
-  `emitAsync`. The other UNCONDITIONAL every-tick halts are fixed the
+  event mirror is now a fire-and-forget `emitAsync`. The other UNCONDITIONAL every-tick halts are fixed the
   same way: **usage-sync + auth-sync** publish through
   `updateFleetSharedDeviceStateAsync` (was a `withFileLock` every tick,
   `fleet-shared-state.ts`); **keychain-reap**'s whole-process-table `ps` is now
-  `execFileBounded` (`secrets/reaper.ts`); **watchdog** reads `watchdog.enabled`
-  via `getConfigValueAsync`; **tmux-reap**'s per-process
+  `execFileBounded` (`secrets/reaper.ts`); **tmux-reap**'s per-process
   `/proc/<pid>/environ` scan uses `fs/promises` (`tmux/orphan-reap.ts`).
 
   The structural guard `guard-no-sync-io.test.ts` (1) scans every `*-service.ts`
@@ -214,7 +211,7 @@ record of `null` for it.
   whole-table-`ps` halts above: the tiny `writeHeartbeat` + `log()` daemon-log
   append (µs; `log()` must stay a sync primitive that flushes before a crash);
   `captureProcessStartTime`'s memoized per-helper
-  `ps` fingerprints (keychain-reap, a small pid subset); the opt-in watchdog per-session `statSync`/`readFileSync`; and
+  `ps` fingerprints (keychain-reap, a small pid subset); and
   `session-index`'s synchronous better-sqlite3 (a different class, not a fs/exec
   primitive). Converting these is a separate change and does not block the
   loop the way the halts this PR removed did.
@@ -341,7 +338,7 @@ Only 3 call sites actually use it: `cli/src/lib/session/session-cache.ts:78`
 and `cli/src/commands/sessions-picker.ts:142` / `:160`. Roughly 28 other
 files implement their own ad-hoc TTL constants plus disk-mirror files with
 little or no eviction (`fleet-status.ts`, `auth-health.ts`, `mailbox.ts`,
-`linear-cache.ts`, `devices/stats-cache.ts`, `session/presence.ts`,
+`linear-cache.ts`, `devices/stats-cache.ts`,
 and others) — so roughly 3 of ~31 cache-like constructs
 in this area route through the shared bounded cache. State this as it is:
 most daemon-adjacent caching has no shared eviction policy today.
@@ -404,7 +401,7 @@ health plus live `enable`/`disable`/`restart` for the supervised set over the
 existing SIGHUP reload path (P4); and the remaining 5 interval-driven
 services — `watchdog`, `device-probe`, `self-heal`, `keychain-reap`,
 `state-dir-check` — migrated onto the supervisor too (P3), bringing the
-supervised total to 10. PHNX-3265 moved live-session publishing and webhook
+supervised total to 10 (`watchdog` was later deleted, PHNX-4439). PHNX-3265 moved live-session publishing and webhook
 ingress plus every fixed-cadence maintenance loop onto the same supervisor,
 and fixed manual periodic restarts so they
 replace, rather than duplicate, the timer. PHNX-3695 added `self-update` as a

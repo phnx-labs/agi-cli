@@ -1,6 +1,6 @@
 # Automation
 
-The daemon is the sole scheduler for watchdog passes and periodic maintenance. UI clients
+The daemon is the sole scheduler for periodic maintenance. UI clients
 may request an action or render state; they never own an acting timer.
 
 ```mermaid
@@ -27,10 +27,3 @@ isolation, account rotation, and session indexing as a run started by hand. A jo
 drains shared input (a tracker, a PR queue) belongs on one device only, per
 [§Scheduling & execution singularity](specifications.md#scheduling--execution-singularity)
 SING-9.
-
-## Watchdog
-
-The watchdog reads fleet progress, classifies non-progressing unfinished sessions, asks a
-real decider for an action, delivers to the exact session, and records confirmation. Hard
-account limits may rotate in place, preserving tab and conversation context. Detection is
-fleet-wide; delivery remains local to the owning device.

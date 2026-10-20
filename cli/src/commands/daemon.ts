@@ -536,7 +536,7 @@ async function runDoctor(opts: { json?: boolean }): Promise<void> {
 export function registerDaemonCommand(program: Command): void {
   const cmd = program
     .command('daemon')
-    .description('The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.')
+    .description('The always-on daemon: session index, feed stream, session/usage sync, and account health. Bare `agents daemon` shows status.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runStatus({ json: command.optsWithGlobals().json === true });
@@ -567,7 +567,7 @@ export function registerDaemonCommand(program: Command): void {
 
       # Toggle or restart a service live — applies without a daemon restart
       # for supervisor-managed services (account-state, session-index,
-      # watchdog, device-probe, self-heal, state-dir-check)
+      # device-probe, self-heal, state-dir-check)
       agents daemon services disable account-state
       agents daemon services enable account-state
       agents daemon services restart account-state
@@ -586,8 +586,8 @@ export function registerDaemonCommand(program: Command): void {
       agents daemon index backfill tools --fleet
     `,
     notes: `
-      'disable' is a persisted kill switch: it stops feed watch,
-      watchdog, and recordings from auto-starting
+      'disable' is a persisted kill switch: it stops feed watch
+      and recordings from auto-starting
       the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).
       'agents daemon start' still starts it explicitly, same as
       'systemctl start' on a disabled unit.
@@ -672,7 +672,7 @@ export function registerDaemonCommand(program: Command): void {
     .description('Clear the daemon.enabled kill switch. Does not start the daemon by itself.')
     .action(() => {
       setConfigValue('daemon.enabled', true);
-      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (feed watch, watchdog, recordings) may bring the daemon up again'));
+      console.log(chalk.green('daemon.enabled: true') + chalk.gray(' — auto-start surfaces (feed watch, recordings) may bring the daemon up again'));
     });
 
   cmd.command('disable')
