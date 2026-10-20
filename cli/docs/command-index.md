@@ -265,7 +265,7 @@ agents lead tool prs merge           Queue for Confirm: agents projects prs merg
 agents lead tool prs ready           Queue for Confirm: agents projects prs ready on one PR of this project
 agents lead tool prs rerun           Queue for Confirm: agents projects prs rerun on one PR of this project
 agents lead tool remember <note...>  Save one short note to the Lead's memory.md
-agents lead tool roster              List live sessions for this project (or --project) from the Lead host's live feed
+agents lead tool roster              List live sessions for this project (or --project) from the Lead host's live feed; --session shows one session's last two turns
 agents lead tool send <text...>      Queue for Confirm: type a message into a running session of this project (slash commands are refused)
 agents lead tool start <task...>     Queue for Confirm: start an agent in edit mode on a task with no ticket
 agents lead tool stop                Queue for Confirm: stop a session; mints a confirm token, never stops anything
