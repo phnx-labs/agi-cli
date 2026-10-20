@@ -53,7 +53,6 @@ export async function toolRoster(ctx: LeadToolContext, project?: string): Promis
 
 const SESSION_TURNS_CHARS = 12_000;
 
-/** One session's last two turns of conversation (the owner's and the agent's words, no tool calls). */
 export async function toolRosterSession(ctx: LeadToolContext, session: string): Promise<string> {
   assertSessionId(session);
   const reply = await hostRequest(ctx.project, { op: 'resolve', session });

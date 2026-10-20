@@ -174,7 +174,6 @@ describe('a time-based inference expires from the transcript stamps, not the fil
     const file = transcript('claude-prose-question.jsonl', '2026-09-10T10:00:08.000Z');
     const askedMs = Date.parse('2026-09-10T10:00:06.000Z');
 
-    // The transcript alone no longer guesses from the last line.
     const unjudged = liveRow(PROSE, file, askedMs + 10 * 60_000);
     expect(reconcileAttention({ session: unjudged, nowMs: askedMs + 10 * 60_000 })).toBeUndefined();
 

@@ -99,7 +99,6 @@ export class FeedSessionProjection {
     return result;
   }
 
-  /** Re-emit the asks whose Lead draft changed; nothing else moved. */
   redraft(): FeedWatchEnvelope[] {
     const result: FeedWatchEnvelope[] = [];
     this.upsertChanged(this.currentAttention(), new Set(), result);

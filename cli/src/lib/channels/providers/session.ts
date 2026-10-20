@@ -22,7 +22,6 @@ export const sessionProvider: ChannelProvider = {
     } else {
       const resolved = await resolveLiveInjectTarget(id);
       const sessionId = resolved.session?.sessionId;
-      // An editor tab, or a terminal this machine cannot address: the AGI EXT window that binds the session types it.
       if (sessionId && !resolved.target && resolved.session && typedByEditorTab(resolved.session)) {
         if (opts.dryRun) return { ok: true, channel: SESSION_CHANNEL, id, backend: 'tab', writes: 0, confirmed: false };
         const res = await deliverToTab({

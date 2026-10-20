@@ -25,13 +25,10 @@ export interface DoneVerdict {
 
 const VERDICT_STATES = new Set(['done', 'open', 'unchecked']);
 
-/** Whose move it is after the last turn, from the Stop hook's model judge
- * (`stop/08-stop-judge.py` in the companion `.agents` repo). */
 export interface TurnVerdict {
   kind: 'asks' | 'waiting' | 'not_done' | 'done' | 'unjudged';
   quote: string;
   choices: string[];
-  /** Epoch ms the judge wrote it; a transcript event after this makes it stale. */
   atMs: number;
 }
 
