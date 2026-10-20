@@ -113,7 +113,7 @@ describe('device-scope keys (per-device doc config:)', () => {
     unsetConfigValue('agents.max-concurrent', { device: 'mac-mini' });
     expect(getConfigValue('agents.max-concurrent', { device: 'mac-mini' }).value).toBeUndefined();
     expect(fs.existsSync(deviceDocPath('mac-mini'))).toBe(false);
-    unsetConfigValue('watchdog.enabled', { device: 'ghost' });
+    unsetConfigValue('auto-launch.preferred', { device: 'ghost' });
     expect(fs.existsSync(deviceDocPath('ghost'))).toBe(false);
   });
 
@@ -121,11 +121,11 @@ describe('device-scope keys (per-device doc config:)', () => {
     const { setConfigValue } = await freshModules();
     writeDoc('mac-mini', 'routines:\n  - watchdog\n');
 
-    setConfigValue('watchdog.enabled', false, { device: 'mac-mini' });
+    setConfigValue('auto-launch.preferred', false, { device: 'mac-mini' });
 
     const doc = readDoc('mac-mini');
     expect(doc).toContain('- watchdog');
-    expect(doc).toContain('watchdogEnabled: false');
+    expect(doc).toContain('autoLaunchPreferred: false');
   });
 });
 
@@ -206,17 +206,17 @@ describe('fleet-defaults layer (central fleet.defaults.config)', () => {
   it('layering: built-in default < fleet default < device value', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
 
-    expect(getConfigValue('watchdog.enabled')).toMatchObject({ value: undefined, source: 'default' });
+    expect(getConfigValue('auto-launch.preferred')).toMatchObject({ value: undefined, source: 'default' });
 
-    setConfigValue('watchdog.enabled', false, { fleet: true });
-    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
+    setConfigValue('auto-launch.preferred', false, { fleet: true });
+    expect(getConfigValue('auto-launch.preferred', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
 
-    setConfigValue('watchdog.enabled', true, { device: 'mac-mini' });
-    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: true, source: 'device' });
-    expect(getConfigValue('watchdog.enabled', { device: 'zion' })).toMatchObject({ value: false, source: 'fleet' });
+    setConfigValue('auto-launch.preferred', true, { device: 'mac-mini' });
+    expect(getConfigValue('auto-launch.preferred', { device: 'mac-mini' })).toMatchObject({ value: true, source: 'device' });
+    expect(getConfigValue('auto-launch.preferred', { device: 'zion' })).toMatchObject({ value: false, source: 'fleet' });
 
-    unsetConfigValue('watchdog.enabled', { device: 'mac-mini' });
-    expect(getConfigValue('watchdog.enabled', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
+    unsetConfigValue('auto-launch.preferred', { device: 'mac-mini' });
+    expect(getConfigValue('auto-launch.preferred', { device: 'mac-mini' })).toMatchObject({ value: false, source: 'fleet' });
   });
 
   it('a pre-existing fleet.devices map survives a --fleet defaults write', async () => {
@@ -464,7 +464,7 @@ describe('listConfig', () => {
     const { listConfig, setConfigValue } = await freshModules();
     setConfigValue('interactive.host', 'zion');
     setConfigValue('daemon.enabled', true);
-    setConfigValue('watchdog.enabled', false, { fleet: true });
+    setConfigValue('auto-launch.preferred', false, { fleet: true });
 
     const entries = listConfig();
     const byName = Object.fromEntries(entries.map((e) => [e.spec.name, e]));
@@ -539,11 +539,10 @@ describe('listConfig', () => {
       'summarizer.model',
       'tmux.enabled',
       'updates.auto',
-      'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', source: 'user' });
     expect(byName['daemon.enabled']).toMatchObject({ value: true, source: 'device' });
-    expect(byName['watchdog.enabled']).toMatchObject({ value: false, source: 'fleet' });
+    expect(byName['auto-launch.preferred']).toMatchObject({ value: false, source: 'fleet' });
     expect(byName['notes']).toMatchObject({ value: undefined, source: 'default' });
   });
 });

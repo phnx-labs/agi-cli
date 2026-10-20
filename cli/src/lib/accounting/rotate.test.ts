@@ -1301,7 +1301,7 @@ describe('pickHarnessWeighted (run auto — the cross-harness layer, RUSH-2132)'
   });
 });
 
-describe('formatNoHealthyAccountError — the watchdog contract (RUSH-2132)', () => {
+describe('formatNoHealthyAccountError — the no-healthy-account contract (RUSH-2132)', () => {
   const NOW = Date.UTC(2026, 7, 3, 7, 0);
   const resetAt = new Date(NOW + 2 * 3600 * 1000);
   const cappedSnap: UsageSnapshot = {

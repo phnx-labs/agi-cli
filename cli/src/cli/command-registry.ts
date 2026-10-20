@@ -40,7 +40,6 @@ const loadRefreshRules: ModuleLoader = async () => (await import('../commands/re
 const loadFactory: ModuleLoader = async () => (await import('../commands/factory.js')).registerFactoryCommands;
 const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 const loadTrace: ModuleLoader = async () => (await import('../commands/sessions-trace.js')).registerTraceCommand;
-const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
 const loadEvents: ModuleLoader = async () => (await import('../commands/events.js')).registerEventsCommand;
 const loadSsh: ModuleLoader = async () => (await import('../commands/ssh.js')).registerSshCommands;
 const loadRepo: ModuleLoader = async () => (await import('../commands/repo.js')).registerRepoCommands;
@@ -102,7 +101,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   factory: [loadFactory],
   insights: [loadInsights],
   trace: [loadTrace],
-  watchdog: [loadWatchdog],
   events: [loadEvents],
   ssh: [loadSsh],
   devices: [loadSsh],

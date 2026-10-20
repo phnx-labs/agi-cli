@@ -31,8 +31,7 @@ driving each one to a **landed** result (merged, shipped, verified), not just st
 Starting an agent is the easy part. The hard part is that agents stall: they stop
 mid-task, ask a question and idle, make a statement ("I won't continue…") and sit, fail
 to reach for the browser or a secret they already have, or hand work back instead of
-finishing it. Every reliability surface in this repo — the daemon **watchdog**,
-`needs-you` detection, **resume/restore**, session-status truth, and the AGI EXT
+finishing it. Every reliability surface in this repo — `needs-you` detection, **resume/restore**, session-status truth, and the AGI EXT
 **Fleet** panel (in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)) —
 exists for one job: notice an agent that has stopped making progress
 and get it moving again, so work lands end to end without a human babysitting every
@@ -115,7 +114,7 @@ and [`architecture.md`](cli/docs/architecture.md).
   ([phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext))
   is a **consumer**: the VS Code UI layer projects `agents ps watch --json` and
   invokes the owning CLI nouns for one-shot reads and actions. It holds presentation
-  state, not duplicate session/device/team/ticket/watchdog mechanisms. Fix a mechanism
+  state, not duplicate session/device/team/ticket mechanisms. Fix a mechanism
   in the CLI and every consumer benefits.
 - **One scheduler, one executor — fleet-affecting features never run twice.** Anything
   that can *act* on this machine or another fleet device — launch/resume/kill a session,
@@ -349,7 +348,7 @@ Hard rules:
   dangling. `install.sh` publishes `agents-dev` / `ag-dev` instead, and removes
   any such shadow link an older revision of it left behind.
 - **The daemon is shared.** `install.sh` leaves it on production code; pass
-  `--bounce-daemon` only when you specifically need the watchdog, feed stream, or
+  `--bounce-daemon` only when you specifically need the feed stream or
   session sync running your build — that affects the user's everyday
   `agents`, not just `agents-dev`. (The secrets broker is a separate process the
   standalone `secrets` CLI owns, PHNX-3989, and the browser IPC service the
@@ -591,8 +590,7 @@ NOT silently deviate from — [`cli/docs/specifications.md`](cli/docs/specificat
 (§[Sessions](cli/docs/specifications.md#sessions) ·
 §[Secrets](cli/docs/specifications.md#secrets) ·
 §[Agent execution](cli/docs/specifications.md#agent-execution) ·
-§[Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity) ·
-§[Watchdog](cli/docs/specifications.md#watchdog)). Its
+§[Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity)). Its
 [coverage inventory](cli/docs/specifications.md#coverage-inventory) names every
 other command group as documented-elsewhere or unspecified — check it before assuming
 a surface has a contract.

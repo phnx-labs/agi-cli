@@ -56,7 +56,7 @@ agents setup tools                     # install/upgrade the standalone sessions
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and owner notifications. `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, term, fleet, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` unlocks the hosted surfaces — [team spaces](#sign-in) and owner notifications. `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, term, fleet, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 The command surface teaches setup through `agents setup` and group-level `--help`.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
@@ -495,7 +495,7 @@ Both are agent-agnostic -- they route through the same `agents run <agent> --res
 Running agents aren't fire-and-forget. Steer them mid-run without opening their terminals.
 
 <p align="center">
-  <img src="assets/fleet-control.svg" alt="agents ps infers live state (working, waiting, idle); watchdog injects Continue into the exact stalled split; message reaches a running agent at its next tool call" width="100%" />
+  <img src="assets/fleet-control.svg" alt="agents ps infers live state (working, waiting, idle); feed answer replies to an open ask; message reaches a running agent at its next tool call" width="100%" />
 </p>
 
 ### Message a running agent
@@ -563,19 +563,6 @@ with isolated settings and can only call fixed-shape `agents lead tool` commands
 start, send, stop, linear, remember). It cannot edit files, and a stop runs only through a confirm token. A per-project host keeps it warm across callers, so a
 follow-up turn skips the harness boot. `--json` streams the NDJSON events the AGI EXT and bubble
 clients render. Reference: [cli/docs/lead.md](cli/docs/lead.md).
-
-### Auto-nudge stalls
-
-```bash
-agents watchdog            # one tick, dry run — reports what it WOULD nudge and why
-agents watchdog --verbose  # include healthy/non-actionable session inspections
-agents watchdog --nudge    # actually inject "Continue." into the stalled split
-agents watchdog --watch    # daemon loop: a tick every --interval
-```
-
-`agents watchdog` detects a stalled session, resolves the *exact* terminal split it lives in (tmux, iTerm, VSCodium, or a raw pty), and injects a nudge -- `Continue.` by default, or set `--text`. Its timestamped default output shows attention-worthy sessions with their agent, host app, machine, project, activity, age, path, latest preview, and decision reason; `--verbose` restores healthy/non-actionable inspections. It's dry by default; `--nudge` acts on a single tick. `agents watchdog enable|disable` controls the device-local daemon pass, which runs once every three minutes. Steer a single run with `agents watchdog policy <id> off | keep | handsoff`.
-
-A stalled session whose tail shows a hard account limit ("You've hit your weekly limit · resets …") is **rotated in place** instead of nudged: the watchdog gates on the same healthy-account selection `agents run auto` makes (zero healthy → one skip event per cooldown window, terminal untouched), injects the harness's exit sequence, relaunches `agents run auto --interactive --session-id <uuid>` in the *same* tab, then replays the old session's resume once the new TUI is live. Default on; `agents watchdog rotate off` disables it (nudging stays on).
 
 ---
 
@@ -1316,7 +1303,7 @@ secrets list   # EXPIRING column flags secrets due in the next 30 days
 
 ## Daemon
 
-The watchdog pass, the session index, the feed stream, and usage/auth sync all run
+The session index, the feed stream, and usage/auth sync all run
 inside one always-on daemon per device. `agents daemon` is its runtime surface:
 
 ```bash
@@ -1331,10 +1318,10 @@ agents daemon disable        # persist daemon.enabled: false -- nothing auto-sta
 agents daemon enable         # clear the kill switch
 
 agents daemon reload                        # SIGHUP -- reload service toggles and the log level, no restart
-agents daemon services                      # health of every hosted service (watchdog, session-index, ...)
+agents daemon services                      # health of every hosted service (session-index, feed-stream, ...)
 agents daemon services list                 # every toggleable service and its current on/off state
 agents daemon services enable recordings
-agents daemon services disable watchdog     # stop the watchdog pass without stopping the daemon
+agents daemon services disable device-probe # stop the device probe without stopping the daemon
 agents daemon logs -f --level warn --since 1h
 agents daemon logs --level error --since 1h # each restart, with what was running when it happened
 agents daemon logs level debug              # trace every tick and slow section, live; `level info` turns it off
@@ -1348,7 +1335,7 @@ agents daemon index backfill tools --fleet  # one-shot historical parse (also: r
 `agents daemon index` is foreground maintenance of the index the daemon's
 session-index service keeps current; it never starts or restarts the daemon.
 
-Each hosted responsibility (watchdog, recordings, device probe,
+Each hosted responsibility (recordings, device probe,
 self-heal, self-update, account-state refresh, state-dir checks) is an
 independent toggle in `~/.agents/daemon/services.yaml`.
 Self-update checks npm on its own schedule, installs + verifies a newer
@@ -1366,7 +1353,7 @@ the standalone `browser` CLI runs its own (`browser stop --service`).
 
 The CLI has no job scheduler: schedule recurring agent work with OS cron, a
 systemd timer, or launchd calling `agents run`. `disable` is a device-local kill
-switch: with it set, `agents feed watch`, `agents watchdog`, and
+switch: with it set, `agents feed watch` and
 `agents recordings` stop auto-starting the daemon, mirroring
 `systemctl disable` -- `agents daemon start` still works as the explicit
 override.

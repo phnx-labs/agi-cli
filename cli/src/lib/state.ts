@@ -572,7 +572,6 @@ const CENTRAL_META_KEYS = [
   'accounts',
   'run',
   'model',
-  'watchdog',
   'lease',
   'secrets',
   'budget',

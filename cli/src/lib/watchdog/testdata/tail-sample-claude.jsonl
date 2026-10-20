@@ -1,5 +1,0 @@
-{"type":"user","message":{"content":[{"type":"text","text":"port the watchdog into agents-cli"}]}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"Reading the reference files now."}]}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"watchdog.ts"}}]}}
-{"type":"user","message":{"content":[{"type":"tool_result","content":"...file contents..."}]}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"I will write the module and run the tests next."}]}}

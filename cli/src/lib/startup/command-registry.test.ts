@@ -81,7 +81,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     const program = configureRootCommand(new Command(), 'agents', '0.0.0');
     await registerAllCommands(program);
     const names = program.commands.map((command) => command.name());
-    expect(names.length).toBeGreaterThan(50);
+    expect(names.length).toBeGreaterThan(45);
     expect(names).toContain('ssh');
     expect(names).toContain('repos');
     expect(names).toContain('ps');

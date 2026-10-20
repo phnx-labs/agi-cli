@@ -430,7 +430,7 @@ Subs = leaf subcommands. cmd = non-test lines in the noun's command modules. lib
 | menubar | 5 | 280 | 1,776 | 11 | 5 | N | keep |
 | skills | 4 | 732 | 1,006 | 11 | 4 | N | keep |
 | permissions | 4 | 898 | 2,867 | 10 | 6 | N | keep |
-| watchdog | 6 | 429 | 2,575 | 10 | 5 | Y | keep |
+| watchdog | 6 | 429 | 2,575 | 10 | 5 | Y | deleted (PHNX-4439): replaced by the Stop-hook done check and the Lead's drafted reply |
 | models | 5 | 421 | 1,743 | 9 | 6 | N | fold into harness |
 | send | 0 | 236 | 2,571 | 7 | 6 | Y | keep; absorbs message, notify, mailboxes, humans |
 | harness | 7 | 1,749 | 2,073 | 6 | 4 | N | keep; absorbs route, models, modes |

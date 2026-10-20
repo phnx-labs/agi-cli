@@ -132,7 +132,6 @@ export type DeviceConfigProperty =
   | 'role'
   | 'max-agents'
   | 'daemon'
-  | 'watchdog'
   | 'tmux'
   | 'browser.remote-control'
   | 'browser.task-idle-minutes'
@@ -146,7 +145,6 @@ const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
   'role',
   'max-agents',
   'daemon',
-  'watchdog',
   'tmux',
   'browser.remote-control',
   'browser.task-idle-minutes',
@@ -249,7 +247,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(role|max-agents|daemon|watchdog|tmux|notes|formFactor|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer|computer\.host)$/,
+    /^devices\.(.+)\.(role|max-agents|daemon|tmux|notes|formFactor|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer|computer\.host)$/,
   );
   if (deviceMatch) {
     return {
@@ -371,8 +369,6 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'agents.max-concurrent';
     case 'daemon':
       return 'daemon.enabled';
-    case 'watchdog':
-      return 'watchdog.enabled';
     case 'tmux':
       return 'tmux.enabled';
     case 'browser.remote-control':

@@ -11,7 +11,6 @@ export type DaemonServiceId =
   | 'self-update'
   | 'account-state'
   | 'account-auth'
-  | 'watchdog'
   | 'device-probe'
   | 'state-dir-check'
   | 'session-index'
@@ -54,11 +53,6 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'account-auth',
     title: 'Account auth refresh',
     description: 'Publishes this host\'s fleet-status row and refreshes auth health on its own slower tick (PHNX-3608: independent circuit breaker from account-state).',
-  },
-  {
-    id: 'watchdog',
-    title: 'Watchdog',
-    description: 'Nudges stalled agent sessions on this host when opted in via watchdog.enabled.',
   },
   {
     id: 'device-probe',

@@ -48,16 +48,16 @@ describe('daemon log levels and structured fields', () => {
 
   it('stores the level in services.yaml without touching the service toggles', () => {
     fs.mkdirSync(process.env.AGENTS_DAEMON_CONFIG_DIR!, { recursive: true });
-    fs.writeFileSync(getDaemonServicesConfigPath(), 'services:\n  watchdog: false\n');
+    fs.writeFileSync(getDaemonServicesConfigPath(), 'services:\n  device-probe: false\n');
     expect(readDaemonLogLevel()).toBe('INFO');
     writeDaemonLogLevel('DEBUG');
     expect(readDaemonLogLevel()).toBe('DEBUG');
-    expect(fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8')).toMatch(/watchdog: false[\s\S]*logLevel: debug/);
+    expect(fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8')).toMatch(/device-probe: false[\s\S]*logLevel: debug/);
   });
 
   it('refuses to set the level over a services.yaml it cannot parse, leaving the file untouched', () => {
     fs.mkdirSync(process.env.AGENTS_DAEMON_CONFIG_DIR!, { recursive: true });
-    const broken = 'services:\n  watchdog: false\n  : [unclosed\n';
+    const broken = 'services:\n  device-probe: false\n  : [unclosed\n';
     fs.writeFileSync(getDaemonServicesConfigPath(), broken);
     expect(() => writeDaemonLogLevel('DEBUG')).toThrow();
     expect(fs.readFileSync(getDaemonServicesConfigPath(), 'utf-8')).toBe(broken);

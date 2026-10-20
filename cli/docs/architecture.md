@@ -13,7 +13,7 @@ flowchart TB
   CLI --> EXEC[Execution engine]
   CLI --> SES[Session history]
   CLI --> FLEET[Fleet transport]
-  D[agents daemon] --> AUTO[Scheduler and watchdog]
+  D[agents daemon] --> AUTO[Periodic services]
   D --> RM[Session index and feed stream]
   AUTO --> EXEC
   EXEC --> H[Agent harnesses]
@@ -26,8 +26,8 @@ flowchart TB
 ## Process boundaries
 
 The one-shot CLI is the public control surface and composition root. The daemon owns
-only responsibilities that require continuity across invocations: scheduling, watchdog
-decisions, usage refresh, and read-model publication. The secrets broker and the browser
+only responsibilities that require continuity across invocations: periodic services,
+usage refresh, and read-model publication. The secrets broker and the browser
 IPC service belong to the standalone `secrets` and `browser` CLIs, not this daemon.
 Harnesses remain separate processes with native storage and authentication.
 

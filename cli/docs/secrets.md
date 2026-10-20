@@ -95,7 +95,7 @@ being silently ignored by usage/probe (SEC-GAP-3).
 **The usage-read credential is role-gated (USAGE-READ-1/2).** By default a
 usage read resolves only this file-based setup-token, never the interactive
 login (RUSH-1822) — the guarantee every background caller (daemon usage warm,
-auth-health probe, watchdog) keeps, since the fleet-logout revocation came from
+auth-health probe) keeps, since the fleet-logout revocation came from
 an unattended loop firing the interactive token at Anthropic. The setup-token
 itself lacks the `user:profile` scope a usage read requires (RUSH-2392), so on
 a `worker`/unmarked device — or any `--json` or piped reader — an account

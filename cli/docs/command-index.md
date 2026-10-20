@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).
 
-_45 command groups · 342 commands._
+_44 command groups · 334 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -85,10 +85,10 @@ agents config set <key> <value>          Set a config key
 agents config unset <key>                Unset a config key (restore default behavior)
 ```
 
-## daemon: The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.
+## daemon: The always-on daemon: session index, feed stream, session/usage sync, and account health. Bare `agents daemon` shows status.
 
 ```
-agents daemon                             The always-on daemon: watchdog, session/usage sync, and account health. Bare `agents daemon` shows status.
+agents daemon                             The always-on daemon: session index, feed stream, session/usage sync, and account health. Bare `agents daemon` shows status.
 agents daemon disable                     Persist daemon.enabled: false — nothing auto-starts the daemon until re-enabled. Does not stop a running daemon.
 agents daemon doctor                      One-shot health check: identity, duplicates, hosted services. Non-zero exit on problems.
 agents daemon enable                      Clear the daemon.enabled kill switch. Does not start the daemon by itself.
@@ -460,14 +460,13 @@ agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Install the standalone `secrets` CLI if missing, then run its `secrets migrate` onboarding.
 agents setup session-backup                   (operator) Provision the managed session-backup Worker + R2 bucket — NOT a per-user step; signing in with `agents auth login` backs sessions up with zero setup
-agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, watchdog, and preferences.
+agents setup status                           Show setup readiness for core, browser, computer, secrets, term, accounts, fleet, and preferences.
 agents setup term                             Install the standalone `term` CLI (the PTY engine `agents accounts add`/`login` spawn) if missing.
 agents setup tools                            Install or upgrade the standalone sessions, browser, secrets, computer, and term CLIs to the versions this release pins
 agents setup url-scheme                       Register/unregister/status the agents:// OS URL-scheme handler for artifact session deep links.
 agents setup url-scheme register              Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents setup url-scheme status                Report whether the agents:// URL scheme handler is registered.
 agents setup url-scheme unregister            Remove the agents:// URL scheme handler.
-agents setup watchdog                         Choose the devices where the daemon watchdog pass runs.
 ```
 
 ## skills: Add domain-specific capabilities to agents via packaged SKILL.md files
@@ -558,18 +557,6 @@ agents use <agent> [version]  Switch the active version for an agent. This is th
 
 ```
 agents view [agent]  Show your agents, connected accounts, and usage.
-```
-
-## watchdog: Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.
-
-```
-agents watchdog                              Auto-nudge stalled agent terminals: detect stalls, resolve the exact split, inject "Continue." — no menu-bar needed.
-agents watchdog disable                      Disable the daemon watchdog pass on this device.
-agents watchdog enable                       Enable the daemon watchdog pass on this device.
-agents watchdog history [sessionId]          Show persisted Watchdog decisions and actions, newest first.
-agents watchdog policy <sessionId> <policy>  Set per-session policy: off (ignore) | keep (default) | handsoff (detect + flag, never inject).
-agents watchdog rotate <state>               Turn in-place rotate of rate-limited sessions on|off (watchdog.rotate in agents.yaml). Rotate-only: nudging stays on — unlike `watchdog disable`, which disables the whole watchdog on this device.
-agents watchdog status                       Show whether the daemon watchdog pass is enabled and where state is written.
 ```
 
 ## workflows: Manage multi-agent pipeline workflows (WORKFLOW.md bundles)

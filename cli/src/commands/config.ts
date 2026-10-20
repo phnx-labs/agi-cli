@@ -116,7 +116,6 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
           }
           return Number.parseInt(raw.trim(), 10);
         case 'daemon':
-        case 'watchdog':
         case 'tmux':
         case 'browser.remote-control':
           return parseBool(raw, key);
@@ -426,9 +425,6 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         break;
       case 'daemon.enabled':
         key = `${prefix}daemon`;
-        break;
-      case 'watchdog.enabled':
-        key = `${prefix}watchdog`;
         break;
       case 'tmux.enabled':
         key = `${prefix}tmux`;

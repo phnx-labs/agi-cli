@@ -205,7 +205,7 @@ if [[ -z "${CI:-}" && "${AGENTS_NO_HEAL:-}" != "1" && "$BOUNCE_DAEMON" == true ]
     ' || true
   fi
 elif [[ -z "${CI:-}" ]]; then
-  dim "  Shared daemon left on production code (watchdog, feed stream, session sync, and more)."
+  dim "  Shared daemon left on production code (feed stream, session sync, and more)."
   dim "  Pass --bounce-daemon to point it at this dev build -- that changes what your"
   dim "  everyday 'agents' talks to, not just agents$DEV_SUFFIX."
 fi
