@@ -58,6 +58,9 @@ export function buildSessionCreateBody(options: DispatchOptions): Record<string,
   if (repos.length > 1) {
     throw new Error(`Rush Cloud runs one repository per session; got ${repos.length} (${repos.join(', ')}). Dispatch one per repository.`);
   }
+  if (options.branch && repos.length === 0) {
+    throw new Error('--branch needs --repo: Rush Cloud starts a branch only inside a repository.');
+  }
   if (options.providerOptions?.mode !== undefined) {
     throw new Error('Rush Cloud has no execution mode; drop --mode and say what you want in the prompt.');
   }
@@ -88,7 +91,7 @@ function repoResourceUrl(full: string, branch?: string): string {
     throw new Error(`Invalid repo format: ${JSON.stringify(full)}. Use owner/repo.`);
   }
   const base = `https://github.com/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
-  return branch ? `${base}/tree/${branch}` : base;
+  return branch ? `${base}/tree/${branch.split('/').map(encodeURIComponent).join('/')}` : base;
 }
 
 function sessionToTask(s: RushSession): CloudTask {
