@@ -7882,13 +7882,22 @@
               "name": "roster",
               "path": "lead tool roster",
               "aliases": [],
-              "description": "List live sessions for this project (or --project) from the Lead host's live feed",
+              "description": "List live sessions for this project (or --project) from the Lead host's live feed; --session shows one session's last two turns",
               "args": [],
               "options": [
                 {
                   "flags": "--project <name>",
                   "description": "Another project",
                   "long": "--project",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--session <id>",
+                  "description": "Show this session's last two turns of conversation (no tool calls)",
+                  "long": "--session",
                   "required": true,
                   "optional": false,
                   "variadic": false,
