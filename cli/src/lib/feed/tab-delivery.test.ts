@@ -51,6 +51,12 @@ describe('deliverToTab', () => {
       .toMatchObject({ delivered: false, touched: false });
   });
 
+  it('with no transcript to confirm it, nothing is sent and the answer can be retried', async () => {
+    const { root } = setup();
+    expect(await deliverToTab({ sessionId: 's6', text: 'hi', root })).toMatchObject({ delivered: false, touched: false });
+    expect(readTabDelivery('s6', root, Number.NEGATIVE_INFINITY)).toBeUndefined();
+  });
+
   it('a window never sees a delivery older than the wait', () => {
     const { root } = setup();
     fs.mkdirSync(path.join(root, 'deliveries'));
