@@ -1341,15 +1341,35 @@ interface FtsOptimizeResult {
   segmentsAfter: number;
 }
 
+const FTS5_STRUCTURE_ROWID = 10;
+const FTS5_STRUCTURE_V2 = [0xff, 0x00, 0x00, 0x01];
+
+function ftsSegmentCount(db: Database.Database, table: string): number {
+  const row = db.prepare(`SELECT block FROM ${table}_data WHERE id = ?`).get(FTS5_STRUCTURE_ROWID) as
+    | { block: Uint8Array }
+    | undefined;
+  if (!row) return 0;
+  const block = row.block;
+  let at = FTS5_STRUCTURE_V2.every((byte, i) => block[4 + i] === byte) ? 8 : 4;
+  const varint = (): number => {
+    let value = 0;
+    for (;;) {
+      const byte = block[at++];
+      value = value * 128 + (byte & 0x7f);
+      if (!(byte & 0x80)) return value;
+    }
+  };
+  varint();
+  return varint();
+}
+
 export function optimizeSessionSearchIndex(): FtsOptimizeResult[] {
   const db = getDB();
   const tables = ['tool_call_text', 'session_text'];
-  const segments = (table: string): number =>
-    (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
   return tables.map((table) => {
-    const segmentsBefore = segments(table);
+    const segmentsBefore = ftsSegmentCount(db, table);
     db.prepare(`INSERT INTO ${table}(${table}) VALUES('optimize')`).run();
-    return { table, segmentsBefore, segmentsAfter: segments(table) };
+    return { table, segmentsBefore, segmentsAfter: ftsSegmentCount(db, table) };
   });
 }
 
@@ -1364,14 +1384,12 @@ export function maintainSessionSearchIndex(
   const threshold = options.segmentThreshold ?? FTS_MAINTENANCE_SEGMENT_THRESHOLD;
   const pages = options.mergePages ?? FTS_MAINTENANCE_MERGE_PAGES;
   const tables = ['tool_call_text', 'session_text'];
-  const segments = (table: string): number =>
-    (db.prepare(`SELECT count(*) AS n FROM ${table}_data`).get() as { n: number }).n;
   const results: FtsOptimizeResult[] = [];
   for (const table of tables) {
-    const segmentsBefore = segments(table);
+    const segmentsBefore = ftsSegmentCount(db, table);
     if (segmentsBefore < threshold) continue;
     db.prepare(`INSERT INTO ${table}(${table}, rank) VALUES('merge', ?)`).run(pages);
-    results.push({ table, segmentsBefore, segmentsAfter: segments(table) });
+    results.push({ table, segmentsBefore, segmentsAfter: ftsSegmentCount(db, table) });
   }
   return results;
 }
