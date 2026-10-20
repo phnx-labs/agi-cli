@@ -530,7 +530,7 @@ export const AGENTS: Record<AgentId, AgentRegistryConfig> = {
       rules: { file: 'AGENTS.md' },
       workflows: { since: '0.2.111' },
       memory: true,
-      modes: ['plan', 'edit', 'skip'],
+      modes: ['plan', 'edit', 'auto', 'skip'],
       headlessPlan: false,
       rulesImports: true,
       interactiveRepl: true,

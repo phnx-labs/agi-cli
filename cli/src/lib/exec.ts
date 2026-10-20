@@ -125,7 +125,7 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * because plan is broken in a headless `--prompt`/`-p` run — kimi refuses
  * `--prompt` + `--plan`, and grok's `--permission-mode plan` silently stalls at
  * its ExitPlanMode gate. For those agents, a headless plan request degrades to
- * `auto` (kimi -p auto-runs; grok maps auto→edit via resolveMode) with a visible
+ * `auto` (kimi -p auto-runs; grok runs `--permission-mode auto`) with a visible
  * one-line stderr warning, mirroring the graceful plan→edit degrade antigravity
  * get for having no plan flag at all. Interactive runs are never
  * downgraded. This is the single source of truth shared by buildExecCommand
@@ -565,6 +565,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
     modeFlags: {
       plan: ['--permission-mode', 'plan'],
       edit: [],
+      auto: ['--permission-mode', 'auto'],
       skip: ['--always-approve'],
     },
     jsonFlags: ['--output-format', 'streaming-json'],

@@ -47,7 +47,7 @@ agents run claude "/code:commit" --mode auto          # run a command unattended
 
 **Treat `skip` as a last resort.** In direct-exec runs (without `--acp`), agents-cli
 forwards the harness's native bypass flag; it does not add another safety layer. Prefer
-`auto` where it adds a safer automatic policy (smart classifier on Claude/Copilot,
+`auto` where it adds a safer automatic policy (smart classifier on Claude/Copilot/Grok,
 native high-auto mode on Droid, or interactive Kimi), or `edit` everywhere else.
 For headless Kimi, `edit`, `auto`, and `skip` all use the same already-auto-approved
 `-p` behavior, so prefer `edit` rather than signaling a blanket bypass.
