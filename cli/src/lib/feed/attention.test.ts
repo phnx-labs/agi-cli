@@ -239,7 +239,8 @@ describe('reconcileAttention', () => {
       sessionId: 'sess-3', kind: 'claude', activity: 'waiting_input', awaitingReason: 'question',
       question: { text: 'Did that work?', reason: 'question' }, lastActivityMs: 4000,
     });
-    expect(reconcileAttention({ session: { ...prose, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toBeUndefined();
+    expect(reconcileAttention({ session: { ...prose, lastEventMs: 4_000, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toBeUndefined();
+    expect(reconcileAttention({ session: { ...prose, lastEventMs: 5_000, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toMatchObject({ source: 'heuristic' });
     expect(reconcileAttention({ session: prose, nowMs: 10_000 })).toMatchObject({ source: 'heuristic', kind: 'question' });
   });
 

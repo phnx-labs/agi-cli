@@ -78,6 +78,9 @@ export async function deliverToTab(input: {
   root?: string;
   timeoutMs?: number;
 }): Promise<TabDeliveryResult> {
+  if (!input.transcript) {
+    return { delivered: false, id: '', touched: false, reason: 'This session has no transcript to confirm a delivery, so nothing was sent.' };
+  }
   const at = new Date();
   const delivery: TabDelivery = {
     id: `tab-${input.sessionId.slice(0, 8)}-${at.getTime()}`,
@@ -102,10 +105,8 @@ export async function deliverToTab(input: {
     return {
       delivered: false,
       id: delivery.id,
-      touched: input.transcript ? sizeOf(input.transcript) > from : true,
-      reason: input.transcript
-        ? `No editor window holding this session's tab typed it within ${Math.round(TAB_DELIVERY_TTL_MS / 1000)} seconds.`
-        : 'This session has no transcript to confirm the delivery.',
+      touched: sizeOf(input.transcript) > from,
+      reason: `No editor window holding this session's tab typed it within ${Math.round(TAB_DELIVERY_TTL_MS / 1000)} seconds.`,
     };
   } finally {
     removeTabDelivery(delivery, input.root);
