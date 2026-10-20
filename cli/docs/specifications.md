@@ -3312,9 +3312,10 @@ nothing but its own view cache.
   daemon's view of account health; canonical fix: PR #1914, which deleted it.
 - **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
   tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
-  trigger MUST stay in the CLI. Precedent: the extension's `/inject` URI verb over
-  `live-terminals.json`, driven by `cli/src/lib/terminal/inject.ts`; the
-  terminal engine's vscodium launch backend.
+  trigger MUST stay in the CLI. Precedent: a row's `delivery`, written by `agents feed
+  answer` / `agents send` and typed by the AGI EXT window that binds the session, with the
+  agent's next prompt as the receipt (`cli/src/lib/feed/tab-delivery.ts`); the terminal
+  engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
   or off MUST flip the CLI's own state (`agents daemon services enable|disable`,
   a typed config key), so every surface observes one truth. A UI-local toggle that

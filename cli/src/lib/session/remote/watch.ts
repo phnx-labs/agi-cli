@@ -47,6 +47,8 @@ export interface SessionWatchRow extends Omit<ActiveSession, 'viewingIn' | 'cont
   branch?: string;
   rowKey: string;
   sourceDevice: string;
+  /** Text waiting for the editor window that binds this session to type it (feed/tab-delivery.ts). */
+  delivery?: import('../../feed/tab-delivery.js').TabDelivery;
   confirmedProject: string | null;
   previous: boolean;
   resumable: boolean;

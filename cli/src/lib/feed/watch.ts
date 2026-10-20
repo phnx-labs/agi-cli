@@ -15,6 +15,8 @@ import { watchLocalSessions, withCanonicalProject, type SessionWatchEnvelope, ty
 import { readBlock, readResolution, blockIdForSession } from './feed.js';
 import { reconcileAttention, type AttentionItem } from './attention.js';
 import { cachedTicketPriority } from './ticket-priority.js';
+import { readTabDelivery, tabDeliveryDir } from './tab-delivery.js';
+import { leadDraftsDir, readLeadDraft } from '../lead/drafts.js';
 import { type ActivityEvent } from './activity.js';
 import { ActivityStream } from './activity-stream.js';
 import { watchToolActivity, type ToolDiff } from './tool-activity.js';
@@ -74,12 +76,7 @@ export class FeedSessionProjection {
     }
 
     const projected = sessionEvent ? this.sessions.apply(sessionEvent) : [];
-    const next = new Map<string, { scope: string; item: AttentionItem }>();
-
-    for (const [observer, items] of this.observations) for (const [rowKey, item] of items) {
-      const row = this.sessions.rowForObservation(observer, rowKey);
-      if (row && !row.previous && row.sourceDevice === observer) next.set(item.key, { scope: observer, item });
-    }
+    const next = this.currentAttention();
     const result: FeedWatchEnvelope[] = [];
     const resetScopes = new Set<string>();
     for (const rowEvent of projected) {
@@ -98,13 +95,52 @@ export class FeedSessionProjection {
     for (const [key, previous] of this.projectedAttention) {
       if (!next.has(key) && !resetScopes.has(previous.scope)) result.push(this.state.emit({ type: 'attention.remove', scope: previous.scope, rowKey: key }));
     }
+    this.upsertChanged(next, resetScopes, result);
+    return result;
+  }
+
+  /** Re-emit the asks whose Lead draft changed; nothing else moved. */
+  redraft(): FeedWatchEnvelope[] {
+    const result: FeedWatchEnvelope[] = [];
+    this.upsertChanged(this.currentAttention(), new Set(), result);
+    return result;
+  }
+
+  private currentAttention(): Map<string, { scope: string; item: AttentionItem }> {
+    const next = new Map<string, { scope: string; item: AttentionItem }>();
+    for (const [observer, items] of this.observations) for (const [rowKey, item] of items) {
+      const row = this.sessions.rowForObservation(observer, rowKey);
+      if (row && !row.previous && row.sourceDevice === observer) next.set(item.key, { scope: observer, item: withLeadDraft(item) });
+    }
+    return next;
+  }
+
+  private upsertChanged(next: Map<string, { scope: string; item: AttentionItem }>, resetScopes: Set<string>, result: FeedWatchEnvelope[]): void {
     for (const [key, value] of next) {
       if (!resetScopes.has(value.scope) && JSON.stringify(this.projectedAttention.get(key)) !== JSON.stringify(value)) {
         result.push(this.state.emit({ type: 'attention.upsert', scope: value.scope, rowKey: key, attention: value.item }));
       }
     }
     this.projectedAttention = next;
-    return result;
+  }
+}
+
+function withLeadDraft(item: AttentionItem): AttentionItem {
+  const draft = item.state === 'open' ? readLeadDraft(item.key) : undefined;
+  if (draft) return { ...item, draft: { label: draft.label, at: draft.at, ...(draft.text ? { text: draft.text } : {}), ...(draft.choiceId ? { choiceId: draft.choiceId } : {}) } };
+  if (!item.draft) return item;
+  const { draft: _gone, ...rest } = item;
+  return rest;
+}
+
+function watchLeadDrafts(onChange: () => void): () => void {
+  try {
+    fs.mkdirSync(leadDraftsDir(), { recursive: true, mode: 0o700 });
+    const watcher = fs.watch(leadDraftsDir(), () => onChange());
+    watcher.on('error', () => watcher.close());
+    return () => watcher.close();
+  } catch {
+    return () => {};
   }
 }
 
@@ -133,9 +169,17 @@ function attentionFor(agent: SessionWatchRow, pullRequest: PullRequestStatus | u
   });
 }
 
+function withDelivery(agent: SessionWatchRow): SessionWatchRow {
+  const delivery = isLive(agent) && agent.sessionId ? readTabDelivery(agent.sessionId) : undefined;
+  if (delivery) return { ...agent, delivery };
+  if (!agent.delivery) return agent;
+  const { delivery: _gone, ...rest } = agent;
+  return rest;
+}
+
 async function projectAgent(agent: SessionWatchRow, gh?: GhExec): Promise<{ agent: SessionWatchRow; attention: AttentionItem | undefined }> {
   const pullRequest = await pullRequestFor(agent, gh);
-  return { agent: withPullRequestStatus(agent, pullRequest), attention: attentionFor(agent, pullRequest) };
+  return { agent: withDelivery(withPullRequestStatus(agent, pullRequest)), attention: attentionFor(agent, pullRequest) };
 }
 
 export async function projectSessionEnvelope(event: SessionWatchEnvelope, state: FeedWatchState, gh?: GhExec, tools: ToolRow[] = [], setup: ToolSetupRow[] = []): Promise<FeedWatchEnvelope[]> {
@@ -165,7 +209,7 @@ function watchAttentionStores(onChange: () => void): () => void {
 
   const feedDir = getFeedDir();
   const watchers: fs.FSWatcher[] = [];
-  for (const dir of [feedDir, path.join(feedDir, 'resolutions')]) {
+  for (const dir of [feedDir, path.join(feedDir, 'resolutions'), tabDeliveryDir()]) {
     try {
       fs.mkdirSync(dir, { recursive: true });
       const watcher = fs.watch(dir, () => onChange());
@@ -208,9 +252,11 @@ export async function watchLocalFeed(options: WatchLocalFeedOptions): Promise<vo
   const reconcileRows = async () => {
     for (const [rowKey, raw] of agents) {
       const { agent, attention: item } = await projectAgent(raw, options.gh);
-      const nextPr = agent.pr ? JSON.stringify(agent.pr) : '';
-      if (agent.pr && prStatus.get(rowKey) !== nextPr) {
-        prStatus.set(rowKey, nextPr);
+      const nextProjected = agent.pr || agent.delivery || prStatus.has(rowKey)
+        ? JSON.stringify({ pr: agent.pr, delivery: agent.delivery })
+        : '';
+      if (nextProjected && prStatus.get(rowKey) !== nextProjected) {
+        prStatus.set(rowKey, nextProjected);
         options.emit(state.emit({ type: 'agent.upsert', scope: options.scope, rowKey, agent }));
       }
       const next = item ? JSON.stringify(item) : '';
@@ -360,6 +406,10 @@ export async function watchFleetFeed(options: { signal: AbortSignal; emit: (even
     }, () => ({ type: event.type, scope: 'scope' in event ? event.scope : undefined }));
   };
   const local = subscribeSharedLocalFeed({ signal: options.signal, emit: forward });
+  const stopDrafts = watchLeadDrafts(() => {
+    for (const projected of projection.redraft()) options.emit(projected);
+  });
+  options.signal.addEventListener('abort', stopDrafts, { once: true });
   let devices: Awaited<ReturnType<typeof loadDevices>>;
   try { devices = await loadDevices(); } catch { await local; return; }
   const self = machineId();

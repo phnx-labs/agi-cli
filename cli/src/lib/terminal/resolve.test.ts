@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, ReplyRail, MuxLocation } from '../session/provenance.js';
-import { resolveInjectTargetForSession, addressabilityRecoveryHint } from './resolve.js';
+import { resolveInjectTargetForSession, addressabilityRecoveryHint, typedByEditorTab } from './resolve.js';
 
 function session(over: {
   sessionId?: string;
@@ -49,27 +49,27 @@ describe('resolveInjectTargetForSession — iterm', () => {
   });
 });
 
-describe('resolveInjectTargetForSession — vscodium', () => {
-  it('resolves a codium integrated terminal to the editor CLI + scheme, id = sessionId', () => {
-    const r = resolveInjectTargetForSession(session({ host: 'codium', sessionId: 'sess-9' }));
-    expect(r).toEqual({
-      addressable: true,
-      rail: 'vscodium',
-      target: { backend: 'vscodium', terminalId: 'sess-9', cli: 'codium', scheme: 'vscodium' },
-    });
+describe('resolveInjectTargetForSession — editor tabs', () => {
+  it('leaves an editor tab to the AGI EXT window that binds it: no CLI rail', () => {
+    for (const host of ['codium', 'cursor', 'code']) {
+      const r = resolveInjectTargetForSession(session({ host, sessionId: 'sess-9' }));
+      expect(r.addressable).toBe(false);
+      if (!r.addressable) expect(r.reason).toContain('the AGI EXT window that binds the session types into it');
+    }
   });
 
-  it('maps cursor and code hosts to their CLI/scheme', () => {
-    const cur = resolveInjectTargetForSession(session({ host: 'cursor', sessionId: 's' }));
-    const code = resolveInjectTargetForSession(session({ host: 'code', sessionId: 's' }));
-    expect(cur.addressable && cur.target).toMatchObject({ cli: 'cursor', scheme: 'cursor' });
-    expect(code.addressable && code.target).toMatchObject({ cli: 'code', scheme: 'vscode' });
-  });
-
-  it('refuses an IDE terminal with no session id (nothing to address) rather than guessing', () => {
+  it('says an IDE terminal with no session id has nothing to address', () => {
     const r = resolveInjectTargetForSession(session({ host: 'codium' }));
     expect(r.addressable).toBe(false);
     if (!r.addressable) expect(r.reason).toContain('no session id');
+  });
+
+  it('typedByEditorTab: an editor tab or an unseen host, never Ghostty, headless or a session with no id', () => {
+    expect(typedByEditorTab(session({ host: 'codium', sessionId: 's' }))).toBe(true);
+    expect(typedByEditorTab(session({ host: undefined, sessionId: 's' }))).toBe(true);
+    expect(typedByEditorTab(session({ host: 'ghostty', sessionId: 's' }))).toBe(false);
+    expect(typedByEditorTab({ ...session({ host: 'codium', sessionId: 's' }), context: 'headless' })).toBe(false);
+    expect(typedByEditorTab({ ...session({ host: 'codium' }), sessionId: undefined })).toBe(false);
   });
 });
 

@@ -297,9 +297,25 @@ touches the endpoint.
   `verdict: { state, gaps, at: <epoch ms> }` into the per-process record
   `~/.agents/.cache/state/sessions/<pid>.json`; the row takes it only when that
   record names the row's pid and session id and neither the record nor the verdict
-  predates the process (`readDoneVerdict`, `src/lib/session/hook-sessions.ts`). It
+  predates the process (`readSessionVerdicts`, `src/lib/session/hook-sessions.ts`). It
   rides `agents ps --json`, `agents ps watch --json`, `agents feed watch --json`
   and remote rows; no field when there is no verdict.
+- A live Claude row carries **`turnVerdict`**, `{ kind, quote, choices, atMs }`: whose
+  move it is after the last turn, from the Stop hook's model judge
+  (`stop/08-stop-judge.py` in the companion `.agents` repo), read from the same record
+  under the same checks. `kind` is `asks`, `not_done`, `waiting`, `done` or `unjudged`.
+  While nothing has happened since `atMs` and the agent is not working, `asks` and
+  `not_done` open a `question` attention item keyed `v<atMs>` (`not_done` headed
+  "Not done"), with the agent's sentence and offered choices; it closes on the next
+  event, never on a clock. A Claude prose question is no longer read from the
+  transcript's last line; harnesses without the judge keep that reading.
+- A live row carries **`delivery`**, `{ id, sessionId, text, enter, at }`, while text
+  waits for the AGI EXT window that binds the session's editor tab to type it
+  (`src/lib/feed/tab-delivery.ts`). `agents feed answer` and `agents send --channel
+  session` write it for a session in an editor tab, or one whose terminal this machine
+  cannot address (no host recorded), and wait up to 15 seconds for the transcript to
+  take the text as the receipt; then the record is removed either way, so nothing
+  types it later. The `codium --open-url …/inject` rail is gone.
 - A live Claude row carries what the session **acted on but did not create**,
   newest first, the last action per item winning, at most 50 of each, and no
   field when there are none:

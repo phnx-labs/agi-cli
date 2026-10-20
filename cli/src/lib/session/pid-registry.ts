@@ -30,6 +30,7 @@ export interface SessionStartRecord {
   cwd?: string;
   ts?: number;
   verdict?: unknown;
+  turnVerdict?: unknown;
 }
 
 export const RECORD_SKEW_MS = 5_000;

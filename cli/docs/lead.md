@@ -116,6 +116,15 @@ agents lead ask ──unix socket (0600)──▶ host (agents __lead-host <proj
 - **Version and model pinning:** `host.json` records the CLI version and `lead.model` the host
   started with. `ask` restarts a host whose version or model differs from its own, so a
   self-update or `agents config set lead.model` takes effect on the next ask.
+- **Drafting new asks:** when an attention item opens for a session of its project (an
+  AskUserQuestion, a plan, or the Stop hook's `asks` / `not_done` turn verdict), the host
+  queues one turn of its own for it, batching asks that arrive within 20 seconds, beside
+  any `ask` of yours. The turn asks the Lead to draft the reply you would most likely send
+  with its `answer` tool, or to say in one line why the decision is yours. Each ask is
+  drafted once. A held `answer` is also written to `drafts/`, and the fleet `feed watch`
+  on this machine puts it on that ask as `draft`, so the card shows it with Send (the
+  ordinary `agents feed answer`). The Lead delivers nothing itself. Drafting runs only
+  while the host does.
 - **Why a host and not the daemon:** the daemon is shared and stays on production code
   (`scripts/install.sh` does not bounce it), restarts on self-update, and has no per-request
   streaming IPC for a child it owns. A daemon restart would kill every warm Lead.
@@ -167,6 +176,7 @@ other program is denied. Each tool has one fixed shape:
 | Tool | Does |
 |---|---|
 | `roster [--project <p>]` | Live sessions from the host's feed snapshot (never a fleet `agents ps`), each with when it started and was last active, plus a fleet count. The only way the Lead sees sessions. |
+| `roster --session <id>` | One session of this project's last two turns of conversation, the owner's and the agent's words only (`sessions <id> --include user,assistant --last 2 --markdown`, over `-H <host>` for another machine), cut to 12,000 characters. |
 | `attention` | Every open ask across the fleet from the host's feed (the `attention` items of `feed watch --json`, any project): one line each with the attention key, session title, host, project, age, the question (cut to 240 characters) and the choice ids and labels. No SSH of its own; says so when the feed is not connected yet. |
 | `prs list [--repo <owner/repo>]` | `agents projects prs list <project> --json`, one line per open PR: `repo#number [draft] title · updated 3h ago`. |
 | `linear tasks [--status …] [--limit n]`, `linear view <ID>`, `linear create --title <t> [--description <d>]` | Reads, and creation in the project's Linear project. `tasks` lists the most recently updated first, each with `· updated 2d ago`, cut to `--limit` with a count of the older ones. |
@@ -220,6 +230,7 @@ expired ones.
 | `<project>/lead-settings.json`, `bin/agents` | the Lead's isolated permissions and its `agents` shim |
 | `<project>/runs/*.log` | output of agents the Lead dispatched |
 | `confirms/<token>.json` | pending confirms |
+| `drafts/<hash>.json` | the Lead's drafted answer per attention key, shown on the card; removed after a day |
 | `surface.json` | client-owned `{ "surface": "bubble" \| "docked" }`; the CLI never writes it, and clients treat a missing file as `docked` |
 
 ## Visibility

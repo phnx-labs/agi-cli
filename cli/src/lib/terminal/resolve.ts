@@ -3,7 +3,7 @@ import { getActiveSessions } from '../session/active.js';
 import { machineId } from '../machine-id.js';
 import type { InjectTarget } from './inject.js';
 
-export type InjectRail = 'tmux' | 'iterm' | 'vscodium' | 'ghostty';
+export type InjectRail = 'tmux' | 'iterm' | 'ghostty';
 export type InjectResolution =
   | { addressable: true; rail: InjectRail; target: InjectTarget; note?: string }
   | { addressable: false; reason: string; hint?: string };
@@ -13,11 +13,14 @@ export interface ResolveOptions {
   allowGhosttyFocus?: boolean;
 }
 
-const IDE_INJECT_VARIANTS: Record<string, { cli: string; scheme: string }> = {
-  codium: { cli: 'codium', scheme: 'vscodium' },
-  cursor: { cli: 'cursor', scheme: 'cursor' },
-  code: { cli: 'code', scheme: 'vscode' },
-};
+const IDE_HOSTS = new Set(['codium', 'cursor', 'code']);
+
+/** An editor tab, or a terminal whose host this machine never saw (an agent here started
+ * from an editor on another machine): the AGI EXT window that binds it can type into it. */
+export function typedByEditorTab(session: Pick<ActiveSession, 'host' | 'sessionId' | 'context'>): boolean {
+  if (!session.sessionId || session.context === 'headless' || session.context === 'teams') return false;
+  return !session.host || IDE_HOSTS.has(session.host);
+}
 
 export function addressabilityRecoveryHint(session: ActiveSession, fallbackId?: string): string {
   const sid = session.sessionId;
@@ -32,7 +35,7 @@ export function addressabilityRecoveryHint(session: ActiveSession, fallbackId?: 
     return `Ghostty has no per-split addressing. ${interactive ? `Enable tmux wrapping with \`${tmuxCmd}\` and re-launch, or ` : ''}use \`${resumeCmd}\` to continue this session.`;
   }
 
-  if (session.host && session.host in IDE_INJECT_VARIANTS && !sid) {
+  if (session.host && IDE_HOSTS.has(session.host) && !sid) {
     return `This IDE terminal has not registered a session id yet. Wait a moment and retry, or use \`${resumeCmd}\` to continue.`;
   }
 
@@ -65,19 +68,13 @@ export function resolveInjectTargetForSession(
     };
   }
 
-  const variant = session.host ? IDE_INJECT_VARIANTS[session.host] : undefined;
-  if (variant) {
-    if (!session.sessionId) {
-      return {
-        addressable: false,
-        reason: `IDE terminal (${session.host}) has no session id to address`,
-        hint: addressabilityRecoveryHint(session),
-      };
-    }
+  if (session.host && IDE_HOSTS.has(session.host)) {
     return {
-      addressable: true,
-      rail: 'vscodium',
-      target: { backend: 'vscodium', terminalId: session.sessionId, cli: variant.cli, scheme: variant.scheme },
+      addressable: false,
+      reason: session.sessionId
+        ? `IDE terminal (${session.host}): the AGI EXT window that binds the session types into it`
+        : `IDE terminal (${session.host}) has no session id to address`,
+      hint: addressabilityRecoveryHint(session),
     };
   }
 

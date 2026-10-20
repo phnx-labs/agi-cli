@@ -84,7 +84,7 @@ export function listLeadProjects(): string[] {
     throw err;
   }
   return names
-    .filter((name) => name !== 'confirms' && isSafeProjectName(name))
+    .filter((name) => name !== 'confirms' && name !== 'drafts' && isSafeProjectName(name))
     .filter((name) => fs.statSync(path.join(leadRoot(), name)).isDirectory())
     .sort();
 }

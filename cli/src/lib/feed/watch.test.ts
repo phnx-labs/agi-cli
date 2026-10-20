@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionMeta } from '@phnx-labs/sessions-cli/reader';
 import { SessionWatchState, canonicalizePeerSessionEnvelope, toSessionWatchRow } from '../session/watch.js';
+import { readLeadDraft, writeLeadDraft } from '../lead/drafts.js';
 import { FeedSessionProjection, FeedWatchState, normalizePeerEnvelope, projectSessionEnvelope, type FeedWatchEnvelope } from './watch.js';
 
 function session(id: string, extra: Partial<ActiveSession> = {}): ActiveSession {
@@ -261,5 +262,23 @@ describe('feed watch PR status on the row', () => {
     const wire = JSON.parse(JSON.stringify(upsert)) as FeedWatchEnvelope;
     const forwarded = new FeedSessionProjection(new FeedWatchState('coordinator')).apply(normalizePeerEnvelope(wire));
     expect(forwarded.find((event) => event.type === 'agent.upsert')).toMatchObject({ agent: { pr: expected } });
+  });
+});
+
+describe('the project Lead\'s draft on an ask', () => {
+  it('rides the ask on the machine the Lead runs on, and a new draft re-emits only that ask', async () => {
+    const projection = new FeedSessionProjection();
+    const sessions = new SessionWatchState();
+    const feed = new FeedWatchState();
+    const first = (await projectSessionEnvelope(sessions.reset('worker', [session('drafted', { machine: 'worker', activity: 'waiting_input', awaitingReason: 'plan_review', question: { text: 'Review?', reason: 'plan_review' } })]), feed)).flatMap((event) => projection.apply(event));
+    const reset = first.find((event) => event.type === 'reset');
+    const item = reset?.type === 'reset' ? reset.attention[0] : undefined;
+    expect(item?.draft).toBeUndefined();
+
+    writeLeadDraft({ key: item!.key, choiceId: 'approve', label: 'Approve plan', project: 'demo', at: '2026-10-19T12:00:00.000Z' });
+    const redrafted = projection.redraft();
+    expect(redrafted).toEqual([expect.objectContaining({ type: 'attention.upsert', attention: expect.objectContaining({ key: item!.key, draft: { choiceId: 'approve', label: 'Approve plan', at: '2026-10-19T12:00:00.000Z' } }) })]);
+    expect(projection.redraft()).toEqual([]);
+    expect(readLeadDraft('worker/other/t1')).toBeUndefined();
   });
 });

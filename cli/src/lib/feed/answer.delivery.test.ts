@@ -14,6 +14,7 @@ import {
   type OpenBlock,
 } from './feed.js';
 import { reconcileAttention } from './attention.js';
+import { readTabDelivery } from './tab-delivery.js';
 import { isOpenQuestionBlock, resolveAnswerRoute } from '../answer-router.js';
 import { groupBlocksByOutcome } from '../feed-outcome.js';
 import { enqueue, mailboxDir, readBox } from '../mailbox.js';
@@ -809,35 +810,61 @@ describe.skipIf(noTmux)('multiline free text over a real tmux rail', () => {
   });
 });
 
-describe('an answer typed into the VSCodium tab a session runs in', () => {
-  it('opens the extension URI once and reports it unconfirmed, keeping the claim so a retry reconciles', async () => {
-    const feedRoot = dir('feed-vscodium');
-    const log = path.join(dir('codium-log'), 'argv');
-    script(dir('codium-bin'), 'codium', `printf '%s\\n' "$@" >> '${log}'`);
-    const session = parkedSession('codium-tab', {
+describe('an answer typed into the editor tab a session runs in', () => {
+  function tabSession(id: string, transcript: string): ActiveSession {
+    return parkedSession(id, {
       host: 'codium', tty: 'ttys004', status: 'input_required', activity: 'waiting_input', awaitingReason: 'question',
-      provenance: { host: 'zion', transport: 'local', reply: null },
+      sessionFile: transcript, provenance: { host: 'zion', transport: 'local', reply: null },
     } as Partial<ActiveSession>);
+  }
+
+  it('puts the text on the row, and the agent taking it as its next prompt is the receipt', async () => {
+    const feedRoot = dir('feed-tab');
+    const transcript = path.join(dir('tab-transcript'), 's.jsonl');
+    fs.writeFileSync(transcript, '{"type":"assistant"}\n');
+    fs.utimesSync(transcript, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+    const session = tabSession('codium-tab', transcript);
     const block = questionBlock('codium-tab', { questions: [{ text: 'Which env?', options: [{ label: 'Production' }] }] });
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
-    const answer = (attempt: number) => claimAndRouteAttentionAnswer({
-      attentionKey: key, text: `Production ${attempt}`, operator: { verified: false, label: 'op' },
-      feedRoot, mailboxRoot: dir('mail-vscodium'), sessions: [session],
+
+    // The editor window: it sees the delivery on the row and types it; the transcript records the prompt.
+    const seen: unknown[] = [];
+    const window = setInterval(() => {
+      const d = readTabDelivery('codium-tab', feedRoot);
+      if (!d || seen.length) return;
+      seen.push(d);
+      fs.appendFileSync(transcript, `${JSON.stringify({ type: 'user', message: { role: 'user', content: d.text } })}\n`);
+    }, 50);
+    try {
+      const result = await claimAndRouteAttentionAnswer({
+        attentionKey: key, text: 'Ship to production', operator: { verified: false, label: 'op' },
+        feedRoot, mailboxRoot: dir('mail-tab'), sessions: [session],
+      });
+      expect(result.status).toBe('delivered');
+      expect(result.resolved).toBe(true);
+    } finally {
+      clearInterval(window);
+    }
+    expect(seen).toEqual([expect.objectContaining({ sessionId: 'codium-tab', text: 'Ship to production', enter: true })]);
+    expect(readTabDelivery('codium-tab', feedRoot)).toBeUndefined();
+  });
+
+  it('with no window holding the tab it says so and clears the text, so nothing types it later', async () => {
+    const feedRoot = dir('feed-tab-none');
+    const transcript = path.join(dir('tab-none-transcript'), 's.jsonl');
+    fs.writeFileSync(transcript, '{"type":"assistant"}\n');
+    const session = tabSession('codium-none', transcript);
+    const block = questionBlock('codium-none', { questions: [{ text: 'Which env?', options: [{ label: 'Production' }] }] });
+    publishBlock(block, feedRoot);
+    const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
+    const result = await claimAndRouteAttentionAnswer({
+      attentionKey: key, text: 'Production', operator: { verified: false, label: 'op' },
+      feedRoot, mailboxRoot: dir('mail-tab-none'), sessions: [session], deadlineMs: 1_500,
     });
-
-    const first = await answer(1);
-    expect(first.status).toBe('unknown');
-    expect(first.reason).toMatch(/vscodium accepted the hand-off but cannot confirm/);
-    const argv = fs.readFileSync(log, 'utf8').trim().split('\n');
-    expect(argv[0]).toBe('--open-url');
-    expect(argv[1]).toMatch(/^vscodium:\/\/swarmify\.swarm-ext\//);
-    const payload = JSON.parse(Buffer.from(new URL(argv[1]!).searchParams.get('p')!, 'base64url').toString('utf8'));
-    expect(payload).toMatchObject({ terminalId: 'codium-tab', text: 'Production 1', enter: true });
-    expect(getAnswerRecord(block.blockId, feedRoot)).toBeDefined();
-
-    const retry = await answer(2);
-    expect(retry.status).toBe('unknown');
-    expect(fs.readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(2);
+    expect(result.status).toBe('unknown');
+    expect(result.reason).toMatch(/No editor window holding this session's tab typed it/);
+    expect(readTabDelivery('codium-none', feedRoot, Number.NEGATIVE_INFINITY)).toBeUndefined();
   });
 });
+

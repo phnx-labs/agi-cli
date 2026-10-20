@@ -170,19 +170,20 @@ describe('a real permission prompt is a permission with the harness choices, unt
 });
 
 describe('a time-based inference expires from the transcript stamps, not the file mtime', () => {
-  it('a trailing free-text question is an inferred ask with no invented buttons, and decays while the bytes sit still', () => {
+  it('a Claude prose question is the Stop hook\'s turn verdict, and it does not decay while nobody answers', () => {
     const file = transcript('claude-prose-question.jsonl', '2026-09-10T10:00:08.000Z');
     const askedMs = Date.parse('2026-09-10T10:00:06.000Z');
 
-    const fresh = liveRow(PROSE, file, askedMs + 10 * 60_000);
-    expect(fresh.activity).toBe('waiting_input');
-    const item = reconcileAttention({ session: fresh, nowMs: askedMs + 10 * 60_000 })!;
-    expect(item).toMatchObject({ kind: 'question', source: 'heuristic' });
-    expect(item.question?.text).toContain('Which browser data directory should I use');
-    expect(item.choices).toBeUndefined();
+    // The transcript alone no longer guesses from the last line.
+    const unjudged = liveRow(PROSE, file, askedMs + 10 * 60_000);
+    expect(reconcileAttention({ session: unjudged, nowMs: askedMs + 10 * 60_000 })).toBeUndefined();
 
-    const stale = liveRow(PROSE, file, askedMs + 31 * 60_000);
-    expect(stale.activity).toBe('idle');
-    expect(reconcileAttention({ session: stale, nowMs: askedMs + 31 * 60_000 })).toBeUndefined();
+    const verdict = { kind: 'asks' as const, quote: 'Which browser data directory should I use?', choices: [], atMs: askedMs + 9_000 };
+    for (const nowMs of [askedMs + 10 * 60_000, askedMs + 2 * 60 * 60_000]) {
+      const item = reconcileAttention({ session: { ...liveRow(PROSE, file, nowMs), turnVerdict: verdict }, nowMs })!;
+      expect(item).toMatchObject({ kind: 'question', source: 'lifecycle', state: 'open' });
+      expect(item.question?.text).toContain('Which browser data directory should I use');
+      expect(item.choices).toBeUndefined();
+    }
   });
 });

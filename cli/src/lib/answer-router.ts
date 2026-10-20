@@ -1,10 +1,11 @@
 import { deriveBlockState, type OpenBlock, type BlockOption } from './feed/feed.js';
 import type { ActiveSession } from './session/active.js';
 import type { InjectTarget } from './terminal/index.js';
-import { addressabilityRecoveryHint, resolveInjectTargetForSession } from './terminal/resolve.js';
+import { addressabilityRecoveryHint, resolveInjectTargetForSession, typedByEditorTab } from './terminal/resolve.js';
 import { injectTargetFromReplyRail } from './session/inject.js';
+import { currentTurnVerdict } from './feed/attention.js';
 
-export type AnswerRouteKind = 'mailbox' | 'tmux' | 'iterm' | 'vscodium' | 'resume' | 'refuse';
+export type AnswerRouteKind = 'mailbox' | 'tmux' | 'iterm' | 'tab' | 'resume' | 'refuse';
 
 export interface AnswerRoute {
   kind: AnswerRouteKind;
@@ -67,7 +68,8 @@ export function isParkedOnInput(session: ActiveSession | null | undefined): bool
   if (session.awaitingReason === 'question' || session.awaitingReason === 'plan_review' || session.awaitingReason === 'permission') {
     return true;
   }
-  return false;
+  const turn = currentTurnVerdict(session);
+  return turn?.kind === 'asks' || turn?.kind === 'not_done';
 }
 
 export function isOpenQuestionBlock(block: OpenBlock | null | undefined): boolean {
@@ -98,10 +100,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
     const { payload, matched, enter } = keystrokesForAnswer(answer, options);
 
     if (inject) {
-      const kind: AnswerRouteKind =
-        inject.backend === 'iterm' ? 'iterm'
-          : inject.backend === 'vscodium' ? 'vscodium'
-            : 'tmux';
+      const kind: AnswerRouteKind = inject.backend === 'iterm' ? 'iterm' : 'tmux';
       return {
         kind,
         reason: `Parked on open question — drive ${inject.backend} selection (${matched}).`,
@@ -127,10 +126,19 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
       };
     }
 
+    if (typedByEditorTab(session)) {
+      return {
+        kind: 'tab',
+        reason: 'Parked in an editor tab (or a terminal this machine cannot address) — the AGI EXT window that binds the session types it.',
+        payload,
+        ...(enter === false ? { enter: false } : {}),
+      };
+    }
+
     return {
       kind: 'refuse',
       reason:
-        'Agent is parked on a question but has no addressable terminal (no tmux, iTerm or IDE rail). ' +
+        'Agent is parked on a question but has no addressable terminal (no tmux, iTerm or editor tab). ' +
         addressabilityRecoveryHint(session),
     };
   }

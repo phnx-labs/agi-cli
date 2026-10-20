@@ -865,7 +865,7 @@ describe('feed store', () => {
     })).toBeUndefined();
 
     const fresh = reconcileAttention({
-      session: { ...staleSession, lastActivityMs: cursorMs + 1, question: { text: 'A later ask?', reason: 'question' } },
+      session: { ...staleSession, lastActivityMs: cursorMs + 1, question: { text: 'A later ask?', reason: 'question', options: [{ label: 'B' }] } },
       resolution: tombstone,
       nowMs: cursorMs + 10_000,
     });
