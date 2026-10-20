@@ -307,15 +307,17 @@ touches the endpoint.
   While nothing has happened since `atMs` and the agent is not working, `asks` and
   `not_done` open a `question` attention item keyed `v<atMs>` (`not_done` headed
   "Not done"), with the agent's sentence and offered choices; it closes on the next
-  event, never on a clock. A Claude prose question is no longer read from the
-  transcript's last line; harnesses without the judge keep that reading.
+  event, never on a clock. Once a session has a `turnVerdict`, its prose question is
+  not read from the transcript's last line; a session without one (another harness, or a
+  machine whose hook does not judge yet) keeps that reading.
 - A live row carries **`delivery`**, `{ id, sessionId, text, enter, at }`, while text
   waits for the AGI EXT window that binds the session's editor tab to type it
   (`src/lib/feed/tab-delivery.ts`). `agents feed answer` and `agents send --channel
   session` write it for a session in an editor tab, or one whose terminal this machine
   cannot address (no host recorded), and wait up to 15 seconds for the transcript to
-  take the text as the receipt; then the record is removed either way, so nothing
-  types it later. The `codium --open-url …/inject` rail is gone.
+  take the text (or, for a picker key, a tool result) appended after the hand-off as the
+  receipt; then the record is removed either way, so nothing types it later. When nothing
+  reached the transcript the answer's claim is released, so it can be sent again. The `codium --open-url …/inject` rail is gone.
 - A live Claude row carries what the session **acted on but did not create**,
   newest first, the last action per item winning, at most 50 of each, and no
   field when there are none:

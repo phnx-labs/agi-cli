@@ -234,14 +234,13 @@ describe('reconcileAttention', () => {
     expect(item!.key).toBe('zion/sess-2/t4000');
   });
 
-  it('a Claude prose question is the turn verdict\'s to call, never the last-line guess', () => {
+  it('once the Stop hook judges a session, a prose question is the verdict\'s to call, never the last-line guess', () => {
     const prose = session({
       sessionId: 'sess-3', kind: 'claude', activity: 'waiting_input', awaitingReason: 'question',
       question: { text: 'Did that work?', reason: 'question' }, lastActivityMs: 4000,
     });
-    expect(reconcileAttention({ session: prose, nowMs: 10_000 })).toBeUndefined();
-    const other = reconcileAttention({ session: { ...prose, kind: 'opencode' }, nowMs: 10_000 });
-    expect(other).toMatchObject({ source: 'heuristic', kind: 'question' });
+    expect(reconcileAttention({ session: { ...prose, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toBeUndefined();
+    expect(reconcileAttention({ session: prose, nowMs: 10_000 })).toMatchObject({ source: 'heuristic', kind: 'question' });
   });
 
   describe('the Stop hook\'s turn verdict', () => {

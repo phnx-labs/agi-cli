@@ -174,8 +174,8 @@ describe('a time-based inference expires from the transcript stamps, not the fil
     const file = transcript('claude-prose-question.jsonl', '2026-09-10T10:00:08.000Z');
     const askedMs = Date.parse('2026-09-10T10:00:06.000Z');
 
-    const unjudged = liveRow(PROSE, file, askedMs + 10 * 60_000);
-    expect(reconcileAttention({ session: unjudged, nowMs: askedMs + 10 * 60_000 })).toBeUndefined();
+    const judgedDone = { ...liveRow(PROSE, file, askedMs + 10 * 60_000), turnVerdict: { kind: 'done' as const, quote: '', choices: [], atMs: askedMs + 9_000 } };
+    expect(reconcileAttention({ session: judgedDone, nowMs: askedMs + 10 * 60_000 })).toBeUndefined();
 
     const verdict = { kind: 'asks' as const, quote: 'Which browser data directory should I use?', choices: [], atMs: askedMs + 9_000 };
     for (const nowMs of [askedMs + 10 * 60_000, askedMs + 2 * 60 * 60_000]) {

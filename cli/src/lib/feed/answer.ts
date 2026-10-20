@@ -423,7 +423,10 @@ async function deliverTab(
     root: feedRoot,
     timeoutMs: Math.max(0, remainingMs(deadline) - 500),
   });
-  if (!result.delivered) throw new AnswerUnknownError(result.reason);
+  if (!result.delivered) {
+    if (!result.touched) throw new AnswerError(`${result.reason} Nothing reached the session, so the answer can be sent again.`, 'rail_failed');
+    throw new AnswerUnknownError(result.reason);
+  }
   return { receipt: { msgId: result.id, status: 'consumed', at: new Date().toISOString(), from: operator.label, ...origin } };
 }
 
