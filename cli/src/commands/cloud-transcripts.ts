@@ -1,9 +1,11 @@
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import type { FilterOptions, SessionMeta } from '@phnx-labs/sessions-cli/reader';
+import type { FilterOptions, SessionEvent, SessionMeta } from '@phnx-labs/sessions-cli/reader';
 
 import { setHelpSections } from '../lib/help.js';
 import { interruptibleSpinner } from '../lib/spinner.js';
+import { deriveShortId } from '../lib/text/short-id.js';
+import type { CloudTask } from '../lib/cloud/types.js';
 import type { TranscriptRenderOptions } from '../lib/session/presentation.js';
 
 export interface CloudTranscriptsOptions extends TranscriptRenderOptions {
@@ -12,9 +14,24 @@ export interface CloudTranscriptsOptions extends TranscriptRenderOptions {
 
 const DEFAULT_LIMIT = '50';
 
+function cloudTaskSessionMeta(task: CloudTask): SessionMeta | null {
+  if (task.agent !== 'claude' && task.agent !== 'codex' && task.agent !== 'opencode') return null;
+  return {
+    id: task.id,
+    shortId: deriveShortId(task.id),
+    agent: task.agent,
+    timestamp: task.createdAt,
+    project: task.repo,
+    filePath: '',
+    topic: task.prompt.split('\n')[0]?.slice(0, 120) || undefined,
+    label: `[cloud/${task.status}]${task.branch ? ` ${task.branch}` : ''}`,
+  };
+}
+
 async function runCloudTranscripts(query: string | undefined, options: CloudTranscriptsOptions): Promise<void> {
-  const { discoverCloudSessions, ensureCloudSessionCached } = await import('../lib/session/cloud.js');
-  const { buildFilterOptions, printSessionTable, resolveViewMode, renderSession } = await import('../lib/session/presentation.js');
+  const { getRushProvider } = await import('../lib/cloud/registry.js');
+  const { buildFilterOptions, printSessionTable, resolveViewMode, renderSessionEvents } = await import('../lib/session/presentation.js');
+  const rush = getRushProvider();
 
   let filterOpts: FilterOptions;
   try {
@@ -29,7 +46,10 @@ async function runCloudTranscripts(query: string | undefined, options: CloudTran
 
   let sessions: SessionMeta[];
   try {
-    sessions = await discoverCloudSessions({ limit: parseInt(options.limit || DEFAULT_LIMIT, 10) });
+    sessions = (await rush.list())
+      .map(cloudTaskSessionMeta)
+      .filter((s): s is SessionMeta => s !== null)
+      .slice(0, parseInt(options.limit || DEFAULT_LIMIT, 10));
   } catch (err: any) {
     spinner?.stop();
     console.error(chalk.red(`Failed to list cloud sessions: ${err?.message || err}`));
@@ -43,7 +63,7 @@ async function runCloudTranscripts(query: string | undefined, options: CloudTran
       return;
     }
     if (sessions.length === 0) {
-      console.log(chalk.gray('No cloud sessions captured yet.'));
+      console.log(chalk.gray('No cloud sessions yet.'));
       return;
     }
     printSessionTable(sessions);
@@ -66,18 +86,18 @@ async function runCloudTranscripts(query: string | undefined, options: CloudTran
   }
 
   const meta = matches[0];
-  const cachedSpinner = options.json ? null : interruptibleSpinner('Fetching session...').start();
-  let cachedPath: string;
+  const fetchSpinner = options.json ? null : interruptibleSpinner('Fetching session...').start();
+  let events: SessionEvent[];
   try {
-    cachedPath = await ensureCloudSessionCached(meta.id);
+    events = await rush.transcript({ id: meta.id, createdAt: meta.timestamp }, meta.agent);
   } catch (err: any) {
-    cachedSpinner?.stop();
+    fetchSpinner?.stop();
     console.error(chalk.red(`Failed to fetch session: ${err?.message || err}`));
     process.exit(1);
   }
-  cachedSpinner?.stop();
+  fetchSpinner?.stop();
 
-  await renderSession({ ...meta, filePath: cachedPath }, mode, filterOpts, options);
+  renderSessionEvents(meta, events, mode, filterOpts, options);
 }
 
 export function registerCloudTranscriptsCommand(cloud: Command): void {
@@ -109,8 +129,8 @@ export function registerCloudTranscriptsCommand(cloud: Command): void {
       agents cloud transcripts 3f2a9c1e --include tools --last 2 --json
     `,
     notes: `
-      - Reads Rush Cloud runs through your \`rush login\` session (~/.rush/user.yaml). A failed login or an unmatched or ambiguous selector exits 1; it never falls back to local sessions.
-      - Every render fetches the run's transcript again and rewrites its copy under the agents cache.
+      - Reads Rush Cloud runs with your Rush API key (RUSH_API_KEY and RUSH_ORG, from the bundle named in cloud.providers.rush.secretsBundle or the environment). A missing or rejected key, or an unmatched or ambiguous selector, exits 1; it never falls back to local sessions.
+      - Every render fetches the run's transcript again from the developer API (\`GET /o/{org}/sessions/{id}/messages\`).
       - \`agents cloud list/status/logs\` cover the run jobs, not their transcripts.
     `,
   });

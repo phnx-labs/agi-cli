@@ -1,358 +1,156 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import * as yaml from 'yaml';
-import { buildDispatchBody, isRushSessionValid, personalOrgHandle, readToken, rushOrgHandle, RushCloudProvider } from './rush.js';
-import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
-import type { ImageAttachment, SkillRef } from './types.js';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startRushApi, type RushApi } from './testdata/rush-api.js';
+import { useFreshSecretsHome } from '../../../tests/secrets-standalone.js';
+import { keychainRef, secretsKeychainItem, writeBundleWithItemsSync } from '../secrets-client.js';
+import type { SecretsBundle } from '../secrets-types.js';
+import type { CloudEvent } from './types.js';
 
-let tmpDir: string;
+let api: RushApi;
+let rush: typeof import('./rush.js');
+let store: typeof import('./store.js');
+const saved = { key: process.env.RUSH_API_KEY, org: process.env.RUSH_ORG };
 
-beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-cloud-test-'));
+beforeAll(async () => {
+  api = await startRushApi();
+  vi.resetModules();
+  process.env.RUSH_PROXY_BASE = api.url;
+  rush = await import('./rush.js');
+  store = await import('./store.js');
 });
 
-afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+afterAll(async () => {
+  store.closeStore();
+  await api.close();
 });
 
-describe('Rush status normalization', () => {
-  it('maps stopped-but-resumable Factory Floor states to idle', () => {
-    expect(normalizeProviderStatus('rush', 'idle')).toBe('idle');
-    expect(normalizeProviderStatus('rush', 'paused')).toBe('idle');
-    expect(normalizeProviderStatus('rush', 'needs_review')).toBe('idle');
-  });
-});
+function restoreEnv(): void {
+  if (saved.key === undefined) delete process.env.RUSH_API_KEY;
+  else process.env.RUSH_API_KEY = saved.key;
+  if (saved.org === undefined) delete process.env.RUSH_ORG;
+  else process.env.RUSH_ORG = saved.org;
+}
 
-describe('buildDispatchBody', () => {
-  it('single repo sends both singular fields and repos[] for back-compat', () => {
-    const body = buildDispatchBody({
-      agent: 'claude',
-      prompt: 'fix the bug',
-      resolvedRepos: [
-        { installation_id: 42, repo_owner: 'example-user', repo_name: 'agents' },
-      ],
-    });
-    expect(body).toMatchObject({
-      agent: 'claude',
-      prompt: 'fix the bug',
-      installation_id: 42,
-      repo_owner: 'example-user',
-      repo_name: 'agents',
-      repos: [
-        { installation_id: 42, repo_owner: 'example-user', repo_name: 'agents' },
-      ],
+describe('buildSessionCreateBody', () => {
+  it('sends the developer API fields only, with the repo and branch as one resources URL', () => {
+    expect(rush.buildSessionCreateBody({
+      prompt: 'fix it', agent: 'codex', repo: 'acme/web', branch: 'release/1.2', model: 'gpt-5.5',
+      skills: ['https://github.com/anthropics/skills/tree/main/skills/frontend-design'],
+    })).toEqual({
+      agent: 'codex',
+      input: 'fix it',
+      model: 'gpt-5.5',
+      skills: ['https://github.com/anthropics/skills/tree/main/skills/frontend-design'],
+      resources: [{ url: 'https://github.com/acme/web/tree/release/1.2' }],
     });
   });
 
-  it('multi-repo omits singular fields so the old cloud proxy rejects cleanly', () => {
-    const body = buildDispatchBody({
+  it('starts a run with no repository, and images become input blocks', () => {
+    expect(rush.buildSessionCreateBody({ prompt: 'look', images: [{ data: 'AAAA', mimeType: 'image/png' }] })).toEqual({
       agent: 'claude',
-      prompt: 'refactor',
-      resolvedRepos: [
-        { installation_id: 1, repo_owner: 'example-user', repo_name: 'rush' },
-        { installation_id: 1, repo_owner: 'example-user', repo_name: 'agents' },
+      input: [
+        { type: 'text', text: 'look' },
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
       ],
     });
-    expect(body.installation_id).toBeUndefined();
-    expect(body.repo_owner).toBeUndefined();
-    expect(body.repo_name).toBeUndefined();
-    expect(body.repos).toEqual([
-      { installation_id: 1, repo_owner: 'example-user', repo_name: 'rush' },
-      { installation_id: 1, repo_owner: 'example-user', repo_name: 'agents' },
+  });
+
+  it('refuses what the API cannot carry instead of dropping it', () => {
+    expect(() => rush.buildSessionCreateBody({ prompt: 'x', repos: ['a/b', 'a/c'] })).toThrow('one repository per session');
+    expect(() => rush.buildSessionCreateBody({ prompt: 'x', providerOptions: { mode: 'plan' } })).toThrow('drop --mode');
+    expect(() => rush.buildSessionCreateBody({ prompt: 'x', repo: 'not-a-repo' })).toThrow('Use owner/repo');
+  });
+});
+
+describe('RushCloudProvider against the developer API', () => {
+  beforeEach(() => {
+    api.requests.length = 0;
+    process.env.RUSH_API_KEY = api.apiKey;
+    process.env.RUSH_ORG = api.org;
+  });
+  afterEach(restoreEnv);
+
+  it('starts, reads, lists, streams, follows up, cancels and reads the transcript of one session', async () => {
+    const provider = new rush.RushCloudProvider();
+    expect(provider.capabilities()).toMatchObject({ available: true, multiRepo: false });
+
+    const task = await provider.dispatch({ prompt: 'reply with the word ok', agent: 'claude' });
+    expect(task).toMatchObject({ provider: 'rush', status: 'allocating', agent: 'claude', prompt: 'reply with the word ok' });
+    expect(api.requests[0]).toEqual({
+      method: 'POST', path: `/o/${api.org}/sessions`, bearer: api.apiKey,
+      body: { agent: 'claude', input: 'reply with the word ok' },
+    });
+    store.insertTask(task);
+
+    expect(await provider.status(task.id)).toMatchObject({
+      id: task.id, status: 'completed', summary: 'ok', prompt: 'reply with the word ok', updatedAt: '2026-10-19T00:01:00.000Z',
+    });
+    expect((await provider.list({ status: 'completed' })).map((t) => t.id)).toContain(task.id);
+    expect(await provider.list({ status: 'running' })).toEqual([]);
+
+    const events: CloudEvent[] = [];
+    for await (const e of provider.stream(task.id)) events.push(e);
+    expect(events).toMatchObject([
+      { type: 'status', status: 'running' },
+      { type: 'text', content: 'ok' },
+      { type: 'done', status: 'completed', summary: 'ok' },
     ]);
+
+    await provider.message(task.id, 'and again');
+    expect(api.requests.at(-1)).toMatchObject({ method: 'POST', path: `/o/${api.org}/sessions/${task.id}/messages`, body: { input: 'and again' } });
+
+    await expect(provider.cancel(task.id)).rejects.toThrow('Rush Cloud cancel failed (409) RUN_STATE_CONFLICT: Cannot cancel: already completed.');
+
+    const transcript = await provider.transcript({ id: task.id, createdAt: task.createdAt }, 'claude');
+    expect(transcript[1]).toEqual({
+      type: 'tool_use', tool: 'Bash', args: { command: 'echo ok' }, callId: 'c1', agent: 'claude', timestamp: task.createdAt,
+    });
+    expect(transcript.at(-1)).toMatchObject({ type: 'message', role: 'assistant', content: 'ok' });
   });
 
-  it('defaults agent to claude when unspecified', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [
-        { installation_id: 1, repo_owner: 'a', repo_name: 'b' },
-      ],
-    });
-    expect(body.agent).toBe('claude');
-  });
-
-  it('forwards mode when set', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      mode: 'plan',
-      resolvedRepos: [
-        { installation_id: 1, repo_owner: 'a', repo_name: 'b' },
-      ],
-    });
-    expect(body.mode).toBe('plan');
-  });
-
-  it('throws when resolvedRepos is empty (guard against programmer error)', () => {
-    expect(() =>
-      buildDispatchBody({ prompt: 'x', resolvedRepos: [] }),
-    ).toThrow(/at least one entry/);
-  });
-
-  it('includes account_manifest (version + email only, no credential material) when supplied', () => {
-    const manifest = {
-      fp: 'aaaa',
-      versions: [
-        { version: '2.1.110', email: 'a@b.com' },
-        { version: '2.1.112', email: 'c@d.com' },
-      ],
-    };
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      accountManifest: manifest,
-    });
-    expect(body.account_manifest).toEqual(manifest);
-    expect(JSON.stringify(body)).not.toContain('cred_fp');
-    expect(body.account_tokens).toBeUndefined();
-  });
-
-  it('omits account_manifest when null (no signed-in claude versions)', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      accountManifest: null,
-    });
-    expect(body.account_manifest).toBeUndefined();
-  });
-
-  it('has no account_tokens surface at all — a native OAuth token is never uploaded (SING-1b)', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      // @ts-expect-error accountTokens was removed from the dispatch surface (RUSH-2527)
-      accountTokens: [{ version: '2.1.110', credentials_json: '{"accessToken":"abc"}' }],
-    });
-    expect(body.account_tokens).toBeUndefined();
-    expect(JSON.stringify(body)).not.toContain('credentials_json');
-    expect(JSON.stringify(body)).not.toContain('accessToken');
-  });
-
-  it('includes strategy when balanced', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      strategy: 'balanced',
-    });
-    expect(body.strategy).toBe('balanced');
-  });
-
-  it('omits strategy when not set', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-    });
-    expect(body.strategy).toBeUndefined();
-  });
-
-  it('includes skills[] verbatim when supplied', () => {
-    const skills: SkillRef[] = [{ id: 'linear' }, { id: 'browser', version: '2.0.0' }];
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      skills,
-    });
-    expect(body.skills).toEqual(skills);
-  });
-
-  it('omits skills when not supplied or empty', () => {
-    const none = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-    });
-    expect(none.skills).toBeUndefined();
-    const empty = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      skills: [],
-    });
-    expect(empty.skills).toBeUndefined();
-  });
-
-  it('includes images[] when supplied', () => {
-    const images: ImageAttachment[] = [
-      { data: 'aGVsbG8=', mimeType: 'image/png' },
-      { data: 'd29ybGQ=', mimeType: 'image/jpeg' },
-    ];
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      images,
-    });
-    expect(body.images).toEqual(images);
-  });
-
-  it('caps images at MAX_IMAGES_PER_DISPATCH, dropping the overflow', () => {
-    const images: ImageAttachment[] = Array.from(
-      { length: MAX_IMAGES_PER_DISPATCH + 3 },
-      (_, i) => ({ data: `img${i}`, mimeType: 'image/png' as const }),
-    );
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      images,
-    });
-    expect(Array.isArray(body.images)).toBe(true);
-    expect((body.images as ImageAttachment[]).length).toBe(MAX_IMAGES_PER_DISPATCH);
-    expect((body.images as ImageAttachment[])[0].data).toBe('img0');
-    expect((body.images as ImageAttachment[])[MAX_IMAGES_PER_DISPATCH - 1].data).toBe(
-      `img${MAX_IMAGES_PER_DISPATCH - 1}`,
+  it('names the key when the API rejects it', async () => {
+    process.env.RUSH_API_KEY = 'rk_live_revoked';
+    await expect(new rush.RushCloudProvider().status('x')).rejects.toThrow(
+      'Rush Cloud status failed (401) AUTH_FAILED: Authentication required. Check RUSH_API_KEY: it may be revoked or expired.',
     );
   });
 
-  it('omits images when not supplied or empty', () => {
-    const none = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-    });
-    expect(none.images).toBeUndefined();
-    const empty = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      images: [],
-    });
-    expect(empty.images).toBeUndefined();
-  });
-
-  it('includes runtime env when supplied for cloud agent injection', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      env: { SHARE_WRITE_TOKEN: 'write-token' },
-    });
-    expect(body.env).toEqual({ SHARE_WRITE_TOKEN: 'write-token' });
-  });
-
-  it('omits empty runtime env', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      env: {},
-    });
-    expect(body.env).toBeUndefined();
-  });
-
-  it('advertises skills + images support in capabilities', () => {
-    const caps = new RushCloudProvider().capabilities();
-    expect(caps.skills).toBe(true);
-    expect(caps.images).toBe(true);
-  });
-
-  it('balanced strategy coexists with no account_manifest', () => {
-    const body = buildDispatchBody({
-      prompt: 'x',
-      resolvedRepos: [{ installation_id: 1, repo_owner: 'a', repo_name: 'b' }],
-      strategy: 'balanced',
-      accountManifest: null,
-    });
-    expect(body.strategy).toBe('balanced');
-    expect(body.account_manifest).toBeUndefined();
-  });
-
-  it('has no upload-consent / token-upload surface anymore (SING-1b regression)', async () => {
-    const mod = (await import('./rush.js')) as Record<string, unknown>;
-    expect(mod.hasRushUploadConsent).toBeUndefined();
-    expect(mod.buildAccountTokensPayload).toBeUndefined();
-    expect(mod.accountTokensFingerprint).toBeUndefined();
-    expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
-    expect(mod.readClaudeCredentialsBlob).toBeUndefined();
+  it('fails loud with the setup steps when no key or org is configured', async () => {
+    delete process.env.RUSH_API_KEY;
+    delete process.env.RUSH_ORG;
+    const provider = new rush.RushCloudProvider();
+    expect(provider.capabilities().available).toBe(false);
+    await expect(provider.list()).rejects.toThrow('Rush Cloud needs RUSH_API_KEY and RUSH_ORG (the environment has none)');
+    expect(api.requests).toEqual([]);
   });
 });
 
-describe('isRushSessionValid', () => {
-  function writeYaml(dir: string, data: object): string {
-    const rushDir = path.join(dir, '.rush');
-    fs.mkdirSync(rushDir, { recursive: true });
-    const p = path.join(rushDir, 'user.yaml');
-    fs.writeFileSync(p, yaml.stringify(data), 'utf-8');
-    return p;
+describe('RushCloudProvider with a secrets bundle', () => {
+  useFreshSecretsHome();
+  beforeEach(() => {
+    delete process.env.RUSH_API_KEY;
+    delete process.env.RUSH_ORG;
+  });
+  afterEach(restoreEnv);
+
+  function writeRushBundle(values: Record<string, string>): void {
+    const bundle: SecretsBundle = { name: 'getrush.ai', backend: 'file', policy: 'never', vars: {} };
+    const items = new Map<string, string>();
+    for (const [key, value] of Object.entries(values)) {
+      items.set(secretsKeychainItem('getrush.ai', key), value);
+      bundle.vars[key] = keychainRef(key);
+    }
+    writeBundleWithItemsSync(bundle, items);
   }
 
-  it('returns false when the yaml file does not exist', () => {
-    const p = path.join(tmpDir, '.rush', 'user.yaml');
-    expect(isRushSessionValid(p)).toBe(false);
+  it('reads RUSH_API_KEY and RUSH_ORG from cloud.providers.rush.secretsBundle', async () => {
+    writeRushBundle({ RUSH_API_KEY: api.apiKey, RUSH_ORG: api.org });
+    await new rush.RushCloudProvider({ secretsBundle: 'getrush.ai' }).list();
+    expect(api.requests.at(-1)).toMatchObject({ path: `/o/${api.org}/sessions?limit=100`, bearer: api.apiKey });
   });
 
-  it('returns false when the yaml has no access_token', () => {
-    const p = writeYaml(tmpDir, { session: { email: 'a@b.com' } });
-    expect(isRushSessionValid(p)).toBe(false);
-  });
-
-  it('returns false when expires_at (ms) is in the past', () => {
-    const expiredAt = Date.now() - 3600_000;
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'tok', expires_at: expiredAt },
-    });
-    expect(isRushSessionValid(p)).toBe(false);
-  });
-
-  it('returns true when expires_at (ms) is in the future', () => {
-    const futureAt = Date.now() + 3600_000;
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'tok', expires_at: futureAt },
-    });
-    expect(isRushSessionValid(p)).toBe(true);
-  });
-
-  it('returns true when expires_at is absent (no expiry info → treat as valid)', () => {
-    const p = writeYaml(tmpDir, { session: { access_token: 'tok' } });
-    expect(isRushSessionValid(p)).toBe(true);
-  });
-
-  it('returns true when expires_at is 0 (non-expiring Phoenix pid_ bearer)', () => {
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'pid_abc123', expires_at: 0 },
-    });
-    expect(isRushSessionValid(p)).toBe(true);
-  });
-});
-
-describe('readToken', () => {
-  function writeYaml(dir: string, data: object): string {
-    const rushDir = path.join(dir, '.rush');
-    fs.mkdirSync(rushDir, { recursive: true });
-    const p = path.join(rushDir, 'user.yaml');
-    fs.writeFileSync(p, yaml.stringify(data), 'utf-8');
-    return p;
-  }
-
-  it('returns the token for a non-expiring pid_ bearer (expires_at: 0)', () => {
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'pid_abc123', expires_at: 0 },
-    });
-    expect(readToken(p)).toBe('pid_abc123');
-  });
-
-  it('throws for a genuinely expired session', () => {
-    const expiredAt = Date.now() - 3600_000;
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'tok', expires_at: expiredAt },
-    });
-    expect(() => readToken(p)).toThrow(/Rush session expired/);
-  });
-
-  it('renders the expiry from ms without an extra *1000 (PHNX-3805)', () => {
-    const expiredAt = Date.now() - 3600_000;
-    const p = writeYaml(tmpDir, {
-      session: { access_token: 'tok', expires_at: expiredAt },
-    });
-    expect(() => readToken(p)).toThrow(new Date(expiredAt).toISOString());
-  });
-
-});
-
-describe('Rush org resolution', () => {
-  it('uses the org saved in user.yaml without asking the service', async () => {
-    const yamlPath = path.join(tmpDir, 'user.yaml');
-    fs.writeFileSync(yamlPath, yaml.stringify({ org: ' acme ', session: { access_token: 't' } }));
-    await expect(rushOrgHandle('t', yamlPath)).resolves.toBe('acme');
-  });
-
-  it('picks the personal org from the /me list, else the first with a slug', () => {
-    expect(personalOrgHandle([{ slug: 'team', kind: 'team' }, { slug: 'mine', kind: 'personal' }])).toBe('mine');
-    expect(personalOrgHandle([{ kind: 'personal' }, { slug: 'team', kind: 'team' }])).toBe('team');
-    expect(personalOrgHandle([])).toBeUndefined();
+  it('says which key the bundle is missing', async () => {
+    writeRushBundle({ RUSH_API_KEY: api.apiKey });
+    await expect(new rush.RushCloudProvider({ secretsBundle: 'getrush.ai' }).list())
+      .rejects.toThrow("Rush Cloud needs RUSH_ORG (bundle 'getrush.ai' has none)");
   });
 });

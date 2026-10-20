@@ -5,7 +5,7 @@ import ora from 'ora';
 import { die } from '../format.js';
 import { insertTask, updateTaskStatus } from './store.js';
 import { renderStream } from './stream.js';
-import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment, SkillRef } from './types.js';
+import type { CloudProvider, CloudProviderId, CloudTarget, CloudTaskStatus, DispatchOptions, ImageAttachment } from './types.js';
 import { MissingTargetError, MAX_IMAGES_PER_DISPATCH } from './types.js';
 import { emit } from '../feed/events.js';
 import { shareRuntimeEnv } from '../share-runtime.js';
@@ -24,14 +24,6 @@ function readImageAttachment(file: string): ImageAttachment {
   }
   const mimeType = imageMimeFromPath(file);
   return { data: fs.readFileSync(file).toString('base64'), mimeType };
-}
-
-function parseSkillRef(raw: string): SkillRef {
-  const at = raw.lastIndexOf('@');
-  if (at > 0) {
-    return { id: raw.slice(0, at), version: raw.slice(at + 1) };
-  }
-  return { id: raw };
 }
 
 export function resolveCloudPrompt(raw: string | undefined, opts: { json: boolean; hint: string }): string {
@@ -87,7 +79,7 @@ interface ExecuteCloudDispatchParams {
   provider: CloudProvider;
   dispatchOptions: DispatchOptions;
   imagePaths?: string[];
-  skillIds?: string[];
+  skillUrls?: string[];
   follow: boolean;
   json: boolean;
 }
@@ -96,7 +88,7 @@ export async function executeCloudDispatch(params: ExecuteCloudDispatchParams): 
 
   const { provider, dispatchOptions, follow, json } = params;
   const imagePaths = params.imagePaths ?? [];
-  const skillIds = params.skillIds ?? [];
+  const skillUrls = params.skillUrls ?? [];
 
   const shareEnv = shareRuntimeEnv();
   if (shareEnv) dispatchOptions.env = shareEnv;
@@ -109,9 +101,9 @@ export async function executeCloudDispatch(params: ExecuteCloudDispatchParams): 
     }
     dispatchOptions.images = imagePaths.map(readImageAttachment);
   }
-  if (skillIds.length > 0) {
+  if (skillUrls.length > 0) {
     if (!caps.skills) die(`${provider.name} does not support ride-along skills.`, 1, { json });
-    dispatchOptions.skills = skillIds.map(parseSkillRef);
+    dispatchOptions.skills = skillUrls;
   }
 
   const dispatchOnce = async () => {

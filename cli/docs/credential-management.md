@@ -664,7 +664,8 @@ endpoint takes any `sk-ant-oat01-` bearer, `accounting/usage.ts`):
    no-ACL cache are removed). An unprovisioned account reads as `unconfigured`
    for the probe; a normal interactive response can still populate its usage
    snapshot through the native status line. Rush Cloud dispatch does not read a Claude credential at all
-   (SING-1b: the account manifest is version + email only). The leftover
+   and sends no account manifest: it calls the developer API with a Rush API key,
+   whose runs use the key creator's own accounts. The leftover
    `readClaudeCredentialsBlob` helper that still read Keychain / `.credentials.json`
    — the #1767 shape — is deleted (RUSH-2359). `--lease` SING-1b detection reads
    the wrapped rotating blob itself and rejects anything that is not

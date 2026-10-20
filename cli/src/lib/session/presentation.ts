@@ -206,8 +206,17 @@ export async function renderSession(
   const spinner = ora(`Parsing ${sessionDisplayAgent(session)} session...`).start();
   const parsedEvents = parseSession(session.filePath, session.agent);
   spinner.stop();
+  renderSessionEvents(session, parsedEvents, mode, filters, options);
+}
 
-  let events = filterEvents(parsedEvents, filters);
+export function renderSessionEvents(
+  session: SessionMeta,
+  parsedEvents: SessionEvent[],
+  mode: ViewMode,
+  filters: FilterOptions,
+  options: { redact?: boolean } = {},
+): void {
+  const events = filterEvents(parsedEvents, filters);
 
   const shown = sessionDisplayAgent(session);
   const agentColor = colorAgent(shown);

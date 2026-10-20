@@ -1,9 +1,4 @@
-
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-import * as crypto from 'crypto';
-import * as yaml from 'yaml';
+import type { SessionAgentId, SessionEvent } from '@phnx-labs/sessions-cli/reader';
 import type {
   CloudProvider,
   CloudTask,
@@ -12,430 +7,247 @@ import type {
   DispatchOptions,
   ProviderCapabilities,
   ImageAttachment,
-  SkillRef,
 } from './types.js';
 import { resolveDispatchRepos, normalizeProviderStatus, MAX_IMAGES_PER_DISPATCH } from './types.js';
-import { isRushSessionExpired } from '../rush-session.js';
 import { parseSSE } from './stream.js';
-import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
-import { getAccountInfo } from '../agents.js';
-import { selectBalancedVersion } from '../accounting/rotate.js';
+import { getTaskById } from './store.js';
 import { RUSH_API_BASE } from '../rush-api.js';
+import { readAndResolveBundleEnv } from '../secrets-client.js';
 
-const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
+const KEY_NAME = 'RUSH_API_KEY';
+const ORG_NAME = 'RUSH_ORG';
+const SETUP_HINT =
+  `Create an API key on the Developers page of https://cloud.getrush.ai, store it with ` +
+  `\`secrets add getrush.ai ${KEY_NAME}\` and your org with \`secrets add getrush.ai ${ORG_NAME} --value <org>\`, ` +
+  `then set cloud.providers.rush.secretsBundle: getrush.ai in ~/.agents/agents.yaml ` +
+  `(or run under \`secrets exec getrush.ai --\`).`;
 
-
-interface UserYaml {
-  org?: string;
-  session?: {
-    email?: string;
-    access_token?: string;
-    refresh_token?: string;
-    expires_at?: number;
-  };
+interface RushCredential {
+  apiKey: string;
+  org: string;
 }
 
-interface Installation {
-  id: number;
-  account_login: string;
-  repositories?: { name: string; full_name: string }[];
-  repository_selection?: string;
+interface RushSession {
+  execution_id: string;
+  status: string;
+  harness?: string;
+  result?: string;
+  error?: { code: string; message: string };
+  repo_owner?: string;
+  repo_name?: string;
+  branch?: string;
+  pr_url?: string;
+  created_at: string;
+  completed_at?: string;
 }
 
-export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
-  try {
-    if (!fs.existsSync(yamlPath)) return false;
-    const raw = fs.readFileSync(yamlPath, 'utf-8');
-    const data = yaml.parse(raw) as UserYaml;
-    if (!data?.session?.access_token) return false;
-    if (isRushSessionExpired(data.session.expires_at)) return false;
-    return true;
-  } catch {
-    return false;
+type RushTranscriptEvent = Omit<SessionEvent, 'agent' | 'timestamp' | 'callId'> & { call_id?: string };
+
+function credentialFrom(env: Record<string, string | undefined>, source: string): RushCredential {
+  const apiKey = env[KEY_NAME];
+  const org = env[ORG_NAME];
+  if (!apiKey || !org) {
+    const missing = [!apiKey && KEY_NAME, !org && ORG_NAME].filter(Boolean).join(' and ');
+    throw new Error(`Rush Cloud needs ${missing} (${source} has none). ${SETUP_HINT}`);
   }
+  return { apiKey, org };
 }
 
-export function readToken(yamlPath: string = USER_YAML): string {
-  if (!fs.existsSync(yamlPath)) {
-    throw new Error('Not logged in to Rush. Run `rush login` first.');
+export function buildSessionCreateBody(options: DispatchOptions): Record<string, unknown> {
+  const repos = resolveDispatchRepos(options);
+  if (repos.length > 1) {
+    throw new Error(`Rush Cloud runs one repository per session; got ${repos.length} (${repos.join(', ')}). Dispatch one per repository.`);
   }
-  const raw = fs.readFileSync(yamlPath, 'utf-8');
-  const data = yaml.parse(raw) as UserYaml;
-  const token = data?.session?.access_token;
-  if (!token) {
-    throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
+  if (options.providerOptions?.mode !== undefined) {
+    throw new Error('Rush Cloud has no execution mode; drop --mode and say what you want in the prompt.');
   }
-  const expiresAt = data.session?.expires_at;
-  if (isRushSessionExpired(expiresAt)) {
-    const expiredAt = new Date(expiresAt!).toISOString();
-    throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
-  }
-  return token;
-}
-
-export interface RushOrg {
-  slug?: string;
-  kind?: string;
-}
-
-export async function rushOrgHandle(token: string, yamlPath: string = USER_YAML): Promise<string> {
-  const saved = (yaml.parse(fs.readFileSync(yamlPath, 'utf-8')) as UserYaml)?.org?.trim();
-  if (saved) return saved;
-  const res = await api('GET', '/me', token);
-  if (!res.ok) throw new Error(`Could not read your Rush organizations (${res.status}). Run \`rush login\` again.`);
-  const handle = personalOrgHandle(((await res.json()) as { orgs?: RushOrg[] }).orgs ?? []);
-  if (!handle) throw new Error('No Rush organization found for your account. Run `rush login` again.');
-  return handle;
-}
-
-export function personalOrgHandle(orgs: RushOrg[]): string | undefined {
-  return (orgs.find((o) => o.kind === 'personal' && o.slug) ?? orgs.find((o) => o.slug))?.slug;
-}
-
-function readEmail(): string | undefined {
-  try {
-    const raw = fs.readFileSync(USER_YAML, 'utf-8');
-    const data = yaml.parse(raw) as UserYaml;
-    return data?.session?.email;
-  } catch {
-    return undefined;
-  }
-}
-
-async function api(method: string, endpoint: string, token: string, body?: unknown): Promise<Response> {
-  const url = endpoint.startsWith('http') ? endpoint : `${RUSH_API_BASE}${endpoint}`;
-  const headers: Record<string, string> = {
-    'Authorization': `Bearer ${token}`,
-    'Content-Type': 'application/json',
-  };
-  return fetch(url, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-}
-
-async function findInstallation(token: string, owner: string, repo: string): Promise<number> {
-  const res = await api('GET', '/api/v1/github/app/installations', token);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch GitHub installations (${res.status}). Is the Rush GitHub App installed?`);
-  }
-  const data = await res.json() as { installations: Installation[] };
-
-  for (const inst of data.installations ?? []) {
-    if (inst.account_login?.toLowerCase() === owner.toLowerCase()) {
-      if (inst.repository_selection === 'all') return inst.id;
-      if (inst.repositories?.some(r => r.name.toLowerCase() === repo.toLowerCase())) {
-        return inst.id;
-      }
-    }
-  }
-
-  throw new Error(
-    `No GitHub App installation found for ${owner}/${repo}. Install the Rush GitHub App at https://github.com/apps/cloud-bot.`,
-  );
-}
-
-interface AccountManifestEntry {
-  version: string;
-  email: string;
-}
-
-interface AccountManifest {
-  fp: string;
-  versions: AccountManifestEntry[];
-}
-
-function sha256(input: string): string {
-  return crypto.createHash('sha256').update(input).digest('hex');
-}
-
-function sanitizeErrorBody(body: string): string {
-
-  const MAX_LEN = 300;
-  try {
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    const msg = (parsed.message ?? parsed.error ?? parsed.detail) as string | undefined;
-    if (typeof msg === 'string') return msg.slice(0, MAX_LEN);
-  } catch {  }
-  let safe = body.slice(0, MAX_LEN);
-  safe = safe.replace(/eyJ[A-Za-z0-9_-]{20,}/g, '[REDACTED_TOKEN]');
-  safe = safe.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
-  safe = safe.replace(/"(access_token|refresh_token|credentials_json)"\s*:\s*"[^"]*"/g, '"$1":"[REDACTED]"');
-  if (body.length > MAX_LEN) safe += '...';
-  return safe;
-}
-
-function parsePromptCode(body: string): string | null {
-  try {
-    const parsed = JSON.parse(body) as { prompt_code?: unknown };
-    return typeof parsed.prompt_code === 'string' ? parsed.prompt_code : null;
-  } catch {
-    return null;
-  }
-}
-
-async function buildAccountManifest(strategy?: string): Promise<AccountManifest | null> {
-
-  let candidateVersions: Array<{ version: string; email: string }>;
-
-  if (strategy === 'balanced') {
-    const result = await selectBalancedVersion('claude');
-    if (!result || result.healthy.length === 0) return null;
-    candidateVersions = result.healthy
-      .filter((c) => !!c.email)
-      .map((c) => ({ version: c.version, email: c.email! }));
-  } else {
-    const versions = listInstalledVersions('claude');
-    if (versions.length === 0) return null;
-    const rows = await Promise.all(
-      versions.map(async (version) => {
-        const home = getVersionHomePath('claude', version);
-        const info = await getAccountInfo('claude', home);
-        return info.email ? { version, email: info.email } : null;
-      }),
-    );
-    candidateVersions = rows.filter((r): r is { version: string; email: string } => r !== null);
-  }
-
-  const entries: AccountManifestEntry[] = candidateVersions
-    .map(({ version, email }) => ({ version, email }))
-    .sort((a, b) => a.version.localeCompare(b.version));
-
-  if (entries.length === 0) return null;
-  const fp = sha256(JSON.stringify(entries));
-  return { fp, versions: entries };
-}
-
-
-export function buildDispatchBody(input: {
-  agent?: string;
-  prompt: string;
-  mode?: string;
-  strategy?: string;
-  resolvedRepos: Array<{ installation_id: number; repo_owner: string; repo_name: string }>;
-  accountManifest?: AccountManifest | null;
-  skills?: SkillRef[] | null;
-  images?: ImageAttachment[] | null;
-  env?: Record<string, string> | null;
-}): Record<string, unknown> {
-  if (input.resolvedRepos.length === 0) {
-    throw new Error('buildDispatchBody: resolvedRepos must have at least one entry');
-  }
-  const primary = input.resolvedRepos[0];
   const body: Record<string, unknown> = {
-    agent: input.agent ?? 'claude',
-    prompt: input.prompt,
-    repos: input.resolvedRepos,
-    mode: input.mode,
-    ...(input.strategy ? { strategy: input.strategy } : {}),
+    agent: options.agent ?? 'claude',
+    input: buildInput(options.prompt, options.images),
   };
-  if (input.resolvedRepos.length === 1) {
-    body.installation_id = primary.installation_id;
-    body.repo_owner = primary.repo_owner;
-    body.repo_name = primary.repo_name;
-  }
-  if (input.accountManifest) {
-    body.account_manifest = input.accountManifest;
-  }
-  if (input.skills && input.skills.length > 0) {
-    body.skills = input.skills;
-  }
-  if (input.images && input.images.length > 0) {
-    body.images = input.images.slice(0, MAX_IMAGES_PER_DISPATCH);
-  }
-  if (input.env && Object.keys(input.env).length > 0) {
-    body.env = input.env;
-  }
+  if (options.model) body.model = options.model;
+  if (options.skills && options.skills.length > 0) body.skills = options.skills;
+  if (repos.length === 1) body.resources = [{ url: repoResourceUrl(repos[0], options.branch) }];
   return body;
+}
+
+function buildInput(prompt: string, images?: ImageAttachment[] | null): unknown {
+  if (!images || images.length === 0) return prompt;
+  return [
+    { type: 'text', text: prompt },
+    ...images.slice(0, MAX_IMAGES_PER_DISPATCH).map((img) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: img.mimeType, data: img.data },
+    })),
+  ];
+}
+
+function repoResourceUrl(full: string, branch?: string): string {
+  const parts = full.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new Error(`Invalid repo format: ${JSON.stringify(full)}. Use owner/repo.`);
+  }
+  const base = `https://github.com/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
+  return branch ? `${base}/tree/${branch}` : base;
+}
+
+function sessionToTask(s: RushSession): CloudTask {
+  return {
+    id: s.execution_id,
+    provider: 'rush',
+    status: normalizeProviderStatus('rush', s.status),
+    agent: s.harness,
+    prompt: getTaskById(s.execution_id)?.prompt ?? '',
+    repo: s.repo_owner && s.repo_name ? `${s.repo_owner}/${s.repo_name}` : undefined,
+    branch: s.branch,
+    prUrl: s.pr_url,
+    summary: s.result ?? s.error?.message,
+    createdAt: s.created_at,
+    updatedAt: s.completed_at ?? s.created_at,
+  };
+}
+
+async function rushApiError(action: string, res: Response): Promise<Error> {
+  const text = await res.text();
+  let detail: string;
+  try {
+    const body = JSON.parse(text) as { error?: string; message?: string; code?: string; error_code?: string };
+    const code = body.code ?? body.error_code;
+    detail = `${code ? `${code}: ` : ''}${body.error ?? body.message ?? ''}`;
+  } catch {
+    detail = text.slice(0, 300).replace(/rk_live_[A-Za-z0-9_-]+/g, '[REDACTED]');
+  }
+  const hint = res.status === 401 ? ` Check ${KEY_NAME}: it may be revoked or expired.` : '';
+  return new Error(`Rush Cloud ${action} failed (${res.status}) ${detail}.${hint}`);
 }
 
 export class RushCloudProvider implements CloudProvider {
   id = 'rush' as const;
   name = 'Rush Cloud';
+  private secretsBundle?: string;
+
+  constructor(config?: { secretsBundle?: string }) {
+    this.secretsBundle = config?.secretsBundle;
+  }
+
+  private async credential(): Promise<RushCredential> {
+    if (!this.secretsBundle) return credentialFrom(process.env, 'the environment');
+    let env: Record<string, string>;
+    try {
+      ({ env } = await readAndResolveBundleEnv(this.secretsBundle, { caller: 'cloud:rush', agentOnly: true }));
+    } catch (err) {
+      throw new Error(`Could not read Rush Cloud credentials from bundle '${this.secretsBundle}': ${(err as Error).message}`);
+    }
+    return credentialFrom(env, `bundle '${this.secretsBundle}'`);
+  }
+
+  private async request(action: string, path: string, init: RequestInit = {}): Promise<Response> {
+    const { apiKey, org } = await this.credential();
+    let res: Response;
+    try {
+      res = await fetch(`${RUSH_API_BASE}/o/${encodeURIComponent(org)}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+          ...init.headers,
+        },
+      });
+    } catch (err) {
+      throw new Error(`Rush Cloud ${action} failed (network): ${(err as Error).message}`);
+    }
+    if (!res.ok) throw await rushApiError(action, res);
+    return res;
+  }
 
   capabilities(): ProviderCapabilities {
     return {
-      available: isRushSessionValid(),
+      available: Boolean(this.secretsBundle || process.env[KEY_NAME]),
       dispatch: true,
       status: true,
       list: true,
       stream: true,
       cancel: true,
       message: true,
-      multiRepo: true,
+      multiRepo: false,
       skills: true,
       images: true,
     };
   }
 
   async dispatch(options: DispatchOptions): Promise<CloudTask> {
+    const body = buildSessionCreateBody(options);
     const repos = resolveDispatchRepos(options);
-    if (repos.length === 0) {
-      throw new Error('Rush Cloud requires --repo <owner/repo> (or --repo repeated for multi-repo).');
-    }
 
-    {
-      const { runPreflightGate } = await import('../budget/preflight.js');
-      const projectKey = repos[0] ?? process.cwd();
-      const gate = runPreflightGate({
-        agent: options.agent ?? 'cloud',
-        model: options.model ?? `${options.agent ?? 'cloud'}-default`,
-        prompt: options.prompt,
-        project: projectKey,
-      });
-      if (!gate.dormant && !gate.decision.allow) {
-        throw new Error(`[budget] BLOCKED cloud dispatch (${projectKey}): ${gate.decision.reason}`);
-      }
-    }
-
-    const token = readToken();
-    const parsed = repos.map((full) => {
-      const parts = full.split('/');
-      if (parts.length !== 2 || !parts[0] || !parts[1]) {
-        throw new Error(`Invalid repo format: ${JSON.stringify(full)}. Use owner/repo.`);
-      }
-      return { full, owner: parts[0], name: parts[1] };
-    });
-
-    const resolvedRepos = await Promise.all(
-      parsed.map(async (r) => ({
-        installation_id: await findInstallation(token, r.owner, r.name),
-        repo_owner: r.owner,
-        repo_name: r.name,
-      })),
-    );
-
-    const strategy = (options.providerOptions as { strategy?: string } | undefined)?.strategy;
-    const accountManifest = strategy === 'balanced' ? null : await buildAccountManifest();
-
-    const body = buildDispatchBody({
-      agent: options.agent,
+    const { runPreflightGate } = await import('../budget/preflight.js');
+    const projectKey = repos[0] ?? process.cwd();
+    const gate = runPreflightGate({
+      agent: options.agent ?? 'cloud',
+      model: options.model ?? `${options.agent ?? 'cloud'}-default`,
       prompt: options.prompt,
-      mode: options.providerOptions?.mode as string | undefined,
-      resolvedRepos,
-      accountManifest,
-      strategy,
-      skills: options.skills,
-      images: options.images,
-      env: options.env,
+      project: projectKey,
     });
-
-    let res = await api('POST', '/api/v1/cloud-runs', token, body);
-
-    if (res.status === 401 && accountManifest) {
-      const errBody = await res.clone().text();
-      const promptCode = parsePromptCode(errBody);
-      if (promptCode === 'NEW_ACCOUNT' || promptCode === 'TOKEN_ROTATED') {
-        throw new Error(
-          [
-            `Rush Cloud asked to sync your Claude login (reason: ${promptCode.toLowerCase()}), but`,
-            `agents-cli never copies a native OAuth / session login off this machine (SING-1b) —`,
-            `a rotating token uploaded to the cloud is invalidated on its next refresh.`,
-            ``,
-            `Portable provider accounts can run locally or on a pinned fleet device, but cloud`,
-            `placement does not securely inject them yet. Create and sync one with:`,
-            `    agents accounts add <name> --provider anthropic --auth api-key    # or: --auth setup-token`,
-            `    agents accounts sync <name> <device>`,
-            `then run locally or on that device with --account <name>. See docs/secrets.md (SING-1b).`,
-          ].join('\n'),
-        );
-      }
+    if (!gate.dormant && !gate.decision.allow) {
+      throw new Error(`[budget] BLOCKED cloud dispatch (${projectKey}): ${gate.decision.reason}`);
     }
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Dispatch failed (${res.status}): ${sanitizeErrorBody(text)}`);
+    if (options.env && Object.keys(options.env).length > 0) {
+      process.stderr.write(
+        `Rush Cloud takes no per-run environment; not sending ${Object.keys(options.env).join(', ')}. ` +
+          `Save it as a Project secret instead (POST /o/{org}/secrets).\n`,
+      );
     }
 
-    const data = await res.json() as { execution_id: string };
-    const now = new Date().toISOString();
-
+    const res = await this.request('dispatch', '/sessions', { method: 'POST', body: JSON.stringify(body) });
+    const session = (await res.json()) as RushSession;
     return {
-      id: data.execution_id,
-      provider: 'rush',
-      status: 'queued',
-      agent: options.agent ?? 'claude',
+      ...sessionToTask(session),
+      agent: session.harness ?? (body.agent as string),
       prompt: options.prompt,
       repo: repos[0],
-      repos: repos,
+      repos: repos.length > 0 ? repos : undefined,
       branch: options.branch,
-      createdAt: now,
-      updatedAt: now,
     };
   }
 
   async status(taskId: string): Promise<CloudTask> {
-    const token = readToken();
-    const res = await api('GET', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}`, token);
-    if (!res.ok) {
-      throw new Error(`Failed to get task status (${res.status}).`);
-    }
-    const data = await res.json() as Record<string, unknown>;
-    return {
-      id: taskId,
-      provider: 'rush',
-      status: normalizeProviderStatus('rush', data.status as string),
-      agent: (data.agent as string) || undefined,
-      prompt: (data.prompt as string) || '',
-      repo: data.repo_owner && data.repo_name ? `${data.repo_owner}/${data.repo_name}` : undefined,
-      branch: (data.branch as string) || undefined,
-      prUrl: (data.pr_url as string) || undefined,
-      summary: (data.summary as string) || undefined,
-      createdAt: (data.created_at as string) || new Date().toISOString(),
-      updatedAt: (data.updated_at as string) || new Date().toISOString(),
-    };
+    const res = await this.request('status', `/sessions/${encodeURIComponent(taskId)}`);
+    return sessionToTask((await res.json()) as RushSession);
   }
 
   async list(filter?: { status?: CloudTaskStatus }): Promise<CloudTask[]> {
-    const token = readToken();
-    const params = new URLSearchParams();
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString() ? `?${params.toString()}` : '';
-    const res = await api('GET', `/api/v1/cloud-runs${qs}`, token);
-    if (!res.ok) {
-      throw new Error(`Failed to list tasks (${res.status}).`);
-    }
-    const data = await res.json() as { executions: Record<string, unknown>[] };
-    return (data.executions ?? []).map((e) => ({
-      id: e.execution_id as string,
-      provider: 'rush' as const,
-      status: normalizeProviderStatus('rush', e.status as string),
-      agent: (e.agent as string) || undefined,
-      prompt: (e.prompt as string) || '',
-      repo: e.repo_owner && e.repo_name ? `${e.repo_owner}/${e.repo_name}` : undefined,
-      branch: (e.branch as string) || undefined,
-      prUrl: (e.pr_url as string) || undefined,
-      summary: (e.summary as string) || undefined,
-      createdAt: (e.created_at as string) || '',
-      updatedAt: (e.updated_at as string) || '',
-    }));
+    const res = await this.request('list', '/sessions?limit=100');
+    const data = (await res.json()) as { sessions?: RushSession[] };
+    const tasks = (data.sessions ?? []).map(sessionToTask);
+    return filter?.status ? tasks.filter((t) => t.status === filter.status) : tasks;
   }
 
   async *stream(taskId: string): AsyncIterable<CloudEvent> {
-    const token = readToken();
-    const res = await fetch(`${RUSH_API_BASE}/api/v1/cloud-runs/${encodeURIComponent(taskId)}/stream`, {
-      headers: { 'Authorization': `Bearer ${token}` },
+    const res = await this.request('stream', `/sessions/${encodeURIComponent(taskId)}/events`, {
+      headers: { Accept: 'text/event-stream' },
     });
-    if (!res.ok) {
-      throw new Error(`Failed to connect to stream (${res.status}).`);
-    }
     yield* parseSSE(res);
   }
 
   async cancel(taskId: string): Promise<void> {
-    const token = readToken();
-    const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/cancel`, token);
-    if (!res.ok) {
-      throw new Error(`Failed to cancel task (${res.status}).`);
-    }
+    await this.request('cancel', `/sessions/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' });
   }
 
   async message(taskId: string, content: string): Promise<void> {
-    const token = readToken();
-    const res = await api('POST', `/api/v1/cloud-runs/${encodeURIComponent(taskId)}/message`, token, { content });
-    if (!res.ok) {
-      throw new Error(`Failed to send message (${res.status}).`);
-    }
+    await this.request('message', `/sessions/${encodeURIComponent(taskId)}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ input: content }),
+    });
+  }
+
+  async transcript(task: Pick<CloudTask, 'id' | 'createdAt'>, agent: SessionAgentId): Promise<SessionEvent[]> {
+    const res = await this.request('transcript', `/sessions/${encodeURIComponent(task.id)}/messages`);
+    const data = (await res.json()) as { events?: RushTranscriptEvent[] };
+    return (data.events ?? []).map(({ call_id, ...e }) => ({
+      ...e,
+      ...(call_id ? { callId: call_id } : {}),
+      agent,
+      timestamp: task.createdAt,
+    }));
   }
 }
