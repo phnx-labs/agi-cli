@@ -236,6 +236,12 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--mode');
     });
 
+    it('grok auto produces --permission-mode auto, not a flagless edit run', () => {
+      const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'auto' }));
+      expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('auto');
+      expect(cmd).not.toContain('--always-approve');
+    });
+
     it('grok skip produces --always-approve', () => {
       const cmd = buildExecCommand(opts({ agent: 'grok', mode: 'skip' }));
       expect(cmd).toContain('--always-approve');
@@ -294,12 +300,12 @@ describeExec('buildExecCommand', () => {
     });
 
     describe('grok headless -p cannot carry --permission-mode plan (RUSH-1810)', () => {
-      it('headless plan downgrades to edit — no --permission-mode', () => {
+      it('headless plan downgrades to auto, never plan', () => {
         let cmd: string[] = [];
         expect(() => {
           cmd = buildExecCommand(opts({ agent: 'grok', mode: 'plan' }));
         }).not.toThrow();
-        expect(cmd).not.toContain('--permission-mode');
+        expect(cmd[cmd.indexOf('--permission-mode') + 1]).toBe('auto');
         expect(cmd).toContain('-p');
       });
     });
@@ -1397,9 +1403,9 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
     expect(resolveHeadlessMode('kimi', 'plan', false)).toBe('auto');
   });
 
-  it('downgrades headless plan to edit for grok (auto→edit via resolveMode)', () => {
+  it('downgrades headless plan to auto for grok', () => {
     expect(AGENTS.grok.capabilities.headlessPlan).toBe(false);
-    expect(resolveHeadlessMode('grok', 'plan', false)).toBe('edit');
+    expect(resolveHeadlessMode('grok', 'plan', false)).toBe('auto');
   });
 
   it('keeps interactive plan for kimi/grok (only headless downgrades)', () => {
