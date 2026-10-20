@@ -243,7 +243,7 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
 agi-cli forwards the harness's native no-prompt flag; it does not add another
 safety layer. Prefer `auto` where it adds a safer automatic policy (smart classifier
-on Claude/Copilot/Grok, never-prompt over a sandbox on Codex, native high-auto mode on
+on Claude/Copilot, Grok's native auto mode, never-prompt over a sandbox on Codex, native high-auto mode on
 Droid, or interactive Kimi), or `edit` everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
 already-auto-approved `-p` behavior, so prefer `edit` rather than signaling a blanket
 bypass. Harnesses without a native bypass flag reject direct-exec `skip`.

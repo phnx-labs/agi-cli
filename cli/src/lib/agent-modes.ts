@@ -19,6 +19,7 @@ const AUTO_SEMANTICS: Partial<Record<AgentId, string>> = {
   muse: 'runs --disable-approval, which turns approvals off while keeping the sandbox — like codex, it never prompts and a denied command fails.',
   droid: 'runs --auto high, droid\'s full-autonomy setting.',
   kimi: "runs kimi's native --auto.",
+  grok: "runs grok's native --permission-mode auto.",
 };
 
 export interface AgentModeEntry {
