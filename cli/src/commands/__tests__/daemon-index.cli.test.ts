@@ -30,17 +30,19 @@ function json<T>(args: string[]): T {
   return JSON.parse(res.stdout) as T;
 }
 
-const codexDir = path.join(home, '.codex', 'sessions', '2026', '10', '06');
+const started = new Date(Date.now() - 2 * 86_400_000);
+const at = (seconds: number) => new Date(Date.UTC(started.getUTCFullYear(), started.getUTCMonth(), started.getUTCDate(), 0, 0, seconds)).toISOString().replace('.000Z', 'Z');
+const codexDir = path.join(home, '.codex', 'sessions', String(started.getUTCFullYear()), String(started.getUTCMonth() + 1).padStart(2, '0'), String(started.getUTCDate()).padStart(2, '0'));
 const claudeDir = path.join(home, '.claude', 'projects');
 const legacyRunArchiveDir = path.join(home, '.agents', '.history', 'runs', 'nightly', '2026-10-06T00-00', 'sessions', 'claude', 'projects');
 
 beforeAll(() => {
   fs.mkdirSync(codexDir, { recursive: true });
   fs.writeFileSync(path.join(codexDir, 'rollout-daemon-index.jsonl'), [
-    { timestamp: '2026-10-06T00:00:00Z', type: 'session_meta', payload: { id: '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001', cwd: home, cli_version: '0.120.0' } },
-    { timestamp: '2026-10-06T00:00:01Z', type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'check the repo status' }] } },
-    { timestamp: '2026-10-06T00:00:02Z', type: 'response_item', payload: { type: 'function_call', name: 'exec_command', call_id: 'c1', arguments: JSON.stringify({ cmd: 'git status; git diff' }) } },
-    { timestamp: '2026-10-06T00:00:03Z', type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: 'clean' } },
+    { timestamp: at(0), type: 'session_meta', payload: { id: '0199aaaa-bbbb-7ccc-8ddd-eeeeffff0001', cwd: home, cli_version: '0.120.0' } },
+    { timestamp: at(1), type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'check the repo status' }] } },
+    { timestamp: at(2), type: 'response_item', payload: { type: 'function_call', name: 'exec_command', call_id: 'c1', arguments: JSON.stringify({ cmd: 'git status; git diff' }) } },
+    { timestamp: at(3), type: 'response_item', payload: { type: 'function_call_output', call_id: 'c1', output: 'clean' } },
   ].map((row) => JSON.stringify(row)).join('\n') + '\n');
   fs.mkdirSync(claudeDir, { recursive: true });
   fs.mkdirSync(legacyRunArchiveDir, { recursive: true });
