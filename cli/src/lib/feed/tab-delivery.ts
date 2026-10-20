@@ -102,7 +102,7 @@ export async function deliverToTab(input: {
     return {
       delivered: false,
       id: delivery.id,
-      touched: sizeOf(input.transcript) > from,
+      touched: input.transcript ? sizeOf(input.transcript) > from : true,
       reason: input.transcript
         ? `No editor window holding this session's tab typed it within ${Math.round(TAB_DELIVERY_TTL_MS / 1000)} seconds.`
         : 'This session has no transcript to confirm the delivery.',
