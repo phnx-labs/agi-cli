@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.23.40
+
+- **The stall watchdog is gone (PHNX-4439).** `agents watchdog`, `agents setup watchdog`, the
+  daemon's `watchdog` service, the `watchdog.enabled` device key and the menubar snapshot's
+  `watchdog` block are deleted. It was off by default, typed a generic "Continue." into a stalled
+  split, and never confirmed that a VSCodium tab received it. Its replacement is the Stop-hook done
+  check, which decides whose move it is, and the project Lead's drafted reply, which you send from the
+  card. A leftover `watchdog: false` in `~/.agents/daemon/services.yaml` or `watchdogEnabled` in a
+  device's `agents.yaml` is left in place and ignored, and `agents watchdog` is an unknown command
+  that never autocorrects to a live one.
+  Source: `cli/src/lib/daemon/daemon.ts`, `cli/src/lib/device-config.ts`.
+
+- **Asks come from the Stop hook's judge, and replies reach editor tabs with a receipt (PHNX-4439).** A Claude session's card now asks when the Stop hook's model judge says the turn handed the owner something (`turnVerdict` on the row, with the agent's own sentence and choices), and says Not done when it stopped waiting on nothing live. Neither expires on a clock; once the judge has judged a session, the last-line question regex no longer applies to it. `agents feed answer` and `agents send --channel session` hand text for a VSCodium tab, or an agent started from an editor on another machine, to the AGI EXT window that binds it (`delivery` on the row) and report delivered only when the agent takes it (and release the answer for another try when nothing reached it); the `codium --open-url` rail, which could not confirm and missed the 31 of 42 sessions running on other machines, is removed. The project Lead drafts a reply for each new ask in its project (shown on the card as `draft`; Send is the ordinary `agents feed answer`), and `agents lead tool roster --session <id>` gives it a session's last two turns. Source: `cli/src/lib/feed/attention.ts`, `cli/src/lib/feed/tab-delivery.ts`, `cli/src/lib/answer-router.ts`, `cli/src/lib/lead/host.ts`, `cli/src/lib/lead/drafts.ts`.
+
 ## 1.23.39
 
 - **`agents run --device auto` places from a snapshot instead of probing the fleet on every launch.** Each placement probe's load stats and readiness answer are now kept in `~/.agents/.cache/.fleet-stats.json`, and the daemon's `device-probe` tick refreshes them every 3 minutes while placement was used in the last day. A launch uses a device's entry when it is at most 5 minutes old and probes live only the devices whose entry is missing or older (stats and readiness now in parallel). The picked device is confirmed with one `ssh … true` that the dispatch then reuses, and `ensureHostReady` reads the same fresh entry instead of its own `agents view` round trip. On yosemite-s1 a headless `--device auto` launch reached its dispatch ssh in 0.6 to 0.9 s instead of 6.1 s. A pick that no longer answers is marked and the next best is taken; when only the snapshot says no device is ready, placement probes live before refusing. Source: cli/src/lib/teams/placement-probe.ts, cli/src/lib/devices/stats-cache.ts, cli/src/lib/hosts/ready.ts, cli/src/lib/smart-launch.ts, cli/src/lib/daemon/device-probe-service.ts
