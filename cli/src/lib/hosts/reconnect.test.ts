@@ -162,14 +162,14 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
   const INJECTION_SID = "a'b; touch /tmp/PWNED-reconnect-test; #";
 
   test.skipIf(!runsBash)('argv round-trips through bash -lc even for a session id needing quoting — no injection', () => {
-    const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'session', id: INJECTION_SID })], { encoding: 'utf8' });
+    const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'session', id: INJECTION_SID }, 'claude')], { encoding: 'utf8' });
     expect(res.trimEnd().split('\n')).toEqual(['ps', 'focus', INJECTION_SID, '--local', '--reconnect-reattach']);
   });
 
   test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
     let status: number | undefined;
     try {
-      execFileSync('bash', ['-c', exit255Shim + reattachRemoteCommand(SESSION_TARGET)]);
+      execFileSync('bash', ['-c', exit255Shim + reattachRemoteCommand(SESSION_TARGET, 'claude')]);
       status = 0;
     } catch (e) {
       status = (e as { status?: number }).status;
@@ -184,10 +184,27 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
     });
   });
 
-  test("the plain string, no shell needed: wraps in bash -lc around the peer's own recovery verb (attach-else-resume, no --attach-only)", () => {
-    expect(reattachRemoteCommand(SESSION_TARGET)).toBe(
-      `bash -lc 'agents ps focus ${SID} --local --reconnect-reattach; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
-    );
+  test("the plain string: bash -lc around the peer's own recovery verb (attach-else-resume, no --attach-only)", () => {
+    const cmd = reattachRemoteCommand(SESSION_TARGET, 'claude');
+    expect(cmd.startsWith("bash -lc '")).toBe(true);
+    expect(cmd).toContain(`agents ps focus ${SID} --local --reconnect-reattach; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`);
+  });
+
+  test.skipIf(!runsBash)('the reattached session keeps the tab it was launched from: the same identity a fresh launch exports', () => {
+    const saved = { ...process.env };
+    try {
+      process.env.AGENT_TERMINAL_ID = 'cl-1792195106138-18';
+      delete process.env.AGENTS_ORIGIN_TERMINAL_ID;
+      delete process.env.AGENTS_RUNTIME;
+      const envShim = `agents() { printf '%s|%s|%s\\n' "$AGENT_TERMINAL_ID" "$AGENTS_ORIGIN_TERMINAL_ID" "$AGENTS_ORIGIN_DEVICE"; }; export -f agents; `;
+      const out = execFileSync('bash', ['-c', envShim + reattachRemoteCommand(SESSION_TARGET, 'claude')], { encoding: 'utf8' }).trim();
+      const [terminal, origin, device] = out.split('|');
+      expect(terminal).toBe('cl-1792195106138-18');
+      expect(origin).toBe('cl-1792195106138-18');
+      expect(device).toBeTruthy();
+    } finally {
+      process.env = saved;
+    }
   });
 });
 

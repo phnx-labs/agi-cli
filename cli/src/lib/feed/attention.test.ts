@@ -242,6 +242,8 @@ describe('reconcileAttention', () => {
     expect(reconcileAttention({ session: { ...prose, lastEventMs: 4_000, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toBeUndefined();
     expect(reconcileAttention({ session: { ...prose, lastEventMs: 5_000, turnVerdict: { kind: 'done', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 })).toMatchObject({ source: 'heuristic' });
     expect(reconcileAttention({ session: prose, nowMs: 10_000 })).toMatchObject({ source: 'heuristic', kind: 'question' });
+    expect(reconcileAttention({ session: { ...prose, lastEventMs: 4_000, turnVerdict: { kind: 'unjudged', quote: '', choices: [], atMs: 4_100 } }, nowMs: 10_000 }))
+      .toMatchObject({ source: 'heuristic', kind: 'question' });
   });
 
   describe('the Stop hook\'s turn verdict', () => {
