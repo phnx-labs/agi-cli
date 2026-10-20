@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { getActiveSessions } from '../session/active.js';
+import { getActiveSessions, type ActiveSession } from '../session/active.js';
 import {
   cleanShotStem,
   isNewerRecording,
@@ -23,11 +23,14 @@ export interface RecordingScan {
 export interface RecordingSettlerOptions {
   settleMs?: number;
   now?: () => number;
-  sessionsAt?: (recordedAtMs: number) => Promise<string | undefined>;
+  liveSessions?: () => Promise<LiveSession[]>;
 }
 
-async function sessionAtRecordingTime(recordedAtMs: number): Promise<string | undefined> {
-  const sessions = await getActiveSessions({ localOnly: true });
+type LiveSession = Pick<ActiveSession, 'sessionId' | 'startedAtMs'>;
+
+const localLiveSessions = (): Promise<LiveSession[]> => getActiveSessions({ localOnly: true });
+
+function sessionAt(sessions: LiveSession[], recordedAtMs: number): string | undefined {
   const matching = sessions.filter((session) =>
     session.sessionId && (session.startedAtMs ?? Number.POSITIVE_INFINITY) <= recordedAtMs,
   );
@@ -38,12 +41,12 @@ export class RecordingSettler {
   private readonly observations = new Map<string, Observation>();
   private readonly settleMs: number;
   private readonly now: () => number;
-  private readonly sessionsAt: (recordedAtMs: number) => Promise<string | undefined>;
+  private readonly liveSessions: () => Promise<LiveSession[]>;
 
   constructor(options: RecordingSettlerOptions = {}) {
     this.settleMs = options.settleMs ?? 10_000;
     this.now = options.now ?? Date.now;
-    this.sessionsAt = options.sessionsAt ?? sessionAtRecordingTime;
+    this.liveSessions = options.liveSessions ?? localLiveSessions;
   }
 
   async scan(directory: string, options: { notBeforeMs?: number } = {}): Promise<RecordingScan> {
@@ -51,6 +54,8 @@ export class RecordingSettler {
     const now = this.now();
     const seen = new Set<string>();
     const candidates: RecordingCandidate[] = [];
+    let sessions: Promise<LiveSession[]> | undefined;
+    const sessionFor = async (recordedAtMs: number) => sessionAt(await (sessions ??= this.liveSessions()), recordedAtMs);
 
     await Promise.all(names.map(async (name) => {
       const filePath = path.join(directory, name);
@@ -68,7 +73,7 @@ export class RecordingSettler {
         size: stat.size,
         mtimeMs: stat.mtimeMs,
         recordedAt: new Date(recordedAtMs).toISOString(),
-        sessionId: previous?.candidate.sessionId ?? await this.sessionsAt(recordedAtMs),
+        sessionId: previous ? previous.candidate.sessionId : await sessionFor(recordedAtMs),
       };
       const unchangedSinceMs = previous && previous.candidate.size === candidate.size
         ? previous.unchangedSinceMs
@@ -112,6 +117,6 @@ export async function candidateForFile(filePath: string): Promise<RecordingCandi
     size: stat.size,
     mtimeMs: stat.mtimeMs,
     recordedAt: new Date(recordedAtMs).toISOString(),
-    sessionId: await sessionAtRecordingTime(recordedAtMs),
+    sessionId: sessionAt(await localLiveSessions(), recordedAtMs),
   };
 }
