@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { atomicWriteJsonSync } from '../fs-atomic.js';
 import { getFeedDir } from '../state.js';
 
 export interface TabDelivery {
@@ -42,31 +41,34 @@ function removeTabDelivery(d: TabDelivery, root?: string): void {
   try { fs.unlinkSync(deliveryPath(d.sessionId, root)); } catch { }
 }
 
-function transcriptTail(file: string, bytes = 256 * 1024): string {
+function sizeOf(file: string | undefined): number {
+  if (!file) return 0;
+  try { return fs.statSync(file).size; } catch { return 0; }
+}
+
+function appendedSince(file: string, from: number): string {
   const fd = fs.openSync(file, 'r');
   try {
     const size = fs.fstatSync(fd).size;
-    const len = Math.min(size, bytes);
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, size - len);
+    if (size <= from) return '';
+    const buf = Buffer.alloc(size - from);
+    fs.readSync(fd, buf, 0, buf.length, from);
     return buf.toString('utf8');
   } finally {
     fs.closeSync(fd);
   }
 }
 
-function received(transcript: string, sinceMs: number, text: string): boolean {
-  let stat: fs.Stats;
-  try { stat = fs.statSync(transcript); } catch { return false; }
-  if (stat.mtimeMs <= sinceMs) return false;
-  const probe = text.trim().slice(0, 60);
-  if (probe.length <= 1) return true;
-  return transcriptTail(transcript).includes(JSON.stringify(probe).slice(1, -1));
+function received(appended: string, text: string): boolean {
+  if (!appended) return false;
+  const probe = Array.from(text.trim()).slice(0, 60).join('');
+  if (probe.length <= 1) return appended.includes('"tool_result"');
+  return appended.includes(JSON.stringify(probe).slice(1, -1));
 }
 
 export type TabDeliveryResult =
   | { delivered: true; id: string }
-  | { delivered: false; id: string; reason: string };
+  | { delivered: false; id: string; reason: string; touched: boolean };
 
 export async function deliverToTab(input: {
   sessionId: string;
@@ -84,12 +86,15 @@ export async function deliverToTab(input: {
     enter: input.enter !== false,
     at: at.toISOString(),
   };
-  fs.mkdirSync(deliveryDir(input.root), { recursive: true });
-  atomicWriteJsonSync(deliveryPath(input.sessionId, input.root), delivery);
+  const from = sizeOf(input.transcript);
+  fs.mkdirSync(deliveryDir(input.root), { recursive: true, mode: 0o700 });
+  const file = deliveryPath(input.sessionId, input.root);
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(delivery), { mode: 0o600 });
+  fs.renameSync(`${file}.tmp`, file);
   const deadline = at.getTime() + Math.min(input.timeoutMs ?? TAB_DELIVERY_TTL_MS, TAB_DELIVERY_TTL_MS);
   try {
     while (Date.now() < deadline) {
-      if (input.transcript && received(input.transcript, at.getTime(), input.text)) {
+      if (input.transcript && received(appendedSince(input.transcript, from), input.text)) {
         return { delivered: true, id: delivery.id };
       }
       await new Promise((r) => setTimeout(r, POLL_MS));
@@ -97,6 +102,7 @@ export async function deliverToTab(input: {
     return {
       delivered: false,
       id: delivery.id,
+      touched: sizeOf(input.transcript) > from,
       reason: input.transcript
         ? `No editor window holding this session's tab typed it within ${Math.round(TAB_DELIVERY_TTL_MS / 1000)} seconds.`
         : 'This session has no transcript to confirm the delivery.',

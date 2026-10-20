@@ -849,7 +849,7 @@ describe('an answer typed into the editor tab a session runs in', () => {
     expect(readTabDelivery('codium-tab', feedRoot)).toBeUndefined();
   });
 
-  it('with no window holding the tab it says so and clears the text, so nothing types it later', async () => {
+  it('with no window holding the tab it says so, clears the text and releases the claim, so it can be sent again', async () => {
     const feedRoot = dir('feed-tab-none');
     const transcript = path.join(dir('tab-none-transcript'), 's.jsonl');
     fs.writeFileSync(transcript, '{"type":"assistant"}\n');
@@ -857,13 +857,12 @@ describe('an answer typed into the editor tab a session runs in', () => {
     const block = questionBlock('codium-none', { questions: [{ text: 'Which env?', options: [{ label: 'Production' }] }] });
     publishBlock(block, feedRoot);
     const key = reconcileAttention({ block, session, nowMs: Date.now() })!.key;
-    const result = await claimAndRouteAttentionAnswer({
+    await expect(claimAndRouteAttentionAnswer({
       attentionKey: key, text: 'Production', operator: { verified: false, label: 'op' },
       feedRoot, mailboxRoot: dir('mail-tab-none'), sessions: [session], deadlineMs: 1_500,
-    });
-    expect(result.status).toBe('unknown');
-    expect(result.reason).toMatch(/No editor window holding this session's tab typed it/);
+    })).rejects.toMatchObject({ code: 'rail_failed', message: expect.stringMatching(/No editor window holding this session's tab typed it/) });
     expect(readTabDelivery('codium-none', feedRoot, Number.NEGATIVE_INFINITY)).toBeUndefined();
+    expect(getAnswerRecord(block.blockId, feedRoot)).toBeUndefined();
   });
 });
 

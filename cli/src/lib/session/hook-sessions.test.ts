@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { getTerminalsDir, getRuntimeStateDir } from '../state.js';
-import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readDoneVerdict } from './hook-sessions.js';
+import { loadHookSessionIndex, resolveHookSessionId, resolveHookSessionRecord, readDoneVerdict, readSessionVerdicts } from './hook-sessions.js';
 import { foldDoneVerdict, type ActiveSession } from './active.js';
 import { readStateSessionRecord, writePidSessionEntry } from './pid-registry.js';
 import { hostProcessView } from './process-view.js';
@@ -291,6 +291,14 @@ describe('readDoneVerdict (the Stop hook verdict merged into state/sessions/<pid
     expect(readDoneVerdict(SP, SID)).toBeUndefined();
     write();
     expect(readDoneVerdict(SP, SID, 1792390000_000)).toBeUndefined();
+  });
+
+  it('carries the turn verdict beside it, under the same checks, and refuses an unknown kind', () => {
+    write({ turnVerdict: { kind: 'asks', quote: 'Which one ships?', choices: ['A', '', 7, 'B'], at: 1792386121000, sha256: 'x' } });
+    expect(readSessionVerdicts(SP, SID, 1792384940_000).turn).toEqual({ kind: 'asks', quote: 'Which one ships?', choices: ['A', 'B'], atMs: 1792386121000 });
+    expect(readSessionVerdicts(SP, 'another-session').turn).toBeUndefined();
+    write({ turnVerdict: { kind: 'maybe', quote: '', choices: [], at: 1792386121000 } });
+    expect(readSessionVerdicts(SP, SID).turn).toBeUndefined();
   });
 
   it('refuses a verdict written before this process started, or one of an unknown shape', () => {

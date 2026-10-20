@@ -110,6 +110,14 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
       };
     }
 
+    const tab: AnswerRoute = {
+      kind: 'tab',
+      reason: 'Parked in an editor tab (or a terminal this machine cannot address) — the AGI EXT window that binds the session types it.',
+      payload,
+      ...(enter === false ? { enter: false } : {}),
+    };
+    if (session.host && typedByEditorTab(session)) return tab;
+
     if (session.context === 'headless' || session.context === 'teams' || !session.tty) {
       const sid = session.sessionId ?? input.mailboxId;
       if (!sid) {
@@ -126,14 +134,7 @@ export function resolveAnswerRoute(input: AnswerRouterInput): AnswerRoute {
       };
     }
 
-    if (typedByEditorTab(session)) {
-      return {
-        kind: 'tab',
-        reason: 'Parked in an editor tab (or a terminal this machine cannot address) — the AGI EXT window that binds the session types it.',
-        payload,
-        ...(enter === false ? { enter: false } : {}),
-      };
-    }
+    if (typedByEditorTab(session)) return tab;
 
     return {
       kind: 'refuse',

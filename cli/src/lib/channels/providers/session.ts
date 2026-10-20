@@ -29,7 +29,7 @@ export const sessionProvider: ChannelProvider = {
         });
         return res.delivered
           ? { ok: true, channel: SESSION_CHANNEL, id, backend: 'tab', writes: 1, confirmed: true }
-          : { ...fail(res.reason), backend: 'tab', writes: 1, confirmed: false };
+          : { ...fail(res.reason), backend: 'tab', writes: res.touched ? 1 : 0, confirmed: false };
       }
       if (!resolved.target) {
         return fail(resolved.hint ? `${resolved.reason}\n${resolved.hint}` : resolved.reason ?? 'session not addressable');

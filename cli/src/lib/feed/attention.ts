@@ -283,7 +283,7 @@ function attentionFromSession(session: ActiveSession, nowMs: number): AttentionC
     reason === 'plan_review' ? 'plan_review' : reason === 'permission' ? 'unverified' : 'question';
   const sq = session.question;
   const structural = kind === 'plan_review' || (kind === 'question' && (sq?.options?.length ?? 0) > 0);
-  if (!structural && kind === 'question' && harnessOf(session) === 'claude') return undefined;
+  if (!structural && kind === 'question' && session.turnVerdict) return undefined;
   const source: AttentionSource = structural ? 'lifecycle' : 'heuristic';
   const question = sq ? structuredToBlockQuestion(sq) : undefined;
 
