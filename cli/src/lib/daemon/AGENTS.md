@@ -380,6 +380,15 @@ transcode's pid and work dir on its ledger row (`TranscodeJob`),
 the dir before requeueing, and `drain` starts one recording only when none is
 active.
 
+**Recordings look up a file's session once.** The watcher ticks every 2 s, and
+`RecordingSettler.scan` used to call `getActiveSessions` once per recording since
+`watchedSince`, in parallel, and again on every tick for a file that matched no
+single session (`?? await sessionsAt(...)`). On an operator laptop with 77
+recordings that was 77 concurrent session scans per tick, loop stalls of 25-68 s,
+and 57 restarts a day that named `attention-notify`, the victim with the shortest
+hang limit. A scan now reads live sessions at most once and only for a new file,
+and the observation keeps the answer, including "no session".
+
 **A deadline breach is usually starvation, not a slow service.** The supervisor's
 deadline is a timer on the same event loop as every other service and the feed
 hub, so a tick that does almost no work still breaches when something else holds
