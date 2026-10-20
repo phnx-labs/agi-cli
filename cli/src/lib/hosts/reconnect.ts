@@ -1,6 +1,7 @@
 import { sshExec, sshStream, shellQuote, SSH_CONN_FAILURE_CODE } from '../ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
 import { RUN_AUTO_KEYWORD } from '../types.js';
+import { remoteRunShellPrelude } from './dispatch.js';
 
 export const SSH_CONN_FAILURE = SSH_CONN_FAILURE_CODE;
 
@@ -168,23 +169,23 @@ export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTar
   return launchId ? { kind: 'launch', id: launchId } : undefined;
 }
 
-export function reattachRemoteCommand(target: ReconnectTarget): string {
+export function reattachRemoteCommand(target: ReconnectTarget, agent: string): string {
   const selector = target.kind === 'launch'
     ? ['--launch-id', target.id]
     : [target.id];
   const inner = ['agents', 'ps', 'focus', ...selector, '--local', '--reconnect-reattach']
     .map(shellQuote)
     .join(' ');
-  return wrapRemoteExitCode(inner);
+  return wrapRemoteExitCode(`${remoteRunShellPrelude(agent)}${inner}`);
 }
 
-export function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
+export function reattachRemoteSession(host: Host, target: ReconnectTarget, agent: string): ReconnectOutcome {
   const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
   const probe = sshExec(sshTarget, 'true', { multiplex: false, extraSshArgs });
   if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false, heldMs: 0 };
   const startedAt = Date.now();
-  const code = sshStream(sshTarget, reattachRemoteCommand(target), { tty: true, extraSshArgs });
+  const code = sshStream(sshTarget, reattachRemoteCommand(target, agent), { tty: true, extraSshArgs });
   return { code, connected: true, heldMs: Date.now() - startedAt };
 }
 

@@ -1758,7 +1758,7 @@ ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n
                   hostName: host.name,
                   target: reconnectTarget,
                   initialExit: exitCode,
-                  reattach: () => reattachRemoteSession(host, reconnectTarget),
+                  reattach: () => reattachRemoteSession(host, reconnectTarget, runAgent),
                 }),
               );
             }
