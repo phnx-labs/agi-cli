@@ -58,6 +58,8 @@ describe('buildSessionCreateBody', () => {
     expect(() => rush.buildSessionCreateBody({ prompt: 'x', repos: ['a/b', 'a/c'] })).toThrow('one repository per session');
     expect(() => rush.buildSessionCreateBody({ prompt: 'x', providerOptions: { mode: 'plan' } })).toThrow('drop --mode');
     expect(() => rush.buildSessionCreateBody({ prompt: 'x', repo: 'not-a-repo' })).toThrow('Use owner/repo');
+    expect(() => rush.buildSessionCreateBody({ prompt: 'x', branch: 'main' })).toThrow('--branch needs --repo');
+    expect(rush.buildSessionCreateBody({ prompt: 'x', repo: 'a/b', branch: 'fix/#12' }).resources).toEqual([{ url: 'https://github.com/a/b/tree/fix/%2312' }]);
   });
 });
 
