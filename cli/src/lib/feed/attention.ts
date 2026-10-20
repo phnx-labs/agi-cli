@@ -241,7 +241,6 @@ function attentionFromBlock(block: OpenBlock, session: ActiveSession, nowMs: num
 
 export function currentTurnVerdict(session: ActiveSession): TurnVerdict | undefined {
   const v = session.turnVerdict;
-  // A turn the judge could not read (model error, usage limit, busy slots) leaves the last-line read in charge.
   if (!v || v.kind === 'unjudged' || session.activity === 'working') return undefined;
   if (session.lastEventMs != null && session.lastEventMs > v.atMs) return undefined;
   return v;
