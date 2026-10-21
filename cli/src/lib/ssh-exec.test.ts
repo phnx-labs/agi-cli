@@ -1,5 +1,5 @@
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -95,8 +95,21 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(controlOpts()).toEqual([]);
   });
 
-  it('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
+  it('is empty when the socket path would pass OpenSSH\'s 104-byte limit, since ssh refuses rather than falls back', async () => {
     if (process.platform === 'win32') return;
+    const savedHome = process.env.HOME;
+    process.env.HOME = path.join(os.tmpdir(), 'x'.repeat(80));
+    vi.resetModules();
+    try {
+      const fresh = await import('./ssh-exec.js');
+      expect(fresh.controlOpts()).toEqual([]);
+    } finally {
+      process.env.HOME = savedHome;
+      vi.resetModules();
+    }
+  });
+
+  it.skipIf(controlOpts().length === 0)('returns ControlMaster/ControlPath/ControlPersist and creates the socket dir', () => {
     const opts = controlOpts();
     expect(opts).toContain('ControlMaster=auto');
     expect(opts).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
@@ -130,7 +143,7 @@ describe.skipIf(process.platform === 'win32')('sshStream connection sharing (PAT
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
-  it('a TTY session gets its own connection; a non-TTY stream still rides the shared master', () => {
+  it.skipIf(controlOpts().length === 0)('a TTY session gets its own connection; a non-TTY stream still rides the shared master', () => {
     expect(argsOf(true)).not.toContain('ControlMaster');
     expect(argsOf(true)).toContain('-tt');
     expect(argsOf(false)).toContain('ControlMaster=auto');

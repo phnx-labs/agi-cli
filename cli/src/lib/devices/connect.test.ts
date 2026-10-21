@@ -1,3 +1,4 @@
+import { controlOpts } from '../ssh-exec.js';
 import { describe, expect, it } from 'vitest';
 import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
@@ -161,7 +162,7 @@ describe('buildSshInvocation', () => {
     expect(env.SSH_ASKPASS).toBeUndefined();
   });
 
-  it('multiplex reuses the shared connection for a command, never for an interactive shell', () => {
+  it.skipIf(controlOpts().length === 0)('multiplex reuses the shared connection for a command, never for an interactive shell', () => {
     const device = dev({ name: 'far', user: 'me', auth: { method: 'key' } });
     const probe = buildSshInvocation(device, ['uptime'], '/shim', {}, { agentOnly: true, multiplex: true }).args;
     expect(probe).toContain('ControlMaster=auto');
