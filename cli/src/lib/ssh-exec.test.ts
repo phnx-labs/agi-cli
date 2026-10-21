@@ -100,6 +100,7 @@ describe('controlOpts (connection multiplexing)', () => {
     const opts = controlOpts();
     expect(opts).toContain('ControlMaster=auto');
     expect(opts).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
+    expect(opts).toContain('ServerAliveInterval=15');
     const cp = opts.find((o) => o.startsWith('ControlPath='));
     expect(cp).toBeDefined();
     expect(cp).toContain('%C');

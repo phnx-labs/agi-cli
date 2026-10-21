@@ -51,7 +51,7 @@ function probeRemoteReady(device: DeviceProfile, usagePayload: string): Promise<
   try {
     const shim = writeAskpassShim();
     const cmd = buildReadyProbeCommand(resolveDeviceProfile(device).shell === 'powershell' ? 'windows' : undefined, { ingestUsage: true });
-    ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true, multiplex: true }));
+    ({ args, env } = buildSshInvocation(device, [cmd], shim, {}, { agentOnly: true }));
   } catch {
     return Promise.resolve(unknown());
   }

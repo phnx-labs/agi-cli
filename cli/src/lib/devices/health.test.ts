@@ -22,6 +22,8 @@ import {
   PROBE_TIMEOUT_MS,
   RELAYED_PROBE_TIMEOUT_MS,
   WIN_PROBE_TIMEOUT_MS,
+  WARM_SSH_LIFETIME_MS,
+  warmSshConnection,
   type DeviceStats,
 } from './health.js';
 import type { DeviceProfile } from './registry.js';
@@ -366,5 +368,27 @@ describe('buildProbeInvocation follows the operator platform, not the discovered
     expect(inv.args.at(-1)).toContain(h.PROBE_SNIPPET);
     expect(inv.args.at(-1)).not.toContain('powershell -NoProfile');
     expect(inv.args).toContain('caleb@jupiter.example.ts.net');
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('warmSshConnection', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('kills a warmer that hangs on a dead link once its lifetime ends', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sshstub-'));
+    fs.writeFileSync(path.join(dir, 'ssh'), '#!/bin/sh\ntrap "" TERM\nexec sleep 60\n', { mode: 0o755 });
+    const prevPath = process.env.PATH;
+    process.env.PATH = dir + path.delimiter + prevPath;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const child = warmSshConnection(['-o', 'BatchMode=yes', 'me@far', 'uptime'], {});
+      const exited = new Promise<NodeJS.Signals | null>((resolve) => child.on('exit', (_code, signal) => resolve(signal)));
+      vi.advanceTimersByTime(WARM_SSH_LIFETIME_MS);
+      expect(await exited).toBe('SIGKILL');
+      expect(child.spawnargs.slice(-2)).toEqual(['me@far', 'true']);
+    } finally {
+      process.env.PATH = prevPath;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

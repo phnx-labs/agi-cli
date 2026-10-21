@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { sandboxTmpRoot } from './hermetic-guards.js';
 import { ensureStandaloneSecretsBin } from './secrets-standalone.js';
 
 const STALE_AGE_MS = 60 * 60 * 1000;
@@ -11,7 +11,7 @@ export default function globalSetup(): void {
   process.env.SECRETS_BIN = secretsBin;
   process.env.AGENTS_TEST_SECRETS_BIN = secretsBin;
 
-  const tmpRoot = os.tmpdir();
+  const tmpRoot = sandboxTmpRoot();
   let entries: string[];
   try {
     entries = fs.readdirSync(tmpRoot);
