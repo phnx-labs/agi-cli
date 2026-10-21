@@ -4,6 +4,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import {
+  MAX_CONTROL_PATH_BYTES,
+  controlPathBytes,
   assertValidSshTarget,
   SSH_TARGET_RE,
   shellQuote,
@@ -95,7 +97,12 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(controlOpts()).toEqual([]);
   });
 
-  it('is empty when the socket path would pass OpenSSH\'s 104-byte limit, since ssh refuses rather than falls back', async () => {
+  it('sizes the limit so a master can bind its temp socket: ControlPath plus 17 bytes within sun_path', () => {
+    expect(MAX_CONTROL_PATH_BYTES + '.0123456789abcdef'.length).toBeLessThanOrEqual(103);
+    expect(controlPathBytes('/'.padEnd(MAX_CONTROL_PATH_BYTES - 44, 'x'))).toBe(MAX_CONTROL_PATH_BYTES);
+  });
+
+  it('is empty when the socket path is too long for a master, since ssh would then never share it', async () => {
     if (process.platform === 'win32') return;
     const savedHome = process.env.HOME;
     process.env.HOME = path.join(os.tmpdir(), 'x'.repeat(80));
