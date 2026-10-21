@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
+import { assertValidSshTarget, controlOpts, shellQuote } from '../ssh-exec.js';
 import { resolveActor, actorEnv } from '../actor.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { encodePwshBase64, pwshLiteral, pwshNativeExecStatements } from '../pwsh.js';
@@ -171,7 +171,7 @@ export function buildSshInvocation(
   cmd: string[],
   askpassShimPath: string,
   hostKey: SshHostKeyOptions = {},
-  opts: { agentOnly?: boolean; interactiveCwd?: string; argv?: boolean } = {},
+  opts: { agentOnly?: boolean; interactiveCwd?: string; argv?: boolean; multiplex?: boolean } = {},
 ): { args: string[]; env: Record<string, string> } {
   device = resolveDeviceProfile(device);
   const target = sshTargetFor(device);
@@ -203,6 +203,7 @@ export function buildSshInvocation(
     args.push(...deviceIdentityArgs(device));
   }
 
+  if (opts.multiplex && !interactive) args.push(...controlOpts());
   if (interactive) args.push('-tt');
   args.push(target);
   if (remote) args.push(remote);

@@ -141,6 +141,18 @@ as `unreachable` and refused to launch. Warm, the same probes take 0.5–0.9 s,
 which is why the failure looked intermittent and "fixed itself" after any other
 fleet command warmed the paths.
 
+**Probes reuse the shared SSH connection.** A direct path is not a near one: a
+peer 300 ms away needs 3.4–3.8 s for a cold handshake, past the 2.5 s direct
+budget, so its probe always timed out. The load probe and the sign-in probe now
+pass `multiplex: true` to `buildSshInvocation`, which adds the same
+`ControlMaster` socket every other fleet call uses (`controlOpts`, kept 10
+minutes). Over a live connection that peer answers in 0.6–0.9 s. When a probe
+times out with no connection to reuse, `warmSshConnection` finishes the
+handshake in the background, bounded by `ConnectTimeout=10`, so the next probe
+reuses it. The budgets do not change. Unlike timed `sshExecAsync` calls
+(RUSH-2114), a killed probe can leave its remote command running, which is
+harmless for `uptime`/`df`.
+
 A probe killed for exceeding its budget is now reported as **`probe timed out`**,
 not `unreachable`, in `--device auto`, `agents devices pick`, and `agents teams`
 placement alike. The two

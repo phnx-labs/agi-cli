@@ -1,5 +1,5 @@
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import type { DeviceProfile } from './registry.js';
 import { buildSshInvocation, writeAskpassShim } from './connect.js';
 import { resolveDeviceProfile } from './resolve-profile.js';
@@ -242,7 +242,7 @@ export function buildProbeInvocation(
 ): { args: string[]; env: Record<string, string>; isWin: boolean; budgetMs: number } {
   const resolved = resolveDeviceProfile(device);
   const isWin = resolved.shell === 'powershell';
-  const { args, env } = buildSshInvocation(resolved, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], askpassShimPath, {}, { agentOnly: true });
+  const { args, env } = buildSshInvocation(resolved, [isWin ? WIN_PROBE_SNIPPET : PROBE_SNIPPET], askpassShimPath, {}, { agentOnly: true, multiplex: true });
   return { args, env, isWin, budgetMs: probeBudgetMs(resolved) };
 }
 
@@ -274,12 +274,20 @@ export function probeDeviceStats(
       (err, stdout) => {
         if (err || !stdout) {
           const timedOut = Boolean(err && (err as NodeJS.ErrnoException & { killed?: boolean }).killed);
+          if (timedOut) warmSshConnection(args, env);
           return resolve(timedOut ? { host, reachable: false, timedOut, fetchedAt } : { host, reachable: false, fetchedAt });
         }
         resolve(isWin ? parseWinProbeOutput(host, stdout, fetchedAt) : parseProbeOutput(host, stdout, fetchedAt));
       },
     );
   });
+}
+
+// A cold handshake to a far peer outlasts the budget; finishing it unbudgeted leaves a shared connection the next probe reuses in one round trip.
+function warmSshConnection(args: string[], env: Record<string, string>): void {
+  const child = spawn('ssh', [...args.slice(0, -1), 'true'], { detached: true, stdio: 'ignore', env: { ...process.env, ...env } });
+  child.on('error', () => {});
+  child.unref();
 }
 
 export function probeLocalStats(

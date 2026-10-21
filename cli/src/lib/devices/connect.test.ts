@@ -161,6 +161,15 @@ describe('buildSshInvocation', () => {
     expect(env.SSH_ASKPASS).toBeUndefined();
   });
 
+  it('multiplex reuses the shared connection for a command, never for an interactive shell', () => {
+    const device = dev({ name: 'far', user: 'me', auth: { method: 'key' } });
+    const probe = buildSshInvocation(device, ['uptime'], '/shim', {}, { agentOnly: true, multiplex: true }).args;
+    expect(probe).toContain('ControlMaster=auto');
+    expect(probe.findIndex((a) => a.startsWith('ControlPath='))).toBeLessThan(probe.indexOf(sshTargetFor(device)));
+    expect(buildSshInvocation(device, ['uptime'], '/shim').args).not.toContain('ControlMaster=auto');
+    expect(buildSshInvocation(device, [], '/shim', {}, { multiplex: true }).args).not.toContain('ControlMaster=auto');
+  });
+
   it('Windows password device wraps the command AND keeps the shim', () => {
     const { args, env } = buildSshInvocation(
       dev({ name: 'win-mini', platform: 'windows', shell: 'powershell', user: 'muqsit', auth: { method: 'password', bundle: 'muqsit' } }),

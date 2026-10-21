@@ -8,7 +8,8 @@ import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-
 const realHome = process.env.HOME ?? os.homedir();
 const realUserAgentsDir = path.join(realHome, '.agents');
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
+// macOS os.tmpdir() is /var/folders/…/T/, too long for the ssh ControlPath under the sandbox home.
+const tmp = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'agents-vitest-'));
 
 const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });
