@@ -4,19 +4,14 @@ import type { DeviceProfile } from './registry.js';
 import { buildSshInvocation, writeAskpassShim } from './connect.js';
 import { resolveDeviceProfile } from './resolve-profile.js';
 
-export const PROBE_TIMEOUT_MS = 2_500;
+// A direct Tailscale path is not a near one: at 300 ms RTT a cold handshake takes 3.5-5.7 s.
+export const PROBE_TIMEOUT_MS = 8_000;
 
-export const RELAYED_PROBE_TIMEOUT_MS = 8_000;
-
-// Only measured relayed peers receive the wider budget; unknown/manual peers are not assumed relayed.
 export function probeBudgetMs(device: DeviceProfile): number {
-  if (device.shell === 'powershell') return WIN_PROBE_TIMEOUT_MS;
-  return device.tailscale && device.tailscale.direct === false
-    ? RELAYED_PROBE_TIMEOUT_MS
-    : PROBE_TIMEOUT_MS;
+  return device.shell === 'powershell' ? WIN_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS;
 }
 
-export const WIN_PROBE_TIMEOUT_MS = 6_000;
+export const WIN_PROBE_TIMEOUT_MS = 10_000;
 
 const SEP = '---AGSTAT---';
 export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null); echo ${SEP}; df -Pk / 2>/dev/null | tail -1`;

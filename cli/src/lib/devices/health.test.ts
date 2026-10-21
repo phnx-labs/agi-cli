@@ -20,7 +20,6 @@ import {
   probeDeviceStats,
   PROBE_SNIPPET,
   PROBE_TIMEOUT_MS,
-  RELAYED_PROBE_TIMEOUT_MS,
   WIN_PROBE_TIMEOUT_MS,
   type DeviceStats,
 } from './health.js';
@@ -279,28 +278,22 @@ function device(over: Partial<DeviceProfile> = {}): DeviceProfile {
 }
 
 describe('probeBudgetMs (PHNX-3682)', () => {
-  it('gives a relayed peer the larger budget', () => {
-    expect(probeBudgetMs(device({ tailscale: { online: true, direct: false, relay: 'sfo' } })))
-      .toBe(RELAYED_PROBE_TIMEOUT_MS);
-  });
-
-  it('keeps the tight budget for a direct peer', () => {
+  it('gives a direct peer the same budget as a relayed one', () => {
     expect(probeBudgetMs(device({ tailscale: { online: true, direct: true } })))
       .toBe(PROBE_TIMEOUT_MS);
-  });
-
-  it('treats a device with no tailscale snapshot as unknown-path, not relayed', () => {
+    expect(probeBudgetMs(device({ tailscale: { online: true, direct: false, relay: 'sfo' } })))
+      .toBe(PROBE_TIMEOUT_MS);
     expect(probeBudgetMs(device())).toBe(PROBE_TIMEOUT_MS);
   });
 
-  it('keeps the windows budget, which already exceeds both', () => {
+  it('allows a cold handshake on a direct 300 ms path and on a relayed path', () => {
+    expect(PROBE_TIMEOUT_MS).toBeGreaterThan(6_588);
+  });
+
+  it('gives windows more, since it pays the same handshake plus a slower query', () => {
     expect(probeBudgetMs(device({ shell: 'powershell', platform: 'windows' })))
       .toBe(WIN_PROBE_TIMEOUT_MS);
     expect(WIN_PROBE_TIMEOUT_MS).toBeGreaterThan(PROBE_TIMEOUT_MS);
-  });
-
-  it('allows a relayed handshake the measured cold-path range', () => {
-    expect(RELAYED_PROBE_TIMEOUT_MS).toBeGreaterThan(6_588);
   });
 });
 
@@ -355,14 +348,14 @@ describe('buildProbeInvocation follows the operator platform, not the discovered
     expect(inv.args.at(-1)).not.toContain(h.PROBE_SNIPPET);
   });
 
-  it('dials the POSIX snippet on the relayed POSIX budget once config says platform: linux', async () => {
+  it('dials the POSIX snippet on the POSIX budget once config says platform: linux', async () => {
     const dir = path.join(TMP, '.agents', 'devices', 'jupiter');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'agents.yaml'), 'config:\n  platform: linux\n  sshUser: caleb\n');
     const h = await fresh();
     const inv = h.buildProbeInvocation(windowsDiscovered(), '/tmp/askpass.sh');
     expect(inv.isWin).toBe(false);
-    expect(inv.budgetMs).toBe(h.RELAYED_PROBE_TIMEOUT_MS);
+    expect(inv.budgetMs).toBe(h.PROBE_TIMEOUT_MS);
     expect(inv.args.at(-1)).toContain(h.PROBE_SNIPPET);
     expect(inv.args.at(-1)).not.toContain('powershell -NoProfile');
     expect(inv.args).toContain('caleb@jupiter.example.ts.net');

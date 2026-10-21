@@ -120,19 +120,24 @@ used only while less than 16 GiB is free (`MEM_COMFORT_BYTES`); a 120 GiB box
 with 62 GiB free is not memory-bound at 48% used, and used to read `busy` and
 lose every pick to a 27 GiB box.
 
-### Probe budget: relayed peers get longer (PHNX-3682)
+### Probe budget: long enough for a far peer (PHNX-3682)
 
 Placement probes each candidate over SSH and excludes any box that does not
-answer inside a budget. That budget is **path-aware**, because a DERP-relayed
-hop pays relay path setup on top of the TCP + SSH handshake:
+answer inside a budget. The budget covers a cold TCP + SSH handshake on a slow
+path, and whether that path is direct or DERP-relayed does not decide it:
 
-| Last handshake | Budget | Constant |
+| Device | Budget | Constant |
 |---|---|---|
-| direct Tailscale path (or unknown, e.g. a `via:"manual"` device) | 2.5 s | `PROBE_TIMEOUT_MS` |
-| DERP-relayed (`tailscale.direct === false`) | 8 s | `RELAYED_PROBE_TIMEOUT_MS` |
-| windows (powershell) | 6 s | `WIN_PROBE_TIMEOUT_MS` |
+| POSIX (direct, relayed, or `via:"manual"`) | 8 s | `PROBE_TIMEOUT_MS` |
+| windows (powershell) | 10 s | `WIN_PROBE_TIMEOUT_MS` |
 
-One flat 2.5 s used to apply to every device. On a fleet with **no** direct
+A direct path is not a near one. Direct peers 300 ms away (`tailscale ping`)
+took 3.5 and 5.7 s for a cold `ssh … true`, about ten round trips, and a
+separate 2.5 s budget for direct paths marked all of them `unreachable`. With
+every box excluded, `--device auto` (and AGI EXT's New Claude) placed the run
+on the launching machine, while every peer was answering.
+
+Before PHNX-3682 one flat 2.5 s applied to every device. On a fleet with **no** direct
 paths that is shorter than a cold relayed handshake — measured across a nine-box
 relayed fleet, probed in parallel from cold: 1.7 / 1.8 / 1.9 / 2.7 / 2.7 / 2.7 /
 3.1 / 5.6 / 6.6 s, six of nine over budget while every one of them was healthy
@@ -153,7 +158,7 @@ When placement runs for a named harness, the sign-in probe (8 s budget) is
 proof of reachability too: a worker that answers it is eligible even if its
 load probe timed out, and ranks with unknown load (`mergePlacementSignal`,
 `teams/placement-probe.ts`). A short stall on the launching machine can push
-every load probe past 2.5 s at once. Before this, that stall alone refused the
+every load probe past its budget at once. Before this, that stall alone refused the
 whole fleet while every worker was signed in and answering.
 
 **Placement reads a snapshot first.** Every probe's result (load stats and the
