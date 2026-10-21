@@ -2,13 +2,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
-import { sandboxTmpRoot, shouldArmHermeticGuards } from './hermetic-guards.js';
+import { shouldArmHermeticGuards } from './hermetic-guards.js';
 import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
 const realHome = process.env.HOME ?? os.homedir();
 const realUserAgentsDir = path.join(realHome, '.agents');
 
-const tmp = fs.mkdtempSync(path.join(sandboxTmpRoot(), 'agents-vitest-'));
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-vitest-'));
 
 const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });
