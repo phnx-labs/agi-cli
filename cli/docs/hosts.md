@@ -132,7 +132,7 @@ path, and whether that path is direct or DERP-relayed does not decide it:
 | windows (powershell) | 10 s | `WIN_PROBE_TIMEOUT_MS` |
 
 A direct path is not a near one. Direct peers 300 ms away (`tailscale ping`)
-took 3.5 and 5.7 s for a cold `ssh … true`, about ten round trips, and a
+took 3.5 and 5.7 s for a cold `ssh … true`, a dozen or more round trips, and a
 separate 2.5 s budget for direct paths marked all of them `unreachable`. With
 every box excluded, `--device auto` (and AGI EXT's New Claude) placed the run
 on the launching machine, while every peer was answering.
@@ -151,8 +151,9 @@ not `unreachable`, in `--device auto`, `agents devices pick`, and `agents teams`
 placement alike. The two
 mean different things — a slow link versus a box that is actually down — and the
 error only mentions usage-window resets when a device was genuinely turned away
-for one. Check `tailscale status` for `relay "<region>"` on rows you expect to be
-direct; restoring a direct path removes the latency rather than masking it.
+for one. `tailscale ping <device>` shows the round trip and whether the path is
+relayed; restoring a direct path removes relay latency, but a far direct peer
+stays slow and needs the budget.
 
 When placement runs for a named harness, the sign-in probe (8 s budget) is
 proof of reachability too: a worker that answers it is eligible even if its

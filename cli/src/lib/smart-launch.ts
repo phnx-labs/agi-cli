@@ -130,7 +130,7 @@ export function formatNoHealthyDeviceError(
     : `${timedOutCount} of ${pool.length} probes exceeded`;
   const hint = timedOutCount > 0
     ? `; ${scope} the probe budget — those devices are likely up but slow to answer`
-      + ' (relayed Tailscale paths). Retry, or check `tailscale status` for a direct path.'
+      + '. Retry, or check `tailscale ping <device>` for a slow or relayed path.'
     : '; earliest window resets unknown';
   return `agents: no healthy device ${target}${poolNote} — excluded: ${excluded}${hint}`;
 }
