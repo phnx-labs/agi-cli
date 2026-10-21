@@ -2,14 +2,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
-import { shouldArmHermeticGuards } from './hermetic-guards.js';
+import { sandboxTmpRoot, shouldArmHermeticGuards } from './hermetic-guards.js';
 import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
 const realHome = process.env.HOME ?? os.homedir();
 const realUserAgentsDir = path.join(realHome, '.agents');
 
-// macOS os.tmpdir() is /var/folders/…/T/, too long for the ssh ControlPath under the sandbox home.
-const tmp = fs.mkdtempSync(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), 'agents-vitest-'));
+const tmp = fs.mkdtempSync(path.join(sandboxTmpRoot(), 'agents-vitest-'));
 
 const sandboxHome = path.join(tmp, 'home');
 fs.mkdirSync(sandboxHome, { recursive: true });

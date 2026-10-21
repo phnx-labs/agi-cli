@@ -23,12 +23,16 @@ export function shellQuote(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
+const SSH_KEEPALIVE_OPTS: readonly string[] = [
+  '-o', 'ServerAliveInterval=15',
+  '-o', 'ServerAliveCountMax=3',
+];
+
 export const SSH_OPTS: readonly string[] = [
   '-o', 'StrictHostKeyChecking=accept-new',
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=10',
-  '-o', 'ServerAliveInterval=15',
-  '-o', 'ServerAliveCountMax=3',
+  ...SSH_KEEPALIVE_OPTS,
 ];
 
 export const REMOTE_STDOUT_MAX_BYTES = 16 * 1024 * 1024;
@@ -68,6 +72,8 @@ export function controlOpts(): string[] {
     '-o', 'ControlMaster=auto',
     '-o', `ControlPath=${path.join(dir, 'cm-%C')}`,
     '-o', `ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`,
+    // A persisted master with no keepalive outlives a dead link and hangs every client that attaches to it.
+    ...SSH_KEEPALIVE_OPTS,
   ];
 }
 
