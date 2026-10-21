@@ -58,12 +58,16 @@ export class RemoteUtf8Accumulator {
 export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
 
 let controlDirEnsured = false;
-const MAX_CONTROL_PATH_BYTES = 103;
+export const MAX_CONTROL_PATH_BYTES = 86;
+
+export function controlPathBytes(dir: string): number {
+  return Buffer.byteLength(path.join(dir, 'cm-'.padEnd(43, '0')));
+}
 
 export function controlOpts(): string[] {
   if (process.platform === 'win32') return [];
   const dir = path.join(getCacheDir(), 'ssh');
-  if (Buffer.byteLength(path.join(dir, 'cm-'.padEnd(43, '0'))) > MAX_CONTROL_PATH_BYTES) return [];
+  if (controlPathBytes(dir) > MAX_CONTROL_PATH_BYTES) return [];
   if (!controlDirEnsured) {
     try {
       fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
