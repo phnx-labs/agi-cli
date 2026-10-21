@@ -72,7 +72,6 @@ export function controlOpts(): string[] {
     '-o', 'ControlMaster=auto',
     '-o', `ControlPath=${path.join(dir, 'cm-%C')}`,
     '-o', `ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`,
-    // A persisted master with no keepalive outlives a dead link and hangs every client that attaches to it.
     ...SSH_KEEPALIVE_OPTS,
   ];
 }

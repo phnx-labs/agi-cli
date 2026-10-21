@@ -285,7 +285,6 @@ export function probeDeviceStats(
 
 export const WARM_SSH_LIFETIME_MS = 15_000;
 
-// A cold handshake to a far peer outlasts the budget; finishing it unbudgeted leaves a shared connection the next probe reuses in one round trip.
 export function warmSshConnection(args: string[], env: Record<string, string>): ChildProcess {
   const child = spawn('ssh', [...args.slice(0, -1), 'true'], { detached: true, stdio: 'ignore', env: { ...process.env, ...env } });
   child.on('error', () => {});
