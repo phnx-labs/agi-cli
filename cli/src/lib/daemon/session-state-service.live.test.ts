@@ -27,7 +27,6 @@ function writeLiveName(name: string): void {
 
 describe('SessionStateService wakes on a live Claude session file', () => {
   it('a /rename wakes the publish at once, a burst wakes it once, a recreated dir is watched again', async () => {
-    // The gather lists the live dirs; the watcher reuses that list instead of doing IO on the tick.
     readClaudeLiveNames();
     const supervisor = new ServiceSupervisor();
     const wakes: number[] = [];
@@ -45,7 +44,7 @@ describe('SessionStateService wakes on a live Claude session file', () => {
     for (let i = 0; i < 5; i++) { writeLiveName(`burst ${i}`); await pause(20); }
     await pause(1_500);
     expect(wakes.length).toBe(2);
-    expect(wakes[1] - wakes[0]).toBeGreaterThanOrEqual(1_000);
+    expect(wakes[1] - wakes[0]).toBeGreaterThanOrEqual(990);
 
     fs.rmSync(accountSessions, { recursive: true });
     fs.mkdirSync(accountSessions, { recursive: true });

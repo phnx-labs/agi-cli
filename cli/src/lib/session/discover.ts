@@ -928,9 +928,6 @@ export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId
   return new Map([...newest].map(([id, { entry }]) => [id, entry]));
 }
 
-/** Calls onChange when a running Claude rewrites its `sessions/<pid>.json`: a /rename
- *  (name, nameSource) or a status flip. refresh() watches the dirs the last
- *  readClaudeLiveNames listed, so it does no IO of its own (daemon tick rule). */
 export function watchClaudeLiveSessionFiles(
   onChange: () => void,
   onWatchError: (dir: string, err: Error) => void = () => {},
@@ -951,7 +948,7 @@ export function watchClaudeLiveSessionFiles(
         watcher.on('error', () => drop(dir));
         watchers.set(dir, watcher);
       } catch (err) {
-        onWatchError(dir, err as Error);
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') onWatchError(dir, err as Error);
       }
     }
   };
