@@ -27,11 +27,16 @@ export class SessionStateService extends BasePeriodicService {
     super();
   }
 
-  protected async onStart(_ctx: DaemonContext): Promise<void> {
+  protected async onStart(ctx: DaemonContext): Promise<void> {
     this.stopReaderWatch = watchActiveSessionsReaderPresence(this.wake);
+    const warned = new Set<string>();
     this.liveFiles = watchClaudeLiveSessionFiles(() => {
       this.lastChangeMs = Date.now();
       this.scheduleWake();
+    }, (dir, err) => {
+      if (warned.has(dir)) return;
+      warned.add(dir);
+      ctx.log('WARN', `session-state: cannot watch ${dir} (${err.message}); renames there wait for the 15 s tick`, { event: 'sessions.live-watch.failed', dir, error: err.message });
     });
   }
 
@@ -46,8 +51,8 @@ export class SessionStateService extends BasePeriodicService {
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
     const startedMs = Date.now();
-    this.liveFiles?.refresh();
     await runActiveSessionsWarmTick({ log: ctx.log });
+    this.liveFiles?.refresh();
     // The supervisor drops a wake while a tick is in flight; a change it missed gets one more.
     if (this.lastChangeMs >= startedMs) this.scheduleWake();
   }
