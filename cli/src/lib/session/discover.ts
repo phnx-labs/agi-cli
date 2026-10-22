@@ -941,8 +941,8 @@ export function watchClaudeLiveSessionFiles(
       if (watchers.has(dir)) continue;
       try {
         const watcher = fs.watch(dir, { persistent: false }, (_event, name) => {
-          // A deleted dir reports its own name and its watcher goes dead; the next refresh re-adds it.
-          if (name && String(name) === path.basename(dir)) { drop(dir); return; }
+          const deletedSelf = name !== null && String(name) === path.basename(dir);
+          if (deletedSelf) { drop(dir); return; }
           if (!name || String(name).endsWith('.json')) onChange();
         });
         watcher.on('error', () => drop(dir));
