@@ -167,14 +167,23 @@ export const PR_NODE_FIELDS = `
     ... on StatusContext { context state targetUrl }
   } } } } } }`;
 
-const OPEN_PRS_QUERY = `query($owner: String!, $name: String!, $endCursor: String) {
+const OPEN_PR_NUMBERS_QUERY = `query($owner: String!, $name: String!, $endCursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequests(states: OPEN, first: 100, after: $endCursor, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
-      nodes { ${PR_NODE_FIELDS} }
+      nodes { number }
     }
   }
 }`;
+
+const prsByNumberQuery = (numbers: readonly number[]) => `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    ${numbers.map((n) => `pr${n}: pullRequest(number: ${n}) { ${PR_NODE_FIELDS} }`).join('\n    ')}
+  }
+}`;
+
+export const OPEN_PRS_PER_QUERY = 10;
+const OPEN_PR_QUERIES_IN_FLIGHT = 12;
 
 const MERGEABLE: Record<string, boolean> = { MERGEABLE: true, CONFLICTING: false };
 
@@ -219,12 +228,22 @@ export function prFromNode(node: Record<string, unknown>): { slug: string; pr: P
 
 export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<ProjectPr[]> {
   const [owner, name] = repo.split('/');
-  const out = await gh([
-    'api', 'graphql', '--paginate',
-    '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `query=${OPEN_PRS_QUERY}`,
-    '--jq', '.data.repository.pullRequests.nodes[]',
-  ]);
-  return parseNdjson(out).map((node) => prFromNode(node).pr);
+  const repoFields = ['-f', `owner=${owner}`, '-f', `name=${name}`];
+  const numbers = (await gh([
+    'api', 'graphql', '--paginate', ...repoFields, '-f', `query=${OPEN_PR_NUMBERS_QUERY}`,
+    '--jq', '.data.repository.pullRequests.nodes[].number',
+  ])).split('\n').map((l) => l.trim()).filter(Boolean).map(Number);
+  const batches: number[][] = [];
+  for (let i = 0; i < numbers.length; i += OPEN_PRS_PER_QUERY) batches.push(numbers.slice(i, i + OPEN_PRS_PER_QUERY));
+  const nodes = (await mapBounded(batches, OPEN_PR_QUERIES_IN_FLIGHT, async (batch) => parseNdjson(await gh([
+    'api', 'graphql', ...repoFields, '-f', `query=${prsByNumberQuery(batch)}`,
+    '--jq', '.data.repository[] | select(. != null)',
+  ])))).flat();
+  const byNumber = new Map(nodes.filter((node) => node.state === 'OPEN').map((node) => [Number(node.number), node]));
+  return numbers.flatMap((n) => {
+    const node = byNumber.get(n);
+    return node ? [prFromNode(node).pr] : [];
+  });
 }
 
 export async function fetchOnePr(repo: string, number: number, gh: GhExec = ghExec, cache?: string): Promise<ProjectPr> {

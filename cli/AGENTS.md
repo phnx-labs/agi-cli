@@ -667,9 +667,12 @@ budget are fast-follow. POSIX-only in v1. `reviewDecision` is deliberately never
 REST-derived (it is a GraphQL-computed branch-protection/CODEOWNERS decision;
 approximating it could let the merge loop bypass review).
 
-**The open-PR reads are one GraphQL query per repository or owner, a measured
-exception to the REST-first rule.** `agents projects prs <name>` lists a repository's
-open PRs with one paginated `repository.pullRequests` query, and the all-orgs
+**The open-PR reads are GraphQL, a few queries per repository and one per owner, a
+measured exception to the REST-first rule.** `agents projects prs <name>` lists a repository's
+open PRs with one paginated `repository.pullRequests` query for the numbers, then
+reads them 10 to a query, 12 queries in flight (`listOpenPrs`): GitHub computes
+`mergeStateStatus` per PR on request, about 30 ms each, so one 100-PR page took
+3 s and pages ran one after another (115 PRs: 5.9 s, now 3.0 s). The all-orgs
 `agents projects prs` (AGI Menu's GitHub tab) runs one paginated `search` per owner
 plus one for `review-requested:@me`; both return each PR's head, `mergeable`,
 `mergeStateStatus` and check rollup in the same page (`PR_NODE_FIELDS` and
