@@ -925,6 +925,29 @@ export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId
   return new Map([...newest].map(([id, { entry }]) => [id, entry]));
 }
 
+/** Calls onChange when a running Claude rewrites its `sessions/<pid>.json`: a /rename
+ *  (name, nameSource) or a status flip. Re-call refresh to watch session dirs that appeared. */
+export function watchClaudeLiveSessionFiles(onChange: () => void): { refresh: () => void; close: () => void } {
+  const watchers = new Map<string, fs.FSWatcher>();
+  const refresh = () => {
+    for (const dir of getAgentSessionDirs('claude', 'sessions')) {
+      if (watchers.has(dir)) continue;
+      try {
+        const watcher = fs.watch(dir, { persistent: false }, (_event, name) => {
+          if (!name || String(name).endsWith('.json')) onChange();
+        });
+        watcher.on('error', () => { watcher.close(); watchers.delete(dir); });
+        watchers.set(dir, watcher);
+      } catch {  }
+    }
+  };
+  refresh();
+  return {
+    refresh,
+    close: () => { for (const w of watchers.values()) w.close(); watchers.clear(); },
+  };
+}
+
 async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Promise<void> {
   claudeAccountIndex(true);
   const liveNames = readClaudeLiveNames();
