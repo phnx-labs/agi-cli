@@ -51,8 +51,8 @@ export class SessionStateService extends BasePeriodicService {
     const startedMs = Date.now();
     await runActiveSessionsWarmTick({ log: ctx.log });
     this.liveFiles?.refresh();
-    // The supervisor drops a wake while a tick is in flight; a change it missed gets one more.
-    if (this.lastChangeMs >= startedMs) this.scheduleWake();
+    const changedDuringTick = this.lastChangeMs >= startedMs;
+    if (changedDuringTick) this.scheduleWake();
   }
 
   private scheduleWake(): void {
