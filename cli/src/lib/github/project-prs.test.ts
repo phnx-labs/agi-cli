@@ -22,6 +22,7 @@ import {
   BLOCKED_WITHOUT_ADMIN,
   OWN_PR_APPROVAL,
   prFromNode,
+  OPEN_PRS_PER_QUERY,
 } from './project-prs.js';
 import { repoPathClaims } from '../projects.js';
 import type { ProjectDef } from '../projects.js';
@@ -91,6 +92,13 @@ const restPr = (number: number, sha: string) => JSON.stringify({
   state: 'OPEN', createdAt: '2026-09-30T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z', login: 'octocat',
   avatarUrl: '', headRefName: `b${number}`, baseRefName: 'main', headSha: sha, body: '', mergeable: null, mergeableState: null,
 });
+const openPrs = (nodes: ReadonlyArray<Record<string, unknown>>) => (args: string[]) => {
+  if (args.includes('--paginate')) return nodes.map((n) => n.number).join('\n');
+  const query = args.find((a) => a.startsWith('query=')) ?? '';
+  const batch = [...query.matchAll(/pullRequest\(number: (\d+)\)/g)].map((m) => Number(m[1]));
+  const aliasOrder = nodes.filter((n) => batch.includes(Number(n.number))).sort((a, b) => `pr${a.number}`.localeCompare(`pr${b.number}`));
+  return ndjson(aliasOrder);
+};
 const fixtureNode = (number: number) => GRAPHQL.nodes.find((n) => n.number === number)!;
 
 describe('monorepo scoping', () => {
@@ -115,7 +123,7 @@ describe('monorepo scoping', () => {
     const routes: Routes = {
       'repos/acme/mono': 'acme/mono\n',
       'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-      [OPEN]: ndjson([prNode(1, 'a1'), prNode(2, 'b2'), prNode(3, 'c3')]),
+      [OPEN]: openPrs([prNode(1, 'a1'), prNode(2, 'b2'), prNode(3, 'c3')]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/2/files?per_page=100': 'rush/cli/main.ts\nprix/api.ts\n',
       'repos/acme/mono/pulls/3/files?per_page=100': 'docs/guide.md\n',
@@ -137,7 +145,7 @@ describe('monorepo scoping', () => {
     const { gh, asked } = recordedGh({
       'repos/acme/mono': 'acme/mono\n',
       'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-      [OPEN]: ndjson([prNode(9, 'd4')]),
+      [OPEN]: openPrs([prNode(9, 'd4')]),
     });
     const envelope = await buildProjectPrs(solo, {}, gh, [solo]);
     expect(envelope.repositories[0].pullRequests.map((pr) => [pr.number, pr.scope])).toEqual([[9, null]]);
@@ -170,7 +178,7 @@ describe('CI at a glance and recently merged PRs', () => {
     ...REST,
     'repos/acme/mono': repoRead,
     'user': '{"login":"octocat","avatar_url":"https://avatars.githubusercontent.com/u/583231?v=4","name":"The Octocat","email":null}\n',
-    [OPEN]: ndjson(GRAPHQL.nodes),
+    [OPEN]: openPrs(GRAPHQL.nodes),
   });
 
   it('classifies each open head\'s REST rollup and names the failing checks', async () => {
@@ -187,7 +195,7 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.defaultBranch).toEqual({ name: 'main', sha: 'd0d0d0d', ciState: 'FAILURE', failingChecks: ['test'] });
   });
 
-  it('reads every open PR, its merge state and its checks in one GraphQL list, with no per-PR read', async () => {
+  it('reads every open PR, its merge state and its checks over GraphQL, with no per-PR REST read', async () => {
     const { gh, asked } = recordedGh(soloRoutes());
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(repo.ciError).toBeNull();
@@ -196,16 +204,16 @@ describe('CI at a glance and recently merged PRs', () => {
       [2, true, 'clean', 'o2'],
       [3, null, 'unknown', 'o3'],
     ]);
-    expect(asked.filter((e) => e === OPEN)).toHaveLength(1);
+    expect(asked.filter((e) => e === OPEN)).toHaveLength(2);
     expect(asked.some((e) => /^repos\/acme\/mono\/(pulls\/[123]$|commits\/o[123]\/)/.test(e))).toBe(false);
   });
 
-  it('asks once per repository however many PRs it has', async () => {
-    const many = Array.from({ length: 250 }, (_, i) => prNode(i + 1, `h${i + 1}`));
-    const { gh, asked } = recordedGh({ ...soloRoutes(), [OPEN]: ndjson(many) });
+  it('lists the open numbers once, then reads them in batches that keep the listed order', async () => {
+    const many = Array.from({ length: 250 }, (_, i) => prNode(250 - i, `h${250 - i}`));
+    const { gh, asked } = recordedGh({ ...soloRoutes(), [OPEN]: openPrs(many) });
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
-    expect(repo.pullRequests).toHaveLength(250);
-    expect(asked.filter((e) => e.startsWith('graphql'))).toEqual([OPEN]);
+    expect(repo.pullRequests.map((pr) => pr.number)).toEqual(many.map((n) => n.number));
+    expect(asked.filter((e) => e.startsWith('graphql'))).toHaveLength(1 + Math.ceil(250 / OPEN_PRS_PER_QUERY));
     expect(asked.filter((e) => /\/commits\/h\d+\//.test(e) || /\/pulls\/\d+$/.test(e) && !/pulls\/(10|13|15)$/.test(e))).toEqual([]);
   });
 
@@ -220,8 +228,8 @@ describe('CI at a glance and recently merged PRs', () => {
   it('asks GitHub for open PRs newest-created first, the order the REST list returned', async () => {
     let query = '';
     const { gh } = recordedGh({ ...soloRoutes(), [OPEN]: (args) => {
-      query = args.find((a) => a.startsWith('query=')) ?? '';
-      return ndjson([prNode(2, 'h2'), prNode(1, 'h1')]);
+      if (args.includes('--paginate')) query = args.find((a) => a.startsWith('query=')) ?? '';
+      return openPrs([prNode(2, 'h2'), prNode(1, 'h1')])(args);
     } });
     const [repo] = (await buildProjectPrs(solo, {}, gh, [solo], { nowMs: NOW, cacheDir: freshCache() })).repositories;
     expect(query).toContain('orderBy: {field: CREATED_AT, direction: DESC}');
@@ -424,7 +432,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
     const routes: Routes = {
       ...soloRoutes(),
-      [OPEN]: ndjson([fixtureNode(1)]),
+      [OPEN]: openPrs([fixtureNode(1)]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
       'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
       'repos/acme/mono/pulls/10/files?per_page=100': 'rush/cli/main.ts\n',
@@ -447,7 +455,7 @@ describe('CI at a glance and recently merged PRs', () => {
     const prix = { name: 'prix', repo: 'acme/mono', root: '/src/mono', defaultPath: '/src/mono/prix' } as ProjectDef;
     const routes: Routes = {
       ...soloRoutes(),
-      [OPEN]: ndjson([fixtureNode(1), fixtureNode(2)]),
+      [OPEN]: openPrs([fixtureNode(1), fixtureNode(2)]),
       'repos/acme/mono/pulls/1/files?per_page=100': 'rush/app.ts\n',
       'repos/acme/mono/pulls/2/files?per_page=100': 'prix/api.ts\n',
       'repos/acme/mono/pulls/13/files?per_page=100': 'AGENTS.md\n',
