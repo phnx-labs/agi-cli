@@ -714,7 +714,7 @@ plain `gh pr merge` after CI and a review verdict, or with `prs automerge`.
 
 ## Authentication — Phoenix ID
 
-`agents auth login` signs in with **Phoenix ID** (`id.byphoenix.com`), the one family
+`agents auth login` signs in with **Phoenix ID** (`id.phoenix.so`; `id.byphoenix.com` keeps serving), the one family
 identity shared with the Rush CLI and prix.dev. The first Phoenix-authenticated
 request rush/api sees provisions the matching Rush user row (owner decision 2026-10-07,
 PHNX-4267), which is what lets a CLI sign-in reach the owner's notification
@@ -734,7 +734,7 @@ it as `Authorization: Bearer <access_token>` against Phoenix ID; `agents auth wh
 resolves it at `GET /api/v1/auth/me`; `agents auth logout` revokes the worker owner-notify tokens this box minted, then deletes the file (local-only —
 signs out nothing else).
 
-- `PHOENIX_ID_BASE` (default `https://id.byphoenix.com`) points the CLI at a different
+- `PHOENIX_ID_BASE` (default `https://id.phoenix.so`) points the CLI at a different
   account service for local/private backends.
 - The CLI never reads another product's credentials (e.g. `~/.rush/user.yaml`); each surface
   holds its own copy of the same Phoenix bearer. The surfaces that use it are the managed

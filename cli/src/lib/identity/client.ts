@@ -5,7 +5,7 @@ import * as path from 'path';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { getRuntimeStateDir } from '../state.js';
 
-export const DEFAULT_PHOENIX_ID_BASE = 'https://id.byphoenix.com';
+export const DEFAULT_PHOENIX_ID_BASE = 'https://id.phoenix.so';
 export const PHOENIX_ID_BASE = process.env.PHOENIX_ID_BASE ?? DEFAULT_PHOENIX_ID_BASE;
 
 export function sessionFilePath(): string {
