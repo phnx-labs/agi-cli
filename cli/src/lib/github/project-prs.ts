@@ -226,6 +226,21 @@ export function prFromNode(node: Record<string, unknown>): { slug: string; pr: P
   return { slug: String(rec(node.repository).nameWithOwner ?? ''), pr: { ...pr, ...ci } };
 }
 
+let openPrQueriesRunning = 0;
+const openPrQueryWaiters: Array<() => void> = [];
+
+async function withOpenPrQuerySlot<T>(fn: () => Promise<T>): Promise<T> {
+  if (openPrQueriesRunning < OPEN_PR_QUERIES_IN_FLIGHT) openPrQueriesRunning++;
+  else await new Promise<void>((handOver) => openPrQueryWaiters.push(handOver));
+  try {
+    return await fn();
+  } finally {
+    const nextInLine = openPrQueryWaiters.shift();
+    if (nextInLine) nextInLine();
+    else openPrQueriesRunning--;
+  }
+}
+
 export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<ProjectPr[]> {
   const [owner, name] = repo.split('/');
   const repoFields = ['-f', `owner=${owner}`, '-f', `name=${name}`];
@@ -235,10 +250,10 @@ export async function listOpenPrs(repo: string, gh: GhExec = ghExec): Promise<Pr
   ])).split('\n').map((l) => l.trim()).filter(Boolean).map(Number);
   const batches: number[][] = [];
   for (let i = 0; i < numbers.length; i += OPEN_PRS_PER_QUERY) batches.push(numbers.slice(i, i + OPEN_PRS_PER_QUERY));
-  const nodes = (await mapBounded(batches, OPEN_PR_QUERIES_IN_FLIGHT, async (batch) => parseNdjson(await gh([
+  const nodes = (await Promise.all(batches.map((batch) => withOpenPrQuerySlot(async () => parseNdjson(await gh([
     'api', 'graphql', ...repoFields, '-f', `query=${prsByNumberQuery(batch)}`,
     '--jq', '.data.repository[] | select(. != null)',
-  ])))).flat();
+  ])))))).flat();
   const byNumber = new Map(nodes.filter((node) => node.state === 'OPEN').map((node) => [Number(node.number), node]));
   return numbers.flatMap((n) => {
     const node = byNumber.get(n);
