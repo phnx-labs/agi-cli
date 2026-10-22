@@ -49,7 +49,7 @@ async function identity() {
 describe('the identity seam', () => {
   it('pins the shipped production default to the branded Phoenix ID host (PHNX-3543)', async () => {
     const { DEFAULT_PHOENIX_ID_BASE } = await import('./client.js');
-    expect(DEFAULT_PHOENIX_ID_BASE).toBe('https://id.byphoenix.com');
+    expect(DEFAULT_PHOENIX_ID_BASE).toBe('https://id.phoenix.so');
   });
 
   it('sends the stored session token, and only that token', async () => {
