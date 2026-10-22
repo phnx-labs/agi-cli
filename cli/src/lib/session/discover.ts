@@ -892,9 +892,12 @@ function recentlyLive(sessionIds: Iterable<string>, now: number): Set<string> {
   return hot;
 }
 
+let lastClaudeLiveDirs: string[] = [];
+
 export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId: string }> {
   const newest = new Map<string, { entry: LiveSessionName & { sessionId: string }; at: number }>();
-  for (const dir of getAgentSessionDirs('claude', 'sessions')) {
+  lastClaudeLiveDirs = getAgentSessionDirs('claude', 'sessions');
+  for (const dir of lastClaudeLiveDirs) {
     let files: string[];
     try {
       files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
@@ -926,25 +929,35 @@ export function readClaudeLiveNames(): Map<string, LiveSessionName & { sessionId
 }
 
 /** Calls onChange when a running Claude rewrites its `sessions/<pid>.json`: a /rename
- *  (name, nameSource) or a status flip. Re-call refresh to watch session dirs that appeared. */
-export function watchClaudeLiveSessionFiles(onChange: () => void): { refresh: () => void; close: () => void } {
+ *  (name, nameSource) or a status flip. refresh() watches the dirs the last
+ *  readClaudeLiveNames listed, so it does no IO of its own (daemon tick rule). */
+export function watchClaudeLiveSessionFiles(
+  onChange: () => void,
+  onWatchError: (dir: string, err: Error) => void = () => {},
+): { refresh: () => void; close: () => void } {
   const watchers = new Map<string, fs.FSWatcher>();
+  const drop = (dir: string) => { watchers.get(dir)?.close(); watchers.delete(dir); };
   const refresh = () => {
-    for (const dir of getAgentSessionDirs('claude', 'sessions')) {
+    const listed = new Set(lastClaudeLiveDirs);
+    for (const dir of [...watchers.keys()]) if (!listed.has(dir)) drop(dir);
+    for (const dir of listed) {
       if (watchers.has(dir)) continue;
       try {
         const watcher = fs.watch(dir, { persistent: false }, (_event, name) => {
+          // A deleted dir reports its own name and its watcher goes dead; the next refresh re-adds it.
+          if (name && String(name) === path.basename(dir)) { drop(dir); return; }
           if (!name || String(name).endsWith('.json')) onChange();
         });
-        watcher.on('error', () => { watcher.close(); watchers.delete(dir); });
+        watcher.on('error', () => drop(dir));
         watchers.set(dir, watcher);
-      } catch {  }
+      } catch (err) {
+        onWatchError(dir, err as Error);
+      }
     }
   };
-  refresh();
   return {
     refresh,
-    close: () => { for (const w of watchers.values()) w.close(); watchers.clear(); },
+    close: () => { for (const dir of [...watchers.keys()]) drop(dir); },
   };
 }
 

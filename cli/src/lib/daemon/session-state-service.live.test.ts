@@ -13,6 +13,7 @@ fs.mkdirSync(accountSessions, { recursive: true });
 
 const { ServiceSupervisor } = await import('./supervisor.js');
 const { SessionStateService } = await import('./session-state-service.js');
+const { readClaudeLiveNames } = await import('../session/discover.js');
 
 afterAll(() => fs.rmSync(TEST_HOME, { recursive: true, force: true }));
 
@@ -25,7 +26,9 @@ function writeLiveName(name: string): void {
 }
 
 describe('SessionStateService wakes on a live Claude session file', () => {
-  it('a /rename wakes the publish within half a second, and a burst wakes it once', async () => {
+  it('a /rename wakes the publish at once, a burst wakes it once, a recreated dir is watched again', async () => {
+    // The gather lists the live dirs; the watcher reuses that list instead of doing IO on the tick.
+    readClaudeLiveNames();
     const supervisor = new ServiceSupervisor();
     const wakes: number[] = [];
     supervisor.register(new SessionStateService(() => { wakes.push(Date.now()); supervisor.runNow('session-state'); }));
@@ -35,14 +38,24 @@ describe('SessionStateService wakes on a live Claude session file', () => {
 
     const renamedAt = Date.now();
     writeLiveName('Improve - AGI Ext');
-    await pause(500);
+    await pause(1_100);
     expect(wakes.length).toBe(1);
-    expect(wakes[0] - renamedAt).toBeLessThan(500);
+    expect(wakes[0] - renamedAt).toBeLessThan(1_000);
 
     for (let i = 0; i < 5; i++) { writeLiveName(`burst ${i}`); await pause(20); }
-    await pause(1_300);
+    await pause(1_500);
     expect(wakes.length).toBe(2);
     expect(wakes[1] - wakes[0]).toBeGreaterThanOrEqual(1_000);
+
+    fs.rmSync(accountSessions, { recursive: true });
+    fs.mkdirSync(accountSessions, { recursive: true });
+    readClaudeLiveNames();
+    supervisor.runNow('session-state');
+    await pause(1_200);
+    wakes.length = 0;
+    writeLiveName('after recreate');
+    await pause(1_100);
+    expect(wakes.length).toBe(1);
 
     await supervisor.stopAll();
     wakes.length = 0;

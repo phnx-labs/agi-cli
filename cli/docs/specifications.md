@@ -3281,8 +3281,10 @@ nothing but its own view cache.
   device-probe tick runs as the supervised `DeviceProbeService`
   (`lib/daemon/device-probe-service.ts`, RUSH-3193 P3), and `session-cache-warm` runs as the supervised `session-state`
   service (`lib/daemon/session-state-service.ts`, PHNX-3265): it owns the 15-second
-  publish cadence and the reader-presence edge that requests an immediate
-  supervised tick. Nothing else calls them, so each is the single daemon-owned
+  publish cadence, the reader-presence edge that requests an immediate
+  supervised tick, and a watch on Claude's live `sessions/<pid>.json` dirs (the ones
+  the last gather listed) that requests one 150 ms after a rename or status change,
+  at most once a second. Nothing else calls them, so each is the single daemon-owned
   scheduler/executor SING-1 requires. `auto-dispatch` and `launch-health`
   were deleted outright with no replacement. **`tmux-reconcile`** (the 5-minute
   poll that retrofitted a stale `pane-died` hook onto managed tmux sessions) was
