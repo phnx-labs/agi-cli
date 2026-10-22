@@ -670,14 +670,18 @@ approximating it could let the merge loop bypass review).
 **The open-PR reads are GraphQL, a few queries per repository and one per owner, a
 measured exception to the REST-first rule.** `agents projects prs <name>` lists a repository's
 open PRs with one paginated `repository.pullRequests` query for the numbers, then
-reads them 10 to a query, 12 queries in flight (`listOpenPrs`): GitHub computes
-`mergeStateStatus` per PR on request, about 30 ms each, so one 100-PR page took
-3 s and pages ran one after another (115 PRs: 5.9 s, now 3.0 s). The all-orgs
+reads them 10 to a query (`listOpenPrs`), at most 12 such queries in flight across
+the whole process however many repositories it reads (`withOpenPrQuerySlot`, well
+under GitHub's 100 concurrent requests): GitHub computes `mergeStateStatus` per PR on
+request, about 30 ms each, so one 100-PR page took 3 s and pages ran one after
+another (115 PRs: 5.9 s, now 3.0 s). Each batch and each page of numbers costs 1
+GraphQL point (measured with `rateLimit { cost }`), so 115 PRs cost about 14 points
+where the old pages cost about 2. The all-orgs
 `agents projects prs` (AGI Menu's GitHub tab) runs one paginated `search` per owner
 plus one for `review-requested:@me`; both return each PR's head, `mergeable`,
 `mergeStateStatus` and check rollup in the same page (`PR_NODE_FIELDS` and
 `prFromNode` in [`src/lib/github/project-prs.ts`](src/lib/github/project-prs.ts)).
-A page of 100 PRs costs 2 GraphQL points (measured with `rateLimit { cost }`). It
+An all-orgs page of 100 PRs costs 2 GraphQL points (measured with `rateLimit { cost }`). It
 replaced a per-PR fan-out of three REST requests and three `gh` processes
 (`pulls/{n}`, `check-runs`, `status`): on a 102-PR repository the read went from
 about 40 s to 6.7 s, and the all-orgs read of 203 PRs in 28 repositories used to

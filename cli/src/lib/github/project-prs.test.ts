@@ -23,6 +23,7 @@ import {
   OWN_PR_APPROVAL,
   prFromNode,
   OPEN_PRS_PER_QUERY,
+  listOpenPrs,
 } from './project-prs.js';
 import { repoPathClaims } from '../projects.js';
 import type { ProjectDef } from '../projects.js';
@@ -215,6 +216,24 @@ describe('CI at a glance and recently merged PRs', () => {
     expect(repo.pullRequests.map((pr) => pr.number)).toEqual(many.map((n) => n.number));
     expect(asked.filter((e) => e.startsWith('graphql'))).toHaveLength(1 + Math.ceil(250 / OPEN_PRS_PER_QUERY));
     expect(asked.filter((e) => /\/commits\/h\d+\//.test(e) || /\/pulls\/\d+$/.test(e) && !/pulls\/(10|13|15)$/.test(e))).toEqual([]);
+  });
+
+  it('keeps at most 12 batch reads in flight across every repository the process reads at once', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const many = Array.from({ length: 200 }, (_, i) => prNode(200 - i, `h${200 - i}`));
+    const answer = openPrs(many);
+    const gh = async (args: string[]) => {
+      if (args.includes('--paginate')) return answer(args);
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 2));
+      inFlight--;
+      return answer(args);
+    };
+    const reads = await Promise.all(['acme/a', 'acme/b', 'acme/c'].map((repo) => listOpenPrs(repo, gh)));
+    expect(reads.map((prs) => prs.length)).toEqual([200, 200, 200]);
+    expect(peak).toBe(12);
   });
 
   it('a failed open-PR list fails that repository and marks the read partial', async () => {
