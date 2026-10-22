@@ -7,8 +7,6 @@ import { BasePeriodicService, type DaemonContext } from './service.js';
 
 const SESSION_STATE_TICK_MS = 15_000;
 const SESSION_STATE_DEADLINE_MS = 30_000;
-// A /rename reaches the row this soon instead of on the next 15 s tick; the gap bounds
-// how often a busy fleet's status flips re-gather (a warm gather is ~15-40 ms).
 const LIVE_CHANGE_SETTLE_MS = 150;
 const LIVE_CHANGE_MIN_GAP_MS = 1_000;
 
