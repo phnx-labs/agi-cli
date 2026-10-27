@@ -23,7 +23,7 @@ import {
   type BriefInputs, type BriefPr, type BriefTicket,
 } from './brief.js';
 import {
-  appendHistory, clearSessionState, readMemory, readSessionState, writeMemory, writeSessionState,
+  DRAFT_TURN_PREFIX, appendHistory, clearSessionState, readMemory, readSessionState, writeMemory, writeSessionState,
   type LeadHistoryTool, type LeadSessionState,
 } from './store.js';
 import { ensureLeadDir, leadRoot, type LeadPaths } from './paths.js';
@@ -436,7 +436,7 @@ export class LeadHost {
       const rows = this.roster.snapshot();
       void this.enqueue(draftTurnText(open.map((a) => formatAttention(a, rows[a.sessionId]))), undefined, (e) => {
         if (e.type === 'error') this.log(`draft turn failed: ${e.message}`);
-      });
+      }, undefined, 'asks');
     }, DRAFT_BATCH_MS);
     this.draftTimer.unref?.();
     this.timers.push(this.draftTimer);
@@ -481,14 +481,14 @@ export class LeadHost {
     return next;
   }
 
-  enqueue(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext): Promise<void> {
+  enqueue(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext, trigger?: 'asks'): Promise<void> {
     this.queued++;
     return this.schedule(async () => {
       this.queued--;
       this.busy = true;
       let rotate: LeadSessionState | null = null;
       try {
-        rotate = await this.runTurn(text, voice, emit, context);
+        rotate = await this.runTurn(text, voice, emit, context, trigger);
       } catch (err) {
         emit({ type: 'error', message: err instanceof Error ? err.message : String(err) });
       } finally {
@@ -614,7 +614,7 @@ export class LeadHost {
     return { result, parser, initAtMs, tools: [...tools.values()] };
   }
 
-  private async runTurn(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext): Promise<LeadSessionState | null> {
+  private async runTurn(text: string, voice: number | undefined, emit: (e: LeadEvent) => void, context?: EditorContext, trigger?: 'asks'): Promise<LeadSessionState | null> {
     const turnId = newTurnId();
     const startedAt = Date.now();
     let state = readSessionState(this.opts.paths);
@@ -734,7 +734,8 @@ export class LeadHost {
     appendHistory(this.opts.paths, {
       turn: turnId,
       at: new Date(startedAt).toISOString(),
-      ask: text,
+      ask: trigger ? '' : text,
+      ...(trigger ? { trigger } : {}),
       ...(voice !== undefined ? { voice } : {}),
       text: result.text,
       summary,
@@ -789,7 +790,7 @@ export class LeadHost {
 
 export function draftTurnText(asks: string[]): string {
   return [
-    '[New asks] These agents in this project stopped and are waiting on the owner. For each one, draft the reply the owner would most likely send, from the goals, the project rules, your memory and what the agent said (`agents lead tool roster --session <id>` shows its last turns when you need more).',
+    DRAFT_TURN_PREFIX + ' These agents in this project stopped and are waiting on the owner. For each one, draft the reply the owner would most likely send, from the goals, the project rules, your memory and what the agent said (`agents lead tool roster --session <id>` shows its last turns when you need more).',
     '- Draft with `agents lead tool answer --key <key> --text "<one line>"` (or `--choice <id>`). It is shown on that agent\'s card for the owner to send; nothing is delivered until they do.',
     '- An agent that stopped before finishing ("Not done") gets the specific next step, never a bare "continue".',
     '- Draft nothing when the decision is the owner\'s: spending or cancelling money, publishing or releasing, deleting, credentials, or a taste call you cannot infer. Say why in one line instead.',
