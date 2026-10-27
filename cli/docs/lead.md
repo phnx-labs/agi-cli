@@ -20,7 +20,7 @@ agents lead stop --project <name>
 |---|---|---|
 | `ask` | Starts the project host if needed, sends one message, streams the turn. `--voice` marks the text as a transcript of that many seconds. `--context` and `--speak` are below. | 1 on an `error` event or a stream that closed before `done` (never because of `--speak`) |
 | `confirm` | Re-checks the held argv against its fixed shape and runs it once (see [Confirm](#confirm)), streams `tool` and `done`. | 1 on an unknown, used, expired, malformed or failed token |
-| `history` | Prints finished turns, oldest first. `--json` is a JSON array. | 0 |
+| `history` | Prints finished turns, oldest first. `--json` is a JSON array. A turn the Lead ran on its own to draft replies for new asks has `trigger: "asks"` and an empty `ask`. | 0 |
 | `status` | `--json` prints one status object with `--project`, else an array over every project that has a Lead directory. | 0 |
 | `stop` | Stops the host and its Claude process. The session stays resumable. | 0 (prints whether it was running) |
 

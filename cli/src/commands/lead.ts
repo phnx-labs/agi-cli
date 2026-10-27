@@ -299,7 +299,7 @@ export function registerLeadCommand(program: Command): void {
         return;
       }
       for (const t of turns) {
-        console.log(`${chalk.gray(t.at)}  ${chalk.cyan('>')} ${t.ask}`);
+        console.log(`${chalk.gray(t.at)}  ${t.trigger === 'asks' ? chalk.gray('(on its own, for new asks)') : `${chalk.cyan('>')} ${t.ask}`}`);
         console.log(`  ${t.text.split('\n').join('\n  ')}\n`);
       }
     });

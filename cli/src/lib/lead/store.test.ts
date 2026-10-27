@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { appendHistory, appendLog, readHistory, readSessionState, writeSessionState, clearSessionState } from './store.js';
+import { DRAFT_TURN_PREFIX, appendHistory, appendLog, readHistory, readSessionState, writeSessionState, clearSessionState } from './store.js';
 import { ensureLeadDir } from './paths.js';
 
 const turn = (n: number) => ({
@@ -25,6 +25,14 @@ describe('Lead store', () => {
     appendHistory(p, turn(3));
     expect(readHistory(p).map((t) => t.turn)).toEqual(['t_1', 't_3']);
     expect(readHistory(p, 1).map((t) => t.turn)).toEqual(['t_3']);
+  });
+
+  it('reads a drafting turn written before `trigger` existed as one the Lead ran on its own', () => {
+    const p = ensureLeadDir('store-draft');
+    appendHistory(p, { ...turn(1), ask: `${DRAFT_TURN_PREFIX} These agents stopped.\n- key "Improve"` });
+    appendHistory(p, { ...turn(2), ask: '', trigger: 'asks' });
+    appendHistory(p, turn(3));
+    expect(readHistory(p).map((t) => [t.ask, t.trigger])).toEqual([['', 'asks'], ['', 'asks'], ['q', undefined]]);
   });
 
   it('rotates history and the host log past their size caps', () => {
