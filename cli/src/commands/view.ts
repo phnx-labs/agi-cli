@@ -69,7 +69,7 @@ import { getAgentsDir, getEffectivePromptcutsPath, readMergedPromptcuts, readMet
 import { findNativeAccountByIdentity } from '../lib/account-registry.js';
 import { ACCOUNT_LISTING_LEGEND, loadAccountCatalog, renderAccountRows, secretsUnavailableNote, type NativeAccountCatalogRow } from '../lib/account-catalog.js';
 import { addSupported } from '../lib/accounts/add.js';
-import { readInstallation } from '../lib/installations/store.js';
+import { installedReleaseFor, readInstallation } from '../lib/installations/store.js';
 import { isAutoUpdateEnabledForAgent } from '../lib/installations/update-policy.js';
 import { selectUpdateStrategy } from '../lib/installations/strategies.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
@@ -129,6 +129,10 @@ export function joinViewColumns(cols: string[]): string {
   let end = cols.length;
   while (end > 0 && cols[end - 1] === '') end--;
   return cols.slice(0, end).join('  ');
+}
+
+function installedVersionLabel(label: string, release: string): string {
+  return release === label ? release : `${release} (installation: ${label})`;
 }
 
 function harnessVersionLabel(harness: ProfileSummary, globalDefault: string | null): string {
@@ -448,11 +452,11 @@ async function showInstalledVersions(
       })
   );
   const displayVersion = (agentId: AgentId, dirVersion: string): string =>
-    liveVersionByAgent.get(agentId) ?? readInstallation(agentId, dirVersion)?.releaseVersion ?? dirVersion;
+    liveVersionByAgent.get(agentId) ?? installedReleaseFor(agentId, dirVersion);
 
   const versionRowLabel = (agentId: AgentId, version: string, globalDefault: string | null): string => {
     const release = displayVersion(agentId, version);
-    const shown = release === version ? version : `${version} → ${release}`;
+    const shown = installedVersionLabel(version, release);
     if (version === globalDefault) return `${shown} (default)`;
     if (isVersionIsolated(agentId, version)) {
       return getIsolatedDefault(agentId) === version
@@ -573,7 +577,7 @@ async function showInstalledVersions(
         const isolated = !isDefault && isVersionIsolated(agentId, version);
         const isolatedTag = getIsolatedDefault(agentId) === version ? ' (isolated default)' : ' (isolated)';
         const release = displayVersion(agentId, version);
-        const shown = release === version ? version : `${version} → ${release}`;
+        const shown = installedVersionLabel(version, release);
         const base = versionRowLabel(agentId, version, globalDefault);
         const tagPad = ' '.repeat(maxVerLabel - base.length);
         const label = isDefault
@@ -817,6 +821,8 @@ async function showAgentResources(
     }
   }
   const home = getVersionHomePath(agentId, version);
+  const release = (isGlobalBinaryAgent(agentId) ? await getLiveVersion(agentId) : null)
+    ?? installedReleaseFor(agentId, version);
 
   const { hasGitRepo, commands: commandsSync, skills: skillsSync, hooks: hooksSync, memory: memorySync } =
     await loadResourceSyncData();
@@ -850,7 +856,7 @@ async function showAgentResources(
   const agentData: AgentResourceDisplay = {
     agentId,
     agentName: agentLabel(agentId),
-    version,
+    version: release,
     commands: resources.commands.map(r => ({
       ...r,
       syncState: r.scope === 'project' ? undefined : resolveResourceSyncState(agentId, r.name, 'commands', commandsSync),
@@ -937,7 +943,7 @@ async function showAgentResources(
     }, { allowInteractiveLogin: usageAllowInteractiveLogin() });
     const accountLabel = accountColumnLabel(accountInfo);
     const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
-    const status = chalk.green(version);
+    const status = chalk.green(installedVersionLabel(version, release));
     const configuredModel = resolveConfiguredModel(agentId, version);
     const modelStr = configuredModel ? chalk.yellow(`  ${configuredModel.model}`) : '';
     const usageStr = formatUsageSummary(usageInfo.snapshot?.plan ?? accountInfo.plan, null);
