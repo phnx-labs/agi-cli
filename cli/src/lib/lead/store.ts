@@ -27,15 +27,12 @@ export interface LeadHistoryTool {
   secs: number;
 }
 
-/** Opens the turn the Lead runs on its own to draft replies for new asks (`draftTurnText`). */
 export const DRAFT_TURN_PREFIX = '[New asks]';
 
 export interface LeadHistoryTurn {
   turn: string;
   at: string;
-  /** What the owner said; empty for a turn the Lead ran on its own. */
   ask: string;
-  /** Set when nobody asked: `asks` is the Lead drafting replies for agents that stopped to ask. */
   trigger?: 'asks';
   voice?: number;
   text: string;
@@ -113,7 +110,6 @@ export function readHistory(paths: LeadPaths, limit?: number): LeadHistoryTurn[]
     if (!line.trim()) continue;
     try {
       const turn = JSON.parse(line) as LeadHistoryTurn;
-      // Turns written before `trigger` existed kept the whole drafting prompt as the ask.
       turns.push(!turn.trigger && turn.ask.startsWith(DRAFT_TURN_PREFIX) ? { ...turn, ask: '', trigger: 'asks' } : turn);
     } catch {
       continue;
