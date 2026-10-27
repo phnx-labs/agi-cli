@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.45
+
+- **The Lead's own drafting turns no longer read as something you said.** When agents stop to ask, the Lead runs a turn on its own to draft their replies. History saved that turn's whole internal prompt ("[New asks] These agents in this project stopped …") as its `ask`, so the AGI extension's Lead tab drew it under "You" on every such turn. These turns are now saved with `trigger: "asks"` and an empty `ask`. Turns saved before this are read back the same way, and `agents lead history` prints "(on its own, for new asks)" for them. Source: `cli/src/lib/lead/store.ts` (`DRAFT_TURN_PREFIX`, `readHistory`), `cli/src/lib/lead/host.ts`.
+
 ## 1.23.44
 
 - **Phoenix ID's default host is now `id.phoenix.so` (PHNX-4424).** `agents auth login`, `whoami` and `logout`, and a session-backup Worker set up from now on, talk to `https://id.phoenix.so` unless `PHOENIX_ID_BASE` says otherwise; a Worker set up earlier keeps checking `id.byphoenix.com`, which still serves. `id.byphoenix.com` keeps serving, and a session signed in through either host is valid at both, so existing sign-ins keep working. Source: `cli/src/lib/identity/client.ts`.
