@@ -747,7 +747,7 @@ signs out nothing else).
   holds its own copy of the same Phoenix bearer. The surfaces that use it are the managed
   session-backup Worker (`sessions export --to-r2`, provisioned by `agents setup session-backup`), which verifies the bearer at
   `${PHOENIX_ID_BASE}/api/v1/auth/me`, and owner notifications, which send it to rush/api
-  (`RUSH_PROXY_BASE`, default `https://api.prix.dev`, `src/lib/rush-api.ts`). A worker never
+  (`RUSH_PROXY_BASE`, default `https://api.phoenix.so`, `src/lib/rush-api.ts`). A worker never
   receives this bearer; it gets a `notify`-scoped device token instead (see owner
   notifications above).
 

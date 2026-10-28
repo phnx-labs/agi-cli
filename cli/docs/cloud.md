@@ -255,7 +255,7 @@ cloud:
 
 ### Rush Cloud credentials
 
-Rush Cloud is called through its developer API at `https://api.prix.dev/o/{org}/sessions`
+Rush Cloud is called through its developer API at `https://api.phoenix.so/o/{org}/sessions`
 with an API key (`rk_live_…`), the way any customer calls it: start
 (`POST /o/{org}/sessions`), read, list, the `…/events` stream, follow-ups and the
 transcript (`…/messages`), and cancel. It does not read the deprecated `rush login`
