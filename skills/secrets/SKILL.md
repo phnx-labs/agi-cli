@@ -89,7 +89,7 @@ secrets generate --copy    # copies to clipboard, prints nothing
 ## "I have multiple machines and want secrets to sync"
 
 Move a bundle between machines with `push`/`pull` — it's encrypted, uploaded to
-`api.prix.dev`, and decrypted back into the local keychain/file store on the
+`api.phoenix.so`, and decrypted back into the local keychain/file store on the
 other end:
 
 ```bash
@@ -104,7 +104,7 @@ secrets pull work      # work now exists locally too
 
 A bundle created with `--synced` instead stores it in an age-encrypted local
 file (`$SECRETS_HOME/vault.age`) that you sync yourself (e.g. via a synced
-folder) rather than through `api.prix.dev`.
+folder) rather than through `api.phoenix.so`.
 
 ## "I want to track when API keys expire"
 
