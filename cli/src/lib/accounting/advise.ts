@@ -293,13 +293,27 @@ export function accountsAdviceNotification(
   lastNotified: string | null,
   now: Date = new Date(),
 ): { fingerprint: string; title: string; body: string; dedupKey: string } | null {
-  const { harness, advice, coverage, peakDemand } = result;
+  const { harness, advice, coverage, peakDemand, thresholds } = result;
+  const week = new Date(weekStartUtc(now.getTime())).toISOString().slice(0, 10);
+  const demand = peakDemand === null ? '' : ` Peak weekly demand was ${peakDemand.toFixed(2)} account-weeks.`;
+  if (advice.confidence === 'low') {
+    if (advice.keep === coverage.total) return null;
+    const fingerprint = [harness, 'low', advice.keep, coverage.total].join('|');
+    if (fingerprint === lastNotified) return null;
+    const title = advice.keep < coverage.total
+      ? `${harness}: about ${advice.keep} of ${coverage.total} accounts cover your usage`
+      : `${harness}: you may need ${advice.keep} accounts, ${coverage.total} are active`;
+    return {
+      fingerprint,
+      title,
+      body: `Which accounts to ${advice.keep < coverage.total ? 'pause' : 'resume'} is named once each has readings in ${thresholds.weeksNeeded} of the last ${result.weeks.length} weeks.${demand} Details: agents accounts usage ${harness}`,
+      dedupKey: `accounts-advice:${harness}:${week}:low:${advice.keep}`,
+    };
+  }
   if (advice.confidence !== 'high') return null;
   if (advice.pause.length === 0 && advice.resume.length === 0 && advice.add === 0) return null;
   const fingerprint = [harness, advice.keep, [...advice.pause].sort().join(','), [...advice.resume].sort().join(','), advice.add].join('|');
   if (fingerprint === lastNotified) return null;
-  const week = new Date(weekStartUtc(now.getTime())).toISOString().slice(0, 10);
-  const demand = peakDemand === null ? '' : ` Peak weekly demand was ${peakDemand.toFixed(2)} account-weeks.`;
   let title: string;
   let action: string;
   if (advice.pause.length > 0) {

@@ -1,0 +1,1 @@
+- **You hear the seat count before the names.** The daemon now notifies you once when the seat count differs from your active accounts at low confidence ("claude: about 5 of 8 accounts cover your usage"), saying when it will name which ones. Before, it stayed silent until every account had 3 weeks of readings. Source: `cli/src/lib/accounting/advise.ts`.
