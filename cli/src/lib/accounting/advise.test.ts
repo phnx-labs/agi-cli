@@ -32,6 +32,9 @@ function accounts(over: Partial<Record<string, Partial<AdviseAccountInput>>> = {
 describe('adviseAccounts', () => {
   it('sizes seats from summed weekly demand, not per-account activity', () => {
     const result = adviseAccounts(accounts(), fixturePeaks(), { now: NOW });
+    expect(result.thresholds).toMatchObject({ minMeasured: 6, weeksNeeded: 3 });
+    expect(adviseAccounts(accounts(), fixturePeaks(), { now: NOW, weeks: 2, target: 0.9 }).thresholds)
+      .toEqual({ target: 0.9, minCoverage: 0.75, minMeasured: 6, weeksNeeded: 2, limitPercent: 100 });
     expect(result.weeks).toEqual(['2026-10-05', '2026-10-12', '2026-10-19', '2026-10-26']);
     expect(result.demand).toEqual([1.96, 1.72, 1.91, 1.99]);
     expect(result.peakDemand).toBe(1.99);

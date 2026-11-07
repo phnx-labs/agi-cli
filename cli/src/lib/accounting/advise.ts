@@ -62,6 +62,7 @@ export interface AdviseOptions {
 export const DEFAULT_ADVISE_WEEKS = 4;
 export const DEFAULT_ADVISE_TARGET = 0.8;
 export const MIN_ADVISE_COVERAGE = 0.75;
+export const LIMIT_PERCENT = 100;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 
@@ -106,7 +107,7 @@ export function adviseAccounts(
     let pace: number | null = null;
     let limitedWeeks = 0;
     for (const p of byKey.get(account.usageKey) ?? []) {
-      if (p.peak >= 100) limitedWeeks += 1;
+      if (p.peak >= LIMIT_PERCENT) limitedWeeks += 1;
       if (Date.parse(p.resetsAt) > now.getTime()) {
         thisWeek = Math.max(thisWeek ?? 0, p.peak);
         const elapsed = Date.parse(p.lastSeen) - (Date.parse(p.resetsAt) - WEEK_MS);
@@ -152,7 +153,7 @@ export function adviseAccounts(
 
   const minMeasured = Math.ceil(active.length * MIN_ADVISE_COVERAGE);
   const weeksNeeded = Math.min(3, weekCount);
-  const thresholds = { target, minCoverage: MIN_ADVISE_COVERAGE, minMeasured, weeksNeeded, limitPercent: 100 };
+  const thresholds = { target, minCoverage: MIN_ADVISE_COVERAGE, minMeasured, weeksNeeded, limitPercent: LIMIT_PERCENT };
   if (peakDemand === null || measured < minMeasured) {
     const unmeasured = active.filter((r) => !hasReading(r)).map((r) => r.name);
     const reason = peakDemand === null
