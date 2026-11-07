@@ -105,6 +105,21 @@ export function peaksFromWindows(
   return out;
 }
 
+export interface UsageCacheRowLike {
+  capturedAt: string | null;
+  windows: readonly UsageWindowSample[];
+}
+
+export function peaksFromCacheRows(rows: Readonly<Record<string, UsageCacheRowLike>>): UsagePeak[] {
+  const out: UsagePeak[] = [];
+  for (const [usageKey, row] of Object.entries(rows)) {
+    const seenAt = row.capturedAt ? new Date(row.capturedAt) : null;
+    if (!seenAt || !Number.isFinite(seenAt.getTime())) continue;
+    out.push(...peaksFromWindows(usageKey, row.windows, seenAt));
+  }
+  return out;
+}
+
 export function recordUsagePeaks(
   usageKey: string,
   windows: readonly UsageWindowSample[],

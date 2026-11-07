@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ingestPeerClaudeUsageRows, mergeClaudeUsageCacheWindows, writeClaudeUsageCache } from './usage.js';
 import {
   mergeUsagePeaks,
+  peaksFromCacheRows,
   readUsageHistory,
   recordUsagePeaks,
   usageHistoryPathFor,
@@ -48,6 +49,22 @@ describe('weekly peak ledger', () => {
     const b: UsagePeak[] = [{ key: 'k', resetsAt: '2026-11-10T00:00:00.000Z', peak: 55, firstSeen: '2026-11-05T00:00:00.000Z', lastSeen: '2026-11-08T00:00:00.000Z' }];
     expect(mergeUsagePeaks(a, b)).toEqual(mergeUsagePeaks(b, a));
     expect(mergeUsagePeaks(a, b)[0]).toMatchObject({ peak: 55, firstSeen: '2026-11-04T00:00:00.000Z', lastSeen: '2026-11-08T00:00:00.000Z' });
+  });
+
+  it('reads weekly peaks out of usage cache rows captured before the ledger existed', () => {
+    const rows = {
+      'claude:org=a': {
+        capturedAt: '2026-11-07T11:00:00.000Z',
+        windows: [
+          { key: 'session' as const, usedPercent: 80, resetsAt: '2026-11-07T15:00:00.000Z' },
+          { key: 'week' as const, usedPercent: 32, resetsAt: '2026-11-13T16:00:00.000Z' },
+        ],
+      },
+      'claude:org=b': { capturedAt: null, windows: [{ key: 'week' as const, usedPercent: 50, resetsAt: '2026-11-13T16:00:00.000Z' }] },
+    };
+    expect(peaksFromCacheRows(rows)).toEqual([
+      { key: 'claude:org=a', resetsAt: '2026-11-13T16:00:00.000Z', peak: 32, firstSeen: '2026-11-07T11:00:00.000Z', lastSeen: '2026-11-07T11:00:00.000Z' },
+    ]);
   });
 
   it('prunes old windows locally and publishes only the recent ones', () => {

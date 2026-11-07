@@ -3,7 +3,15 @@ import { usageKeyForNativeIdentity } from '../agents.js';
 import { readFleetSharedDeviceStates } from '../fleet-shared-state.js';
 import { readMeta } from '../state.js';
 import type { AgentId } from '../types.js';
-import { getUsageHistoryPath, mergeUsagePeaks, parseUsagePeaks, readUsageHistory, type UsagePeak } from './usage-history.js';
+import { exportClaudeUsageCacheRows } from './usage.js';
+import {
+  getUsageHistoryPath,
+  mergeUsagePeaks,
+  parseUsagePeaks,
+  peaksFromCacheRows,
+  readUsageHistory,
+  type UsagePeak,
+} from './usage-history.js';
 
 export interface AdviseAccountInput {
   name: string;
@@ -52,6 +60,7 @@ export interface AdviseOptions {
 
 export const DEFAULT_ADVISE_WEEKS = 4;
 export const DEFAULT_ADVISE_TARGET = 0.8;
+export const MIN_ADVISE_COVERAGE = 0.75;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 
@@ -140,13 +149,16 @@ export function adviseAccounts(
   const coverage = { measured, total: active.length };
   const weeksLabel = weekStarts.map((w) => new Date(w).toISOString().slice(0, 10));
 
-  if (peakDemand === null) {
+  const minMeasured = Math.ceil(active.length * MIN_ADVISE_COVERAGE);
+  if (peakDemand === null || measured < minMeasured) {
+    const unmeasured = active.filter((r) => !hasReading(r)).map((r) => r.name);
+    const reason = peakDemand === null
+      ? `No weekly usage recorded in the last ${weekCount} weeks yet; readings arrive as accounts run.`
+      : `Only ${measured} of ${active.length} active accounts have a weekly reading; a seat count needs ${minMeasured}. `
+        + `No reading for ${unmeasured.join(', ')}.`;
     return {
       weeks: weeksLabel, rows, demand, currentDemand, peakDemand, target, coverage,
-      advice: {
-        keep: active.length, pause: [], resume: [], add: 0, confidence: 'none',
-        reason: `No weekly usage recorded in the last ${weekCount} weeks yet; readings arrive as accounts run.`,
-      },
+      advice: { keep: active.length, pause: [], resume: [], add: 0, confidence: 'none', reason },
     };
   }
 
@@ -173,7 +185,9 @@ export function adviseAccounts(
     add = short - resume.length;
   }
 
-  const confidence: AdviceConfidence = measured === active.length && weeksWithData >= Math.min(3, weekCount) ? 'high' : 'low';
+  const weeksNeeded = Math.min(3, weekCount);
+  const thinHistory = active.filter((r) => r.peaks.filter((v) => v !== null).length < weeksNeeded).map((r) => r.name);
+  const confidence: AdviceConfidence = thinHistory.length === 0 ? 'high' : 'low';
   if (confidence === 'low') {
     pause = [];
     resume = [];
@@ -186,7 +200,7 @@ export function adviseAccounts(
   if (weeksWithData < weekCount) parts.push(`Only ${weeksWithData} of ${weekCount} weeks have readings.`);
   if (unmeasured.length > 0) parts.push(`No reading for ${unmeasured.join(', ')} (idle, or used only headless).`);
   if (confidence === 'low' && need !== active.length) {
-    parts.push(`Accounts to ${need < active.length ? 'pause' : 'resume'} are named once every active account has readings in ${Math.min(3, weekCount)} of the last ${weekCount} weeks.`);
+    parts.push(`Accounts to ${need < active.length ? 'pause' : 'resume'} are named once every active account has readings in ${weeksNeeded} of the last ${weekCount} weeks.`);
   }
 
   return {
@@ -198,6 +212,7 @@ export function adviseAccounts(
 export interface CollectAdviceOptions extends AdviseOptions {
   userAgentsDir?: string;
   historyPath?: string;
+  cachePath?: string;
 }
 
 export function collectAccountsAdvice(
@@ -217,9 +232,12 @@ export function collectAccountsAdvice(
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
   const local = readUsageHistory(options.historyPath ?? getUsageHistoryPath());
-  const peers = readFleetSharedDeviceStates(options.userAgentsDir).states
-    .map((s) => parseUsagePeaks(s.usageHistory?.peaks));
-  return { harness: agent, ...adviseAccounts(accounts, mergeUsagePeaks(local, ...peers), options) };
+  const cached = peaksFromCacheRows(exportClaudeUsageCacheRows(options.cachePath));
+  const peers = readFleetSharedDeviceStates(options.userAgentsDir).states.flatMap((s) => [
+    parseUsagePeaks(s.usageHistory?.peaks),
+    peaksFromCacheRows(s.usage?.rows ?? {}),
+  ]);
+  return { harness: agent, ...adviseAccounts(accounts, mergeUsagePeaks(local, cached, ...peers), options) };
 }
 
 function pct(v: number | null): string {
