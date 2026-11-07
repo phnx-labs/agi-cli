@@ -1,8 +1,13 @@
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { accountsAdviceNotification, adviseAccounts, renderAccountsAdvice, weekStartUtc, type AdviseAccountInput } from './advise.js';
+import { usageKeyForNativeIdentity } from '../agents.js';
+import { updateFleetSharedDeviceStateAsync } from '../fleet-shared-state.js';
+import { updateMeta } from '../state.js';
+
+import { accountsAdviceNotification, adviseAccounts, collectAccountsAdvice, renderAccountsAdvice, weekStartUtc, type AdviseAccountInput } from './advise.js';
 import { parseUsagePeaks, type UsagePeak } from './usage-history.js';
 
 const FIXTURE = path.join(__dirname, 'testdata', 'advise-peaks.json');
@@ -150,6 +155,40 @@ describe('adviseAccounts', () => {
     const lines = renderAccountsAdvice({ harness: 'claude', ...adviseAccounts(accounts(), fixturePeaks(), { now: NOW }) });
     expect(lines.join('\n')).toContain('Keep 3, pause 5: hotel, golf, foxtrot, echo, delta');
     expect(lines).toContain('  agents accounts pause claude#hotel claude#golf claude#foxtrot claude#echo claude#delta');
+  });
+});
+
+describe('collectAccountsAdvice', () => {
+  afterEach(() => updateMeta((meta) => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+
+  it('counts readings from this box\'s usage cache and a peer\'s synced usage rows', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'advise-collect-'));
+    const names = ['alpha', 'bravo', 'charlie', 'delta'];
+    updateMeta((meta) => ({
+      ...meta,
+      accounts: {
+        ...meta.accounts,
+        native: Object.fromEntries(names.map((name) => [`id-${name}`, {
+          id: `id-${name}`, name, agent: 'claude' as const, identityKey: `claude:user=${name}`, scope: 'version' as const,
+        }])),
+      },
+    }));
+    const key = (name: string) => usageKeyForNativeIdentity('claude', `claude:user=${name}`);
+    const weekRow = (usedPercent: number) => ({
+      capturedAt: '2026-11-07T12:00:00.000Z',
+      windows: [{ key: 'week' as const, label: 'Week', shortLabel: 'W', usedPercent, resetsAt: '2026-11-12T00:00:00.000Z', windowMinutes: 10080 }],
+    });
+    const cachePath = path.join(dir, 'claude-usage.json');
+    fs.writeFileSync(cachePath, JSON.stringify({ [key('alpha')]: weekRow(40), [key('bravo')]: weekRow(20), [key('charlie')]: weekRow(10) }));
+    await updateFleetSharedDeviceStateAsync('worker-a', { usage: { rows: { [key('delta')]: weekRow(30) } } }, dir);
+
+    const result = collectAccountsAdvice('claude', {
+      now: NOW, cachePath, historyPath: path.join(dir, 'usage-history.json'), userAgentsDir: dir,
+    });
+    fs.rmSync(dir, { recursive: true, force: true });
+    expect(result.coverage).toEqual({ measured: 4, total: 4 });
+    expect(result.rows.find((r) => r.name === 'delta')).toMatchObject({ thisWeek: 30 });
+    expect(result.advice.confidence).toBe('low');
   });
 });
 
