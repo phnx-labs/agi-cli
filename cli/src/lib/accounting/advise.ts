@@ -110,16 +110,16 @@ export function adviseAccounts(
     let pace: number | null = null;
     let limitedWeeks = 0;
     for (const p of byKey.get(account.usageKey) ?? []) {
-      const week = windowWeek(p);
-      const idx = weekIndex.get(week);
-      if (idx !== undefined) {
-        weekly[idx] = Math.max(weekly[idx] ?? 0, p.peak);
-        if (p.peak >= 100) limitedWeeks += 1;
-      } else if (week === currentWeek) {
+      if (p.peak >= 100) limitedWeeks += 1;
+      // A window that has not reset is in progress whichever week it started in.
+      if (Date.parse(p.resetsAt) > now.getTime()) {
         thisWeek = Math.max(thisWeek ?? 0, p.peak);
         const elapsed = Date.parse(p.lastSeen) - (Date.parse(p.resetsAt) - WEEK_MS);
         if (elapsed >= DAY_MS) pace = Math.max(pace ?? 0, Math.min(100, (p.peak * WEEK_MS) / elapsed));
+        continue;
       }
+      const idx = weekIndex.get(windowWeek(p));
+      if (idx !== undefined) weekly[idx] = Math.max(weekly[idx] ?? 0, p.peak);
     }
     return {
       name: account.name,
@@ -133,11 +133,18 @@ export function adviseAccounts(
     };
   });
 
-  const demand = weekStarts.map((_, i) => round2(rows.reduce((sum, r) => sum + (r.peaks[i] ?? 0), 0) / 100));
+  // Accounts that share a usage key (two seats in one Claude org) share one limit: count it once.
+  const firstOfKey = new Set<number>();
+  const seenKeys = new Set<string>();
+  accounts.forEach((a, i) => {
+    if (!seenKeys.has(a.usageKey)) { seenKeys.add(a.usageKey); firstOfKey.add(i); }
+  });
+  const counted = rows.filter((_, i) => firstOfKey.has(i));
+  const demand = weekStarts.map((_, i) => round2(counted.reduce((sum, r) => sum + (r.peaks[i] ?? 0), 0) / 100));
   const weeksWithData = weekStarts.filter((_, i) => rows.some((r) => r.peaks[i] !== null)).length;
   const current = (r: AccountUsageRow) => r.pace ?? r.thisWeek;
-  const currentDemand = rows.some((r) => current(r) !== null)
-    ? round2(rows.reduce((sum, r) => sum + (current(r) ?? 0), 0) / 100)
+  const currentDemand = counted.some((r) => current(r) !== null)
+    ? round2(counted.reduce((sum, r) => sum + (current(r) ?? 0), 0) / 100)
     : null;
   const candidates = [...(weeksWithData > 0 ? demand : []), ...(currentDemand === null ? [] : [currentDemand])];
   const peakDemand = candidates.length > 0 ? Math.max(...candidates) : null;

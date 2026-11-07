@@ -131,13 +131,8 @@ export function recordUsagePeaks(
   if (incoming.length === 0) return 0;
   ensureLockTarget(historyPath, '');
   return withFileLock(historyPath, () => {
-    let current: UsagePeak[] = [];
-    try {
-      current = readUsageHistory(historyPath);
-    } catch {
-      current = [];
-    }
-    const merged = pruneUsagePeaks(mergeUsagePeaks(current, incoming), seenAt);
+    // An unreadable ledger throws rather than being overwritten with one reading.
+    const merged = pruneUsagePeaks(mergeUsagePeaks(readUsageHistory(historyPath), incoming), seenAt);
     fs.mkdirSync(path.dirname(historyPath), { recursive: true });
     atomicWriteFileSync(historyPath, `${JSON.stringify({ v: 1, peaks: merged })}\n`, 'utf-8');
     return incoming.length;
@@ -146,11 +141,5 @@ export function recordUsagePeaks(
 
 /** The slice of the local ledger a box publishes in its daemon-state envelope. */
 export function usagePeaksForPublish(now: Date = new Date(), historyPath = getUsageHistoryPath()): UsagePeak[] {
-  let peaks: UsagePeak[];
-  try {
-    peaks = readUsageHistory(historyPath);
-  } catch {
-    return [];
-  }
-  return pruneUsagePeaks(peaks, now, USAGE_HISTORY_PUBLISH_DAYS);
+  return pruneUsagePeaks(readUsageHistory(historyPath), now, USAGE_HISTORY_PUBLISH_DAYS);
 }

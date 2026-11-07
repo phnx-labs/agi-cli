@@ -43,10 +43,12 @@ export async function notifyChangedAccountsAdvice(
     if (!note) continue;
     const { postOwnerNotification, describeOwnerResult } = await import('../owner-notify.js');
     const sent = await postOwnerNotification({ event: 'message', title: note.title, body: note.body, dedupKey: note.dedupKey });
+    outcomes.push({ harness, title: note.title, result: describeOwnerResult(sent) });
+    // Mark it sent only when a channel took it (or rush/api already had it); otherwise retry next tick.
+    if (sent.delivered.length === 0 && sent.queued.length === 0 && sent.suppressed !== 'duplicate') continue;
     notified[harness] = note.fingerprint;
     fs.mkdirSync(path.dirname(statePath), { recursive: true });
     atomicWriteFileSync(statePath, `${JSON.stringify(notified, null, 2)}\n`, 'utf-8');
-    outcomes.push({ harness, title: note.title, result: describeOwnerResult(sent) });
   }
   return outcomes;
 }

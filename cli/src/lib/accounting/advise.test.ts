@@ -91,6 +91,34 @@ describe('adviseAccounts', () => {
     expect(result.advice.reason).toContain('named once every active account has readings');
   });
 
+  it('treats a window that has not reset as this week, not a finished one', () => {
+    const wednesday = new Date('2026-11-04T12:00:00.000Z');
+    const peaks: UsagePeak[] = [
+      { key: 'claude:org=alpha', resetsAt: '2026-11-06T09:00:00.000Z', peak: 40, firstSeen: '2026-10-30T10:00:00.000Z', lastSeen: '2026-11-04T09:00:00.000Z' },
+    ];
+    const row = adviseAccounts(accounts().slice(0, 1), peaks, { now: wednesday }).rows[0]!;
+    expect(row.peaks).toEqual([null, null, null, null]);
+    expect(row.thisWeek).toBe(40);
+    expect(row.pace).toBe(56);
+  });
+
+  it('adds a seat when an account is at its limit this week', () => {
+    const peaks: UsagePeak[] = [
+      { key: 'claude:org=alpha', resetsAt: '2026-11-10T14:00:00.000Z', peak: 100, firstSeen: '2026-11-04T00:00:00.000Z', lastSeen: '2026-11-07T11:00:00.000Z' },
+      { key: 'claude:org=bravo', resetsAt: '2026-11-10T14:00:00.000Z', peak: 30, firstSeen: '2026-11-04T00:00:00.000Z', lastSeen: '2026-11-07T11:00:00.000Z' },
+    ];
+    const result = adviseAccounts(accounts().slice(0, 2), peaks, { now: NOW });
+    expect(result.rows[0]!.limitedWeeks).toBe(1);
+    expect(result.advice).toMatchObject({ keep: 3, add: 1 });
+  });
+
+  it('counts two seats in one org once, since they share one limit', () => {
+    const shared = accounts({ bravo: { usageKey: 'claude:org=alpha' } });
+    const result = adviseAccounts(shared, fixturePeaks().filter((p) => p.key !== 'claude:org=bravo'), { now: NOW });
+    expect(result.rows.find((r) => r.name === 'bravo')!.peaks).toEqual([71, 55, 62, 78]);
+    expect(result.demand[3]).toBe(1.43);
+  });
+
   it('files a window under the calendar week it started in', () => {
     expect(new Date(weekStartUtc(Date.parse('2026-11-08T23:59:00Z'))).toISOString()).toBe('2026-11-02T00:00:00.000Z');
     expect(new Date(weekStartUtc(Date.parse('2026-11-09T00:00:00Z'))).toISOString()).toBe('2026-11-09T00:00:00.000Z');

@@ -171,31 +171,31 @@
   },
   {
    "key": "claude:org=golf",
-   "resetsAt": "2026-10-18T07:00:00.000Z",
+   "resetsAt": "2026-10-12T07:00:00.000Z",
    "peak": 0,
-   "firstSeen": "2026-10-11T07:00:00.000Z",
-   "lastSeen": "2026-10-17T07:00:00.000Z"
+   "firstSeen": "2026-10-05T07:00:00.000Z",
+   "lastSeen": "2026-10-11T07:00:00.000Z"
   },
   {
    "key": "claude:org=golf",
-   "resetsAt": "2026-10-25T07:00:00.000Z",
+   "resetsAt": "2026-10-19T07:00:00.000Z",
    "peak": 4,
-   "firstSeen": "2026-10-18T07:00:00.000Z",
-   "lastSeen": "2026-10-24T07:00:00.000Z"
+   "firstSeen": "2026-10-12T07:00:00.000Z",
+   "lastSeen": "2026-10-18T07:00:00.000Z"
   },
   {
    "key": "claude:org=golf",
-   "resetsAt": "2026-11-01T07:00:00.000Z",
+   "resetsAt": "2026-10-26T07:00:00.000Z",
    "peak": 0,
-   "firstSeen": "2026-10-25T07:00:00.000Z",
-   "lastSeen": "2026-10-31T07:00:00.000Z"
+   "firstSeen": "2026-10-19T07:00:00.000Z",
+   "lastSeen": "2026-10-25T07:00:00.000Z"
   },
   {
    "key": "claude:org=golf",
-   "resetsAt": "2026-11-08T07:00:00.000Z",
+   "resetsAt": "2026-11-02T07:00:00.000Z",
    "peak": 0,
-   "firstSeen": "2026-11-01T07:00:00.000Z",
-   "lastSeen": "2026-11-07T07:00:00.000Z"
+   "firstSeen": "2026-10-26T07:00:00.000Z",
+   "lastSeen": "2026-11-01T07:00:00.000Z"
   },
   {
    "key": "claude:org=hotel",
