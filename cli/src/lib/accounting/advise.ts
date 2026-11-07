@@ -5,14 +5,6 @@ import { readMeta } from '../state.js';
 import type { AgentId } from '../types.js';
 import { getUsageHistoryPath, mergeUsagePeaks, parseUsagePeaks, readUsageHistory, type UsagePeak } from './usage-history.js';
 
-/**
- * Account right-sizing: how many subscription seats a harness actually needs.
- *
- * Balanced rotation spreads work over every healthy account, so how often an
- * account is used says nothing about how many accounts are needed. The signal
- * is total demand: the sum of every account's weekly peak, in account-weeks.
- * The advice is a count (`keep`), and which accounts to pause is secondary.
- */
 export interface AdviseAccountInput {
   name: string;
   id: string;
@@ -26,11 +18,8 @@ export interface AccountUsageRow {
   id: string;
   paused: boolean;
   isDefault: boolean;
-  /** Weekly peak percent per complete week, oldest first; null = no reading that week. */
   peaks: Array<number | null>;
-  /** The current, unfinished week so far. */
   thisWeek: number | null;
-  /** `thisWeek` projected to the full window, once a day of it has passed; capped at 100. */
   pace: number | null;
   limitedWeeks: number;
 }
@@ -41,7 +30,6 @@ export interface AccountsAdvice {
   weeks: string[];
   rows: AccountUsageRow[];
   demand: number[];
-  /** This week's demand from each account's pace (or its reading so far). */
   currentDemand: number | null;
   peakDemand: number | null;
   target: number;
@@ -67,14 +55,12 @@ export const DEFAULT_ADVISE_TARGET = 0.8;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 
-/** Monday 00:00 UTC of the week containing `ms`. */
 export function weekStartUtc(ms: number): number {
   const d = new Date(ms);
   const day = (d.getUTCDay() + 6) % 7;
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - day * DAY_MS;
 }
 
-/** A weekly window is filed under the calendar week it started in. */
 function windowWeek(p: UsagePeak): number {
   return weekStartUtc(Date.parse(p.resetsAt) - WEEK_MS);
 }
@@ -111,7 +97,6 @@ export function adviseAccounts(
     let limitedWeeks = 0;
     for (const p of byKey.get(account.usageKey) ?? []) {
       if (p.peak >= 100) limitedWeeks += 1;
-      // A window that has not reset is in progress whichever week it started in.
       if (Date.parse(p.resetsAt) > now.getTime()) {
         thisWeek = Math.max(thisWeek ?? 0, p.peak);
         const elapsed = Date.parse(p.lastSeen) - (Date.parse(p.resetsAt) - WEEK_MS);
@@ -133,7 +118,6 @@ export function adviseAccounts(
     };
   });
 
-  // Accounts that share a usage key (two seats in one Claude org) share one limit: count it once.
   const firstOfKey = new Set<number>();
   const seenKeys = new Set<string>();
   accounts.forEach((a, i) => {
@@ -216,11 +200,6 @@ export interface CollectAdviceOptions extends AdviseOptions {
   historyPath?: string;
 }
 
-/**
- * Gather the inputs for one harness on this box: its registered native
- * accounts, and the union of this box's weekly-peak ledger with every peer
- * ledger the usage-sync exchange stored under `devices/<peer>/`.
- */
 export function collectAccountsAdvice(
   agent: AgentId,
   options: CollectAdviceOptions = {},
@@ -247,7 +226,6 @@ function pct(v: number | null): string {
   return v === null ? '—' : `${v}%`;
 }
 
-/** Plain-text table plus the recommendation, as `agents accounts usage` prints it. */
 export function renderAccountsAdvice(result: AccountsAdvice & { harness: string }): string[] {
   const { harness, weeks, rows, demand, coverage, advice } = result;
   const lines: string[] = [];
@@ -289,7 +267,6 @@ export function renderAccountsAdvice(result: AccountsAdvice & { harness: string 
   return lines;
 }
 
-/** What changed advice looks like to the owner; null when there is nothing to say. */
 export function accountsAdviceNotification(
   result: AccountsAdvice & { harness: string },
   lastNotified: string | null,

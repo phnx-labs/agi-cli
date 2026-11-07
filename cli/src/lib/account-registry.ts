@@ -528,11 +528,6 @@ export function renameAccount(oldSelector: string, newName: string, base = getUs
   renameProfileConsumers(account.name, newName, base);
 }
 
-/**
- * Pause or resume a native account. A paused account stays registered and keeps
- * its credentials; balanced/available rotation skips it and an explicit
- * `<harness>#<name>` selection still runs it.
- */
 export function setNativeAccountPaused(selector: string, paused: boolean, now: Date = new Date()): NativeAccount {
   const meta = readMeta();
   const parsed = parseAccountSelector(selector);
@@ -561,7 +556,6 @@ export function setNativeAccountPaused(selector: string, paused: boolean, now: D
   return { ...apply(first), kind: 'native' };
 }
 
-/** Identity keys of paused native accounts for one harness. */
 export function pausedNativeIdentityKeys(
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   agent: AgentId,

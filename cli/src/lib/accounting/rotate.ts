@@ -61,7 +61,6 @@ export interface RotateCandidate {
   providerAccountId?: string;
   slotDir?: string;
   fromSlot?: boolean;
-  /** `agents accounts pause`: never picked by a strategy, still runnable by name. */
   paused?: boolean;
 }
 

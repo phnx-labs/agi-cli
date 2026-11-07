@@ -126,7 +126,6 @@ export interface NativeAccountCatalogRow {
   token: string;
   lastAuth: string;
   fix: string | null;
-  /** `agents accounts pause`: out of rotation on purpose, so no repair is suggested. */
   paused?: boolean;
 }
 

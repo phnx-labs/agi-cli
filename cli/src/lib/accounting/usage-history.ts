@@ -4,14 +4,6 @@ import * as path from 'path';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from '../fs-atomic.js';
 import { getCacheDir } from '../state.js';
 
-/**
- * Weekly usage peaks per account, the history behind `agents accounts usage`.
- *
- * The usage cache keeps only the latest snapshot per account, so a window's
- * value is gone once it resets. This ledger keeps the highest `usedPercent`
- * seen for each `(usageKey, resetsAt)` weekly window. A peak is a max, so
- * merging ledgers from several boxes is order-free and idempotent.
- */
 export interface UsagePeak {
   key: string;
   resetsAt: string;
@@ -36,7 +28,6 @@ export function getUsageHistoryPath(): string {
   return path.join(getCacheDir(), USAGE_HISTORY_FILE);
 }
 
-/** The ledger lives beside the usage cache it is fed from. */
 export function usageHistoryPathFor(cachePath: string): string {
   return path.join(path.dirname(cachePath), USAGE_HISTORY_FILE);
 }
@@ -71,7 +62,6 @@ export function readUsageHistory(historyPath = getUsageHistoryPath()): UsagePeak
   return parseUsagePeaks(parsed?.peaks);
 }
 
-/** Max-merge: per window keep the highest peak, the earliest firstSeen and the latest lastSeen. */
 export function mergeUsagePeaks(...sets: ReadonlyArray<readonly UsagePeak[]>): UsagePeak[] {
   const byId = new Map<string, UsagePeak>();
   for (const set of sets) {
@@ -99,7 +89,6 @@ export function pruneUsagePeaks(peaks: readonly UsagePeak[], now: Date, days = U
   return peaks.filter((p) => Date.parse(p.resetsAt) >= floor);
 }
 
-/** Peaks from samples: only weekly windows with a known reset form a history row. */
 export function peaksFromWindows(
   usageKey: string,
   windows: readonly UsageWindowSample[],
@@ -116,11 +105,6 @@ export function peaksFromWindows(
   return out;
 }
 
-/**
- * Fold one snapshot's weekly window into the ledger. Called by every usage
- * cache writer, so a reading recorded anywhere (poll, status line, peer sync)
- * lands in the history too.
- */
 export function recordUsagePeaks(
   usageKey: string,
   windows: readonly UsageWindowSample[],
@@ -131,7 +115,6 @@ export function recordUsagePeaks(
   if (incoming.length === 0) return 0;
   ensureLockTarget(historyPath, '');
   return withFileLock(historyPath, () => {
-    // An unreadable ledger throws rather than being overwritten with one reading.
     const merged = pruneUsagePeaks(mergeUsagePeaks(readUsageHistory(historyPath), incoming), seenAt);
     fs.mkdirSync(path.dirname(historyPath), { recursive: true });
     atomicWriteFileSync(historyPath, `${JSON.stringify({ v: 1, peaks: merged })}\n`, 'utf-8');
@@ -139,7 +122,6 @@ export function recordUsagePeaks(
   });
 }
 
-/** The slice of the local ledger a box publishes in its daemon-state envelope. */
 export function usagePeaksForPublish(now: Date = new Date(), historyPath = getUsageHistoryPath()): UsagePeak[] {
   return pruneUsagePeaks(readUsageHistory(historyPath), now, USAGE_HISTORY_PUBLISH_DAYS);
 }
