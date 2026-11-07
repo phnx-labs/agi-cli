@@ -424,6 +424,20 @@ describeUnix('release-attestation.sh', () => {
       expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
     });
 
+    it('accepts a repo-root README.md edit: prepack ships it as the package README', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-root-readme-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'README.md'), '# agents\n\n- a documented command\n');
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
+    });
+
     it('a derived record satisfies require() for the release tree (round-trip)', () => {
       const { root, tree: baseTree } = initRepo();
       const store = tmp('rel-attest-derive-rt-');
@@ -455,6 +469,22 @@ describeUnix('release-attestation.sh', () => {
       const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
       expect(d.status).not.toBe(0);
       expect(d.out).toContain("'.github/workflows/release.yml' is outside the CLI release-input allowlist");
+    });
+
+    it('validate-release-inputs accepts a repo-root README.md; a nested README still fails the metadata-only gate', () => {
+      const { root, commit: baseCommit } = initRepo();
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'README.md'), '# agents\n\n- a documented command\n');
+      });
+      const inputs = sh(['validate-release-inputs', '--base', baseCommit, '--commit', rel.commit, '--repo-root', root], root);
+      expect(inputs.status, inputs.out).toBe(0);
+      const nested = releaseCommit(root, () => {
+        fs.mkdirSync(path.join(root, 'cli/docs'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'cli/docs/README.md'), '# not the package README\n');
+      });
+      const tree = sh(['validate-release-tree', '--base', rel.commit, '--commit', nested.commit, '--repo-root', root], root);
+      expect(tree.status).not.toBe(0);
+      expect(tree.out).toContain("release tree changes 'cli/docs/README.md'");
     });
 
     it('executes the release-tree validator and rejects every non-metadata path', () => {

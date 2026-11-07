@@ -2218,10 +2218,14 @@ expensive suite run is inherited. The soundness gate is
 `release-attestation.sh derive` — it fails **closed** unless the tree diff between
 base and release touches only `package.json`, `.changelog/**`, `CHANGELOG.md`,
 `docs/command-index.{md,json}`, and `docs/command-reference.html` within `cli/**`
-(the exact set `release.sh` stages). `release-ci.sh` separately rejects every path
-outside the CLI release-input allowlist between the selected attested commit and
-the release head, so an untested workflow or unrelated repository change cannot
-ride a stale pass. The selector also requires the impact policy to remain
+(the set `release.sh` stages), and tolerates the repo-root `CHANGELOG.md` and
+`README.md`, which carry no executable code (`prepack` ships the README as the package
+README); the same rule applies to the release commit itself.
+`release-ci.sh` separately rejects every path
+outside the CLI release-input allowlist (`cli/**`, the packaged session-tracker,
+`scripts/ci-scope.ts`, and those two root documents) between the selected attested
+commit and the release head, so an untested workflow or unrelated repository change
+cannot ride a stale pass. The selector also requires the impact policy to remain
 byte-identical before suite inheritance, so a CLI code change cannot ride one either.
 The derived record inherits the base's
 lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
