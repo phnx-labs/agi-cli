@@ -1239,11 +1239,14 @@ dialer puts on a peer's reply — so an oversized push exits 2 with one
 latest snapshot per account; [`usage-history.ts`](src/lib/accounting/usage-history.ts)
 keeps the highest weekly percent per `(usageKey, resetsAt)` window for 180 days, fed by
 every cache writer. Every box, worker included, publishes the last 90 days as
-`usageHistory` in its daemon-state envelope (a worker's status line is first-hand), and
-the reader max-merges its own ledger with every stored peer ledger. The engine
+`usageHistory` in its daemon-state envelope (a worker's status line is first-hand), plus
+the weekly windows in its current usage cache, so readings taken before the ledger
+existed count too. The reader max-merges its own ledger and cache with every stored
+peer ledger and peer usage row. The engine
 ([`advise.ts`](src/lib/accounting/advise.ts), pure) sums weekly peaks into account-weeks
-of demand and recommends `ceil(peak ÷ 0.8)` seats; it names accounts to pause only at
-high confidence. `agents accounts pause` sets `pausedAt` on the account row, which
+of demand and recommends `ceil(peak ÷ 0.8)` seats. It gives no count (`confidence:
+none`) until 75% of active accounts have a reading, since summing a few would undercount
+demand, and names accounts to pause only at high confidence. `agents accounts pause` sets `pausedAt` on the account row, which
 `isRotationEligible` honors, and the headed usage-sync tick sends one owner notification
 when the advice changes (`advise-notify.ts`).
 

@@ -40,7 +40,15 @@ import {
   ingestPeerClaudeUsageRows,
   type CachedUsageSnapshot,
 } from './usage.js';
-import { getUsageHistoryPath, usageHistoryPathFor, usagePeaksForPublish } from './usage-history.js';
+import {
+  getUsageHistoryPath,
+  mergeUsagePeaks,
+  peaksFromCacheRows,
+  pruneUsagePeaks,
+  USAGE_HISTORY_PUBLISH_DAYS,
+  usageHistoryPathFor,
+  usagePeaksForPublish,
+} from './usage-history.js';
 
 export const USAGE_SYNC_INTERVAL_MS = 15 * 60_000;
 export const USAGE_PUBLISH_HEARTBEAT_MS = 10 * 60_000;
@@ -158,7 +166,11 @@ async function publishOwnUsageHistory(
 ): Promise<PublishOwnFleetStateResult['history']> {
   try {
     const historyPath = options.cachePath ? usageHistoryPathFor(options.cachePath) : getUsageHistoryPath();
-    const peaks = usagePeaksForPublish(new Date(), historyPath);
+    const now = new Date();
+    const peaks = mergeUsagePeaks(
+      usagePeaksForPublish(now, historyPath),
+      pruneUsagePeaks(peaksFromCacheRows(exportClaudeUsageCacheRows(options.cachePath)), now, USAGE_HISTORY_PUBLISH_DAYS),
+    );
     await updateFleetSharedDeviceStateAsync(
       options.device ?? machineId(),
       { usageHistory: { peaks } },

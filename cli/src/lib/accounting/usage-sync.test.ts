@@ -13,6 +13,7 @@ import {
   parseFleetStateExchangeInput,
   parseFleetStateReply,
   formatFleetStateReply,
+  publishOwnFleetState,
   publishUsageSnapshotToSharedStore,
 } from './usage-sync.js';
 
@@ -68,6 +69,25 @@ describe('usage sync envelope: headed box publishes, peer applies (real files, n
     expect(peer.device).toBe('zion');
     expect(peer.receivedAt).toBe(1_700_000_000_000);
     expect(peer.usage?.rows['claude:org=alpha'].windows[0].usedPercent).toBe(64);
+  });
+
+  it('a worker publishes the weekly readings already in its cache as usage history', async () => {
+    const worker = tempDir();
+    const cache = path.join(worker, 'claude-usage.json');
+    const resetsAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+    const capturedAt = new Date().toISOString();
+    seed(cache, {
+      'claude:org=alpha': {
+        capturedAt,
+        windows: [{ key: 'week', label: 'Week', shortLabel: 'W', usedPercent: 41, resetsAt, windowMinutes: 10080 }],
+      },
+    });
+    await publishOwnFleetState({ userAgentsDir: worker, cachePath: cache, role: 'worker', device: 'worker-a' });
+    const own = readOwnFleetSharedDeviceState('worker-a', worker);
+    expect(own.usage).toBeUndefined();
+    expect(own.usageHistory?.peaks).toEqual([
+      { key: 'claude:org=alpha', resetsAt, peak: 41, firstSeen: capturedAt, lastSeen: capturedAt },
+    ]);
   });
 
   it('newest-wins per identity across two headed envelopes, whatever the arrival order', async () => {

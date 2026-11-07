@@ -74,6 +74,27 @@ describe('adviseAccounts', () => {
     expect(result.advice.reason).toContain('No reading for charlie');
   });
 
+  it('gives no seat count while most accounts have no reading', () => {
+    const peaks: UsagePeak[] = [
+      { key: 'claude:org=alpha', resetsAt: '2026-11-10T14:00:00.000Z', peak: 9, firstSeen: '2026-11-07T10:00:00.000Z', lastSeen: '2026-11-07T12:00:00.000Z' },
+    ];
+    const result = adviseAccounts(accounts({ alpha: { isDefault: true } }), peaks, { now: NOW });
+    expect(result.coverage).toEqual({ measured: 1, total: 8 });
+    expect(result.advice).toMatchObject({ keep: 8, pause: [], resume: [], add: 0, confidence: 'none' });
+    expect(result.advice.reason).toContain('Only 1 of 8 active accounts have a weekly reading; a seat count needs 6.');
+  });
+
+  it('names nobody to pause when each account has only one week, even if the fleet covers three', () => {
+    const resets = ['2026-10-14T00:00:00.000Z', '2026-10-21T00:00:00.000Z', '2026-10-28T00:00:00.000Z'];
+    const peaks: UsagePeak[] = NAMES.map((name, i) => ({
+      key: `claude:org=${name}`, resetsAt: resets[i % 3], peak: 10, firstSeen: '2026-10-07T00:00:00.000Z', lastSeen: '2026-10-27T00:00:00.000Z',
+    }));
+    const result = adviseAccounts(accounts(), peaks, { now: NOW });
+    expect(result.coverage).toEqual({ measured: 8, total: 8 });
+    expect(result.advice).toMatchObject({ confidence: 'low', pause: [] });
+    expect(result.advice.keep).toBeLessThan(8);
+  });
+
   it('counts this week at its projected pace and names nobody to pause on thin history', () => {
     const peaks: UsagePeak[] = [
       { key: 'claude:org=echo', resetsAt: '2026-11-10T14:00:00.000Z', peak: 63, firstSeen: '2026-11-04T00:00:00.000Z', lastSeen: '2026-11-07T11:00:00.000Z' },
@@ -81,7 +102,8 @@ describe('adviseAccounts', () => {
       { key: 'claude:org=bravo', resetsAt: '2026-11-13T16:00:00.000Z', peak: 9, firstSeen: '2026-11-07T12:00:00.000Z', lastSeen: '2026-11-07T12:30:00.000Z' },
       { key: 'claude:org=golf', resetsAt: '2026-10-27T06:00:00.000Z', peak: 87, firstSeen: '2026-10-21T00:00:00.000Z', lastSeen: '2026-10-22T19:50:00.000Z' },
     ];
-    const result = adviseAccounts(accounts(), peaks, { now: NOW });
+    const four = accounts().filter((a) => ['bravo', 'delta', 'echo', 'golf'].includes(a.name));
+    const result = adviseAccounts(four, peaks, { now: NOW });
     const echo = result.rows.find((r) => r.name === 'echo')!;
     expect(echo).toMatchObject({ thisWeek: 63, pace: 100 });
     expect(result.rows.find((r) => r.name === 'bravo')).toMatchObject({ thisWeek: 9, pace: null });
