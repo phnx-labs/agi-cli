@@ -1241,6 +1241,28 @@ The `connect` / `name` / `label` / `mint` / `attach` / `detach` / `switch` /
 `set-default` verbs are deleted; use `add` / `login` / `default` /
 `run <harness>#<name>` instead.
 
+### How many accounts do you need?
+
+```bash
+agents accounts usage                    # claude: weekly peak per account, demand, keep/pause
+agents accounts usage codex --weeks 8 --json
+agents accounts pause claude#smores      # out of rotation, still registered
+agents accounts resume claude#smores
+```
+
+`accounts usage` lists each named account's highest weekly-limit percent per
+calendar week, this week's reading projected to the full week, and the summed
+`demand` in account-weeks. Rotation spreads work over every account, so the useful
+answer is a count: keep `ceil(peak demand ÷ 0.8)` accounts (`--target` changes
+the 0.8), plus one if any account hit its limit. Once every active account has
+readings in 3 of the last 4 weeks it names the least-used accounts to pause,
+never the default; before that it gives the count only. Readings come from every
+box: the headed poll and the status line of interactive sessions on workers,
+carried home on the 15-minute usage-sync exchange. Accounts used only headless
+show no reading. The headed daemon sends one owner notification when that
+recommendation changes. `pause` keeps the credentials, so `resume` is instant if
+you re-subscribe; cancelling the subscription itself is done with the provider.
+
 ---
 
 ## Secrets

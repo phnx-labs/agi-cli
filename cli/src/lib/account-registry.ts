@@ -528,6 +528,49 @@ export function renameAccount(oldSelector: string, newName: string, base = getUs
   renameProfileConsumers(account.name, newName, base);
 }
 
+/**
+ * Pause or resume a native account. A paused account stays registered and keeps
+ * its credentials; balanced/available rotation skips it and an explicit
+ * `<harness>#<name>` selection still runs it.
+ */
+export function setNativeAccountPaused(selector: string, paused: boolean, now: Date = new Date()): NativeAccount {
+  const meta = readMeta();
+  const parsed = parseAccountSelector(selector);
+  const rows = nativeRowsForNameOrId(meta, parsed.name, parsed.agent);
+  if (rows.length === 0) {
+    const where = parsed.agent ? `${parsed.agent} account` : 'account';
+    throw new Error(`Unknown ${where} '${parsed.name}'. Pause applies to named harness logins (agents accounts list).`);
+  }
+  const rowScope = rows[0]!.scope;
+  const pausedAt = paused ? now.toISOString() : undefined;
+  const apply = (row: NativeAccountRecord): NativeAccountRecord => {
+    const { pausedAt: _prior, ...rest } = row;
+    return pausedAt ? { ...rest, pausedAt } : rest;
+  };
+  updateMeta(current => {
+    if (rowScope === 'device') {
+      const native = { ...current.deviceAccounts?.native };
+      for (const row of rows) native[row.id] = apply(native[row.id]!);
+      return { ...current, deviceAccounts: { ...current.deviceAccounts, native } };
+    }
+    const native = { ...current.accounts?.native };
+    for (const row of rows) native[row.id] = apply(native[row.id]!);
+    return { ...current, accounts: { ...current.accounts, native } };
+  });
+  const { kind: _kind, ...first } = rows[0]!;
+  return { ...apply(first), kind: 'native' };
+}
+
+/** Identity keys of paused native accounts for one harness. */
+export function pausedNativeIdentityKeys(
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
+  agent: AgentId,
+): Set<string> {
+  return new Set(listNativeAccounts(meta)
+    .filter(account => account.agent === agent && account.pausedAt)
+    .map(account => account.identityKey));
+}
+
 export function removeAccount(selector: string, base = getUserAgentsDir()): void {
   const meta = readMeta();
   const parsed = parseAccountSelector(selector);

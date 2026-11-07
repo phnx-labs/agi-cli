@@ -33,6 +33,8 @@ import {
   resolveSpawnAccount,
   setAccountSecret,
   setDefaultAccountIfAbsent,
+  setNativeAccountPaused,
+  pausedNativeIdentityKeys,
   type AccountRegistryDocument,
 } from './account-registry.js';
 
@@ -51,6 +53,30 @@ describe('findUnifiedAccount does not touch the provider store for a native look
 
   it('reaches the provider registry only when the name is not a native account', () => {
     expect(() => findUnifiedAccount('not-native', meta, poisoned)).toThrow('provider registry accessed');
+  });
+});
+
+describe('pausing a native account', () => {
+  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+
+  it('marks the row paused fleet-wide and resume clears it', () => {
+    labelNativeAccount('claude', 'claude:account=1:org=a', 'a@example.com', 'smores', 'version');
+    labelNativeAccount('codex', 'codex:account=1', 'a@example.com', 'smores', 'version');
+    const paused = setNativeAccountPaused('claude#smores', true, new Date('2026-11-07T00:00:00Z'));
+    expect(paused).toMatchObject({ agent: 'claude', name: 'smores', pausedAt: '2026-11-07T00:00:00.000Z' });
+    expect([...pausedNativeIdentityKeys(readMeta(), 'claude')]).toEqual(['claude:account=1:org=a']);
+    expect(pausedNativeIdentityKeys(readMeta(), 'codex').size).toBe(0);
+    setNativeAccountPaused('claude#smores', false);
+    expect(pausedNativeIdentityKeys(readMeta(), 'claude').size).toBe(0);
+    expect(listNativeAccounts(readMeta()).every(a => !('pausedAt' in a))).toBe(true);
+  });
+
+  it('refuses an unknown or ambiguous name', () => {
+    labelNativeAccount('claude', 'claude:account=1:org=a', 'a@example.com', 'smores', 'version');
+    labelNativeAccount('codex', 'codex:account=1', 'a@example.com', 'smores', 'version');
+    expect(() => setNativeAccountPaused('claude#nope', true)).toThrow("Unknown claude account 'nope'");
+    expect(() => setNativeAccountPaused('smores', true)).toThrow();
   });
 });
 

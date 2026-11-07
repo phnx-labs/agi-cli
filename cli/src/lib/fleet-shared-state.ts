@@ -7,6 +7,7 @@ import { atomicWriteFileSync, ensureLockTarget, withFileLock, withFileLockAsync 
 import { getUserAgentsDir } from './state.js';
 import type { CachedUsageSnapshot } from './accounting/usage.js';
 import type { NativeAccountRecord } from './types.js';
+import type { UsagePeak } from './accounting/usage-history.js';
 
 export const FLEET_SHARED_STATE_VERSION = 1;
 export const FLEET_SHARED_STATE_FILE = 'daemon-state.json';
@@ -58,6 +59,9 @@ export interface FleetSharedDeviceState {
     signedIn: boolean;
     deviceToken: boolean;
   };
+  usageHistory?: {
+    peaks: UsagePeak[];
+  };
   receivedAt?: number;
 }
 
@@ -67,6 +71,7 @@ interface FleetSharedStatePatch {
   sessions?: FleetSharedDeviceState['sessions'];
   accounts?: FleetSharedDeviceState['accounts'];
   ownerNotify?: FleetSharedDeviceState['ownerNotify'];
+  usageHistory?: FleetSharedDeviceState['usageHistory'];
   receivedAt?: number;
 }
 
@@ -123,6 +128,10 @@ export function parseFleetSharedDeviceStateEnvelope(parsed: unknown, owner?: str
   ) {
     throw new Error('unrecognized owner-notify state');
   }
+  const usageHistory = parsed.usageHistory;
+  if (usageHistory !== undefined && (!isRecord(usageHistory) || !Array.isArray(usageHistory.peaks))) {
+    throw new Error('unrecognized usage history');
+  }
   if (parsed.receivedAt !== undefined && (typeof parsed.receivedAt !== 'number' || !Number.isFinite(parsed.receivedAt))) {
     throw new Error('unrecognized receivedAt');
   }
@@ -148,6 +157,7 @@ function mergeFleetState(currentRaw: string, device: string, patch: FleetSharedS
     ...(patch.sessions !== undefined ? { sessions: patch.sessions } : {}),
     ...(patch.accounts !== undefined ? { accounts: patch.accounts } : {}),
     ...(patch.ownerNotify !== undefined ? { ownerNotify: patch.ownerNotify } : {}),
+    ...(patch.usageHistory !== undefined ? { usageHistory: patch.usageHistory } : {}),
     ...(patch.receivedAt !== undefined ? { receivedAt: patch.receivedAt } : {}),
     version: FLEET_SHARED_STATE_VERSION,
     device,
@@ -248,5 +258,6 @@ export async function storePeerFleetSharedDeviceState(
   if (state.sessions !== undefined) patch.sessions = state.sessions;
   if (state.accounts !== undefined) patch.accounts = state.accounts;
   if (state.ownerNotify !== undefined) patch.ownerNotify = state.ownerNotify;
+  if (state.usageHistory !== undefined) patch.usageHistory = state.usageHistory;
   return updateFleetSharedDeviceStateAsync(state.device, patch, userAgentsDir);
 }

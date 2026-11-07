@@ -1,0 +1,236 @@
+{
+ "v": 1,
+ "peaks": [
+  {
+   "key": "claude:org=prix",
+   "resetsAt": "2026-10-13T07:00:00.000Z",
+   "peak": 71,
+   "firstSeen": "2026-10-06T07:00:00.000Z",
+   "lastSeen": "2026-10-12T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=prix",
+   "resetsAt": "2026-10-20T07:00:00.000Z",
+   "peak": 55,
+   "firstSeen": "2026-10-13T07:00:00.000Z",
+   "lastSeen": "2026-10-19T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=prix",
+   "resetsAt": "2026-10-27T07:00:00.000Z",
+   "peak": 62,
+   "firstSeen": "2026-10-20T07:00:00.000Z",
+   "lastSeen": "2026-10-26T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=prix",
+   "resetsAt": "2026-11-03T07:00:00.000Z",
+   "peak": 78,
+   "firstSeen": "2026-10-27T07:00:00.000Z",
+   "lastSeen": "2026-11-02T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=gmail",
+   "resetsAt": "2026-10-15T07:00:00.000Z",
+   "peak": 48,
+   "firstSeen": "2026-10-08T07:00:00.000Z",
+   "lastSeen": "2026-10-14T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=gmail",
+   "resetsAt": "2026-10-22T07:00:00.000Z",
+   "peak": 40,
+   "firstSeen": "2026-10-15T07:00:00.000Z",
+   "lastSeen": "2026-10-21T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=gmail",
+   "resetsAt": "2026-10-29T07:00:00.000Z",
+   "peak": 52,
+   "firstSeen": "2026-10-22T07:00:00.000Z",
+   "lastSeen": "2026-10-28T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=gmail",
+   "resetsAt": "2026-11-05T07:00:00.000Z",
+   "peak": 56,
+   "firstSeen": "2026-10-29T07:00:00.000Z",
+   "lastSeen": "2026-11-04T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=dev",
+   "resetsAt": "2026-10-12T07:00:00.000Z",
+   "peak": 30,
+   "firstSeen": "2026-10-05T07:00:00.000Z",
+   "lastSeen": "2026-10-11T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=dev",
+   "resetsAt": "2026-10-19T07:00:00.000Z",
+   "peak": 22,
+   "firstSeen": "2026-10-12T07:00:00.000Z",
+   "lastSeen": "2026-10-18T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=dev",
+   "resetsAt": "2026-10-26T07:00:00.000Z",
+   "peak": 35,
+   "firstSeen": "2026-10-19T07:00:00.000Z",
+   "lastSeen": "2026-10-25T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=dev",
+   "resetsAt": "2026-11-02T07:00:00.000Z",
+   "peak": 20,
+   "firstSeen": "2026-10-26T07:00:00.000Z",
+   "lastSeen": "2026-11-01T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=trp",
+   "resetsAt": "2026-10-17T07:00:00.000Z",
+   "peak": 25,
+   "firstSeen": "2026-10-10T07:00:00.000Z",
+   "lastSeen": "2026-10-16T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=trp",
+   "resetsAt": "2026-10-24T07:00:00.000Z",
+   "peak": 28,
+   "firstSeen": "2026-10-17T07:00:00.000Z",
+   "lastSeen": "2026-10-23T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=trp",
+   "resetsAt": "2026-10-31T07:00:00.000Z",
+   "peak": 18,
+   "firstSeen": "2026-10-24T07:00:00.000Z",
+   "lastSeen": "2026-10-30T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=trp",
+   "resetsAt": "2026-11-07T07:00:00.000Z",
+   "peak": 22,
+   "firstSeen": "2026-10-31T07:00:00.000Z",
+   "lastSeen": "2026-11-06T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=work",
+   "resetsAt": "2026-10-14T07:00:00.000Z",
+   "peak": 12,
+   "firstSeen": "2026-10-07T07:00:00.000Z",
+   "lastSeen": "2026-10-13T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=work",
+   "resetsAt": "2026-10-21T07:00:00.000Z",
+   "peak": 9,
+   "firstSeen": "2026-10-14T07:00:00.000Z",
+   "lastSeen": "2026-10-20T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=work",
+   "resetsAt": "2026-10-28T07:00:00.000Z",
+   "peak": 15,
+   "firstSeen": "2026-10-21T07:00:00.000Z",
+   "lastSeen": "2026-10-27T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=work",
+   "resetsAt": "2026-11-04T07:00:00.000Z",
+   "peak": 15,
+   "firstSeen": "2026-10-28T07:00:00.000Z",
+   "lastSeen": "2026-11-03T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=swarmify",
+   "resetsAt": "2026-10-16T07:00:00.000Z",
+   "peak": 10,
+   "firstSeen": "2026-10-09T07:00:00.000Z",
+   "lastSeen": "2026-10-15T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=swarmify",
+   "resetsAt": "2026-10-23T07:00:00.000Z",
+   "peak": 14,
+   "firstSeen": "2026-10-16T07:00:00.000Z",
+   "lastSeen": "2026-10-22T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=swarmify",
+   "resetsAt": "2026-10-30T07:00:00.000Z",
+   "peak": 6,
+   "firstSeen": "2026-10-23T07:00:00.000Z",
+   "lastSeen": "2026-10-29T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=swarmify",
+   "resetsAt": "2026-11-06T07:00:00.000Z",
+   "peak": 8,
+   "firstSeen": "2026-10-30T07:00:00.000Z",
+   "lastSeen": "2026-11-05T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=icloud",
+   "resetsAt": "2026-10-18T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-10-11T07:00:00.000Z",
+   "lastSeen": "2026-10-17T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=icloud",
+   "resetsAt": "2026-10-25T07:00:00.000Z",
+   "peak": 4,
+   "firstSeen": "2026-10-18T07:00:00.000Z",
+   "lastSeen": "2026-10-24T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=icloud",
+   "resetsAt": "2026-11-01T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-10-25T07:00:00.000Z",
+   "lastSeen": "2026-10-31T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=icloud",
+   "resetsAt": "2026-11-08T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-11-01T07:00:00.000Z",
+   "lastSeen": "2026-11-07T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=smores",
+   "resetsAt": "2026-10-13T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-10-06T07:00:00.000Z",
+   "lastSeen": "2026-10-12T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=smores",
+   "resetsAt": "2026-10-20T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-10-13T07:00:00.000Z",
+   "lastSeen": "2026-10-19T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=smores",
+   "resetsAt": "2026-10-27T07:00:00.000Z",
+   "peak": 3,
+   "firstSeen": "2026-10-20T07:00:00.000Z",
+   "lastSeen": "2026-10-26T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=smores",
+   "resetsAt": "2026-11-03T07:00:00.000Z",
+   "peak": 0,
+   "firstSeen": "2026-10-27T07:00:00.000Z",
+   "lastSeen": "2026-11-02T07:00:00.000Z"
+  },
+  {
+   "key": "claude:org=prix",
+   "resetsAt": "2026-11-10T07:00:00.000Z",
+   "peak": 14,
+   "firstSeen": "2026-11-04T07:00:00.000Z",
+   "lastSeen": "2026-11-07T07:00:00.000Z"
+  }
+ ]
+}

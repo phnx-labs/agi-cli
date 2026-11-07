@@ -54,5 +54,13 @@ export class UsageSyncService extends BasePeriodicService {
     }
     if (foldedIn.pruned > 0) ctx.log('INFO', `session-mirror: pruned ${foldedIn.pruned} stale mirror row(s)`);
     for (const err of foldedIn.errors) ctx.log('WARN', `session-mirror: ${err.device}: ${err.message}`);
+    try {
+      const { notifyChangedAccountsAdvice } = await import('../accounting/advise-notify.js');
+      for (const sent of await notifyChangedAccountsAdvice()) {
+        ctx.log('INFO', `accounts-advice: ${sent.title} (${sent.result})`);
+      }
+    } catch (err) {
+      ctx.log('WARN', `accounts-advice: ${(err as Error).message}`);
+    }
   }
 }

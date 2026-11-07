@@ -43,7 +43,7 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()['menubar.menu.todoProject']).toBe('Rush');
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': [],
-        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox'],
+        'menubar.menu.tabOrder': ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox', 'accounts'],
         'menubar.menu.hiddenTabs': ['secrets'],
         'menubar.menu.homeGoals': ['company'],
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
@@ -73,7 +73,7 @@ describe('menubar snapshot', () => {
       expect(buildMenuPreferences()['menubar.menu.showBrowserSessions']).toBe(false);
       expect(buildMenuListPreferences()).toEqual({
         'menubar.menu.pinnedProjects': ['Rush'],
-        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github'],
+        'menubar.menu.tabOrder': ['home', 'projects', 'sessions', 'inbox', 'goals', 'secrets', 'linear', 'github', 'accounts'],
         'menubar.menu.hiddenTabs': ['inbox'],
         'menubar.menu.homeGoals': ['company', 'myDay'],
         'menubar.menu.homeSections': ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'],
