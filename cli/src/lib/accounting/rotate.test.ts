@@ -82,18 +82,18 @@ function rotation(healthy: RotateCandidate[], pickedIdx = 0): RotateResult {
 describe('paused accounts (agents accounts pause)', () => {
   it('balanced and available never pick a paused account; naming it still matches', () => {
     const work = candidate({ version: 'main', nativeAccount: 'work', nativeAccountId: 'w' });
-    const smores = candidate({ version: 'main', nativeAccount: 'smores', nativeAccountId: 's', paused: true });
+    const spare = candidate({ version: 'main', nativeAccount: 'spare', nativeAccountId: 's', paused: true });
     for (let i = 0; i < 20; i++) {
-      expect(pickBalancedCandidate([work, smores])?.picked.nativeAccount).toBe('work');
+      expect(pickBalancedCandidate([work, spare])?.picked.nativeAccount).toBe('work');
     }
-    expect(pickAvailableCandidate([smores, work])?.picked.nativeAccount).toBe('work');
-    expect(pickBalancedCandidate([smores])).toBeNull();
-    expect(matchAccountCandidate([work, smores], 'smores')?.nativeAccount).toBe('smores');
+    expect(pickAvailableCandidate([spare, work])?.picked.nativeAccount).toBe('work');
+    expect(pickBalancedCandidate([spare])).toBeNull();
+    expect(matchAccountCandidate([work, spare], 'spare')?.nativeAccount).toBe('spare');
   });
 
   it('names paused as the exclusion reason when nothing is left', () => {
-    const smores = candidate({ version: 'main', nativeAccount: 'smores', nativeAccountId: 's', paused: true });
-    expect(formatNoHealthyAccountError('claude', 'balanced', [smores])).toContain('main (paused)');
+    const spare = candidate({ version: 'main', nativeAccount: 'spare', nativeAccountId: 's', paused: true });
+    expect(formatNoHealthyAccountError('claude', 'balanced', [spare])).toContain('main (paused)');
   });
 });
 
