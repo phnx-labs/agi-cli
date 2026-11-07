@@ -30,9 +30,10 @@ let shell: ChildProcess | undefined;
 async function startTab(count: number, layout = 'siblings', kind = 'claude'): Promise<number[]> {
   const binary = path.join(root, `bin-${tabCount++}`, 'claude');
   fs.mkdirSync(path.dirname(binary), { recursive: true });
-  if (process.platform === 'darwin') fs.symlinkSync('/bin/sleep', binary);
+  // A bash named `claude`: uutils coreutils (Ubuntu 26.04) picks its program by argv[0], so a renamed `sleep` exits at once.
+  if (process.platform === 'darwin') fs.symlinkSync('/bin/bash', binary);
   else {
-    fs.copyFileSync('/bin/sleep', binary);
+    fs.copyFileSync('/bin/bash', binary);
     fs.chmodSync(binary, 0o755);
   }
   shell = spawn('bash', [path.join(fixtures, 'terminal-agent-children.sh'), binary, String(count), layout], {
