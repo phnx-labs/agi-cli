@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.23.46
+
+- **`agents accounts usage [harness]` shows how many subscription accounts you actually need.**
+  It prints each named account's highest weekly-limit percent per calendar week (last 4 weeks
+  by default, `--weeks`), this week's reading projected to the full week, and the summed
+  demand in account-weeks, then recommends a count: keep `ceil(peak demand ÷ 0.8)` accounts
+  (`--target`), plus one if any account hit its weekly limit. With readings for every active
+  account in 3 of the last 4 weeks it names the least-used accounts to pause (never the default
+  account), or paused accounts to resume; on thinner history it gives the count only. `--json`
+  carries the same table and advice for the menu bar. The history comes from a new weekly-peak
+  ledger (`usage-history.json`) fed by every usage cache writer (headed poll, status line, peer
+  sync), and every box, worker included, now publishes its ledger on the 15-minute usage-sync
+  exchange, so the status-line readings from sessions on workers reach the headed box for the
+  first time. Source: `cli/src/lib/accounting/usage-history.ts`, `cli/src/lib/accounting/advise.ts`,
+  `cli/src/lib/accounting/usage-sync.ts`, `cli/src/commands/accounts.ts`.
+- **`agents accounts pause <harness>#<name>` / `resume`.** A paused account stays registered with
+  its credentials but balanced and available rotation never pick it; `agents run <harness>#<name>`
+  and resuming its sessions still work. `accounts list` marks it `paused` and stops suggesting a
+  repair for it. The flag lives on the fleet-wide account row in `agents.yaml`.
+- **The headed daemon tells you when the advice changes.** On the usage-sync tick it sends one owner
+  notification per harness when a high-confidence recommendation to pause, resume or add accounts
+  changes, deduplicated per week so two headed boxes never both send it. Source:
+  `cli/src/lib/accounting/advise-notify.ts`, `cli/src/lib/daemon/usage-sync-service.ts`.
+
+- **Agent version views show the installed release first.** Resource details and section headings no longer report the historical installation label as the installed release. Diagnostics and detail summaries identify a differing stable name as `(installation: <label>)`; homes, selectors, and JSON fields keep their existing meanings. Source: `cli/src/commands/view.ts`.
+
+- **AGI Menu 1.20.0: the Accounts tab.** The `menubar` helper floor rises to 1.20.0, so an installed CLI
+  fetches the AGI Menu with the Accounts tab (weekly usage per named account, the keep/pause verdict
+  from `agents accounts usage`, and Pause/Resume). Source: `cli/src/lib/helper-versions.ts`.
+
+- **A setup-token session no longer credits its rate limits to the login whose home it runs in.**
+  `agents run claude --strategy balanced` on a box whose native login was at 100% kept
+  picking that login. A session launched with a provider account (`--account <setup-token>`,
+  or balanced picking it) runs inside the native login's version home, and the Claude status
+  line read the account from that home, so it wrote the token account's headroom (session 31%,
+  week 3%) over the poll's 100%/56% under the native login's usage key. Each write made the
+  limited login look healthy again until the next poll, and the run died with "You've hit
+  your session limit". The status line now resolves the account from `AGENTS_RUN_ACCOUNT_ID`:
+  a provider account's limits land under its own key (`claude:name=<account>`), a native
+  login keeps its identity, and an id that matches neither writes nothing. Balanced and
+  available rotation read that key, so a limited token account is excluded like a limited
+  login instead of being a permanently blind pick; a balanced provider pick now also passes
+  its account id to the session, and the pick banner names the provider account (`balanced
+  picked turing-token · claude@2.1.260`) instead of only the harness version. Source: `cli/src/lib/claude-statusline.ts`,
+  `cli/src/lib/accounting/account-pool-collect.ts`, `cli/src/lib/accounting/account-pool.ts`,
+  `cli/src/commands/exec.ts`.
+
 ## 1.23.45
 
 - **The Lead's own drafting turns no longer read as something you said.** When agents stop to ask, the Lead runs a turn on its own to draft their replies. History saved that turn's whole internal prompt ("[New asks] These agents in this project stopped …") as its `ask`, so the AGI extension's Lead tab drew it under "You" on every such turn. These turns are now saved with `trigger: "asks"` and an empty `ask`. Turns saved before this are read back the same way, and `agents lead history` prints "(on its own, for new asks)" for them. Source: `cli/src/lib/lead/store.ts` (`DRAFT_TURN_PREFIX`, `readHistory`), `cli/src/lib/lead/host.ts`.
