@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).
 
-_44 command groups · 334 commands._
+_44 command groups · 337 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -23,10 +23,13 @@ agents accounts list [harness]            List accounts as name + usage, with th
 agents accounts login <account>           Re-authenticate an account into its slot on this device (<harness>#<name>); re-mints and re-syncs the worker credential
 agents accounts logout <target>           Sign out a harness-native OAuth login by <harness>, <harness>@<label>, <harness>#<account>, or account name. API-key / setup-token / bearer accounts use `accounts remove` instead.
 agents accounts migrate                   Fold leftover per-account installations into 1 harness install + N credential slots
+agents accounts pause <account>           Take an account out of automatic rotation without removing it (<harness>#<name>)
 agents accounts remove <name>             Remove an account and its device-local credential. Target may be <harness>#<name> when the name exists for several harnesses
 agents accounts rename <old> <new>        Rename an account without changing its stable id. Target may be <harness>#<name> when the name exists for several harnesses
+agents accounts resume <account>          Put a paused account back into automatic rotation (<harness>#<name>)
 agents accounts set-key <name>            Rotate an account credential without changing its identity
 agents accounts sync <name> [device]      Copy one provider account bundle to a worker device
+agents accounts usage [harness]           Weekly usage per account across the fleet, and how many accounts you need (keep / pause)
 agents accounts view <name>               Show safe account metadata, custody, and attachments. Target may be <harness>#<name> when the name exists for several harnesses
 ```
 

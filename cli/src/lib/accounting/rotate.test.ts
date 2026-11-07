@@ -79,6 +79,24 @@ function rotation(healthy: RotateCandidate[], pickedIdx = 0): RotateResult {
   return { picked: healthy[pickedIdx], healthy, excluded: [] };
 }
 
+describe('paused accounts (agents accounts pause)', () => {
+  it('balanced and available never pick a paused account; naming it still matches', () => {
+    const work = candidate({ version: 'main', nativeAccount: 'work', nativeAccountId: 'w' });
+    const smores = candidate({ version: 'main', nativeAccount: 'smores', nativeAccountId: 's', paused: true });
+    for (let i = 0; i < 20; i++) {
+      expect(pickBalancedCandidate([work, smores])?.picked.nativeAccount).toBe('work');
+    }
+    expect(pickAvailableCandidate([smores, work])?.picked.nativeAccount).toBe('work');
+    expect(pickBalancedCandidate([smores])).toBeNull();
+    expect(matchAccountCandidate([work, smores], 'smores')?.nativeAccount).toBe('smores');
+  });
+
+  it('names paused as the exclusion reason when nothing is left', () => {
+    const smores = candidate({ version: 'main', nativeAccount: 'smores', nativeAccountId: 's', paused: true });
+    expect(formatNoHealthyAccountError('claude', 'balanced', [smores])).toContain('main (paused)');
+  });
+});
+
 describe('slot verdict eligibility (PHNX-3940 T5)', () => {
   it('balanced excludes a missing/expired/revoked slot even when signedIn looks true', () => {
     const live = candidate({ version: 'main', nativeAccount: 'work', fromSlot: true, authVerdict: 'live' });

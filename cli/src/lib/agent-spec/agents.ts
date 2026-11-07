@@ -1401,6 +1401,20 @@ interface ClaudeHomeConfig {
   identity: ClaudeHomeIdentity;
 }
 
+// Claude usage is org-scoped; account routing is account+org scoped.
+function claudeUsageKey(organizationId: string | null): string | null {
+  return buildIdentityKey('claude', [['org', organizationId]]);
+}
+
+/**
+ * The usage-cache key a registered native account's limits are recorded under:
+ * Claude meters per organization, every other harness per account identity.
+ */
+export function usageKeyForNativeIdentity(agent: AgentId, identityKey: string): string {
+  if (agent !== 'claude') return identityKey;
+  return claudeUsageKey(parseNativeIdentityKey('claude', identityKey)?.org ?? null) ?? identityKey;
+}
+
 export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
   const configDirFile = path.join(base, '.claude', '.claude.json');
   const homeLevelFile = path.join(base, '.claude.json');
@@ -1440,8 +1454,7 @@ export function readClaudeHomeConfig(base: string): ClaudeHomeConfig | null {
       organizationId,
       organizationName: oa.organizationName ?? null,
       organizationType: oa.organizationType ?? null,
-      // Usage is org-scoped; account routing is account+org scoped.
-      usageKey: buildIdentityKey('claude', [['org', organizationId]]),
+      usageKey: claudeUsageKey(organizationId),
       accountKey: buildIdentityKey('claude', [
         ['account', accountId],
         ['org', organizationId],

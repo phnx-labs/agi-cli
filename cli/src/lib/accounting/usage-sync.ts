@@ -9,8 +9,13 @@
  * its cache newest-wins and prints its own envelope back, which the headed box
  * stores in `~/.agents/devices/<peer>/daemon-state.json` stamped `receivedAt`.
  * Workers never initiate. A peer that times out is skipped this tick and never
- * blocks another. Only usage rows, verdicts, and session digests move here —
- * never a credential (invariant 7: roles never cross).
+ * blocks another. Only usage rows, verdicts, session digests and weekly usage
+ * peaks move here — never a credential (invariant 7: roles never cross).
+ *
+ * Every box, worker included, publishes its own weekly-peak ledger
+ * (`usageHistory`): a worker's status line sees the rate limits of the accounts
+ * it runs first-hand, and the headed box is where `agents accounts usage`
+ * unions them. Peaks max-merge, so the exchange order never matters.
  *
  * This replaced a git exchange over the fleet-synced user repo: every daemon
  * committed its own file each tick, so the shared store reached 1.1 GiB /
@@ -40,6 +45,7 @@ import {
   ingestPeerClaudeUsageRows,
   type CachedUsageSnapshot,
 } from './usage.js';
+import { getUsageHistoryPath, usageHistoryPathFor, usagePeaksForPublish } from './usage-history.js';
 
 export const USAGE_SYNC_INTERVAL_MS = 15 * 60_000;
 export const USAGE_PUBLISH_HEARTBEAT_MS = 10 * 60_000;
@@ -146,9 +152,27 @@ export async function publishUsageSnapshotToSharedStore(
 
 export interface PublishOwnFleetStateResult {
   usage: PublishUsageSnapshotResult;
+  history: { count: number; error: string | null };
   mirror: { changed: boolean; count: number; error: string | null };
   auth: { status: string; error: string | null };
   errors: string[];
+}
+
+async function publishOwnUsageHistory(
+  options: PublishUsageSnapshotOptions,
+): Promise<PublishOwnFleetStateResult['history']> {
+  try {
+    const historyPath = options.cachePath ? usageHistoryPathFor(options.cachePath) : getUsageHistoryPath();
+    const peaks = usagePeaksForPublish(new Date(), historyPath);
+    await updateFleetSharedDeviceStateAsync(
+      options.device ?? machineId(),
+      { usageHistory: { peaks } },
+      options.userAgentsDir ?? getUserAgentsDir(),
+    );
+    return { count: peaks.length, error: null };
+  } catch (err) {
+    return { count: 0, error: (err as Error).message };
+  }
 }
 
 // Peer exchange carries usage, auth verdict, and session digests only; credentials never cross device roles.
@@ -158,6 +182,8 @@ export async function publishOwnFleetState(
   const errors: string[] = [];
   const usage = await publishUsageSnapshotToSharedStore(options);
   if (usage.error) errors.push(`usage: ${usage.error}`);
+  const history = await publishOwnUsageHistory(options);
+  if (history.error) errors.push(`usage-history: ${history.error}`);
   let mirror: PublishOwnFleetStateResult['mirror'] = { changed: false, count: 0, error: null };
   try {
     const { publishSessionMirrorToSharedStore } = await import('../session/mirror.js');
@@ -182,7 +208,7 @@ export async function publishOwnFleetState(
   } catch (err) {
     errors.push(`owner-notify: ${(err as Error).message}`);
   }
-  return { usage, mirror, auth, errors };
+  return { usage, history, mirror, auth, errors };
 }
 
 interface BuildPayloadOptions {

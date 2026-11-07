@@ -47,6 +47,8 @@ export interface NativeAccountRecord {
   workerCredential?: NativeAccountWorkerCredential;
   provisioning?: AccountProvisioning;
   createdOn?: string;
+  /** Set by `agents accounts pause`: out of automatic rotation, still registered. */
+  pausedAt?: string;
 }
 
 export type RunStrategy = 'pinned' | 'available' | 'balanced';

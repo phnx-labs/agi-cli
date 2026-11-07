@@ -51,13 +51,13 @@ const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 const DEVICE_FORM_FACTORS = ['laptop', 'desktop', 'server', 'unknown'] as const;
 
-export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox'] as const;
+export const MENUBAR_TABS = ['home', 'goals', 'secrets', 'linear', 'github', 'sessions', 'inbox', 'accounts'] as const;
 
 export const MENUBAR_RETIRED_TABS: readonly string[] = ['projects'];
 
 const MENUBAR_STORABLE_TABS: readonly string[] = [...MENUBAR_TABS, ...MENUBAR_RETIRED_TABS];
 
-const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github'];
+const MENUBAR_TABS_ADDED_LATER: readonly string[] = ['goals', 'secrets', 'linear', 'github', 'accounts'];
 
 export const MENUBAR_HOME_GOALS = ['company', 'week', 'myWeek', 'myDay'] as const;
 export const MENUBAR_HOME_SECTIONS = ['company', 'cycle', 'today', 'needs', 'prs', 'issues', 'sessions', 'artifacts', 'todos'] as const;

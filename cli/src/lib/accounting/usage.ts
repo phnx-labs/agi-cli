@@ -22,6 +22,7 @@ import { mapBounded } from '../concurrency.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock, withFileLockAsync } from '../fs-atomic.js';
 import { withRefreshLease } from '../refresh-coordinator.js';
 import { padToWidth } from '../session/width.js';
+import { recordUsagePeaks, usageHistoryPathFor } from './usage-history.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1592,6 +1593,7 @@ export function writeClaudeUsageCache(
       };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
+    recordUsagePeaks(usageKey, snapshot.windows, snapshot.capturedAt ?? new Date(), usageHistoryPathFor(cachePath));
   } catch {
   }
 }
@@ -1624,6 +1626,7 @@ export function mergeClaudeUsageCacheWindows(
       };
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
+    recordUsagePeaks(usageKey, snapshot.windows, snapshot.capturedAt ?? new Date(), usageHistoryPathFor(cachePath));
   } catch {
   }
 }
@@ -1671,6 +1674,10 @@ export async function ingestPeerClaudeUsageRows(
       }
       if (merged > 0) writeClaudeUsageCacheFile(cache, cachePath);
     });
+    const historyPath = usageHistoryPathFor(cachePath);
+    for (const [key, row] of incoming) {
+      recordUsagePeaks(key, row.windows, new Date(row.capturedAt ?? Date.now()), historyPath);
+    }
   } catch {
   }
   return merged;
