@@ -25,12 +25,6 @@ export interface AdviceNotifyOutcome {
   result: string;
 }
 
-/**
- * Run on the headed box's usage-sync tick, after the exchange has stored every
- * peer's ledger. Sends one owner notification per harness when its keep/pause
- * advice changes; the per-week dedupKey keeps two headed boxes from both
- * sending it.
- */
 export async function notifyChangedAccountsAdvice(
   now: Date = new Date(),
   statePath: string = path.join(getCacheDir(), STATE_FILE),
@@ -44,7 +38,6 @@ export async function notifyChangedAccountsAdvice(
     const { postOwnerNotification, describeOwnerResult } = await import('../owner-notify.js');
     const sent = await postOwnerNotification({ event: 'message', title: note.title, body: note.body, dedupKey: note.dedupKey });
     outcomes.push({ harness, title: note.title, result: describeOwnerResult(sent) });
-    // Mark it sent only when a channel took it (or rush/api already had it); otherwise retry next tick.
     if (sent.delivered.length === 0 && sent.queued.length === 0 && sent.suppressed !== 'duplicate') continue;
     notified[harness] = note.fingerprint;
     fs.mkdirSync(path.dirname(statePath), { recursive: true });

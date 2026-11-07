@@ -12,11 +12,6 @@
  * blocks another. Only usage rows, verdicts, session digests and weekly usage
  * peaks move here — never a credential (invariant 7: roles never cross).
  *
- * Every box, worker included, publishes its own weekly-peak ledger
- * (`usageHistory`): a worker's status line sees the rate limits of the accounts
- * it runs first-hand, and the headed box is where `agents accounts usage`
- * unions them. Peaks max-merge, so the exchange order never matters.
- *
  * This replaced a git exchange over the fleet-synced user repo: every daemon
  * committed its own file each tick, so the shared store reached 1.1 GiB /
  * 18,358 commits with 100% of the last 2,000 being `chore(devices): publish

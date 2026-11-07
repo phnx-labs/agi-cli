@@ -1401,15 +1401,11 @@ interface ClaudeHomeConfig {
   identity: ClaudeHomeIdentity;
 }
 
-// Claude usage is org-scoped; account routing is account+org scoped.
+// Usage is org-scoped; account routing is account+org scoped.
 function claudeUsageKey(organizationId: string | null): string | null {
   return buildIdentityKey('claude', [['org', organizationId]]);
 }
 
-/**
- * The usage-cache key a registered native account's limits are recorded under:
- * Claude meters per organization, every other harness per account identity.
- */
 export function usageKeyForNativeIdentity(agent: AgentId, identityKey: string): string {
   if (agent !== 'claude') return identityKey;
   return claudeUsageKey(parseNativeIdentityKey('claude', identityKey)?.org ?? null) ?? identityKey;
