@@ -373,8 +373,8 @@ agents accounts list --fleet`,
     examples: `agents accounts usage
 agents accounts usage claude --weeks 8
 agents accounts usage codex --json
-agents accounts pause claude#smores
-agents accounts resume claude#smores`,
+agents accounts pause claude#spare
+agents accounts resume claude#spare`,
     notes: 'Each cell is the highest weekly-limit percent an account reached in the weekly window that started that calendar week (UTC). Readings come from every box: the headed poll, and the status line of every interactive session on any worker, carried home on the 15-minute usage-sync exchange. `demand` is the column sum in account-weeks. The recommendation keeps ceil(peak demand ÷ target) accounts, adds one if any account hit its limit, never pauses the default account, and pauses the least-used ones first. Accounts used only headless never show a reading, so they read as idle. Pausing does not cancel a subscription; do that with the provider.',
   });
 
@@ -389,8 +389,8 @@ agents accounts resume claude#smores`,
     });
   setHelpSections(pauseCmd, {
     examples: `agents accounts usage claude
-agents accounts pause claude#smores
-agents accounts resume claude#smores`,
+agents accounts pause claude#spare
+agents accounts resume claude#spare`,
     notes: 'Use it when you cancel or stop paying for a seat: the account stays registered with its credentials, so `resume` is instant if you subscribe again. The pause is fleet-wide (it lives on the account row in agents.yaml).',
   });
 

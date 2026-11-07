@@ -1246,8 +1246,8 @@ The `connect` / `name` / `label` / `mint` / `attach` / `detach` / `switch` /
 ```bash
 agents accounts usage                    # claude: weekly peak per account, demand, keep/pause
 agents accounts usage codex --weeks 8 --json
-agents accounts pause claude#smores      # out of rotation, still registered
-agents accounts resume claude#smores
+agents accounts pause claude#spare      # out of rotation, still registered
+agents accounts resume claude#spare
 ```
 
 `accounts usage` lists each named account's highest weekly-limit percent per
