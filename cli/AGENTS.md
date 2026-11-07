@@ -1235,6 +1235,18 @@ dialer puts on a peer's reply — so an oversized push exits 2 with one
 `UsageIngestInputTooLargeError` line on stderr and writes nothing. A synced row reads as `last_seen`
 (cached), never a live fetch, so a worker's bar is honest about being propagated.
 
+**Usage history and seat advice (`agents accounts usage`).** The cache above holds one
+latest snapshot per account; [`usage-history.ts`](src/lib/accounting/usage-history.ts)
+keeps the highest weekly percent per `(usageKey, resetsAt)` window for 180 days, fed by
+every cache writer. Every box, worker included, publishes the last 90 days as
+`usageHistory` in its daemon-state envelope (a worker's status line is first-hand), and
+the reader max-merges its own ledger with every stored peer ledger. The engine
+([`advise.ts`](src/lib/accounting/advise.ts), pure) sums weekly peaks into account-weeks
+of demand and recommends `ceil(peak ÷ 0.8)` seats; it names accounts to pause only at
+high confidence. `agents accounts pause` sets `pausedAt` on the account row, which
+`isRotationEligible` honors, and the headed usage-sync tick sends one owner notification
+when the advice changes (`advise-notify.ts`).
+
 **One exchange per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
 verdict, PHNX-4116 SSH transport).** The `usage-sync` service refreshes every
 owned field in its `devices/<device>/daemon-state.json` (`publishOwnFleetState`)

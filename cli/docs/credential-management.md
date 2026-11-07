@@ -410,6 +410,8 @@ The commands read like the task, object first:
 | `agents accounts view <account>` (alias `inspect`) | Show one account — kind, custody, and its attachments. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. |
 | `agents accounts rename <old> <new>` / `remove <name>` | Rename or remove either kind. Target may be `<harness>#<name>` when the same name exists for several harnesses; an ambiguous bare name is refused, never guessed. `remove` refuses while a binding, a per-harness default, or a harness profile still references the account |
 | `agents accounts sync <account> <device>` | Copy a provider account bundle to a worker (native records have no bytes to copy) |
+| `agents accounts usage [harness] [--weeks n] [--target f] [--json]` | Weekly usage history per named native account and a seat-count recommendation. Each cell is the highest weekly-limit percent seen in the window that started that calendar week (UTC), from the union of this box's `usage-history.json` ledger and every peer ledger stored by the usage-sync exchange; `this week` shows the reading so far and, once a day of the window has passed, the pace projected to the full week. `demand` sums a column in account-weeks; the advice keeps `ceil(max demand ÷ target)` accounts (target 0.8), +1 when any account reached 100%. Names to pause (least summed usage, never the default) or resume appear only when every active account has readings in 3 of the last 4 weeks (`confidence: high`); otherwise the count alone. Pure engine: `adviseAccounts` in `lib/accounting/advise.ts` |
+| `agents accounts pause <harness>#<name>` / `resume <harness>#<name>` | Sets / clears `pausedAt` on every row of that identity in `agents.yaml` (fleet-wide). Balanced and available rotation never pick a paused account (`isRotationEligible`); `<harness>#<name>` and resuming its sessions still work; `accounts list` shows `paused` and suggests no repair. Credentials are untouched |
 | deleted: `connect`, `name`, `label`, `mint`, `attach`, `detach`, `switch`, `set-default` | Use `add` / `login` / `default` / `run <harness>#<name>` instead. |
 
 `--json` (`agents accounts --json`, `accounts list --json`) is the version 2
@@ -478,9 +480,13 @@ crosses only when the user runs `agents accounts sync <name> <device>`.
   `daemon-state.json` (untracked) and pushes that envelope to every dialable
   peer over SSH each usage-sync tick (`agents __usage-ingest --reply`,
   PHNX-4116); a worker merges the rows newest-wins as they arrive and answers
-  with its own envelope. Only usage rows, verdicts, and session digests move —
-  never a credential (invariant 7) — and the worker still never polls the usage
-  endpoint itself (invariant 5).
+  with its own envelope. Only usage rows, verdicts, session digests and weekly
+  usage peaks move — never a credential (invariant 7) — and the worker still
+  never polls the usage endpoint itself (invariant 5). Every box, worker
+  included, publishes its own weekly-peak ledger (`usageHistory`, the last 90
+  days of `usage-history.json`), because a worker's status line records the rate
+  limits of the accounts it runs first-hand; the headed box unions them for
+  `agents accounts usage`. Peaks max-merge, so exchange order never matters.
   Claude's human row ends with one unlabeled last-active timestamp. Auth-health
   remains available in `--json` for machine consumers; it is not rendered as a
   second timestamp beside usage because that probe age is neither activity age

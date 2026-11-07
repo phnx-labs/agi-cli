@@ -126,6 +126,7 @@ export interface NativeAccountCatalogRow {
   token: string;
   lastAuth: string;
   fix: string | null;
+  paused?: boolean;
 }
 
 export interface AccountDeviceVerdict {
@@ -192,6 +193,7 @@ export interface AccountListEntryJson {
   token: string;
   lastAuth: string;
   fix: string | null;
+  paused?: boolean;
 }
 
 interface AccountListJson {
@@ -307,7 +309,8 @@ export function buildNativeCatalog(
       usageError: null,
       token: 'no token',
       lastAuth: 'not used on this box yet',
-      fix: fixFor({
+      paused: !!account?.pausedAt,
+      fix: account?.pausedAt ? null : fixFor({
         agent: group.agent,
         verdict: signedIn ? 'no_evidence' : 'missing',
         name: account?.name,
@@ -444,7 +447,7 @@ export async function loadAccountCatalog(): Promise<AccountCatalog> {
     const credentialDir = slot?.slotDir ?? (localHome ? getVersionHomePath(row.agent, localHome.label) : null);
     row.token = readTokenFact(row.agent, credentialDir);
     row.lastAuth = formatAuthFact((cached as AuthHealth | undefined) ?? null);
-    row.fix = fixFor({
+    row.fix = row.paused ? null : fixFor({
       agent: row.agent,
       verdict: row.verdict,
       name: row.name,
@@ -523,6 +526,7 @@ export function accountListJson(
         token: row.token,
         lastAuth: row.lastAuth,
         fix: row.fix,
+        ...(row.paused ? { paused: true } : {}),
       })),
       ...providers.flatMap((row) => providerJsonEntries(row, harness)),
     ],
@@ -597,6 +601,7 @@ function nativeLine(row: NativeAccountCatalogRow, localDevice: string, maxWindow
   return {
     name: row.name ?? row.identityLabel,
     notes: [
+      row.paused ? chalk.yellow('paused') : null,
       chalk.gray(row.token),
       authFactNote(row.lastAuth),
       row.verdict === 'missing' ? chalk.red('signed out') : null,

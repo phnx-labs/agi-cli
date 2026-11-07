@@ -17,7 +17,7 @@ import { resolveConfiguredModel } from '../models.js';
 import { isTierToken, resolveTier } from '../model-tiers.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
 import { resolveManagedInstallation } from '../installations/store.js';
-import { listNativeAccounts } from '../account-registry.js';
+import { listNativeAccounts, pausedNativeIdentityKeys } from '../account-registry.js';
 import { resolveNativeSpawnHome } from '../exec-account-home.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit, type EventPayload } from '../feed/events.js';
@@ -61,6 +61,7 @@ export interface RotateCandidate {
   providerAccountId?: string;
   slotDir?: string;
   fromSlot?: boolean;
+  paused?: boolean;
 }
 
 export interface RotateResult {
@@ -101,6 +102,7 @@ function isLaunchableSlotVerdict(verdict: AuthVerdict | null): boolean {
 }
 
 function isRotationEligible(candidate: RotateCandidate, nowMs: number = Date.now(), model?: string): boolean {
+  if (candidate.paused) return false;
   if (candidate.fromSlot && !isLaunchableSlotVerdict(candidate.authVerdict)) return false;
   return readinessFromCandidate(candidate, nowMs, model).ready;
 }
@@ -407,7 +409,7 @@ export function classifyHarnessCandidates(
       const counts = new Map<string, number>();
       for (const c of candidates) {
         const readiness = readinessFromCandidate(c, nowMs);
-        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        const reason = c.paused ? 'paused' : readiness.ready ? 'ineligible' : readiness.reason;
         counts.set(reason, (counts.get(reason) ?? 0) + 1);
       }
       summaries.push({
@@ -484,7 +486,7 @@ export function formatNoHealthyAccountError(
     ? 'no installed versions'
     : excluded.map((c) => {
         const readiness = readinessFromCandidate(c, nowMs);
-        const reason = readiness.ready ? 'ineligible' : readiness.reason;
+        const reason = c.paused ? 'paused' : readiness.ready ? 'ineligible' : readiness.reason;
         return `${c.version} (${reason})`;
       }).join(', ');
   const resetSummary = formatResetSummary(earliestResetAcross(excluded, nowMs));
@@ -538,6 +540,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
   const authCache = readAuthHealthCache();
   const localHost = machineId();
   const meta = readMeta();
+  const pausedKeys = pausedNativeIdentityKeys(meta, agent);
   const binaryLabel = resolveManagedInstallation(agent)?.label ?? versions[0];
 
   type CandidateRow = {
@@ -559,6 +562,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
     providerAccountId?: string;
     slotDir?: string;
     fromSlot?: boolean;
+    paused?: boolean;
   };
 
   const slotRows: CandidateRow[] = [];
@@ -599,6 +603,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         nativeAccountId: account.id,
         slotDir: home,
         fromSlot: !!slot,
+        paused: !!account.pausedAt,
       };
     }));
     for (const row of probed) {
@@ -632,6 +637,7 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
         authVerdict,
         authCheckedAt: authHealth?.checkedAt ?? null,
         lastActive: info.lastActive,
+        paused: !!info.accountKey && pausedKeys.has(info.accountKey),
       };
     })
   );

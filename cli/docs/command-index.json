@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 44,
-  "commands": 334,
+  "commands": 337,
   "root": {
     "name": "agents",
     "path": "",
@@ -459,6 +459,35 @@
           "subcommands": []
         },
         {
+          "name": "pause",
+          "path": "accounts pause",
+          "aliases": [],
+          "description": "Take an account out of automatic rotation without removing it (<harness>#<name>)",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts usage claude\nagents accounts pause claude#spare\nagents accounts resume claude#spare",
+          "notes": "Use it when you cancel or stop paying for a seat: the account stays registered with its credentials, so `resume` is instant if you subscribe again. The pause is fleet-wide (it lives on the account row in agents.yaml).",
+          "subcommands": []
+        },
+        {
           "name": "remove",
           "path": "accounts remove",
           "aliases": [],
@@ -520,6 +549,33 @@
           ],
           "examples": "agents accounts rename cxicloud icloud\nagents accounts rename codex#icloud cloud",
           "notes": "Native names are unique per harness. A bare name that exists for several harnesses is refused — pick one with <harness>#<name>.",
+          "subcommands": []
+        },
+        {
+          "name": "resume",
+          "path": "accounts resume",
+          "aliases": [],
+          "description": "Put a paused account back into automatic rotation (<harness>#<name>)",
+          "args": [
+            {
+              "name": "account",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         },
         {
@@ -607,6 +663,62 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "usage",
+          "path": "accounts usage",
+          "aliases": [],
+          "description": "Weekly usage per account across the fleet, and how many accounts you need (keep / pause)",
+          "args": [
+            {
+              "name": "harness",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--weeks <n>",
+              "description": "Complete weeks to look back over (default 4)",
+              "long": "--weeks",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--target <fraction>",
+              "description": "Highest share of each account's weekly limit to plan for (default 0.8)",
+              "long": "--target",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable history and recommendation",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts usage\nagents accounts usage claude --weeks 8\nagents accounts usage codex --json\nagents accounts pause claude#spare\nagents accounts resume claude#spare",
+          "notes": "Each cell is the highest weekly-limit percent an account reached in the weekly window that started that calendar week (UTC). Readings come from every box: the headed poll, and the status line of every interactive session on any worker, carried home on the 15-minute usage-sync exchange. `demand` is the column sum in account-weeks. The recommendation keeps ceil(peak demand ÷ target) accounts, adds one if any account hit its limit, never pauses the default account, and pauses the least-used ones first. Accounts used only headless never show a reading, so they read as idle. Pausing does not cancel a subscription; do that with the provider.",
           "subcommands": []
         },
         {

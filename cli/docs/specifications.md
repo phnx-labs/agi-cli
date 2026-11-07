@@ -3155,7 +3155,12 @@ setup-token became unschedulable. A run that HITS
 its weekly limit MUST also persist a `rate_limited`
 `week` window (`lib/claude-statusline.ts:76-89`) so the next
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
-(`hasUsageAvailable`, `lib/accounting/rotate.ts:159-172`).
+(`hasUsageAvailable`, `lib/accounting/rotate.ts:159-172`). Every usage cache writer (`writeClaudeUsageCache`,
+`mergeClaudeUsageCacheWindows`, `ingestPeerClaudeUsageRows`) MUST also fold the
+snapshot's weekly window into the weekly-peak ledger beside the cache
+(`recordUsagePeaks`, `lib/accounting/usage-history.ts`), and every box MUST
+publish that ledger in its envelope (`usageHistory`), so the max-merged history
+behind `agents accounts usage` sees readings from every box.
 
 **GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526 / W3).**
 Given a `balanced`/`available` pool where EVERY eligible account carries a usage

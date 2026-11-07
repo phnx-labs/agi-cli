@@ -10,6 +10,7 @@ import { ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { assertNativeAccountNameable } from '../lib/account-capabilities.js';
 import { collectRunCandidates } from '../lib/accounting/rotate.js';
+import { collectAccountsAdvice, DEFAULT_ADVISE_TARGET, DEFAULT_ADVISE_WEEKS, renderAccountsAdvice } from '../lib/accounting/advise.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
 
@@ -33,7 +34,7 @@ import { ensureAdoptedDefaultRepoint } from '../lib/exec-account-home.js';
 import { acquireAuthOperationLock } from '../lib/accounts/auth-operation-lock.js';
 import { isSecretsClientError, pushBundleToHost, readAndResolveBundleEnv, readBundle } from '../lib/secrets-client.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, assertUnambiguousNativeAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, type UnifiedAccount } from '../lib/account-registry.js';
+import { accountBindings, addAccount, assertUnambiguousNativeAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, nativeAccountHome, parseAccountSelector, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, setNativeAccountPaused, type UnifiedAccount } from '../lib/account-registry.js';
 
 function addSupportedList(): string {
   return supportedAddHarnesses().join(', ');
@@ -346,6 +347,61 @@ agents accounts list --fleet`,
     notes: 'One row per account per harness: the account name, its usage bars (`*` stale), then nothing at all when the account is healthy. A state worth acting on trails the row — `rate-limited` (the usage snapshot via `deriveUsageStatusFromSnapshot`/`applyUsageHonesty`, never a probe 429), `expired`/`revoked`/`missing`, partial fleet coverage (`usable on 3 of 5 boxes`), then the exact repair command. `live`, `unverified`, `ready` and `per-device` are the ordinary cases and print nothing. For the identity behind an account use `agents accounts view <name>`; for per-device state use `--fleet`; for everything use `--json`. Reserved credential stores are not listed here; `secrets` is the place those show.',
   });
 
+
+  const usageCmd = accounts.command('usage [harness]')
+    .description('Weekly usage per account across the fleet, and how many accounts you need (keep / pause)')
+    .option('--weeks <n>', `Complete weeks to look back over (default ${DEFAULT_ADVISE_WEEKS})`)
+    .option('--target <fraction>', `Highest share of each account's weekly limit to plan for (default ${DEFAULT_ADVISE_TARGET})`)
+    .option('--json', 'Machine-readable history and recommendation')
+    .action(async (harnessRaw: string | undefined, o: { weeks?: string; target?: string; json?: boolean }, command: Command) => {
+      await runAccountsAction(command, () => {
+        const agent = harnessRaw ? resolveAgentName(harnessRaw) : 'claude';
+        if (!agent) throw new Error(`Unknown harness '${harnessRaw}'. Known: ${ALL_AGENT_IDS.join(', ')}`);
+        const weeks = o.weeks === undefined ? undefined : Number(o.weeks);
+        if (weeks !== undefined && !(Number.isInteger(weeks) && weeks >= 1 && weeks <= 26)) throw new Error('--weeks must be a whole number from 1 to 26.');
+        const target = o.target === undefined ? undefined : Number(o.target);
+        if (target !== undefined && !(target > 0 && target <= 1)) throw new Error('--target must be a fraction above 0 and at most 1, e.g. 0.8.');
+        const result = collectAccountsAdvice(agent, { weeks, target });
+        if (o.json || (command.optsWithGlobals() as { json?: boolean }).json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        for (const line of renderAccountsAdvice(result)) console.log(line);
+      });
+    });
+  setHelpSections(usageCmd, {
+    examples: `agents accounts usage
+agents accounts usage claude --weeks 8
+agents accounts usage codex --json
+agents accounts pause claude#spare
+agents accounts resume claude#spare`,
+    notes: 'Each cell is the highest weekly-limit percent an account reached in the weekly window that started that calendar week (UTC). Readings come from every box: the headed poll, and the status line of every interactive session on any worker, carried home on the 15-minute usage-sync exchange. `demand` is the column sum in account-weeks. The recommendation keeps ceil(peak demand ÷ target) accounts, adds one if any account hit its limit, never pauses the default account, and pauses the least-used ones first. Accounts used only headless never show a reading, so they read as idle. Pausing does not cancel a subscription; do that with the provider.',
+  });
+
+  const pauseCmd = accounts.command('pause <account>')
+    .description('Take an account out of automatic rotation without removing it (<harness>#<name>)')
+    .action(async (selector: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => {
+        const account = setNativeAccountPaused(selector, true);
+        console.log(chalk.green(`Paused ${account.agent}#${account.name}.`));
+        console.log(chalk.gray(`  Balanced and available rotation skip it; agents run ${account.agent}#${account.name} still runs it. Undo: agents accounts resume ${account.agent}#${account.name}`));
+      });
+    });
+  setHelpSections(pauseCmd, {
+    examples: `agents accounts usage claude
+agents accounts pause claude#spare
+agents accounts resume claude#spare`,
+    notes: 'Use it when you cancel or stop paying for a seat: the account stays registered with its credentials, so `resume` is instant if you subscribe again. The pause is fleet-wide (it lives on the account row in agents.yaml).',
+  });
+
+  accounts.command('resume <account>')
+    .description('Put a paused account back into automatic rotation (<harness>#<name>)')
+    .action(async (selector: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => {
+        const account = setNativeAccountPaused(selector, false);
+        console.log(chalk.green(`Resumed ${account.agent}#${account.name}.`));
+      });
+    });
 
   const addCmd = accounts.command('add <target> [name]')
     .description('Add an account. Harness form: add <harness> [name] runs the native login in a fresh credential slot and provisions workers. Provider form: add <name> --provider <p> --auth <t> stores a durable credential.')

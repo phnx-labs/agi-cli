@@ -47,6 +47,7 @@ export interface NativeAccountRecord {
   workerCredential?: NativeAccountWorkerCredential;
   provisioning?: AccountProvisioning;
   createdOn?: string;
+  pausedAt?: string;
 }
 
 export type RunStrategy = 'pinned' | 'available' | 'balanced';
