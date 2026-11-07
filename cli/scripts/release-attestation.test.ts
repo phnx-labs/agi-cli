@@ -424,6 +424,20 @@ describeUnix('release-attestation.sh', () => {
       expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
     });
 
+    it('accepts a repo-root README.md edit: prepack ships it as the package README', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-root-readme-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'README.md'), '# agents\n\n- a documented command\n');
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      expect(JSON.parse(d.out).candidateTree).toBe(rel.tree);
+    });
+
     it('a derived record satisfies require() for the release tree (round-trip)', () => {
       const { root, tree: baseTree } = initRepo();
       const store = tmp('rel-attest-derive-rt-');
