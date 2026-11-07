@@ -42,6 +42,7 @@ export interface AccountsAdvice {
   peakDemand: number | null;
   target: number;
   coverage: { measured: number; total: number };
+  thresholds: { target: number; minCoverage: number; minMeasured: number; weeksNeeded: number; limitPercent: number };
   advice: {
     keep: number;
     pause: string[];
@@ -150,6 +151,8 @@ export function adviseAccounts(
   const weeksLabel = weekStarts.map((w) => new Date(w).toISOString().slice(0, 10));
 
   const minMeasured = Math.ceil(active.length * MIN_ADVISE_COVERAGE);
+  const weeksNeeded = Math.min(3, weekCount);
+  const thresholds = { target, minCoverage: MIN_ADVISE_COVERAGE, minMeasured, weeksNeeded, limitPercent: 100 };
   if (peakDemand === null || measured < minMeasured) {
     const unmeasured = active.filter((r) => !hasReading(r)).map((r) => r.name);
     const reason = peakDemand === null
@@ -157,7 +160,7 @@ export function adviseAccounts(
       : `Only ${measured} of ${active.length} active accounts have a weekly reading; a seat count needs ${minMeasured}. `
         + `No reading for ${unmeasured.join(', ')}.`;
     return {
-      weeks: weeksLabel, rows, demand, currentDemand, peakDemand, target, coverage,
+      weeks: weeksLabel, rows, demand, currentDemand, peakDemand, target, coverage, thresholds,
       advice: { keep: active.length, pause: [], resume: [], add: 0, confidence: 'none', reason },
     };
   }
@@ -185,7 +188,6 @@ export function adviseAccounts(
     add = short - resume.length;
   }
 
-  const weeksNeeded = Math.min(3, weekCount);
   const thinHistory = active.filter((r) => r.peaks.filter((v) => v !== null).length < weeksNeeded).map((r) => r.name);
   const confidence: AdviceConfidence = thinHistory.length === 0 ? 'high' : 'low';
   if (confidence === 'low') {
@@ -204,7 +206,7 @@ export function adviseAccounts(
   }
 
   return {
-    weeks: weeksLabel, rows, demand, currentDemand, peakDemand, target, coverage,
+    weeks: weeksLabel, rows, demand, currentDemand, peakDemand, target, coverage, thresholds,
     advice: { keep: need, pause, resume, add, confidence, reason: parts.join(' ') },
   };
 }
