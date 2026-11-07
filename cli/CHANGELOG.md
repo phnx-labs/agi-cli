@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.49
+
+- **You hear the seat count before the names.** The daemon now notifies you once when the seat count differs from your active accounts at low confidence ("claude: about 5 of 8 accounts cover your usage"), saying when it will name which ones. Before, it stayed silent until every account had 3 weeks of readings. Source: `cli/src/lib/accounting/advise.ts`.
+
 ## 1.23.48
 
 - **`agents accounts usage --json` reports the rules it applied.** A new `thresholds` object carries the target share, the coverage needed before a seat count (`minCoverage`, `minMeasured`), the weeks each account needs before accounts are named (`weeksNeeded`) and the limit percent, so the AGI Menu Accounts tab can show why it recommends what it does. Source: `cli/src/lib/accounting/advise.ts`.
