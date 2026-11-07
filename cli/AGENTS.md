@@ -1248,7 +1248,9 @@ of demand and recommends `ceil(peak ÷ 0.8)` seats. It gives no count (`confiden
 none`) until 75% of active accounts have a reading, since summing a few would undercount
 demand, and names accounts to pause only at high confidence. `agents accounts pause` sets `pausedAt` on the account row, which
 `isRotationEligible` honors, and the headed usage-sync tick sends one owner notification
-when the advice changes (`advise-notify.ts`).
+when the advice changes (`advise-notify.ts`): at low confidence the seat count alone ("about 5 of
+8 accounts cover your usage") when it differs from the active count, at high confidence the
+accounts to pause or resume with the command.
 
 **One exchange per tick — usage-sync (PHNX-3792 session mirror, PHNX-4051 auth
 verdict, PHNX-4116 SSH transport).** The `usage-sync` service refreshes every

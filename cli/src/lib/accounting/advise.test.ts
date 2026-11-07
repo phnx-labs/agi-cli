@@ -207,9 +207,19 @@ describe('accountsAdviceNotification', () => {
     expect(accountsAdviceNotification(result(), note.fingerprint, NOW)).toBeNull();
   });
 
-  it('stays quiet when the advice is low confidence or nothing should change', () => {
+  it('at low confidence tells the owner the seat count once, without naming accounts', () => {
     const partial = fixturePeaks().filter((p) => p.key !== 'claude:org=charlie');
-    expect(accountsAdviceNotification({ harness: 'claude', ...adviseAccounts(accounts(), partial, { now: NOW }) }, null, NOW)).toBeNull();
+    const low = { harness: 'claude', ...adviseAccounts(accounts(), partial, { now: NOW }) };
+    expect(low.advice.confidence).toBe('low');
+    const note = accountsAdviceNotification(low, null, NOW)!;
+    expect(note.title).toBe(`claude: about ${low.advice.keep} of 8 accounts cover your usage`);
+    expect(note.body).toContain('named once each has readings in 3 of the last 4 weeks');
+    expect(note.body).not.toContain('agents accounts pause');
+    expect(accountsAdviceNotification(low, note.fingerprint, NOW)).toBeNull();
+  });
+
+  it('stays quiet without a count, or when nothing should change', () => {
+    expect(accountsAdviceNotification({ harness: 'claude', ...adviseAccounts(accounts(), [], { now: NOW }) }, null, NOW)).toBeNull();
     const two = accounts().slice(0, 2);
     const fit = adviseAccounts(two, fixturePeaks().filter((p) => ['claude:org=alpha', 'claude:org=bravo'].includes(p.key)), { now: NOW });
     expect(fit.advice).toMatchObject({ keep: 2, pause: [], resume: [], add: 0 });
