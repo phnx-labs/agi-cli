@@ -14,7 +14,7 @@ import { artifactKind, deriveImportantMessage, deriveSessionRecap, isReapableOrp
 import { loadSessionPreviewDigest, readCachedPreviewDigest } from '../preview-digest.js';
 import { indexArtifactSidecars, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { listNativeAccounts } from '../../account-registry.js';
-import { getUserAgentsDir, readMeta } from '../../state.js';
+import { readMeta } from '../../state.js';
 import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionAgentSupportsResume } from '../recovery.js';
@@ -122,7 +122,7 @@ function previousRowCard(
     attachments,
     request,
   });
-  const sidecars = indexArtifactSidecars(path.join(getUserAgentsDir(), 'artifacts')).get(session.id) ?? [];
+  const sidecars = indexArtifactSidecars().get(session.id) ?? [];
   const artifacts = mergeArtifacts(digest?.producedArtifacts ?? [], sidecars).map((artifact) => ({ ...artifact, kind: artifactKind(artifact.path) }));
   const todos = digest?.todos ?? session.todos;
   const importantMessage = deriveImportantMessage({ status: 'closed', lastAgentLine: recap.lastAgentLine });

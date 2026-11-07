@@ -274,7 +274,7 @@ export function materializeInlineImages(events: SessionEvent[], sessionId: strin
 }
 
 export function enrichGlanceFiles(rows: ActiveSession[], nowMs = Date.now()): void {
-  const artifacts = indexArtifactSidecars(path.join(getUserAgentsDir(), 'artifacts'), nowMs);
+  const artifacts = indexArtifactSidecars(undefined, nowMs);
   for (const row of rows) {
     if (!row.sessionId) continue;
     row.artifacts = mergeArtifacts(row.artifacts ?? [], artifacts.get(row.sessionId) ?? []);
