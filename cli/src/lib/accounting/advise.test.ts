@@ -85,6 +85,7 @@ describe('adviseAccounts', () => {
     ];
     const result = adviseAccounts(accounts({ alpha: { isDefault: true } }), peaks, { now: NOW });
     expect(result.coverage).toEqual({ measured: 1, total: 8 });
+    expect(result.thresholds).toEqual({ target: 0.8, minCoverage: 0.75, minMeasured: 6, weeksNeeded: 3, limitPercent: 100 });
     expect(result.advice).toMatchObject({ keep: 8, pause: [], resume: [], add: 0, confidence: 'none' });
     expect(result.advice.reason).toContain('Only 1 of 8 active accounts have a weekly reading; a seat count needs 6.');
   });
