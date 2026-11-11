@@ -1,5 +1,7 @@
 
 import { describe, it, expect } from 'vitest';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -220,4 +222,45 @@ describe('withFileLockAsync (non-blocking acquisition)', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }, 20_000);
+});
+
+const fsAtomicModule = fileURLToPath(new URL('./fs-atomic.ts', import.meta.url));
+
+// A child that takes and releases the lock in a tight loop, so the signal lands mid-cycle.
+function lockLeftAfterSignal(target: string, signal: 'SIGTERM' | 'SIGHUP'): Promise<boolean> {
+  const script = `
+    const { withFileLockAsync } = await import(${JSON.stringify(fsAtomicModule)});
+    let first = true;
+    for (;;) {
+      await withFileLockAsync(${JSON.stringify(target)}, () => {}, { staleMs: 600000, realpath: false });
+      if (first) { first = false; process.stdout.write('ready\\n'); }
+      await new Promise((r) => setImmediate(r));
+    }
+  `;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    child.stdout.once('data', () => {
+      setTimeout(() => child.kill(signal), 20 + Math.floor(Math.random() * 60));
+    });
+    child.on('error', reject);
+    child.on('close', () => resolve(fs.existsSync(`${target}.lock`)));
+  });
+}
+
+describe('withFileLockAsync when the holder is signalled', () => {
+  it('leaves no lock behind for SIGTERM or SIGHUP landing mid acquire or release', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-atomic-signal-'));
+    try {
+      const kills = Array.from({ length: 12 }, (_, i) => {
+        const target = path.join(dir, `target-${i}`);
+        ensureLockTarget(target);
+        return lockLeftAfterSignal(target, i % 2 === 0 ? 'SIGTERM' : 'SIGHUP');
+      });
+      expect((await Promise.all(kills)).filter(Boolean)).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
