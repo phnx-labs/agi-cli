@@ -226,7 +226,6 @@ describe('withFileLockAsync (non-blocking acquisition)', () => {
 
 const fsAtomicModule = fileURLToPath(new URL('./fs-atomic.ts', import.meta.url));
 
-// A child that takes and releases the lock in a tight loop, so the signal lands mid-cycle.
 function lockLeftAfterSignal(target: string, signal: 'SIGTERM' | 'SIGHUP'): Promise<boolean> {
   const script = `
     const { withFileLockAsync } = await import(${JSON.stringify(fsAtomicModule)});

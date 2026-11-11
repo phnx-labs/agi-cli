@@ -56,9 +56,6 @@ export interface FileLockOptions {
   realpath?: boolean;
 }
 
-// Always the sync API: proper-lockfile's async lock() registers its exit cleanup only after mkdir and
-// two more fs callbacks, and unlock() drops it before the rmdir, so a SIGTERM or SIGHUP in either gap
-// left the lock directory behind for every later caller until it went stale.
 function lockOnce(filePath: string, staleMs: number, realpath: boolean, onCompromised: (err: Error) => void): () => void {
   try {
     return lockfile.lockSync(filePath, { stale: staleMs, realpath, onCompromised });
