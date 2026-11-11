@@ -56,6 +56,22 @@ export interface FileLockOptions {
   realpath?: boolean;
 }
 
+function lockOnce(filePath: string, staleMs: number, realpath: boolean, onCompromised: (err: Error) => void): () => void {
+  try {
+    return lockfile.lockSync(filePath, { stale: staleMs, realpath, onCompromised });
+  } catch (err) {
+    if (err instanceof Error && (err as any).code === 'ENOTDIR') {
+      try {
+        const base = realpath ? fs.realpathSync(filePath) : filePath;
+        const lockPath = `${base}.lock`;
+        const st = fs.statSync(lockPath);
+        if (st.isFile()) fs.unlinkSync(lockPath);
+      } catch {  }
+    }
+    throw err;
+  }
+}
+
 export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) => T, opts: FileLockOptions = {}): T {
   let release: (() => void) | null = null;
   let lastError: unknown;
@@ -65,22 +81,10 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
   const deadline = Date.now() + acquireTimeoutMs;
   for (let attempt = 0; ; attempt++) {
     try {
-      release = lockfile.lockSync(filePath, {
-        stale: staleMs,
-        realpath: opts.realpath ?? true,
-        onCompromised: (err: Error) => { compromised = err; },
-      });
+      release = lockOnce(filePath, staleMs, opts.realpath ?? true, (err) => { compromised = err; });
       break;
     } catch (err) {
       lastError = err;
-      if (err instanceof Error && (err as any).code === 'ENOTDIR') {
-        try {
-          const base = (opts.realpath ?? true) ? fs.realpathSync(filePath) : filePath;
-          const lockPath = `${base}.lock`;
-          const st = fs.statSync(lockPath);
-          if (st.isFile()) fs.unlinkSync(lockPath);
-        } catch {  }
-      }
       if (Date.now() >= deadline) break;
       const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
       sleepSync(Math.min(backoff, Math.max(0, deadline - Date.now())));
@@ -112,7 +116,7 @@ export function withFileLock<T>(filePath: string, fn: (heartbeat: () => void) =>
 }
 
 export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () => void) => Promise<T> | T, opts: FileLockOptions = {}): Promise<T> {
-  let release: (() => Promise<void>) | null = null;
+  let release: (() => void) | null = null;
   let lastError: unknown;
   let compromised: Error | null = null;
   const staleMs = opts.staleMs ?? LOCK_STALE_MS;
@@ -120,22 +124,10 @@ export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () 
   const deadline = Date.now() + acquireTimeoutMs;
   for (let attempt = 0; ; attempt++) {
     try {
-      release = await lockfile.lock(filePath, {
-        stale: staleMs,
-        realpath: opts.realpath ?? true,
-        onCompromised: (err: Error) => { compromised = err; },
-      });
+      release = lockOnce(filePath, staleMs, opts.realpath ?? true, (err) => { compromised = err; });
       break;
     } catch (err) {
       lastError = err;
-      if (err instanceof Error && (err as any).code === 'ENOTDIR') {
-        try {
-          const base = (opts.realpath ?? true) ? fs.realpathSync(filePath) : filePath;
-          const lockPath = `${base}.lock`;
-          const st = fs.statSync(lockPath);
-          if (st.isFile()) fs.unlinkSync(lockPath);
-        } catch {  }
-      }
       if (Date.now() >= deadline) break;
       const backoff = Math.min(LOCK_RETRY_MIN_MS * (attempt + 1), LOCK_RETRY_MAX_MS);
       await new Promise((r) => setTimeout(r, Math.min(backoff, Math.max(0, deadline - Date.now()))));
@@ -161,6 +153,6 @@ export async function withFileLockAsync<T>(filePath: string, fn: (heartbeat: () 
     }
     return result;
   } finally {
-    try { await release(); } catch {  }
+    try { release(); } catch {  }
   }
 }
