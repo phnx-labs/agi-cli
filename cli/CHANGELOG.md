@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.50
+
+- **A launch killed in its first second no longer locks the harness for ten minutes (PHNX-4610).** `withFileLockAsync` took its lock through proper-lockfile's async `lock()`, which registers the exit cleanup only after `mkdir` and two more fs callbacks, and its async `unlock()` drops that registration before the `rmdir`. A SIGTERM or SIGHUP landing in either gap left `<target>.lock` behind, and every later caller read it as held until it went stale. For the installation lock that is ten minutes, longer than the three minutes `agents __launch-lease` waits, so the next launch of that harness failed with `Could not acquire lock … Lock file is already being held` and `could not safely coordinate this launch with a possibly in-progress update`. Rush Cloud hit it when Stop landed during the shim's launch: the follow-up waited six minutes and failed. The async variant now takes and releases the lock through the same sync API `withFileLock` uses, so registration and removal never straddle an event-loop turn; the retry wait between attempts stays asynchronous. Measured with 12 children cycling the lock and killed mid-cycle: 8 of 12 left the lock before, 0 of 12 after. A SIGKILL still leaves it, as before. Source: `cli/src/lib/fs-atomic.ts`, `cli/src/lib/fs-atomic.test.ts`.
+
 ## 1.23.49
 
 - **You hear the seat count before the names.** The daemon now notifies you once when the seat count differs from your active accounts at low confidence ("claude: about 5 of 8 accounts cover your usage"), saying when it will name which ones. Before, it stayed silent until every account had 3 weeks of readings. Source: `cli/src/lib/accounting/advise.ts`.
