@@ -1,2 +1,7 @@
 set -gx EDITOR nvim
-alias secrets 'agents secrets'
+function secrets
+    if test -n "$argv"
+        echo secrets
+    end
+    agents secrets $argv
+end
