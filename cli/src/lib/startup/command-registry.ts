@@ -1,3 +1,7 @@
+import * as os from 'os';
+import { findExecutable } from '../platform/exec.js';
+import { findShadowingDefinition, shadowFixCommand } from './shadowing-alias.js';
+
 const LOADED_COMMAND_NAMES = [
   'accounts', 'auth', 'view', 'inspect', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use',
@@ -111,7 +115,25 @@ export function removedToolGroupMessage(group: string, rest: readonly string[]):
       ? `error: 'agents sessions --roots' was removed; use 'agents daemon index roots'.`
       : `error: 'agents sessions --active' was removed; use 'agents ps'.`;
   }
-  return `error: 'agents ${group}' was removed; use the standalone '${group}' CLI (${group} --help).`;
+  return standaloneGroupMessage(group);
+}
+
+const STANDALONE_CHECK_VERB: Readonly<Record<string, string>> = { browser: 'doctor' };
+
+// A bare `browser` aliased to `agents browser` lands here, and `browser --help` loops
+// straight back, so name the alias and the real binary by absolute path (PHNX-4641).
+function standaloneGroupMessage(group: string): string {
+  const binary = findExecutable(group);
+  const next = binary ? `(${binary} ${STANDALONE_CHECK_VERB[group] ?? '--help'})` : `(none is on PATH)`;
+  const shadow = findShadowingDefinition(group, os.homedir());
+  const fix = shadow
+    ? `~/${shadow.file}:${shadow.line} defines it: delete that ${shadow.kind === 'alias' ? 'line' : 'function'}, then run '${shadowFixCommand(group, shadow)}'.`
+    : `Remove it from your shell rc file, then run 'unalias ${group}' (or 'unset -f ${group}' for a function).`;
+  return [
+    `error: 'agents ${group}' was removed; use the standalone '${group}' CLI ${next}.`,
+    `If you typed '${group}', a shell alias or function sends it here; 'type ${group}' shows it.`,
+    fix,
+  ].join('\n');
 }
 
 export function isKnownTopLevelCommand(name: string): boolean {
