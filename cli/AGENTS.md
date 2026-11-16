@@ -58,9 +58,12 @@ extractions. The standalone `sessions share <id>` publishes a transcript the sam
 way.
 
 `agents browser`, `agents computer`, `agents secrets` and `agents sessions` were
-removed (PHNX-4227) with no alias or forwarder: each exits 1 with one line naming
-the standalone CLI, or the agents home of a moved `sessions` verb
-(`removedToolGroupMessage`, [`src/lib/startup/command-registry.ts`](src/lib/startup/command-registry.ts)).
+removed (PHNX-4227) with no alias or forwarder: each exits 1 naming the standalone
+CLI by its absolute path on PATH, or the agents home of a moved `sessions` verb in one
+line (`removedToolGroupMessage`, [`src/lib/startup/command-registry.ts`](src/lib/startup/command-registry.ts)).
+A shell alias such as `alias browser="agents browser"` routes the bare name back here,
+so the message also names the rc file and line that defines it when a read-only scan
+finds one (`findShadowingDefinition`, [`src/lib/startup/shadowing-alias.ts`](src/lib/startup/shadowing-alias.ts), PHNX-4641).
 The agents-owned verbs moved: live roster and lifecycle to `agents ps`
 (`stop`/`focus`/`detach`/`migrate`/`preview`/`watch`), resume to `agents run auto
 --resume <id>`, inject to `agents send --channel session`, fork to `agents fork`,
