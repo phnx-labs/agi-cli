@@ -255,6 +255,7 @@ export interface TitleBackfillEnvelope {
   generated: number;
   grouped: number;
   failed: number;
+  errors: string[];
   titles: Array<{ id: string; title: string; workstream?: string }>;
 }
 
@@ -422,7 +423,7 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
         for (const { id, title, workstream } of envelope.titles) console.log(`  ${chalk.cyan(id.slice(0, 8))}  ${title}${workstream ? chalk.gray(`  · ${workstream}`) : ''}`);
         if (envelope.grouped > 0) console.log(`${envelope.grouped.toLocaleString()} session${envelope.grouped === 1 ? '' : 's'} got a workstream.`);
         if (envelope.failed > 0) {
-          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} session${envelope.failed === 1 ? '' : 's'} got no usable title or workstream; rerun to retry.`));
+          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} session${envelope.failed === 1 ? '' : 's'} got no usable title or workstream${envelope.errors.length ? ` (${envelope.errors.join('; ')})` : ''}; rerun to retry.`));
         }
       }
     } catch (error) {

@@ -53,14 +53,20 @@ export interface SessionTitleBatchItem {
   currentTitle?: string;
 }
 
+/** One line, bounded: every field the batch prompt quotes, so none can open a new `[n]` block. */
+function promptLine(raw: string | null | undefined, max: number): string {
+  return (raw ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
 export function renderSessionTitleBatchPrompt(items: SessionTitleBatchItem[], workstreams: string[]): string {
-  const sessions = items.flatMap(({ ref, input, currentTitle }) => {
+  const sessions = items.flatMap(({ ref, input, currentTitle: named }) => {
     const text = sessionTitleSourceText(input).slice(0, SESSION_TITLE_BATCH_INPUT_MAX_CHARS);
     const context = [
-      input.project ? `repository ${input.project}` : null,
-      input.ticketId ? `ticket ${input.ticketId}` : null,
-      input.gitBranch ? `branch ${input.gitBranch}` : null,
+      input.project ? `repository ${promptLine(input.project, 80)}` : null,
+      input.ticketId ? `ticket ${promptLine(input.ticketId, 80)}` : null,
+      input.gitBranch ? `branch ${promptLine(input.gitBranch, 80)}` : null,
     ].filter(Boolean).join(', ');
+    const currentTitle = promptLine(named, 120);
     return [
       `[${ref}]${context ? ` (${context})` : ''}`,
       ...(currentTitle ? [`Current title: ${currentTitle}`] : []),
@@ -76,7 +82,7 @@ export function renderSessionTitleBatchPrompt(items: SessionTitleBatchItem[], wo
     'workstream: 1 to 3 words naming the larger effort the session belongs to, the same name for',
     'every session about that effort, e.g. "Rush Mac", "Ahrefs SEO", "Fundraising".',
     workstreams.length
-      ? `Reuse one of these existing workstreams whenever it fits; coin a new one only when none does: ${workstreams.join(' | ')}`
+      ? `Reuse one of these existing workstreams whenever it fits; coin a new one only when none does: ${workstreams.map((w) => promptLine(w, SESSION_WORKSTREAM_MAX_CHARS)).join(' | ')}`
       : 'Name workstreams so that related sessions share one.',
     'Respond IMMEDIATELY with only a JSON array, one object per session, in this exact shape:',
     '[{"ref": "1", "title": "...", "workstream": "..."}]',
@@ -313,6 +319,8 @@ export interface SessionTitleTickResult {
   /** Sessions that got a workstream this tick (with or without a new title). */
   grouped: number;
   failed: number;
+  /** Why a model call failed (missing harness, timeout, …), each once, so the service can say it. */
+  errors: string[];
   titles: Array<{ id: string; title: string; workstream?: string }>;
 }
 
@@ -351,7 +359,7 @@ export async function runSessionTitleTick(
   const limit = options.limit ?? SESSION_TITLE_MAX_PER_TICK;
   const now = options.nowMs ?? Date.now();
   const maxAgeMs = options.maxAgeMs ?? SESSION_TITLE_MAX_AGE_MS;
-  const result: SessionTitleTickResult = { scanned: 0, cached: 0, generated: 0, grouped: 0, failed: 0, titles: [] };
+  const result: SessionTitleTickResult = { scanned: 0, cached: 0, generated: 0, grouped: 0, failed: 0, errors: [], titles: [] };
   const { querySessionTitleCandidates, setSessionGeneratedTitle, setSessionWorkstream, listRecentWorkstreams } = await import('./db.js');
   const rows = querySessionTitleCandidates(
     options.id ? 1 : SESSION_TITLE_CANDIDATE_SCAN,
@@ -371,22 +379,18 @@ export async function runSessionTitleTick(
 
   const provider = options.provider ?? new CloudSessionTitleProvider(options.run);
   const known = listRecentWorkstreams(now - maxAgeMs, SESSION_WORKSTREAMS_OFFERED);
-  for (let i = 0; i < pending.length; i += SESSION_TITLE_BATCH_SIZE) {
-    if (options.signal?.aborted) break;
-    const batch = pending.slice(i, i + SESSION_TITLE_BATCH_SIZE);
-    const items: SessionTitleBatchItem[] = batch.map(({ row, needsTitle }, n) => ({
-      ref: String(n + 1),
-      input: row,
-      ...(needsTitle ? {} : { currentTitle: (row.label?.trim() || row.generatedTitle) ?? undefined }),
-    }));
-    let reply = new Map<string, { title?: string; workstream?: string }>();
-    try {
-      reply = parseSessionTitleBatch(await provider.generateBatch(items, known, options.signal));
-    } catch {
-    }
+  // A name that differs from a known one only in case is that name, so "rush mac" never splits a group.
+  const canonical = (name: string | undefined): string | undefined => {
+    if (!name) return undefined;
+    const hit = known.find((k) => k.toLowerCase() === name.toLowerCase());
+    if (hit) return hit;
+    known.push(name);
+    return name;
+  };
+  const apply = (batch: PendingSessionTitle[], reply: Map<string, { title?: string; workstream?: string }>) => {
     batch.forEach(({ row, sourceKey, needsTitle }, n) => {
       const answer = reply.get(String(n + 1));
-      const workstream = answer?.workstream;
+      const workstream = canonical(answer?.workstream);
       if (needsTitle) {
         const title = answer?.title;
         if (!title) {
@@ -405,9 +409,39 @@ export async function runSessionTitleTick(
         return;
       }
       if (setSessionWorkstream(row.id, workstream)) result.grouped++;
-      if (!known.includes(workstream)) known.push(workstream);
     });
-    for (const t of result.titles) if (t.workstream && !known.includes(t.workstream)) known.push(t.workstream);
+  };
+  // One call per batch. A reply that is not the JSON array (one session's request can pull the
+  // model into prose) is retried in halves, so one bad session never holds the rest of the queue.
+  const run = async (batch: PendingSessionTitle[]): Promise<void> => {
+    if (options.signal?.aborted) return;
+    const items: SessionTitleBatchItem[] = batch.map(({ row, needsTitle }, n) => ({
+      ref: String(n + 1),
+      input: row,
+      ...(needsTitle ? {} : { currentTitle: (row.label?.trim() || row.generatedTitle) ?? undefined }),
+    }));
+    let raw: string;
+    try {
+      raw = await provider.generateBatch(items, known, options.signal);
+    } catch (error) {
+      if (options.signal?.aborted) return;
+      const message = error instanceof Error ? error.message.split('\n')[0] : String(error);
+      if (!result.errors.includes(message)) result.errors.push(message);
+      result.failed += batch.length;
+      return;
+    }
+    const reply = parseSessionTitleBatch(raw);
+    if (reply.size === 0 && batch.length > 1) {
+      const half = Math.ceil(batch.length / 2);
+      await run(batch.slice(0, half));
+      await run(batch.slice(half));
+      return;
+    }
+    apply(batch, reply);
+  };
+  for (let i = 0; i < pending.length; i += SESSION_TITLE_BATCH_SIZE) {
+    if (options.signal?.aborted) break;
+    await run(pending.slice(i, i + SESSION_TITLE_BATCH_SIZE));
   }
   return result;
 }
