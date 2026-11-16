@@ -132,9 +132,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   generated_title TEXT,
   generated_title_key TEXT,
   generated_title_at INTEGER,
-  -- What the session is about across sessions (a short topic shared by related
-  -- sessions, e.g. "Rush Mac"), written by the same titler in the same batched call
-  -- so a client can group sessions by it. Keyed by generated_title_key like the title.
   workstream TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
@@ -3447,7 +3444,6 @@ export function querySessionTitleCandidates(
     clauses.push(`(id = ? OR short_id = ?)`);
     params.push(opts.id, opts.id);
   } else {
-    // A renamed session keeps its name but still needs a workstream to be grouped.
     clauses.push(`((label IS NULL OR trim(label) = '') OR workstream IS NULL)`);
     if (opts.sinceMs != null) {
       clauses.push(`COALESCE(last_activity, timestamp) >= ?`);
@@ -3508,8 +3504,6 @@ export function getSessionWorkstream(id: string): string | undefined {
   return row?.workstream ?? undefined;
 }
 
-/** The workstream names this box's recent sessions already carry, most used first,
- *  so the titler reuses a name instead of coining a near-duplicate. */
 export function listRecentWorkstreams(sinceMs: number, limit: number): string[] {
   const rows = getDB().prepare(`
     SELECT workstream, COUNT(*) AS n FROM sessions
