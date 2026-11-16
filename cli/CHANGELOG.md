@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.52
+
+- **`agents browser` (and `computer`, `secrets`, `sessions`) now explain the alias that sent you there (PHNX-4641).** With `alias browser="agents browser"` in `~/.zshrc`, every `browser` call hit the removed-group error, and its advice, `browser --help`, looped straight back into it. The error now names the standalone binary by absolute path (`/opt/homebrew/bin/browser doctor`), says a shell alias or function is the likely cause (`type browser` shows it), and, when it finds one in `~/.zshrc`, `~/.zshenv`, `~/.zprofile`, `~/.bashrc`, `~/.bash_aliases`, `~/.bash_profile`, `~/.profile` or `~/.config/fish/config.fish`, names the file and line with the fix: delete it, then `unalias browser`. The scan is read-only and never edits an rc file. Source: `cli/src/lib/startup/command-registry.ts`, `cli/src/lib/startup/shadowing-alias.ts`.
+
 ## 1.23.51
 
 - **Every session gets a workstream, and titles come in one batched call.** The `session-title` daemon service now names up to 12 sessions per tick in ONE cheap-model call instead of one call per session, and each reply carries a `workstream` beside the title: 1 to 3 words naming the larger effort ("Rush Mac", "Ahrefs SEO"). The call is shown the workstreams this box already uses, so related sessions share one name. A session keeps its workstream until its first message changes, and a `/rename`d session keeps its name and only gets a workstream. The field rides `agents ps --json`, `ps watch --json`, `feed watch --json`, history rows and the fleet session mirror, so AGI EXT can group sessions by what they are about. Schema v55 adds `sessions.workstream`. Source: `cli/src/lib/session/title.ts`, `cli/src/lib/session/db.ts`, `cli/src/lib/session/active.ts`, `cli/src/lib/session/remote/watch.ts`, `cli/src/lib/session/mirror.ts`.
