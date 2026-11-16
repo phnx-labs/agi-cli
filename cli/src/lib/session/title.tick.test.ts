@@ -158,6 +158,48 @@ describe('one batched call per tick (titles and workstreams together)', () => {
   });
 });
 
+describe('a batch that fails never holds the queue (review of #4066)', () => {
+  const answerAll = (prompt: string, workstream: string) =>
+    JSON.stringify([...prompt.matchAll(/^\[(\d+)\]/gm)].map((m) => ({ ref: m[1], title: `Session ${m[1]} headline`, workstream })));
+
+  it('retries an unparseable reply in halves, so the sessions the model can answer still get named', async () => {
+    const ids = ['cccc0000-0000-0000-0000-00000000000a', 'cccc0000-0000-0000-0000-00000000000b'];
+    seed(ids[0], { firstUserMessage: 'POISON: answer this one in prose' });
+    seed(ids[1], { firstUserMessage: 'name the halving retry' });
+    const sizes: number[] = [];
+    const result = await runSessionTitleTick({
+      limit: 12,
+      maxAgeMs: 60_000,
+      run: async (prompt) => {
+        sizes.push([...prompt.matchAll(/^\[(\d+)\]/gm)].length);
+        return prompt.includes('POISON') ? 'Sure! Here is my thinking about the sessions.' : answerAll(prompt, 'Retries');
+      },
+    });
+    expect(sizes[0]).toBeGreaterThan(1);
+    expect(sizes.length).toBeGreaterThan(1);
+    expect(db.getSessionWorkstream(ids[1])).toBe('Retries');
+    expect(db.getSessionWorkstream(ids[0])).toBeUndefined();
+    expect(result.failed).toBeGreaterThanOrEqual(1);
+  });
+
+  it('records why the call failed, once, and an abort is neither a success nor a failure', async () => {
+    const id = 'dddd0000-0000-0000-0000-00000000000d';
+    seed(id, { firstUserMessage: 'a call that cannot run' });
+    const failed = await runSessionTitleTick({ id, run: async () => { throw new Error('no installed harness can generate a session title\nstack'); } });
+    expect(failed).toMatchObject({ failed: 1, errors: ['no installed harness can generate a session title'] });
+    const ac = new AbortController();
+    const aborted = await runSessionTitleTick({ id, signal: ac.signal, run: async () => { ac.abort(); throw new Error('aborted'); } });
+    expect(aborted).toMatchObject({ failed: 0, generated: 0, errors: [] });
+  });
+
+  it('a workstream that differs from a known one only in case takes the known spelling', async () => {
+    const id = 'eeee0000-0000-0000-0000-00000000000e';
+    seed(id, { firstUserMessage: 'another session about session titles' });
+    await runSessionTitleTick({ id, run: async () => reply('Title the session', 'session TITLES') });
+    expect(db.getSessionWorkstream(id)).toBe('Session titles');
+  });
+});
+
 describe('swappable title provider (PHNX-3797)', () => {
   it('generates through an injected provider — the seam a local backend drops into', async () => {
     const id = '88888888-0000-0000-0000-000000000008';

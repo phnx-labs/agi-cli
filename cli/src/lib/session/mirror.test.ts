@@ -101,12 +101,13 @@ describe('session mirror (real DB + real shared-state files)', () => {
     const root = getUserAgentsDir();
     const id = 'a1a1a1a1-0000-0000-0000-000000000011';
     seedLocalSession({ id, topic: 'wire the session titler' });
-    db.setSessionGeneratedTitle(id, 'Daemon session titler', 'key-1');
+    db.setSessionGeneratedTitle(id, 'Daemon session titler', 'key-1', Date.now(), 'Session titles');
 
     await mirror.publishSessionMirrorToSharedStore({ userAgentsDir: root });
     const published = readFleetSharedDeviceStates(root).states
       .find((s) => s.device === self)!.sessions!.rows.find((r) => r.id === id)!;
     expect(published.title).toBe('Daemon session titler');
+    expect(published.workstream).toBe('Session titles');
 
     const peerId = 'b2b2b2b2-0000-0000-0000-000000000012';
     updateFleetSharedDeviceState('yosemite-m3', {
@@ -118,6 +119,7 @@ describe('session mirror (real DB + real shared-state files)', () => {
           machine: 'yosemite-m3',
           topic: 'the fleet list headline is the agent last message',
           title: 'Session headline ladder fix',
+          workstream: 'Session titles',
           firstUser: 'Every row shows the agent latest message. Make it a real title.',
           lastActivity: '2026-09-01T13:00:00.000Z',
           timestamp: '2026-09-01T12:00:00.000Z',
@@ -128,6 +130,8 @@ describe('session mirror (real DB + real shared-state files)', () => {
     mirror.consumeSessionMirrorFromSharedStore({ userAgentsDir: root, device: self, role: 'personal' });
     expect(rawRow(peerId).generated_title).toBe('Session headline ladder fix');
     expect(db.getSessionById(peerId)?.generatedTitle).toBe('Session headline ladder fix');
+    expect(rawRow(peerId).workstream).toBe('Session titles');
+    expect(db.getSessionWorkstream(peerId)).toBe('Session titles');
   });
 
   it('OVERWRITES a host-dispatch stub\'s [host/peer] placeholder label with the synced topic', () => {

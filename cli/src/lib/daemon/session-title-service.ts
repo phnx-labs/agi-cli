@@ -46,7 +46,7 @@ export class SessionTitleService extends BasePeriodicService {
       this.skipTicks = this.backoff;
       ctx.log(
         'WARN',
-        `session-title: ${result.failed} session(s) got no title or workstream; backing off ${this.backoff} tick(s)`,
+        `session-title: ${result.failed} session(s) got no title or workstream${result.errors.length ? ` (${result.errors.join('; ')})` : ''}; backing off ${this.backoff} tick(s)`,
       );
     }
   }

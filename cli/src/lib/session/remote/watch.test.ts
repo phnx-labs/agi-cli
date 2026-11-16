@@ -105,6 +105,14 @@ describe('durable Previous rows on the canonical watch stream', () => {
     expect(projected.lastActivityMs - projected.startedAtMs!).toBe(120_000);
   });
 
+  it('carries the titler\'s workstream on a history row, read from the index', async () => {
+    const { upsertSession, setSessionGeneratedTitle } = await import('../db.js');
+    upsertSession({ ...indexed('history-ws', { firstUserMessage: 'verify the Rush Mac TextEdit test' }), filePath: '' } as SessionMeta, '');
+    expect(setSessionGeneratedTitle('history-ws', 'Verify the Rush Mac TextEdit test', 'k', Date.now(), 'Rush Mac')).toBe(true);
+    expect(toPreviousSessionWatchRow('zion', indexed('history-ws')).workstream).toBe('Rush Mac');
+    expect('workstream' in toPreviousSessionWatchRow('zion', indexed('history-no-ws'))).toBe(false);
+  });
+
   it('headlines a history row on the same ladder as a live row (PHNX-3797)', () => {
     const generated = toPreviousSessionWatchRow('zion', indexed('history-2', {
       topic: 'the sessions list headline is wrong, fix it',

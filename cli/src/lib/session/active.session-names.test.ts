@@ -100,6 +100,19 @@ describe('applySessionNames — one label for every live row (PHNX-4387)', () =>
   });
 });
 
+describe('applySessionNames — the titler\'s workstream rides the live row', () => {
+  it('reads the stored workstream onto the row, and leaves a row with none without the field', async () => {
+    const { setSessionGeneratedTitle } = await import('./db.js');
+    upsertSession({ id: 'ws-live-a', shortId: 'ws-live-a', agent: 'claude', timestamp: new Date().toISOString(), filePath: '', firstUserMessage: 'post the PR 83 review' }, '');
+    upsertSession({ id: 'ws-live-b', shortId: 'ws-live-b', agent: 'claude', timestamp: new Date().toISOString(), filePath: '', firstUserMessage: 'something else' }, '');
+    expect(setSessionGeneratedTitle('ws-live-a', 'Post the PR 83 review', 'k', Date.now(), 'Rush Mac')).toBe(true);
+    const rows = [row('ws-live-a'), row('ws-live-b')];
+    applySessionNames(rows);
+    expect(rows[0].workstream).toBe('Rush Mac');
+    expect('workstream' in rows[1]).toBe(false);
+  });
+});
+
 describe("applySessionNames — Claude's latest recap rides the live row", () => {
   const RECAP_FIXTURE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'testdata', 'session-names', 'claude-recap.jsonl');
   const id = '5e55a000-0000-4000-8000-00000000ec01';
