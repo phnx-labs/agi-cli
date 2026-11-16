@@ -31,7 +31,7 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-export const SCHEMA_VERSION = 54;
+export const SCHEMA_VERSION = 55;
 
 export const CONTENT_INDEX_VERSION = 8;
 
@@ -131,7 +131,11 @@ CREATE TABLE IF NOT EXISTS sessions (
   -- is when it was produced.
   generated_title TEXT,
   generated_title_key TEXT,
-  generated_title_at INTEGER
+  generated_title_at INTEGER,
+  -- What the session is about across sessions (a short topic shared by related
+  -- sessions, e.g. "Rush Mac"), written by the same titler in the same batched call
+  -- so a client can group sessions by it. Keyed by generated_title_key like the title.
+  workstream TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -560,6 +564,7 @@ interface SessionRow {
   generated_title?: string | null;
   generated_title_key?: string | null;
   generated_title_at?: number | null;
+  workstream?: string | null;
 }
 
 export interface ScanStamp {
@@ -1176,6 +1181,11 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   }
 
   if (fromVersion < 54) reparseSessionsWithPr(db);
+
+  if (fromVersion < 55) {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'workstream')) db.exec(`ALTER TABLE sessions ADD COLUMN workstream TEXT`);
+  }
 }
 
 function reparseSessionsWithPr(db: Database.Database): void {
@@ -2311,6 +2321,7 @@ export interface IndexedSessionNames {
   recap?: SessionRecap;
   touchedPrs?: TouchedPr[];
   touchedTickets?: TouchedTicket[];
+  workstream?: string;
 }
 
 function nonEmptyJsonArray<T>(raw: string | null): T[] | undefined {
@@ -2330,10 +2341,10 @@ export function getIndexedSessionNames(
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
     const indexed = db
-      .prepare(`SELECT id, label, file_path FROM sessions WHERE id IN (${chunk.map(() => '?').join(',')})`)
-      .all(...chunk) as Array<{ id: string; label: string | null; file_path: string | null }>;
+      .prepare(`SELECT id, label, file_path, workstream FROM sessions WHERE id IN (${chunk.map(() => '?').join(',')})`)
+      .all(...chunk) as Array<{ id: string; label: string | null; file_path: string | null; workstream: string | null }>;
     for (const row of indexed) {
-      out.set(row.id, { label: row.label ?? undefined });
+      out.set(row.id, { label: row.label ?? undefined, ...(row.workstream ? { workstream: row.workstream } : {}) });
       filePathById.set(row.id, filePathById.get(row.id) ?? row.file_path ?? undefined);
     }
   }
@@ -3270,6 +3281,7 @@ export interface LocalMirrorSource {
   firstUserMessage: string | null;
   label: string | null;
   generatedTitle: string | null;
+  workstream: string | null;
   lastActivity: string | null;
   timestamp: string;
   ticketId: string | null;
@@ -3281,7 +3293,7 @@ export interface LocalMirrorSource {
 export function queryLocalOriginSessionsForMirror(self: string, limit: number): LocalMirrorSource[] {
   const rows = getDB().prepare(`
     SELECT id, short_id, agent, version, machine, cwd, topic, first_user_message,
-           label, generated_title, last_activity, timestamp, ticket_id, pr_url
+           label, generated_title, workstream, last_activity, timestamp, ticket_id, pr_url
     FROM sessions
     WHERE mirror_synced_at IS NULL
       AND file_path IS NOT NULL AND file_path <> ''
@@ -3293,13 +3305,13 @@ export function queryLocalOriginSessionsForMirror(self: string, limit: number): 
   `).all(self, limit) as Array<{
     id: string; short_id: string; agent: string; version: string | null; machine: string | null;
     cwd: string | null; topic: string | null; first_user_message: string | null; label: string | null;
-    generated_title: string | null;
+    generated_title: string | null; workstream: string | null;
     last_activity: string | null; timestamp: string; ticket_id: string | null; pr_url: string | null;
   }>;
   return rows.map((r) => ({
     id: r.id, shortId: r.short_id, agent: r.agent, version: r.version, machine: r.machine,
     cwd: r.cwd, topic: r.topic, firstUserMessage: r.first_user_message, label: r.label,
-    generatedTitle: r.generated_title,
+    generatedTitle: r.generated_title, workstream: r.workstream,
     lastActivity: r.last_activity, timestamp: r.timestamp, ticketId: r.ticket_id, prUrl: r.pr_url,
     summary: readSessionSummaryAny(r.id) ?? null,
     timeline: readSessionTimelineAny(r.id) ?? null,
@@ -3317,6 +3329,7 @@ export interface MirrorSessionUpsert {
   firstUser?: string | null;
   label?: string | null;
   generatedTitle?: string | null;
+  workstream?: string | null;
   lastActivity?: string | null;
   timestamp: string;
   ticketId?: string | null;
@@ -3331,11 +3344,11 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
   const result = db.prepare(`
     INSERT INTO sessions (
       id, short_id, agent, origin, version, timestamp, last_activity, cwd,
-      topic, first_user_message, label, generated_title, message_count, file_path, scanned_at,
+      topic, first_user_message, label, generated_title, workstream, message_count, file_path, scanned_at,
       is_team_origin, ticket_id, pr_url, machine, mirror_synced_at, mirror_source
     ) VALUES (
       @id, @short_id, @agent, 'cli', @version, @timestamp, @last_activity, @cwd,
-      @topic, @first_user, @label, @generated_title, NULL, '', @scanned_at,
+      @topic, @first_user, @label, @generated_title, @workstream, NULL, '', @scanned_at,
       0, @ticket_id, @pr_url, @machine, @synced_at, @source
     )
     ON CONFLICT(id) DO UPDATE SET
@@ -3359,6 +3372,7 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
       -- session yet clears it (the ladder then falls back to the synced first
       -- user message, never to an agent line).
       generated_title = excluded.generated_title,
+      workstream = excluded.workstream,
       ticket_id = COALESCE(excluded.ticket_id, sessions.ticket_id),
       pr_url = COALESCE(excluded.pr_url, sessions.pr_url),
       machine = excluded.machine,
@@ -3377,6 +3391,7 @@ export function upsertMirrorSession(row: MirrorSessionUpsert, source: string, sy
     first_user: row.firstUser ?? null,
     label: row.label ?? null,
     generated_title: row.generatedTitle ?? null,
+    workstream: row.workstream ?? null,
     ticket_id: row.ticketId ?? null,
     pr_url: row.prUrl ?? null,
     machine: row.machine,
@@ -3416,6 +3431,7 @@ export interface SessionTitleCandidateRow {
   gitBranch: string | null;
   generatedTitle: string | null;
   generatedTitleKey: string | null;
+  workstream: string | null;
 }
 
 export function querySessionTitleCandidates(
@@ -3431,7 +3447,8 @@ export function querySessionTitleCandidates(
     clauses.push(`(id = ? OR short_id = ?)`);
     params.push(opts.id, opts.id);
   } else {
-    clauses.push(`(label IS NULL OR trim(label) = '')`);
+    // A renamed session keeps its name but still needs a workstream to be grouped.
+    clauses.push(`((label IS NULL OR trim(label) = '') OR workstream IS NULL)`);
     if (opts.sinceMs != null) {
       clauses.push(`COALESCE(last_activity, timestamp) >= ?`);
       params.push(new Date(opts.sinceMs).toISOString());
@@ -3439,7 +3456,7 @@ export function querySessionTitleCandidates(
   }
   const rows = getDB().prepare(`
     SELECT id, agent, cwd, project, topic, first_user_message, label, ticket_id,
-           git_branch, generated_title, generated_title_key
+           git_branch, generated_title, generated_title_key, workstream
     FROM sessions
     WHERE ${clauses.join(' AND ')}
     ORDER BY COALESCE(last_activity, timestamp) DESC
@@ -3448,7 +3465,7 @@ export function querySessionTitleCandidates(
     id: string; agent: string; cwd: string | null; project: string | null;
     topic: string | null; first_user_message: string | null; label: string | null;
     ticket_id: string | null; git_branch: string | null;
-    generated_title: string | null; generated_title_key: string | null;
+    generated_title: string | null; generated_title_key: string | null; workstream: string | null;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -3462,6 +3479,7 @@ export function querySessionTitleCandidates(
     gitBranch: r.git_branch,
     generatedTitle: r.generated_title,
     generatedTitleKey: r.generated_title_key,
+    workstream: r.workstream,
   }));
 }
 
@@ -3470,13 +3488,37 @@ export function setSessionGeneratedTitle(
   title: string,
   sourceKey: string,
   now: number = Date.now(),
+  workstream?: string,
 ): boolean {
   const result = getDB().prepare(`
     UPDATE sessions
-    SET generated_title = ?, generated_title_key = ?, generated_title_at = ?
+    SET generated_title = ?, generated_title_key = ?, generated_title_at = ?,
+        workstream = COALESCE(?, workstream)
     WHERE id = ? AND mirror_synced_at IS NULL
-  `).run(title, sourceKey, now, id);
+  `).run(title, sourceKey, now, workstream ?? null, id);
   return result.changes > 0;
+}
+
+export function setSessionWorkstream(id: string, workstream: string): boolean {
+  return getDB().prepare(`UPDATE sessions SET workstream = ? WHERE id = ? AND mirror_synced_at IS NULL`).run(workstream, id).changes > 0;
+}
+
+export function getSessionWorkstream(id: string): string | undefined {
+  const row = getDB().prepare(`SELECT workstream FROM sessions WHERE id = ?`).get(id) as { workstream: string | null } | undefined;
+  return row?.workstream ?? undefined;
+}
+
+/** The workstream names this box's recent sessions already carry, most used first,
+ *  so the titler reuses a name instead of coining a near-duplicate. */
+export function listRecentWorkstreams(sinceMs: number, limit: number): string[] {
+  const rows = getDB().prepare(`
+    SELECT workstream, COUNT(*) AS n FROM sessions
+    WHERE workstream IS NOT NULL AND trim(workstream) <> ''
+      AND COALESCE(last_activity, timestamp) >= ?
+    GROUP BY workstream ORDER BY n DESC, MAX(COALESCE(last_activity, timestamp)) DESC
+    LIMIT ?
+  `).all(new Date(sinceMs).toISOString(), limit) as Array<{ workstream: string }>;
+  return rows.map((r) => r.workstream);
 }
 
 export function pruneMirrorSessions(cutoffMs: number): number {

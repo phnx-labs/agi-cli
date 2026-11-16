@@ -98,7 +98,7 @@ agents daemon enable                      Clear the daemon.enabled kill switch. 
 agents daemon index                       Maintain the session index the daemon keeps: transcript roots, FTS compaction, historical backfills. Runs in the foreground; never starts or restarts the daemon.
 agents daemon index backfill              Populate derived session data explicitly.
 agents daemon index backfill resources    Derive historical skill/slash-command usage once into the local SQLite index.
-agents daemon index backfill titles       Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.
+agents daemon index backfill titles       Generate the session-row headline (a short technical title) and its workstream now, instead of waiting for the daemon.
 agents daemon index backfill tools        Parse historical tool calls once into the local SQLite index.
 agents daemon index optimize              Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
 agents daemon index roots                 Print the on-disk directories scanned for session transcripts, per agent, as JSON (for external watchers)

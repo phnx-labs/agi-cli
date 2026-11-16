@@ -37,7 +37,7 @@ describe('SessionTitleService', () => {
   it('titles pending sessions, then goes quiet once every recent row is current', async () => {
     seed('aaaa1111-0000-0000-0000-000000000001', 'Fix the fleet list headline so it names the work.');
     let calls = 0;
-    const svc = new SessionTitleService(async () => { calls++; return 'Fleet headline fix'; });
+    const svc = new SessionTitleService(async () => { calls++; return JSON.stringify([{ ref: '1', title: 'Fleet headline fix', workstream: 'Fleet' }]); });
     await svc.start(ctx());
 
     await svc.tick(ctx(), new AbortController().signal);
@@ -56,7 +56,7 @@ describe('SessionTitleService', () => {
     const svc = new SessionTitleService(async () => {
       calls++;
       if (fail) throw new Error('no signed-in harness');
-      return 'Daemon owns session titles';
+      return JSON.stringify([{ ref: '1', title: 'Daemon owns session titles', workstream: 'Daemon' }]);
     });
     await svc.start(ctx());
 

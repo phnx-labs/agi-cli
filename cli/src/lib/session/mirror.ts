@@ -98,6 +98,7 @@ export async function publishSessionMirrorToSharedStore(
     ...(snippet(s.topic, 200) ? { topic: snippet(s.topic, 200) } : {}),
     ...(s.label ? { label: s.label } : {}),
     ...(snippet(s.generatedTitle, 200) ? { title: snippet(s.generatedTitle, 200) } : {}),
+    ...(snippet(s.workstream, 64) ? { workstream: snippet(s.workstream, 64) } : {}),
     ...(snippet(s.firstUserMessage) ? { firstUser: snippet(s.firstUserMessage) } : {}),
     ...(s.lastActivity ? { lastActivity: s.lastActivity } : {}),
     timestamp: s.timestamp,
@@ -162,7 +163,7 @@ function isString(v: unknown): v is string {
 
 function toUpsert(raw: unknown): {
   id: string; shortId: string; agent: string; version?: string; machine: string;
-  cwd?: string; topic?: string; firstUser?: string; label?: string; generatedTitle?: string;
+  cwd?: string; topic?: string; firstUser?: string; label?: string; generatedTitle?: string; workstream?: string;
   lastActivity?: string; timestamp: string; ticketId?: string; prUrl?: string;
   summary?: import('./db.js').SessionSummaryEntry;
   timeline?: import('./db.js').SessionTimelineProjection;
@@ -186,6 +187,7 @@ function toUpsert(raw: unknown): {
     firstUser: cap(r.firstUser, SESSION_MIRROR_SNIPPET_MAX),
     label: cap(r.label, 400),
     generatedTitle: cap(r.title, 200),
+    workstream: cap(r.workstream, 64),
     lastActivity: isString(r.lastActivity) ? r.lastActivity : undefined,
     timestamp,
     ticketId: cap(r.ticketId, 64),

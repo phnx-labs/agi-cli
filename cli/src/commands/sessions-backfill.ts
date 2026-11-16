@@ -253,8 +253,9 @@ export interface TitleBackfillEnvelope {
   scanned: number;
   cached: number;
   generated: number;
+  grouped: number;
   failed: number;
-  titles: Array<{ id: string; title: string }>;
+  titles: Array<{ id: string; title: string; workstream?: string }>;
 }
 
 export async function runTitlesBackfill(options: TitleBackfillOptions): Promise<TitleBackfillEnvelope> {
@@ -384,14 +385,14 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
 
   const titles = backfill
     .command('titles')
-    .description('Generate the session-row headline (a short technical title) now, instead of waiting for the daemon.')
+    .description('Generate the session-row headline (a short technical title) and its workstream now, instead of waiting for the daemon.')
     .option('--session <id>', 'Title one session (full or short id), even if it is old or already titled')
     .option('--limit <n>', 'Maximum titles to generate in this run')
     .option('--refresh', 'Regenerate even when the stored title still matches the session\'s first user message')
     .option('--json', 'Emit the machine-readable result');
   setHelpSections(titles, {
     examples: `
-      # Catch this machine up now (the daemon otherwise does a couple every 2 min)
+      # Catch this machine up now (the daemon otherwise does up to 12 every 2 min, in one call)
       ${invocation} titles
 
       # Re-title one session after correcting its first message
@@ -402,7 +403,8 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
     `,
     notes: `
       - The headline ladder is: \`/rename\` label > this generated title > the user's first message. It is never the agent's latest turn.
-      - One cheap-model call per session (\`--model cheap\`, read-only plan mode), generated ONCE and persisted; a session whose first message has not changed is a pure cache hit.
+      - One cheap-model call per batch of up to 12 sessions (\`--model cheap\`, read-only plan mode) returns each session's title and workstream, generated ONCE and persisted; a session whose first message has not changed is a pure cache hit.
+      - The workstream is 1 to 3 words naming the larger effort (e.g. "Rush Mac"); the call is shown this box's existing workstreams so related sessions share one name. A \`/rename\`d session keeps its name and only gets a workstream.
       - Local-only: each box titles its own sessions and publishes them to the fleet via the session mirror, so a peer's rows already carry their titles.
       - Best-effort. With no signed-in harness nothing is generated and rows keep showing the user's own words.
     `,
@@ -417,9 +419,10 @@ export function registerBackfillCommand(parent: Command, invocation: string): vo
           `${envelope.machine}: generated ${envelope.generated.toLocaleString()} title${envelope.generated === 1 ? '' : 's'}; ` +
             `${envelope.cached.toLocaleString()} already current, ${envelope.scanned.toLocaleString()} scanned.`,
         );
-        for (const { id, title } of envelope.titles) console.log(`  ${chalk.cyan(id.slice(0, 8))}  ${title}`);
+        for (const { id, title, workstream } of envelope.titles) console.log(`  ${chalk.cyan(id.slice(0, 8))}  ${title}${workstream ? chalk.gray(`  · ${workstream}`) : ''}`);
+        if (envelope.grouped > 0) console.log(`${envelope.grouped.toLocaleString()} session${envelope.grouped === 1 ? '' : 's'} got a workstream.`);
         if (envelope.failed > 0) {
-          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} session${envelope.failed === 1 ? '' : 's'} produced no usable title; rerun to retry.`));
+          console.log(chalk.yellow(`${envelope.failed.toLocaleString()} session${envelope.failed === 1 ? '' : 's'} got no usable title or workstream; rerun to retry.`));
         }
       }
     } catch (error) {
