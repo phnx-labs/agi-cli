@@ -17,7 +17,6 @@ import type { SessionTitleProvider } from './title.js';
 
 const self = machineId();
 
-/** The model's batched reply for one session (ref 1). */
 const reply = (title: string, workstream = 'Session titles') => JSON.stringify([{ ref: '1', title, workstream }]);
 
 function seed(id: string, over: Record<string, unknown> = {}): void {

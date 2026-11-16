@@ -24,7 +24,6 @@ export interface SessionMirrorRow {
   topic?: string;
   label?: string;
   title?: string;
-  /** The titler's workstream (what the session is about, shared by related sessions). */
   workstream?: string;
   firstUser?: string;
   lastActivity?: string;

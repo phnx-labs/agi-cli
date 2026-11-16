@@ -337,7 +337,6 @@ export interface ActiveSession {
   firstUserMessage?: string;
   lastUserMessage?: string;
   generatedTitle?: string;
-  /** The titler's workstream for this session (`session-title` daemon service); clients group by it. */
   workstream?: string;
   title?: string;
   forkOf?: string;

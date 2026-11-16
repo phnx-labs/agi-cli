@@ -46,14 +46,11 @@ export function isSessionTitlePrompt(...values: Array<string | null | undefined>
 }
 
 export interface SessionTitleBatchItem {
-  /** Short handle the reply refers back to ("1", "2", …). */
   ref: string;
   input: SessionTitleInput;
-  /** The session's name when it already has one: the reply's title is then ignored. */
   currentTitle?: string;
 }
 
-/** One line, bounded: every field the batch prompt quotes, so none can open a new `[n]` block. */
 function promptLine(raw: string | null | undefined, max: number): string {
   return (raw ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
@@ -101,8 +98,6 @@ export function sanitizeWorkstream(raw: unknown): string | undefined {
   return name || undefined;
 }
 
-/** Reads the model's JSON array reply; an unparseable reply yields an empty map
- *  (every session in the batch then counts as failed and is retried next tick). */
 export function parseSessionTitleBatch(raw: string): Map<string, { title?: string; workstream?: string }> {
   const out = new Map<string, { title?: string; workstream?: string }>();
   const open = raw.indexOf('[');
@@ -285,7 +280,6 @@ export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSi
 
 export interface SessionTitleProvider {
   readonly name: string;
-  /** One model call for the whole batch; returns the raw reply. */
   generateBatch(items: SessionTitleBatchItem[], workstreams: string[], signal?: AbortSignal): Promise<string>;
 }
 
@@ -316,10 +310,8 @@ export interface SessionTitleTickResult {
   scanned: number;
   cached: number;
   generated: number;
-  /** Sessions that got a workstream this tick (with or without a new title). */
   grouped: number;
   failed: number;
-  /** Why a model call failed (missing harness, timeout, …), each once, so the service can say it. */
   errors: string[];
   titles: Array<{ id: string; title: string; workstream?: string }>;
 }
@@ -327,7 +319,6 @@ export interface SessionTitleTickResult {
 export interface PendingSessionTitle {
   row: SessionTitleCandidateRow;
   sourceKey: string;
-  /** False when the session already has a current name and only lacks a workstream. */
   needsTitle: boolean;
 }
 
@@ -379,7 +370,6 @@ export async function runSessionTitleTick(
 
   const provider = options.provider ?? new CloudSessionTitleProvider(options.run);
   const known = listRecentWorkstreams(now - maxAgeMs, SESSION_WORKSTREAMS_OFFERED);
-  // A name that differs from a known one only in case is that name, so "rush mac" never splits a group.
   const canonical = (name: string | undefined): string | undefined => {
     if (!name) return undefined;
     const hit = known.find((k) => k.toLowerCase() === name.toLowerCase());
@@ -411,9 +401,6 @@ export async function runSessionTitleTick(
       if (setSessionWorkstream(row.id, workstream)) result.grouped++;
     });
   };
-  // One call per batch. A reply that is not the JSON array (one session's request can pull the
-  // model into prose) is retried once, as two halves, so one bad session never holds the rest of
-  // the queue and a model that only answers prose costs at most three calls a batch.
   const run = async (batch: PendingSessionTitle[], split = false): Promise<void> => {
     if (options.signal?.aborted) return;
     const items: SessionTitleBatchItem[] = batch.map(({ row, needsTitle }, n) => ({
