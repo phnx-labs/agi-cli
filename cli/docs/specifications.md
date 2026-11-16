@@ -480,7 +480,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `SessionTitleProvider` and persists the result plus `sessionTitleSourceKey` — a
   hash of the user text it was derived from — in
   `sessions.generated_title{,_key,_at}`. The generation backend MUST sit behind
-  that one small interface (`generate(input) → raw reply`) so a local model can
+  that one small interface (`generateBatch(items, workstreams) → raw reply`) so a local model can
   replace the default without touching the tick; the shipped default is
   `CloudSessionTitleProvider`, which renders the shared prompt and calls a cheap
   model through the normal `agents run --model cheap --mode plan` resolution. The
@@ -492,6 +492,14 @@ SSH access (§7); rendering sessions that no harness produced.
   title a session whose own prompt carries `SESSION_TITLE_PROMPT_MARKER` (its own
   spawned runs, which would otherwise grow the queue forever), MUST bound each
   sweep, and MUST back off after failed sweeps rather than respawning per tick.
+  A sweep MUST make one model call per batch of up to `SESSION_TITLE_BATCH_SIZE`
+  sessions, never one per session, and each reply carries a `workstream` per
+  session (1–3 words naming the larger effort, `sanitizeWorkstream`) persisted in
+  `sessions.workstream` beside the title; the prompt MUST offer the workstreams
+  this box already uses (`listRecentWorkstreams`) so related sessions share a
+  name. A `/rename`d session MUST NOT be re-titled but is given a workstream
+  once. Live rows read it in `applySessionNames`, history rows in
+  `toPreviousSessionWatchRow`, and the session mirror carries it.
   Generation is best-effort: a failure leaves the row untitled and therefore
   showing the user's own words, never an agent line. The value rides the existing
   streams unchanged — `toSessionWatchRow` spreads the row, `watchFleetSessions`

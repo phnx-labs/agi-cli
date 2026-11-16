@@ -15,7 +15,7 @@ import { loadSessionPreviewDigest, readCachedPreviewDigest } from '../preview-di
 import { indexArtifactSidecars, mergeArtifacts } from '@phnx-labs/sessions-cli/reader';
 import { listNativeAccounts } from '../../account-registry.js';
 import { readMeta } from '../../state.js';
-import { querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
+import { getSessionWorkstream, querySessions, readSessionSummaryAny, readSessionTimelineAny } from '../db.js';
 import { linearIssueUrl } from '@phnx-labs/sessions-cli/reader';
 import { sessionAgentSupportsResume } from '../recovery.js';
 import { SESSION_AGENTS, type SessionMeta } from '@phnx-labs/sessions-cli/reader';
@@ -156,6 +156,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
       }
     : readSessionSummaryAny(session.id);
   const folded = readSessionTimelineAny(session.id);
+  const workstream = getSessionWorkstream(session.id);
   const model = folded?.model ?? session.model;
   const card = previousRowCard(session, folded?.request, folded?.attachments);
   return {
@@ -169,6 +170,7 @@ export function toPreviousSessionWatchRow(scope: string, session: SessionMeta, a
     confirmedProject: confirmedProjectForCwd(session.cwd) ?? null,
     ...(session.label ? { label: session.label } : {}),
     ...(session.generatedTitle ? { generatedTitle: session.generatedTitle } : {}),
+    ...(workstream ? { workstream } : {}),
     ...(session.topic ? { topic: session.topic } : {}),
     ...(session.firstUserMessage ? { firstUserMessage: session.firstUserMessage } : {}),
     ...(session.version ? { version: session.version } : {}),

@@ -185,6 +185,7 @@ export function applySessionNames(sessions: ActiveSession[]): void {
     if (stored?.recap) s.recap = stored.recap;
     if (stored?.touchedPrs) s.touchedPrs = stored.touchedPrs;
     if (stored?.touchedTickets) s.touchedTickets = stored.touchedTickets;
+    if (stored?.workstream) s.workstream = stored.workstream;
   }
 }
 
@@ -336,6 +337,8 @@ export interface ActiveSession {
   firstUserMessage?: string;
   lastUserMessage?: string;
   generatedTitle?: string;
+  /** The titler's workstream for this session (`session-title` daemon service); clients group by it. */
+  workstream?: string;
   title?: string;
   forkOf?: string;
   startedAs?: string;

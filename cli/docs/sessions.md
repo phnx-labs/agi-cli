@@ -381,7 +381,10 @@ touches the endpoint.
   user text it came from — so a titled session costs no further model calls, and
   it regenerates only when that first user message changes or on an explicit
   `agents daemon index backfill titles --refresh`. Until it runs, the row honestly
-  shows the user's own first message. The agent's rolling last line stays where a
+  shows the user's own first message. The same call names each session's **`workstream`** — 1 to 3
+  words for the larger effort ("Rush Mac"), reusing a name this box already uses —
+  for up to 12 sessions at a time in one model call; rows carry it as
+  `workstream` and AGI EXT groups by it. The agent's rolling last line stays where a
   live status belongs: `lastAgentLine` / the preview pane. Each box titles its own
   sessions and publishes them on the fleet session mirror, so a peer's rows carry
   the same headline with no per-row SSH.

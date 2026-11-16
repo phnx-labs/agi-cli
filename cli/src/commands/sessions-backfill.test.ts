@@ -102,7 +102,7 @@ describe('sessions backfill titles (the explicit-refresh half of PHNX-3797)', ()
     } as SessionMeta, 'make it a real title');
 
     let calls = 0;
-    const run = async () => { calls++; return 'Session headline ladder fix'; };
+    const run = async () => { calls++; return JSON.stringify([{ ref: '1', title: 'Session headline ladder fix', workstream: 'Session titles' }]); };
 
     const first = await runTitlesBackfill({ session: id, run });
     expect(first).toMatchObject({ kind: 'titles-backfill', generated: 1, failed: 0 });
@@ -112,7 +112,7 @@ describe('sessions backfill titles (the explicit-refresh half of PHNX-3797)', ()
     expect(second).toMatchObject({ generated: 0, cached: 1 });
     expect(calls).toBe(1);
 
-    const refreshed = await runTitlesBackfill({ session: id, refresh: true, run: async () => 'Regenerated headline' });
+    const refreshed = await runTitlesBackfill({ session: id, refresh: true, run: async () => JSON.stringify([{ ref: '1', title: 'Regenerated headline', workstream: 'Session titles' }]) });
     expect(refreshed.generated).toBe(1);
     expect(getSessionById(id)?.generatedTitle).toBe('Regenerated headline');
   });

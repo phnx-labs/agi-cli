@@ -1827,7 +1827,9 @@ current name from `<config>/sessions/<pid>.json` in any config home
 extension's tab title is a projection of it, never an input. Live rows also
 carry `startedAs`, the first prompt with `/goal` and injected turns stripped. `generatedTitle` is produced ONCE per session by the
 daemon's `session-title` service with a cheap model and persisted in
-`sessions.generated_title` beside the hash of the user text it came from, so a
+`sessions.generated_title` (and a `workstream`, 1 to 3 words for the larger effort,
+in `sessions.workstream`; up to 12 sessions share ONE model call per tick and are
+shown the box's existing workstreams) beside the hash of the user text it came from, so a
 titled session never costs another model call and re-titles only when that first
 user message changes (or on `agents daemon index backfill titles --refresh`). It
 rides the existing streams — the watch row spread and the PHNX-3792 session

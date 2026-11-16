@@ -17,6 +17,9 @@ import type { SessionTitleProvider } from './title.js';
 
 const self = machineId();
 
+/** The model's batched reply for one session (ref 1). */
+const reply = (title: string, workstream = 'Session titles') => JSON.stringify([{ ref: '1', title, workstream }]);
+
 function seed(id: string, over: Record<string, unknown> = {}): void {
   const meta: any = {
     id,
@@ -40,7 +43,7 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     let calls = 0;
     const run = async () => {
       calls++;
-      return '"Session headline ladder fix"\n';
+      return reply('Session headline ladder fix');
     };
 
     const first = await runSessionTitleTick({ run, limit: 5 });
@@ -48,6 +51,7 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     expect(calls).toBe(1);
     expect(db.getSessionById('11111111-0000-0000-0000-000000000001')?.generatedTitle)
       .toBe('Session headline ladder fix');
+    expect(db.getSessionWorkstream('11111111-0000-0000-0000-000000000001')).toBe('Session titles');
 
     const second = await runSessionTitleTick({ run, limit: 5 });
     expect(second.generated).toBe(0);
@@ -58,15 +62,16 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
   it('re-titles when the first user message changes, and on an explicit refresh', async () => {
     const id = '22222222-0000-0000-0000-000000000002';
     seed(id);
-    await runSessionTitleTick({ run: async () => 'First title', limit: 5 });
+    await runSessionTitleTick({ run: async () => reply('First title'), limit: 5 });
     expect(db.getSessionById(id)?.generatedTitle).toBe('First title');
 
     seed(id, { firstUserMessage: 'Actually: make the fleet mirror carry the title too.' });
-    const changed = await runSessionTitleTick({ run: async () => 'Mirror carries title', limit: 5 });
+    const changed = await runSessionTitleTick({ run: async () => reply('Mirror carries title', 'Fleet mirror'), limit: 5 });
     expect(changed.generated).toBe(1);
     expect(db.getSessionById(id)?.generatedTitle).toBe('Mirror carries title');
+    expect(db.getSessionWorkstream(id)).toBe('Fleet mirror');
 
-    const forced = await runSessionTitleTick({ id, force: true, run: async () => 'Refreshed title' });
+    const forced = await runSessionTitleTick({ id, force: true, run: async () => reply('Refreshed title') });
     expect(forced.generated).toBe(1);
     expect(db.getSessionById(id)?.generatedTitle).toBe('Refreshed title');
   });
@@ -97,20 +102,59 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     expect(db.getSessionById(id)?.generatedTitle).toBeUndefined();
   });
 
-  it('skips a session that already carries a /rename label — the label outranks a title', async () => {
+  it('never titles a session that carries a /rename label, but gives it a workstream', async () => {
     const id = '55555555-0000-0000-0000-000000000005';
     seed(id, { label: 'ship the auth fix' });
-    const swept = await runSessionTitleTick({ run: async () => 'Should not be used', limit: 10 });
+    let prompt = '';
+    const swept = await runSessionTitleTick({ id, run: async (p) => { prompt = p; return reply('Should not be used', 'Auth'); } });
+    expect(prompt).toContain('Current title: ship the auth fix');
     expect(swept.titles.some((t) => t.id === id)).toBe(false);
+    expect(swept.grouped).toBe(1);
     expect(db.getSessionById(id)?.generatedTitle).toBeUndefined();
+    expect(db.getSessionWorkstream(id)).toBe('Auth');
   });
 
   it('keeps the stored title across a later transcript rescan', async () => {
     const id = '66666666-0000-0000-0000-000000000006';
     seed(id);
-    await runSessionTitleTick({ id, run: async () => 'Durable across rescan' });
+    await runSessionTitleTick({ id, run: async () => reply('Durable across rescan', 'Rescans') });
     seed(id, { messageCount: 42 });
     expect(db.getSessionById(id)?.generatedTitle).toBe('Durable across rescan');
+    expect(db.getSessionWorkstream(id)).toBe('Rescans');
+  });
+});
+
+describe('one batched call per tick (titles and workstreams together)', () => {
+  it('titles several sessions with ONE model call and offers the existing workstreams', async () => {
+    const ids = ['aaaa0000-0000-0000-0000-00000000000a', 'aaaa0000-0000-0000-0000-00000000000b', 'aaaa0000-0000-0000-0000-00000000000c'];
+    seed(ids[0], { firstUserMessage: 'post the PR 83 review for the Rush Mac launch' });
+    seed(ids[1], { firstUserMessage: 'include TextEdit in the Rush Mac test' });
+    seed(ids[2], { firstUserMessage: 'set up Ahrefs for SEO and AEO' });
+    const prompts: string[] = [];
+    const result = await runSessionTitleTick({
+      limit: 12,
+      maxAgeMs: 60_000,
+      run: async (prompt) => {
+        prompts.push(prompt);
+        const refs = [...prompt.matchAll(/^\[(\d+)\]/gm)].map((m) => m[1]);
+        return JSON.stringify(refs.map((ref) => {
+          const ask = prompt.split(`[${ref}]`)[1].split('\n[')[0];
+          return { ref, title: `Session ${ref} headline`, workstream: /Ahrefs/.test(ask) ? 'Ahrefs SEO' : 'Rush Mac' };
+        }));
+      },
+    });
+    expect(prompts).toHaveLength(1);
+    expect(result.generated).toBeGreaterThanOrEqual(3);
+    expect(ids.map((id) => db.getSessionWorkstream(id))).toEqual(['Rush Mac', 'Rush Mac', 'Ahrefs SEO']);
+    expect(prompts[0]).toContain('Reuse one of these existing workstreams whenever it fits; coin a new one only when none does: Session titles');
+  });
+
+  it('counts every session in a batch as failed when the reply is not the JSON array', async () => {
+    const id = 'bbbb0000-0000-0000-0000-00000000000b';
+    seed(id, { firstUserMessage: 'an unparseable reply' });
+    const result = await runSessionTitleTick({ id, run: async () => 'Session headline ladder fix' });
+    expect(result).toMatchObject({ generated: 0, grouped: 0, failed: 1 });
+    expect(db.getSessionById(id)?.generatedTitle).toBeUndefined();
   });
 });
 
@@ -118,17 +162,16 @@ describe('swappable title provider (PHNX-3797)', () => {
   it('generates through an injected provider — the seam a local backend drops into', async () => {
     const id = '88888888-0000-0000-0000-000000000008';
     seed(id, { firstUserMessage: 'wire up the local title backend' });
-    let seen: { name: string; input?: string } = { name: '' };
+    let seen: { input?: string } = {};
     const provider: SessionTitleProvider = {
       name: 'fake-local',
-      async generate(input) {
-        seen = { name: 'fake-local', input: input.firstUserMessage ?? undefined };
-        return 'Wire up the local backend';
+      async generateBatch(items) {
+        seen = { input: items[0].input.firstUserMessage ?? undefined };
+        return reply('Wire up the local backend');
       },
     };
     const result = await runSessionTitleTick({ id, provider });
     expect(result.generated).toBe(1);
-    expect(seen.name).toBe('fake-local');
     expect(seen.input).toBe('wire up the local title backend');
     expect(db.getSessionById(id)?.generatedTitle).toBe('Wire up the local backend');
   });
@@ -137,28 +180,29 @@ describe('swappable title provider (PHNX-3797)', () => {
     const id = '99999999-0000-0000-0000-000000000009';
     seed(id, { firstUserMessage: 'provider beats run' });
     let ranRunner = false;
-    const provider: SessionTitleProvider = { name: 'p', async generate() { return 'Provider wins'; } };
+    const provider: SessionTitleProvider = { name: 'p', async generateBatch() { return reply('Provider wins'); } };
     const result = await runSessionTitleTick({
       id,
       provider,
-      run: async () => { ranRunner = true; return 'Runner wins'; },
+      run: async () => { ranRunner = true; return reply('Runner wins'); },
     });
     expect(result.generated).toBe(1);
     expect(ranRunner).toBe(false);
     expect(db.getSessionById(id)?.generatedTitle).toBe('Provider wins');
   });
 
-  it('the cloud provider renders the shared prompt through its runner', async () => {
+  it('the cloud provider renders the shared batch prompt through its runner', async () => {
     let promptSeen = '';
     const provider = new CloudSessionTitleProvider(async (prompt) => {
       promptSeen = prompt;
-      return 'Cloud default title';
+      return 'raw reply';
     });
-    const reply = await provider.generate({ firstUserMessage: 'name this session' });
+    const raw = await provider.generateBatch([{ ref: '1', input: { firstUserMessage: 'name this session' } }], ['Rush Mac']);
     expect(provider.name).toBe('cloud');
-    expect(reply).toBe('Cloud default title');
+    expect(raw).toBe('raw reply');
     expect(promptSeen).toContain(SESSION_TITLE_PROMPT_MARKER);
     expect(promptSeen).toContain('name this session');
+    expect(promptSeen).toContain('Rush Mac');
   });
 });
 
@@ -171,7 +215,7 @@ describe('explicit --session targeting', () => {
   it('accepts a short id', async () => {
     const id = '77777777-0000-0000-0000-000000000007';
     seed(id);
-    const result = await runSessionTitleTick({ id: id.slice(0, 8), run: async () => 'Short id target' });
+    const result = await runSessionTitleTick({ id: id.slice(0, 8), run: async () => reply('Short id target') });
     expect(result.generated).toBe(1);
     expect(db.getSessionById(id)?.generatedTitle).toBe('Short id target');
   });

@@ -34,9 +34,9 @@ export class SessionTitleService extends BasePeriodicService {
       signal,
       ...(this.run ? { run: this.run } : {}),
     });
-    if (result.generated > 0) {
+    if (result.generated > 0 || result.grouped > 0) {
       this.backoff = 0;
-      ctx.log('INFO', `session-title: generated ${result.generated} title(s) (${result.cached} already current)`);
+      ctx.log('INFO', `session-title: generated ${result.generated} title(s), ${result.grouped} workstream(s) (${result.cached} already current)`);
       return;
     }
     if (result.failed > 0) {
@@ -46,7 +46,7 @@ export class SessionTitleService extends BasePeriodicService {
       this.skipTicks = this.backoff;
       ctx.log(
         'WARN',
-        `session-title: ${result.failed} generation(s) produced no title; backing off ${this.backoff} tick(s)`,
+        `session-title: ${result.failed} session(s) got no title or workstream; backing off ${this.backoff} tick(s)`,
       );
     }
   }

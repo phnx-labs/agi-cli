@@ -10,10 +10,15 @@ export const SESSION_TITLE_MAX_CHARS = 60;
 export const SESSION_TITLE_MAX_WORDS = 8;
 export const SESSION_TITLE_INPUT_MAX_CHARS = 2000;
 
-export const SESSION_TITLE_MAX_PER_TICK = 2;
+export const SESSION_TITLE_MAX_PER_TICK = 12;
+export const SESSION_TITLE_BATCH_SIZE = 12;
+export const SESSION_TITLE_BATCH_INPUT_MAX_CHARS = 600;
+export const SESSION_WORKSTREAM_MAX_CHARS = 32;
+export const SESSION_WORKSTREAM_MAX_WORDS = 4;
+export const SESSION_WORKSTREAMS_OFFERED = 30;
 export const SESSION_TITLE_CANDIDATE_SCAN = 200;
 export const SESSION_TITLE_MAX_AGE_MS = 14 * 24 * 60 * 60_000;
-export const SESSION_TITLE_TIMEOUT_MS = 45_000;
+export const SESSION_TITLE_TIMEOUT_MS = 90_000;
 
 export const SESSION_TITLE_AGENTS = ['claude', 'codex', 'grok', 'kimi', 'opencode'] as const;
 
@@ -40,28 +45,80 @@ export function isSessionTitlePrompt(...values: Array<string | null | undefined>
   return values.some((v) => typeof v === 'string' && v.includes(SESSION_TITLE_PROMPT_MARKER));
 }
 
-export function renderSessionTitlePrompt(input: SessionTitleInput): string {
-  const text = sessionTitleSourceText(input);
-  const context = [
-    input.project ? `Repository: ${input.project}` : null,
-    input.ticketId ? `Ticket: ${input.ticketId}` : null,
-    input.gitBranch ? `Branch: ${input.gitBranch}` : null,
-  ].filter(Boolean);
+export interface SessionTitleBatchItem {
+  /** Short handle the reply refers back to ("1", "2", …). */
+  ref: string;
+  input: SessionTitleInput;
+  /** The session's name when it already has one: the reply's title is then ignored. */
+  currentTitle?: string;
+}
+
+export function renderSessionTitleBatchPrompt(items: SessionTitleBatchItem[], workstreams: string[]): string {
+  const sessions = items.flatMap(({ ref, input, currentTitle }) => {
+    const text = sessionTitleSourceText(input).slice(0, SESSION_TITLE_BATCH_INPUT_MAX_CHARS);
+    const context = [
+      input.project ? `repository ${input.project}` : null,
+      input.ticketId ? `ticket ${input.ticketId}` : null,
+      input.gitBranch ? `branch ${input.gitBranch}` : null,
+    ].filter(Boolean).join(', ');
+    return [
+      `[${ref}]${context ? ` (${context})` : ''}`,
+      ...(currentTitle ? [`Current title: ${currentTitle}`] : []),
+      `Request: ${text}`,
+      '',
+    ];
+  });
   return [
-    `${SESSION_TITLE_PROMPT_MARKER} naming what this coding session is working on.`,
-    'Write an ACTION + OBJECT headline of 4 to 8 words — a verb phrase naming the concrete task,',
+    `${SESSION_TITLE_PROMPT_MARKER} and a workstream for each coding session below.`,
+    'title: an ACTION + OBJECT headline of 4 to 8 words naming the concrete task,',
     'e.g. "Triage the AGI board" or "Rename browser profile — default confusion".',
-    'NOT a single noun, NOT a full sentence. Name the concrete feature, component, or fix —',
-    'not the person, not the pleasantries.',
-    'Respond IMMEDIATELY with only the headline. Do NOT investigate, do NOT read files, do NOT use any tools.',
-    'No quotes, no trailing punctuation, no explanation.',
-    ...(context.length ? ['', ...context] : []),
+    'Not a single noun, not a full sentence, not the person, not the pleasantries.',
+    'workstream: 1 to 3 words naming the larger effort the session belongs to, the same name for',
+    'every session about that effort, e.g. "Rush Mac", "Ahrefs SEO", "Fundraising".',
+    workstreams.length
+      ? `Reuse one of these existing workstreams whenever it fits; coin a new one only when none does: ${workstreams.join(' | ')}`
+      : 'Name workstreams so that related sessions share one.',
+    'Respond IMMEDIATELY with only a JSON array, one object per session, in this exact shape:',
+    '[{"ref": "1", "title": "...", "workstream": "..."}]',
+    'Do NOT investigate, do NOT read files, do NOT use any tools. No prose, no code fences.',
     '',
-    "The user's request:",
-    '---',
-    text,
-    '---',
+    ...sessions,
   ].join('\n');
+}
+
+export function sanitizeWorkstream(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  let name = raw.replace(/["'`*_]/g, '').replace(/[.!?,;:]+$/, '').replace(/\s+/g, ' ').trim();
+  const words = name.split(' ');
+  if (words.length > SESSION_WORKSTREAM_MAX_WORDS) name = words.slice(0, SESSION_WORKSTREAM_MAX_WORDS).join(' ');
+  if (name.length > SESSION_WORKSTREAM_MAX_CHARS) name = name.slice(0, SESSION_WORKSTREAM_MAX_CHARS).trimEnd();
+  return name || undefined;
+}
+
+/** Reads the model's JSON array reply; an unparseable reply yields an empty map
+ *  (every session in the batch then counts as failed and is retried next tick). */
+export function parseSessionTitleBatch(raw: string): Map<string, { title?: string; workstream?: string }> {
+  const out = new Map<string, { title?: string; workstream?: string }>();
+  const open = raw.indexOf('[');
+  const close = raw.lastIndexOf(']');
+  if (open < 0 || close <= open) return out;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(open, close + 1));
+  } catch {
+    return out;
+  }
+  if (!Array.isArray(parsed)) return out;
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { ref, title, workstream } = entry as Record<string, unknown>;
+    if (typeof ref !== 'string' && typeof ref !== 'number') continue;
+    out.set(String(ref), {
+      title: typeof title === 'string' ? sanitizeGeneratedTitle(title) : undefined,
+      workstream: sanitizeWorkstream(workstream),
+    });
+  }
+  return out;
 }
 
 export function sanitizeGeneratedTitle(raw: string | null | undefined): string | undefined {
@@ -222,14 +279,15 @@ export async function defaultSessionTitleRunner(prompt: string, signal?: AbortSi
 
 export interface SessionTitleProvider {
   readonly name: string;
-  generate(input: SessionTitleInput, signal?: AbortSignal): Promise<string>;
+  /** One model call for the whole batch; returns the raw reply. */
+  generateBatch(items: SessionTitleBatchItem[], workstreams: string[], signal?: AbortSignal): Promise<string>;
 }
 
 export class CloudSessionTitleProvider implements SessionTitleProvider {
   readonly name = 'cloud';
   constructor(private readonly runner: SessionTitleRunner = defaultSessionTitleRunner) {}
-  generate(input: SessionTitleInput, signal?: AbortSignal): Promise<string> {
-    return this.runner(renderSessionTitlePrompt(input), signal);
+  generateBatch(items: SessionTitleBatchItem[], workstreams: string[], signal?: AbortSignal): Promise<string> {
+    return this.runner(renderSessionTitleBatchPrompt(items, workstreams), signal);
   }
 }
 
@@ -252,25 +310,37 @@ export interface SessionTitleTickResult {
   scanned: number;
   cached: number;
   generated: number;
+  /** Sessions that got a workstream this tick (with or without a new title). */
+  grouped: number;
   failed: number;
-  titles: Array<{ id: string; title: string }>;
+  titles: Array<{ id: string; title: string; workstream?: string }>;
+}
+
+export interface PendingSessionTitle {
+  row: SessionTitleCandidateRow;
+  sourceKey: string;
+  /** False when the session already has a current name and only lacks a workstream. */
+  needsTitle: boolean;
 }
 
 export function selectSessionsNeedingTitle(
   rows: SessionTitleCandidateRow[],
   opts: { limit: number; force?: boolean } = { limit: SESSION_TITLE_MAX_PER_TICK },
-): { pending: Array<{ row: SessionTitleCandidateRow; sourceKey: string }>; cached: number } {
-  const pending: Array<{ row: SessionTitleCandidateRow; sourceKey: string }> = [];
+): { pending: PendingSessionTitle[]; cached: number } {
+  const pending: PendingSessionTitle[] = [];
   let cached = 0;
   for (const row of rows) {
     if (isSessionTitlePrompt(row.firstUserMessage, row.topic)) continue;
     const sourceKey = sessionTitleSourceKey(row);
     if (!sourceKey) continue;
-    if (!opts.force && row.generatedTitle && row.generatedTitleKey === sourceKey) {
+    const named = Boolean(row.label?.trim());
+    const titleCurrent = named || (!opts.force && Boolean(row.generatedTitle) && row.generatedTitleKey === sourceKey);
+    const needsTitle = !titleCurrent;
+    if (!needsTitle && row.workstream) {
       cached++;
       continue;
     }
-    if (pending.length < opts.limit) pending.push({ row, sourceKey });
+    if (pending.length < opts.limit) pending.push({ row, sourceKey, needsTitle });
   }
   return { pending, cached };
 }
@@ -280,13 +350,12 @@ export async function runSessionTitleTick(
 ): Promise<SessionTitleTickResult> {
   const limit = options.limit ?? SESSION_TITLE_MAX_PER_TICK;
   const now = options.nowMs ?? Date.now();
-  const result: SessionTitleTickResult = { scanned: 0, cached: 0, generated: 0, failed: 0, titles: [] };
-  const { querySessionTitleCandidates, setSessionGeneratedTitle } = await import('./db.js');
+  const maxAgeMs = options.maxAgeMs ?? SESSION_TITLE_MAX_AGE_MS;
+  const result: SessionTitleTickResult = { scanned: 0, cached: 0, generated: 0, grouped: 0, failed: 0, titles: [] };
+  const { querySessionTitleCandidates, setSessionGeneratedTitle, setSessionWorkstream, listRecentWorkstreams } = await import('./db.js');
   const rows = querySessionTitleCandidates(
     options.id ? 1 : SESSION_TITLE_CANDIDATE_SCAN,
-    options.id
-      ? { id: options.id }
-      : { sinceMs: now - (options.maxAgeMs ?? SESSION_TITLE_MAX_AGE_MS) },
+    options.id ? { id: options.id } : { sinceMs: now - maxAgeMs },
   );
   result.scanned = rows.length;
   if (options.id && rows.length === 0) {
@@ -301,22 +370,44 @@ export async function runSessionTitleTick(
   if (pending.length === 0) return result;
 
   const provider = options.provider ?? new CloudSessionTitleProvider(options.run);
-  for (const { row, sourceKey } of pending) {
+  const known = listRecentWorkstreams(now - maxAgeMs, SESSION_WORKSTREAMS_OFFERED);
+  for (let i = 0; i < pending.length; i += SESSION_TITLE_BATCH_SIZE) {
     if (options.signal?.aborted) break;
-    let title: string | undefined;
+    const batch = pending.slice(i, i + SESSION_TITLE_BATCH_SIZE);
+    const items: SessionTitleBatchItem[] = batch.map(({ row, needsTitle }, n) => ({
+      ref: String(n + 1),
+      input: row,
+      ...(needsTitle ? {} : { currentTitle: (row.label?.trim() || row.generatedTitle) ?? undefined }),
+    }));
+    let reply = new Map<string, { title?: string; workstream?: string }>();
     try {
-      title = sanitizeGeneratedTitle(await provider.generate(row, options.signal));
+      reply = parseSessionTitleBatch(await provider.generateBatch(items, known, options.signal));
     } catch {
-      title = undefined;
     }
-    if (!title) {
-      result.failed++;
-      continue;
-    }
-    if (setSessionGeneratedTitle(row.id, title, sourceKey, now)) {
-      result.generated++;
-      result.titles.push({ id: row.id, title });
-    }
+    batch.forEach(({ row, sourceKey, needsTitle }, n) => {
+      const answer = reply.get(String(n + 1));
+      const workstream = answer?.workstream;
+      if (needsTitle) {
+        const title = answer?.title;
+        if (!title) {
+          result.failed++;
+          return;
+        }
+        if (setSessionGeneratedTitle(row.id, title, sourceKey, now, workstream)) {
+          result.generated++;
+          if (workstream) result.grouped++;
+          result.titles.push({ id: row.id, title, ...(workstream ? { workstream } : {}) });
+        }
+        return;
+      }
+      if (!workstream) {
+        result.failed++;
+        return;
+      }
+      if (setSessionWorkstream(row.id, workstream)) result.grouped++;
+      if (!known.includes(workstream)) known.push(workstream);
+    });
+    for (const t of result.titles) if (t.workstream && !known.includes(t.workstream)) known.push(t.workstream);
   }
   return result;
 }

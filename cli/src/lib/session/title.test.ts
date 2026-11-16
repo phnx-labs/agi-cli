@@ -4,7 +4,9 @@ import {
   SESSION_TITLE_MAX_WORDS,
   SESSION_TITLE_PROMPT_MARKER,
   isSessionTitlePrompt,
-  renderSessionTitlePrompt,
+  parseSessionTitleBatch,
+  renderSessionTitleBatchPrompt,
+  sanitizeWorkstream,
   resolveSessionName,
   sanitizeGeneratedTitle,
   startedAsFromUserTurn,
@@ -29,6 +31,7 @@ function candidate(over: Partial<SessionTitleCandidateRow> = {}): SessionTitleCa
     gitBranch: 'phnx-3797',
     generatedTitle: null,
     generatedTitleKey: null,
+    workstream: null,
     ...over,
   };
 }
@@ -65,27 +68,42 @@ describe('sessionTitleSourceKey', () => {
   });
 });
 
-describe('renderSessionTitlePrompt', () => {
-  it('carries the marker, the user text, and the technical context', () => {
-    const prompt = renderSessionTitlePrompt({
-      firstUserMessage: 'the sessions list headline is wrong',
-      project: 'agents-cli',
-      ticketId: 'PHNX-3797',
-      gitBranch: 'phnx-3797-session-title',
-    });
-    expect(prompt).toContain(SESSION_TITLE_PROMPT_MARKER);
-    expect(prompt).toContain('the sessions list headline is wrong');
-    expect(prompt).toContain('Repository: agents-cli');
-    expect(prompt).toContain('Ticket: PHNX-3797');
-    expect(prompt).toContain('Branch: phnx-3797-session-title');
+describe('renderSessionTitleBatchPrompt', () => {
+  it('carries the marker, each session with its context, and asks for one JSON array', () => {
+    const prompt = renderSessionTitleBatchPrompt([
+      { ref: '1', input: { firstUserMessage: 'the sessions list headline is wrong', project: 'agents-cli', ticketId: 'PHNX-3797', gitBranch: 'phnx-3797-session-title' } },
+      { ref: '2', input: { firstUserMessage: 'add the TextEdit choice to the Mac test' }, currentTitle: 'Rush Mac launch test' },
+    ], ['Rush Mac', 'Ahrefs SEO']);
     expect(isSessionTitlePrompt(prompt)).toBe(true);
+    expect(prompt).toContain('[1] (repository agents-cli, ticket PHNX-3797, branch phnx-3797-session-title)');
+    expect(prompt).toContain('Request: the sessions list headline is wrong');
+    expect(prompt).toContain('Current title: Rush Mac launch test');
+    expect(prompt).toContain('Rush Mac | Ahrefs SEO');
+    expect(prompt).toContain('[{"ref": "1", "title": "...", "workstream": "..."}]');
+    expect(prompt).toContain('ACTION + OBJECT');
   });
 
-  it('asks for a descriptive action+object headline, not a single terse noun', () => {
-    const prompt = renderSessionTitlePrompt({ firstUserMessage: 'triage the board' });
-    expect(prompt).toContain('ACTION + OBJECT');
-    expect(prompt).toContain('4 to 8 words');
-    expect(prompt).toMatch(/NOT a single noun/);
+  it('bounds each session\'s request so a batch of long prompts stays small', () => {
+    const prompt = renderSessionTitleBatchPrompt([{ ref: '1', input: { firstUserMessage: 'x'.repeat(5000) } }], []);
+    expect(prompt.length).toBeLessThan(2000);
+  });
+});
+
+describe('parseSessionTitleBatch', () => {
+  it('reads each ref\'s title and workstream, sanitized, even with prose around the array', () => {
+    const reply = parseSessionTitleBatch('Here you go:\n[{"ref":"1","title":"Fix the headline ladder.","workstream":"Session titles"},{"ref":2,"title":"Post the PR review","workstream":"  Rush   Mac  "}]');
+    expect(reply.get('1')).toEqual({ title: 'Fix the headline ladder', workstream: 'Session titles' });
+    expect(reply.get('2')).toEqual({ title: 'Post the PR review', workstream: 'Rush Mac' });
+  });
+
+  it('yields nothing for a reply that is not a JSON array', () => {
+    expect(parseSessionTitleBatch('Session headline ladder fix').size).toBe(0);
+    expect(parseSessionTitleBatch('[not json]').size).toBe(0);
+  });
+
+  it('caps a workstream that ignored the word budget', () => {
+    expect(sanitizeWorkstream('one two three four five six')).toBe('one two three four');
+    expect(sanitizeWorkstream(42)).toBeUndefined();
   });
 });
 
@@ -121,11 +139,24 @@ describe('selectSessionsNeedingTitle (generate once, then cache-hit)', () => {
     const row = candidate();
     const key = sessionTitleSourceKey(row)!;
     const { pending, cached } = selectSessionsNeedingTitle(
-      [{ ...row, generatedTitle: 'Recap ladder fix', generatedTitleKey: key }],
+      [{ ...row, generatedTitle: 'Recap ladder fix', generatedTitleKey: key, workstream: 'Session titles' }],
       { limit: 5 },
     );
     expect(pending).toHaveLength(0);
     expect(cached).toBe(1);
+  });
+
+  it('queues a titled row that has no workstream yet, for the workstream only', () => {
+    const row = candidate();
+    const key = sessionTitleSourceKey(row)!;
+    const { pending } = selectSessionsNeedingTitle([{ ...row, generatedTitle: 'Recap ladder fix', generatedTitleKey: key }], { limit: 5 });
+    expect(pending.map((p) => p.needsTitle)).toEqual([false]);
+  });
+
+  it('never re-titles a renamed session, but groups it once', () => {
+    const renamed = candidate({ label: 'ship the auth fix' });
+    expect(selectSessionsNeedingTitle([renamed], { limit: 5, force: true }).pending.map((p) => p.needsTitle)).toEqual([false]);
+    expect(selectSessionsNeedingTitle([{ ...renamed, workstream: 'Auth' }], { limit: 5, force: true }).cached).toBe(1);
   });
 
   it('re-titles when the first user message changed under a stored title', () => {
