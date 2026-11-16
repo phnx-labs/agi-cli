@@ -168,18 +168,25 @@ describe('a batch that fails never holds the queue (review of #4066)', () => {
     seed(ids[1], { firstUserMessage: 'name the halving retry' });
     const sizes: number[] = [];
     const result = await runSessionTitleTick({
-      limit: 12,
+      limit: 2,
       maxAgeMs: 60_000,
       run: async (prompt) => {
         sizes.push([...prompt.matchAll(/^\[(\d+)\]/gm)].length);
         return prompt.includes('POISON') ? 'Sure! Here is my thinking about the sessions.' : answerAll(prompt, 'Retries');
       },
     });
-    expect(sizes[0]).toBeGreaterThan(1);
-    expect(sizes.length).toBeGreaterThan(1);
+    expect(sizes).toEqual([2, 1, 1]);
     expect(db.getSessionWorkstream(ids[1])).toBe('Retries');
     expect(db.getSessionWorkstream(ids[0])).toBeUndefined();
     expect(result.failed).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a model that only answers prose costs at most three calls a batch', async () => {
+    const ids = ['ffff0000-0000-0000-0000-00000000000a', 'ffff0000-0000-0000-0000-00000000000b', 'ffff0000-0000-0000-0000-00000000000c', 'ffff0000-0000-0000-0000-00000000000d'];
+    ids.forEach((id, n) => seed(id, { firstUserMessage: `prose-only request ${n}` }));
+    let calls = 0;
+    await runSessionTitleTick({ limit: 12, maxAgeMs: 60_000, run: async () => { calls++; return 'I would rather talk about it.'; } });
+    expect(calls).toBe(3);
   });
 
   it('records why the call failed, once, and an abort is neither a success nor a failure', async () => {

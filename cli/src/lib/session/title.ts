@@ -412,8 +412,9 @@ export async function runSessionTitleTick(
     });
   };
   // One call per batch. A reply that is not the JSON array (one session's request can pull the
-  // model into prose) is retried in halves, so one bad session never holds the rest of the queue.
-  const run = async (batch: PendingSessionTitle[]): Promise<void> => {
+  // model into prose) is retried once, as two halves, so one bad session never holds the rest of
+  // the queue and a model that only answers prose costs at most three calls a batch.
+  const run = async (batch: PendingSessionTitle[], split = false): Promise<void> => {
     if (options.signal?.aborted) return;
     const items: SessionTitleBatchItem[] = batch.map(({ row, needsTitle }, n) => ({
       ref: String(n + 1),
@@ -431,10 +432,10 @@ export async function runSessionTitleTick(
       return;
     }
     const reply = parseSessionTitleBatch(raw);
-    if (reply.size === 0 && batch.length > 1) {
+    if (reply.size === 0 && batch.length > 1 && !split) {
       const half = Math.ceil(batch.length / 2);
-      await run(batch.slice(0, half));
-      await run(batch.slice(half));
+      await run(batch.slice(0, half), true);
+      await run(batch.slice(half), true);
       return;
     }
     apply(batch, reply);
