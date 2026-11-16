@@ -62,8 +62,7 @@ same stored keys.
 
 ## What agents-cli no longer does (PHNX-4227)
 
-- **`agents browser` is gone**, with no alias or forwarder. Running it exits 1
-  with `error: 'agents browser' was removed; use the standalone 'browser' CLI (browser --help).`
+- **`agents browser` is gone**, with no alias or forwarder. Running it exits 1 naming the standalone binary by its path on PATH, and the shell alias or function that routes a bare `browser` back to agents when a scan of the shell rc files finds one (PHNX-4641).
 - **No fleet `--device` resolution for drive verbs.** The standalone binds a
   device at `browser start --device <alias>` and resolves the alias itself
   (fleet devices become ssh aliases once `agents devices render --write` has

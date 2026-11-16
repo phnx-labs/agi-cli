@@ -65,8 +65,7 @@ the rules. Run `computer reload` after editing a group so the helper picks it up
 
 ## What agents-cli no longer does (PHNX-4227)
 
-- **`agents computer` is gone**, with no alias or forwarder. Running it exits 1
-  with `error: 'agents computer' was removed; use the standalone 'computer' CLI (computer --help).`
+- **`agents computer` is gone**, with no alias or forwarder. Running it exits 1 naming the standalone binary by its path on PATH, and the shell alias or function that routes a bare `computer` back to agents when a scan of the shell rc files finds one (PHNX-4641).
 - **No fleet `--device` resolution.** agents-cli no longer turns a device name
   into an ssh target or `--host <address>` for the engine, and the context has no
   `target` field. The engine takes `--host <address>` and also accepts

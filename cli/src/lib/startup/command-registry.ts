@@ -120,15 +120,13 @@ export function removedToolGroupMessage(group: string, rest: readonly string[]):
 
 const STANDALONE_CHECK_VERB: Readonly<Record<string, string>> = { browser: 'doctor' };
 
-// A bare `browser` aliased to `agents browser` lands here, and `browser --help` loops
-// straight back, so name the alias and the real binary by absolute path (PHNX-4641).
 function standaloneGroupMessage(group: string): string {
   const binary = findExecutable(group);
   const next = binary ? `(${binary} ${STANDALONE_CHECK_VERB[group] ?? '--help'})` : `(none is on PATH)`;
   const shadow = findShadowingDefinition(group, os.homedir());
   const fix = shadow
     ? `~/${shadow.file}:${shadow.line} defines it: delete that ${shadow.kind === 'alias' ? 'line' : 'function'}, then run '${shadowFixCommand(group, shadow)}'.`
-    : `Remove it from your shell rc file, then run 'unalias ${group}' (or 'unset -f ${group}' for a function).`;
+    : `If so, remove it from your shell rc file, then run 'unalias ${group}' (or 'unset -f ${group}' for a function).`;
   return [
     `error: 'agents ${group}' was removed; use the standalone '${group}' CLI ${next}.`,
     `If you typed '${group}', a shell alias or function sends it here; 'type ${group}' shows it.`,

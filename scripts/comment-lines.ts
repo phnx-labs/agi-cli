@@ -44,6 +44,7 @@ const CODE_EXTENSIONS = new Map<string, string>([
   ['.bash', 'shell'],
   ['.cjs', 'javascript'],
   ['.css', 'css'],
+  ['.fish', 'shell'],
   ['.html', 'html'],
   ['.js', 'javascript'],
   ['.jsx', 'jsx'],
@@ -66,6 +67,9 @@ const IGNORED_EXTENSIONS = new Set([
 ]);
 const IGNORED_BASENAMES = new Set([
   '.gitkeep', '.prettierrc', 'LICENSE', 'SHA256SUMS',
+]);
+const SHELL_RC_BASENAMES = new Set([
+  '.bash_aliases', '.bash_profile', '.bashrc', '.profile', '.zprofile', '.zshenv', '.zshrc',
 ]);
 const IGNORED_PREFIXES = ['.agents/', 'cli/docs/', 'cli/schema/'];
 const GENERATED_BASENAMES = new Set(['HEALTH.html']);
@@ -459,6 +463,7 @@ export function classifyPath(path: string, source?: string): string | null {
   const name = basename(path);
   if (GENERATED_BASENAMES.has(name)) return null;
   if (name.startsWith('Dockerfile')) return 'shell';
+  if (SHELL_RC_BASENAMES.has(name)) return 'shell';
   if (name === 'Makefile' || name === 'CODEOWNERS' || name === '.gitignore' || name === '.npmignore') return 'shell';
   const language = CODE_EXTENSIONS.get(extname(name).toLowerCase());
   if (language) return language;

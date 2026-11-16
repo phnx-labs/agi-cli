@@ -35,7 +35,7 @@ describe('removed tool groups', () => {
       expect(result.stderr.trim().split('\n')).toEqual([
         `error: 'agents ${group}' was removed; use the standalone '${group}' CLI (none is on PATH).`,
         `If you typed '${group}', a shell alias or function sends it here; 'type ${group}' shows it.`,
-        `Remove it from your shell rc file, then run 'unalias ${group}' (or 'unset -f ${group}' for a function).`,
+        `If so, remove it from your shell rc file, then run 'unalias ${group}' (or 'unset -f ${group}' for a function).`,
       ]);
     });
   }
@@ -48,7 +48,7 @@ describe('removed tool groups', () => {
     expect(result.stderr.trim().split('\n')).toEqual([
       `error: 'agents browser' was removed; use the standalone 'browser' CLI (${path.join(bin, 'browser')} doctor).`,
       "If you typed 'browser', a shell alias or function sends it here; 'type browser' shows it.",
-      "~/.zshrc:8 defines it: delete that line, then run 'unalias browser'.",
+      "~/.zshrc:7 defines it: delete that line, then run 'unalias browser'.",
     ]);
   });
 

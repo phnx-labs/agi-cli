@@ -102,6 +102,8 @@ describe('language scanners', () => {
 describe('tracked inventory and budget', () => {
   test('classifies code and known non-code while rejecting a new language silently omitted from policy', () => {
     expect(classifyPath('cli/src/a.ts')).toBe('typescript');
+    expect(classifyPath('cli/src/lib/startup/testdata/home/.zshrc')).toBe('shell');
+    expect(classifyPath('cli/src/lib/startup/testdata/home/.config/fish/config.fish')).toBe('shell');
     expect(classifyPath('.agents/artifacts/x.ts')).toBeNull();
     expect(classifyPath('README.md')).toBeNull();
     expect(classifyPath('cli/HEALTH.html')).toBeNull();
