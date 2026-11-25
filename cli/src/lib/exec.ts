@@ -449,7 +449,6 @@ interface AgentCommandTemplate {
   jsonFlags?: string[];
   modelFlag?: string;
   printFlags?: string[];
-  /** Flag carrying the prompt on an interactive launch, when it differs from `promptFlag`. */
   interactivePromptFlag?: string;
   verboseFlag?: string;
   nameFlag?: string;
@@ -550,8 +549,6 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       edit: [],
     },
   },
-  // agy's --print and --prompt-interactive take the prompt as their value, so any
-  // flag placed between --print and a positional prompt is read as the prompt.
   antigravity: {
     base: ['agy'],
     promptFlag: '--print',
