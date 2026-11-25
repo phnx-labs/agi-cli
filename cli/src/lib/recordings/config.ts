@@ -10,9 +10,6 @@ export interface RecordingsConfig {
   watchedSince?: string;
 }
 
-// Runtime state belongs in .history/, not the user's tracked ~/.agents/ repo.
-// Earlier releases wrote ~/.agents/recordings/; move it once so the ledger
-// keeps its published rows and nothing is uploaded twice.
 export function recordingsStateDir(): string {
   const dir = path.join(getHistoryDir(), 'recordings');
   const legacy = path.join(getUserAgentsDir(), 'recordings');
