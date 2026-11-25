@@ -22,10 +22,31 @@ describe('diffVersionResources honours a declined opt-in', () => {
       setVersionResourcePatterns('claude', version, { hooks: ['!system:*', '!user:*'] });
       expect(missingHooks().some((name) => name.includes(hookName))).toBe(false);
 
-      reopenDeclinedOptIn('claude', version, 'hooks');
+      reopenDeclinedOptIn('claude', version, 'hooks', [hookName]);
       expect(missingHooks().some((name) => name.includes(hookName))).toBe(true);
     } finally {
       fs.rmSync(hookFile, { force: true });
+    }
+  });
+
+  it('reports a declined permission group as not missing until it is added back', () => {
+    const groupDir = path.join(getUserAgentsDir(), 'permissions', 'groups');
+    fs.mkdirSync(groupDir, { recursive: true });
+    const group = `declined-net-${Date.now()}`;
+    const groupFile = path.join(groupDir, `${group}.yaml`);
+    fs.writeFileSync(groupFile, 'allow:\n  - "Bash(curl:*)"\n');
+    const version = `0.0.0-perm-${Date.now()}`;
+    fs.mkdirSync(path.join(getVersionHomePath('claude', version), '.claude'), { recursive: true });
+    const missing = () => diffVersionResources('claude', version, { kinds: ['permissions'] })
+      .kinds.permissions.filter((row) => row.status === 'missing').map((row) => row.name);
+    try {
+      expect(missing()).toContain(group);
+      setVersionResourcePatterns('claude', version, { permissions: ['system:*', `!user:${group}`] });
+      expect(missing()).not.toContain(group);
+      reopenDeclinedOptIn('claude', version, 'permissions', [group]);
+      expect(missing()).toContain(group);
+    } finally {
+      fs.rmSync(groupFile, { force: true });
     }
   });
 });
