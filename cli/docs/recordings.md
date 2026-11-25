@@ -15,7 +15,7 @@ agents recordings unwatch
 ```
 
 On macOS, `watch` reads `pl.maketheweb.cleanshotx exportPath` when `--dir` is not
-given. The selected folder persists in `~/.agents/recordings/config.json`.
+given. The selected folder persists in `~/.agents/.history/recordings/config.json`.
 `watch` enables the otherwise-disabled `recordings` daemon service and signals a
 running daemon to apply it live. Its persisted enable time is the discovery baseline:
 files already in the folder are not bulk-published. `unwatch` disables only this service.
@@ -31,7 +31,7 @@ CleanShot folder
   → organization identity check
   → temporary ffmpeg H.264/AAC copy (≤1080p, 30 fps, ~3 Mbps, fast-start)
   → artifacts share … --visibility org --expire never
-  → ~/.agents/recordings/ledger.json
+  → ~/.agents/.history/recordings/ledger.json
 ```
 
 The source file is read-only. macOS uses `h264_videotoolbox`; other platforms use

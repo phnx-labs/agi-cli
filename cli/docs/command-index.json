@@ -11865,7 +11865,7 @@
             }
           ],
           "examples": "agents recordings list\nagents recordings list --json",
-          "notes": "The ledger lives at ~/.agents/recordings/ledger.json and is reused after daemon restarts.",
+          "notes": "The ledger lives at ~/.agents/.history/recordings/ledger.json and is reused after daemon restarts.",
           "subcommands": []
         },
         {

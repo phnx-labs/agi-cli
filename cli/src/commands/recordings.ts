@@ -104,7 +104,7 @@ agents recordings watch --dir ~/Movies/CleanShot`,
   setHelpSections(list, {
     examples: `agents recordings list
 agents recordings list --json`,
-    notes: 'The ledger lives at ~/.agents/recordings/ledger.json and is reused after daemon restarts.',
+    notes: 'The ledger lives at ~/.agents/.history/recordings/ledger.json and is reused after daemon restarts.',
   });
 
   const upload = command.command('upload <file>')

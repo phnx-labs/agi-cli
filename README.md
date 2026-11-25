@@ -421,7 +421,7 @@ Install `ffmpeg` and `@phnx-labs/artifacts-cli`, then sign in to `artifacts` wit
 organization email. Every publish uses `--visibility org --expire never`; public inbox
 identities are refused rather than turning a team recording into a personal artifact.
 CleanShot re-exports such as `… AM 3.mp4` replace the earlier artifact at the same slug.
-The restart-safe ledger is `~/.agents/recordings/ledger.json`. See
+The restart-safe ledger is `~/.agents/.history/recordings/ledger.json`. See
 [the recordings guide](cli/docs/recordings.md) for the data flow and failure behavior.
 
 ### Back up sessions off-box
