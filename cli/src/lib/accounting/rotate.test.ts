@@ -243,6 +243,17 @@ describe('isVersionLaunchableHere for a symlink-adopted harness (antigravity)', 
     pointConfigAt(signedInOther);
     expect((await isVersionLaunchableHere('antigravity', `1.0.13-${stamp}`)).launchable).toBe(true);
   });
+
+  it('a real (non-symlink) ~/.gemini/antigravity-cli makes no managed version launchable', async () => {
+    const stamp = Date.now();
+    plantAgyHome(`1.0.13-${stamp}`, true);
+    fs.mkdirSync(configPath, { recursive: true });
+    try {
+      expect((await isVersionLaunchableHere('antigravity', `1.0.13-${stamp}`)).launchable).toBe(false);
+    } finally {
+      fs.rmSync(configPath, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('matchAccountVersion (RUSH-1957 — pin a run to an account by identity)', () => {
