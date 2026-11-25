@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
+import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import * as path from 'node:path';
-import { getUserAgentsDir } from '../state.js';
+import { getHistoryDir, getUserAgentsDir } from '../state.js';
 import { atomicWriteFile } from '../fs-atomic.js';
 import { runProcess } from './process.js';
 
@@ -9,8 +10,17 @@ export interface RecordingsConfig {
   watchedSince?: string;
 }
 
+// Runtime state belongs in .history/, not the user's tracked ~/.agents/ repo.
+// Earlier releases wrote ~/.agents/recordings/; move it once so the ledger
+// keeps its published rows and nothing is uploaded twice.
 export function recordingsStateDir(): string {
-  return path.join(getUserAgentsDir(), 'recordings');
+  const dir = path.join(getHistoryDir(), 'recordings');
+  const legacy = path.join(getUserAgentsDir(), 'recordings');
+  if (!existsSync(dir) && existsSync(legacy)) {
+    mkdirSync(getHistoryDir(), { recursive: true, mode: 0o700 });
+    renameSync(legacy, dir);
+  }
+  return dir;
 }
 
 export function recordingsConfigPath(): string {
