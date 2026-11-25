@@ -15,7 +15,12 @@ export function recordingsStateDir(): string {
   const legacy = path.join(getUserAgentsDir(), 'recordings');
   if (!existsSync(dir) && existsSync(legacy)) {
     mkdirSync(getHistoryDir(), { recursive: true, mode: 0o700 });
-    renameSync(legacy, dir);
+    try {
+      renameSync(legacy, dir);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'EEXIST' && code !== 'ENOTEMPTY') throw error;
+    }
   }
   return dir;
 }
