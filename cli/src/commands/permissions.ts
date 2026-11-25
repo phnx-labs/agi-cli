@@ -37,6 +37,7 @@ import {
   getGlobalDefault,
   getVersionHomePath,
   promptAgentVersionSelection,
+  reopenDeclinedOptIn,
   resolveAgentVersionTargets,
 } from '../lib/installations/versions.js';
 import { recordVersionResources } from '../lib/state.js';
@@ -398,6 +399,7 @@ Examples:
 
             for (const [agentId, versions] of versionSelections) {
               for (const version of versions) {
+                reopenDeclinedOptIn(agentId, version, 'permissions');
                 const versionHome = getVersionHomePath(agentId, version);
                 const applyResult = applyPermissionsToVersion(agentId, installed.set, versionHome, !options.replace);
                 if (applyResult.success) {
@@ -563,6 +565,7 @@ Examples:
             let applied = 0;
             for (const [agentId, versions] of versionSelections) {
               for (const version of versions) {
+                reopenDeclinedOptIn(agentId, version, 'permissions');
                 const versionHome = getVersionHomePath(agentId, version);
                 const applyResult = applyPermissionsToVersion(agentId, merged, versionHome, !options.replace);
                 if (applyResult.success) {
@@ -699,6 +702,7 @@ Examples:
             for (const perm of permissions) {
               for (const [agentId, versions] of versionSelections) {
                 for (const version of versions) {
+                  reopenDeclinedOptIn(agentId, version, 'permissions');
                   const versionHome = getVersionHomePath(agentId, version);
                   const applyResult = applyPermissionsToVersion(agentId, perm.set, versionHome, !options.replace);
                   if (applyResult.success) {

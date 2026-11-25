@@ -56,6 +56,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  declinedResources,
   getProjectOnlyResources,
   hasNewResources,
   printTrashFooter,
@@ -574,7 +575,7 @@ export function registerVersionsCommands(program: Command): void {
 
             const available = getAvailableResources();
             const actuallySynced = getActuallySyncedResources(agent, installedVersion);
-            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
+            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agent, installedVersion, available));
 
             const hasAnySynced = actuallySynced.commands.length > 0 ||
               actuallySynced.skills.length > 0 ||
@@ -594,7 +595,7 @@ export function registerVersionsCommands(program: Command): void {
                   selection = buildAutomaticSelection(newResources);
                 }
               } else if (!hasAnySynced) {
-                const userSelection = await promptResourceSelection(agent);
+                const userSelection = await promptResourceSelection(agent, installedVersion);
                 if (userSelection) {
                   selection = userSelection;
                 }
@@ -908,7 +909,7 @@ export function registerVersionsCommands(program: Command): void {
         } else {
           const available = getAvailableResources();
           const actuallySynced = getActuallySyncedResources(agentId, finalVersion);
-          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
+          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, finalVersion, available));
 
           const hasAnySynced = actuallySynced.commands.length > 0 ||
             actuallySynced.skills.length > 0 ||
@@ -943,7 +944,7 @@ export function registerVersionsCommands(program: Command): void {
               }
             } else if (!hasAnySynced) {
               console.log(chalk.yellow(`\n${agentLabel(agentConfig.id)}@${finalVersion} has no synced resources.`));
-              const userSelection = await promptResourceSelection(agentId);
+              const userSelection = await promptResourceSelection(agentId, finalVersion);
               if (userSelection && Object.keys(userSelection).length > 0) {
                 const syncResult = syncResourcesToVersion(agentId, finalVersion, userSelection);
                 const syncedTypes: string[] = [];

@@ -32,6 +32,7 @@ import {
   listInstalledVersions,
   getGlobalDefault,
   syncResourcesToVersion,
+  reopenDeclinedOptIn,
   promptAgentVersionSelection,
   getVersionHomePath,
   resolveAgentVersionTargets,
@@ -428,6 +429,7 @@ Examples:
 
         for (const [agentId, versions] of versionSelections) {
           for (const version of versions) {
+            reopenDeclinedOptIn(agentId, version, 'hooks');
             syncResourcesToVersion(agentId, version);
             recordVersionResources(agentId, version, 'hooks', hooks);
             synced++;
