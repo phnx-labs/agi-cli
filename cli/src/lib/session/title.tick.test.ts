@@ -118,7 +118,6 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     seed(id);
     await runSessionTitleTick({ id, run: async () => reply('First title', 'Session titles') });
     expect(db.setSessionWorkstreamByUser(id, 'Rush Cloud')).toBe(true);
-    // An explicit refresh re-titles and answers another workstream: the title moves, the topic stays.
     const swept = await runSessionTitleTick({ id, force: true, run: async () => reply('Second title', 'Something else') });
     expect(swept.titles.some((t) => t.id === id)).toBe(true);
     expect(db.getSessionById(id)?.generatedTitle).toBe('Second title');

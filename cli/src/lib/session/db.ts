@@ -133,8 +133,6 @@ CREATE TABLE IF NOT EXISTS sessions (
   generated_title_key TEXT,
   generated_title_at INTEGER,
   workstream TEXT,
-  -- 1 once a person set this session's workstream (\`agents ps topic\`): the titler
-  -- never overwrites it, so a session moved to another topic stays there.
   workstream_set_by_user INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
@@ -3507,9 +3505,6 @@ export function setSessionWorkstream(id: string, workstream: string): boolean {
   return getDB().prepare(`UPDATE sessions SET workstream = ? WHERE id = ? AND mirror_synced_at IS NULL AND workstream_set_by_user IS NOT 1`).run(workstream, id).changes > 0;
 }
 
-/** A person's choice of this session's workstream (`agents ps topic`). Only the box that
- *  owns the transcript writes it (a mirror row takes the owner's value on the next sync),
- *  and the titler never overwrites it. False when this box holds no such session. */
 export function setSessionWorkstreamByUser(id: string, workstream: string): boolean {
   return getDB().prepare(`UPDATE sessions SET workstream = ?, workstream_set_by_user = 1 WHERE id = ? AND mirror_synced_at IS NULL`).run(workstream, id).changes > 0;
 }
