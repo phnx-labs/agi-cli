@@ -115,6 +115,11 @@ describe('AgentProcess: remoteSessionId extraction', () => {
     expect(agent.remoteSessionId).toBe('550e8400-e29b-41d4-a716-446655440000');
   });
 
+  it('picks up conversation_id from a real Antigravity stream-json session', async () => {
+    const agent = await runAgainstFixture('antigravity', 'antigravity-session.jsonl', tmpBase);
+    expect(agent.remoteSessionId).toBe('06f57e3e-5302-40b3-8a09-3f474b62da5f');
+  });
+
   it('remoteSessionId stays pinned to the FIRST session_id seen', async () => {
     const agentId = randomUUID();
     const agent = new AgentProcess(
@@ -136,8 +141,8 @@ describe('AgentProcess: remoteSessionId extraction', () => {
     await fs.writeFile(
       stdoutPath,
       [
-        '{"type":"init","sessionId":"first-session"}',
-        '{"type":"init","sessionId":"second-session"}',
+        '{"event":"init","conversation_id":"first-session","init":{}}',
+        '{"event":"init","conversation_id":"second-session","init":{}}',
       ].join('\n') + '\n'
     );
     await agent.readNewEvents();
