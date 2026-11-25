@@ -230,7 +230,7 @@ describe('a batch that fails never holds the queue (review of #4066)', () => {
 
 describe('swappable title provider (PHNX-3797)', () => {
   it('generates through an injected provider — the seam a local backend drops into', async () => {
-    const id = '8b8b8b8b-0000-0000-0000-0000000000a2';
+    const id = '88888888-0000-0000-0000-000000000008';
     seed(id, { firstUserMessage: 'wire up the local title backend' });
     let seen: { input?: string } = {};
     const provider: SessionTitleProvider = {
