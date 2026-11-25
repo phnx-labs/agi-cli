@@ -31,7 +31,7 @@ import { emptyTimelineState, TIMELINE_EXTRACTOR_VERSION, type TimelineState } fr
 const SESSIONS_DIR = getSessionsDir();
 const DB_PATH = getSessionsDbPath();
 
-export const SCHEMA_VERSION = 55;
+export const SCHEMA_VERSION = 56;
 
 export const CONTENT_INDEX_VERSION = 8;
 
@@ -132,7 +132,10 @@ CREATE TABLE IF NOT EXISTS sessions (
   generated_title TEXT,
   generated_title_key TEXT,
   generated_title_at INTEGER,
-  workstream TEXT
+  workstream TEXT,
+  -- 1 once a person set this session's workstream (\`agents ps topic\`): the titler
+  -- never overwrites it, so a session moved to another topic stays there.
+  workstream_set_by_user INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_timestamp ON sessions(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd);
@@ -1182,6 +1185,11 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
   if (fromVersion < 55) {
     const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
     if (!cols.some(c => c.name === 'workstream')) db.exec(`ALTER TABLE sessions ADD COLUMN workstream TEXT`);
+  }
+
+  if (fromVersion < 56) {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some(c => c.name === 'workstream_set_by_user')) db.exec(`ALTER TABLE sessions ADD COLUMN workstream_set_by_user INTEGER`);
   }
 }
 
@@ -3489,14 +3497,21 @@ export function setSessionGeneratedTitle(
   const result = getDB().prepare(`
     UPDATE sessions
     SET generated_title = ?, generated_title_key = ?, generated_title_at = ?,
-        workstream = COALESCE(?, workstream)
+        workstream = CASE WHEN workstream_set_by_user = 1 THEN workstream ELSE COALESCE(?, workstream) END
     WHERE id = ? AND mirror_synced_at IS NULL
   `).run(title, sourceKey, now, workstream ?? null, id);
   return result.changes > 0;
 }
 
 export function setSessionWorkstream(id: string, workstream: string): boolean {
-  return getDB().prepare(`UPDATE sessions SET workstream = ? WHERE id = ? AND mirror_synced_at IS NULL`).run(workstream, id).changes > 0;
+  return getDB().prepare(`UPDATE sessions SET workstream = ? WHERE id = ? AND mirror_synced_at IS NULL AND workstream_set_by_user IS NOT 1`).run(workstream, id).changes > 0;
+}
+
+/** A person's choice of this session's workstream (`agents ps topic`). Only the box that
+ *  owns the transcript writes it (a mirror row takes the owner's value on the next sync),
+ *  and the titler never overwrites it. False when this box holds no such session. */
+export function setSessionWorkstreamByUser(id: string, workstream: string): boolean {
+  return getDB().prepare(`UPDATE sessions SET workstream = ?, workstream_set_by_user = 1 WHERE id = ? AND mirror_synced_at IS NULL`).run(workstream, id).changes > 0;
 }
 
 export function getSessionWorkstream(id: string): string | undefined {

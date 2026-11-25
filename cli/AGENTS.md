@@ -1745,7 +1745,7 @@ src/
   index.ts             # CLI entry (commander.js)
   commands/            # User-facing subcommands (one file — or a `<cmd>-*.ts` family, e.g. the `sessions*.ts` family — per `agents <cmd>`)
                        #   ps.ts + ps-roster.ts: `agents ps`, the live roster (renderActiveSessions over lib/session/active.ts gatherActiveSessions)
-                       #   and the stop/focus/detach/migrate/preview/watch verbs (PHNX-4227)
+                       #   and the stop/focus/detach/migrate/preview/watch verbs (PHNX-4227); ps-topic.ts: `ps topic` (PHNX-4676)
   lib/
     state.ts           # Path constants; agents.yaml read/write (serializeCentral preserves comments)
     manifest.ts        # Project/user agents.yaml Manifest read/write (comment-preserving Document round-trip; used by mcp add, etc.)
@@ -1832,7 +1832,8 @@ carry `startedAs`, the first prompt with `/goal` and injected turns stripped. `g
 daemon's `session-title` service with a cheap model and persisted in
 `sessions.generated_title` (and a `workstream`, 1 to 3 words for the larger effort,
 in `sessions.workstream`; up to 12 sessions share ONE model call per tick and are
-shown the box's existing workstreams) beside the hash of the user text it came from, so a
+shown the box's existing workstreams; a workstream a person set with `agents ps topic`
+is marked `workstream_set_by_user` and the job never overwrites it, PHNX-4676) beside the hash of the user text it came from, so a
 titled session never costs another model call and re-titles only when that first
 user message changes (or on `agents daemon index backfill titles --refresh`). It
 rides the existing streams — the watch row spread and the PHNX-3792 session

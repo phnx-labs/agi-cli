@@ -10,7 +10,7 @@ Every `agents` command and subcommand, with its argument names and one-line desc
 - `agents <command> --help` shows the help for one command.
 - Excluded: commands Commander marks hidden, plus the deprecated aliases and tombstones registered inline in src/index.ts (`perms`, `exec`, `check`, `resources`, `hq`, `_internal`).
 
-_44 command groups · 337 commands._
+_44 command groups · 338 commands._
 
 ## accounts: Browse and manage harness accounts
 
@@ -387,6 +387,7 @@ agents ps migrate [session-id]  Relocate a running session onto another machine 
 agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
 agents ps preview <id...>       Show rich session cards without rendering the full transcripts
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
+agents ps topic <id> <topic>    File a session under a topic you choose; the daemon never changes it back
 agents ps watch                 Stream canonical live and recoverable session row changes as NDJSON
 ```
 
