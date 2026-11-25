@@ -140,7 +140,7 @@ remote home for you.
 | Flag | Description |
 |---|---|
 | `-n, --name <name>` | Friendly name (required when using `--after`) |
-| `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `auto` (more autonomous than edit, per-harness) \| `skip` (bypass all permission prompts; `full` is an alias). Default: `edit`. kimi/grok/antigravity have no headless plan mode and downgrade `plan` to `auto` |
+| `-m, --mode <mode>` | `plan` (read-only) \| `edit` (write files) \| `auto` (more autonomous than edit, per-harness) \| `skip` (bypass all permission prompts; `full` is an alias). Default: `edit`. kimi/grok have no headless plan mode and downgrade `plan` to `auto` |
 | `-e, --effort <effort>` | `low` \| `medium` \| `high` \| `xhigh` \| `max` \| `auto`. Default: `medium` |
 | `--model <model>` | Cost tier (`cheap`\|`default`\|`best`\|`ultra`) or a concrete id (e.g. `claude-opus-4-8`); tiers resolve per harness+version to a supported model. See Model tiers. |
 | `--env <key=value>` | Set an env var for this teammate (repeatable) |

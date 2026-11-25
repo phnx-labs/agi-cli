@@ -1132,19 +1132,18 @@ function extractDroidToolResultContent(content: any): string {
   return '';
 }
 
+const ANTIGRAVITY_FILE_TOOLS: Record<string, 'file_create' | 'file_write' | 'file_read'> = {
+  write_file: 'file_create',
+  edit_file: 'file_write',
+  replace_file_content: 'file_write',
+  multi_replace_file_content: 'file_write',
+  view_file: 'file_read',
+};
+
+// `agy --output-format stream-json`: one `{event, <event>: {...}}` object per line
+// (init, step_update, result). Fixture: teams/__tests__/testdata/antigravity-stream.jsonl.
 function normalizeAntigravity(raw: any): any[] {
   const timestamp = new Date().toISOString();
-
-  if (typeof raw === 'string') {
-    if (!raw) return [];
-    return [{
-      type: 'message',
-      agent: 'antigravity',
-      content: raw,
-      complete: true,
-      timestamp: timestamp,
-    }];
-  }
 
   if (!raw || typeof raw !== 'object') {
     return [{
@@ -1155,41 +1154,90 @@ function normalizeAntigravity(raw: any): any[] {
     }];
   }
 
-  const eventType = raw.type || 'unknown';
+  const event = typeof raw.event === 'string' ? raw.event : 'unknown';
+  const body = raw[event] && typeof raw[event] === 'object' ? raw[event] : {};
+  const sessionId = typeof raw.conversation_id === 'string'
+    ? raw.conversation_id
+    : typeof body.conversation_id === 'string' ? body.conversation_id : null;
 
-  if (eventType === 'init') {
+  if (event === 'init') {
     return [{
       type: 'init',
       agent: 'antigravity',
-      session_id: typeof raw.sessionId === 'string' ? raw.sessionId : null,
+      session_id: sessionId,
       timestamp: timestamp,
     }];
   }
 
-  if (eventType === 'message') {
-    const content = typeof raw.content === 'string' ? raw.content : '';
-    if (!content) return [];
-    return [{
-      type: 'message',
-      agent: 'antigravity',
-      content: content,
-      complete: raw.complete !== false,
-      timestamp: timestamp,
-    }];
-  }
-
-  if (eventType === 'result') {
+  if (event === 'result') {
     return [{
       type: 'result',
       agent: 'antigravity',
-      status: raw.status === 'error' ? 'error' : 'success',
-      session_id: typeof raw.sessionId === 'string' ? raw.sessionId : null,
+      status: body.status === 'SUCCESS' ? 'success' : 'error',
+      session_id: sessionId,
       timestamp: timestamp,
     }];
   }
 
+  if (event === 'step_update') {
+    if (body.step_type === 'user_input') return [];
+
+    if (body.step_type === 'agent_response') {
+      const delta = typeof body.text_delta === 'string' ? body.text_delta : '';
+      if (!delta) return [];
+      return [{
+        type: 'message',
+        agent: 'antigravity',
+        content: delta,
+        complete: false,
+        timestamp: timestamp,
+      }];
+    }
+
+    if (body.step_type === 'tool') {
+      const info = body.tool_info && typeof body.tool_info === 'object' ? body.tool_info : {};
+      const toolName = typeof info.name === 'string' ? info.name : 'unknown';
+      const params = info.parameters && typeof info.parameters === 'object' ? info.parameters : {};
+
+      if (body.state === 'DONE') {
+        return [{
+          type: 'tool_result',
+          agent: 'antigravity',
+          tool: toolName,
+          success: !body.error,
+          content: typeof info.output === 'string' ? info.output : '',
+          timestamp: timestamp,
+        }];
+      }
+
+      const command = typeof params.CommandLine === 'string' ? params.CommandLine : '';
+      if (toolName === 'run_command' && command) {
+        const events: any[] = [{ type: 'bash', agent: 'antigravity', tool: toolName, command, timestamp }];
+        const [filesRead, filesWritten, filesDeleted] = extractFileOpsFromBash(command);
+        for (const p of filesRead) events.push({ type: 'file_read', agent: 'antigravity', tool: 'bash', path: p, command, timestamp });
+        for (const p of filesWritten) events.push({ type: 'file_write', agent: 'antigravity', tool: 'bash', path: p, command, timestamp });
+        for (const p of filesDeleted) events.push({ type: 'file_delete', agent: 'antigravity', tool: 'bash', path: p, command, timestamp });
+        return events;
+      }
+
+      const fileType = ANTIGRAVITY_FILE_TOOLS[toolName];
+      const filePath = typeof params.Path === 'string' ? params.Path : '';
+      if (fileType && filePath) {
+        return [{ type: fileType, agent: 'antigravity', tool: toolName, path: filePath, timestamp }];
+      }
+
+      return [{
+        type: 'tool_use',
+        agent: 'antigravity',
+        tool: toolName,
+        args: params,
+        timestamp: timestamp,
+      }];
+    }
+  }
+
   return [{
-    type: eventType,
+    type: event,
     agent: 'antigravity',
     raw: raw,
     timestamp: timestamp,

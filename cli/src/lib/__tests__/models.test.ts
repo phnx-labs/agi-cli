@@ -314,6 +314,13 @@ describe('buildReasoningFlags', () => {
     expect(buildReasoningFlags('codex', 'max')).toEqual(['-c', 'model_reasoning_effort=high']);
   });
 
+  it('passes every level through to agy --effort, and leaves auto to agy', () => {
+    for (const level of ['low', 'medium', 'high', 'xhigh', 'max']) {
+      expect(buildReasoningFlags('antigravity', level)).toEqual(['--effort', level]);
+    }
+    expect(buildReasoningFlags('antigravity', 'auto')).toEqual([]);
+  });
+
   it('returns empty for agents with no known mapping', () => {
     expect(buildReasoningFlags('gemini', 'high')).toEqual([]);
   });

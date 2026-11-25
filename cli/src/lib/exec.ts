@@ -126,8 +126,8 @@ export function resolveMode(agent: AgentId, requested: Mode): Mode {
  * `--prompt` + `--plan`, and grok's `--permission-mode plan` silently stalls at
  * its ExitPlanMode gate. For those agents, a headless plan request degrades to
  * `auto` (kimi -p auto-runs; grok runs `--permission-mode auto`) with a visible
- * one-line stderr warning, mirroring the graceful plan→edit degrade antigravity
- * get for having no plan flag at all. Interactive runs are never
+ * one-line stderr warning, mirroring the graceful plan→edit degrade a harness
+ * with no plan flag at all gets. Interactive runs are never
  * downgraded. This is the single source of truth shared by buildExecCommand
  * (agents run / teams).
  */
@@ -449,6 +449,8 @@ interface AgentCommandTemplate {
   jsonFlags?: string[];
   modelFlag?: string;
   printFlags?: string[];
+  /** Flag carrying the prompt on an interactive launch, when it differs from `promptFlag`. */
+  interactivePromptFlag?: string;
   verboseFlag?: string;
   nameFlag?: string;
   resume?: (
@@ -548,16 +550,20 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       edit: [],
     },
   },
-  // TODO: --output-format json is documented but currently broken upstream
+  // agy's --print and --prompt-interactive take the prompt as their value, so any
+  // flag placed between --print and a positional prompt is read as the prompt.
   antigravity: {
     base: ['agy'],
-    promptFlag: 'positional',
+    promptFlag: '--print',
+    interactivePromptFlag: '--prompt-interactive',
     modeFlags: {
-      edit: [],
+      plan: ['--mode', 'plan'],
+      edit: ['--mode', 'accept-edits'],
       skip: ['--dangerously-skip-permissions'],
     },
-    printFlags: ['--print'],
+    jsonFlags: ['--output-format', 'stream-json'],
     modelFlag: '--model',
+    resume: { flag: '--conversation', since: '1.1.27' },
   },
   grok: {
     base: ['grok'],
@@ -808,6 +814,8 @@ export function buildExecCommand(options: ExecOptions): string[] {
       cmd.push('--prompt', options.prompt);
     } else if (interactive && options.agent === 'claude') {
       cmd.push(options.prompt);
+    } else if (interactive && template.interactivePromptFlag) {
+      cmd.push(template.interactivePromptFlag, options.prompt);
     } else if (template.promptFlag === 'positional') {
       cmd.push(options.prompt);
     } else {

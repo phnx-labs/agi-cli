@@ -190,7 +190,7 @@ describe('degraded run governance mode', () => {
       const eventsPath = path.join(root, 'events.jsonl');
       const result = spawnSync(
         'node',
-        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'antigravity', 'probe', '--mode', 'plan', '--quiet', '--cwd', root],
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'antigravity', 'probe', '--mode', 'auto', '--quiet', '--cwd', root],
         {
           cwd: path.resolve(import.meta.dirname, '..', '..'),
           env: {
