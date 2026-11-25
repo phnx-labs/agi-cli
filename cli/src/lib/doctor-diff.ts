@@ -26,6 +26,7 @@ import {
   getActuallySyncedResources,
   getVersionHomePath,
   compareVersions,
+  declinedResources,
 } from './installations/versions.js';
 import { discoverPlugins, marketplaceSpecForName } from './plugins/plugins.js';
 import type { DiscoveredPlugin } from './types.js';
@@ -811,7 +812,12 @@ export function diffVersionResources(
   if (requested.has('commands')) empty.commands = diffCommands(agent, version, cwd, excludeProject);
   if (requested.has('skills')) empty.skills = diffSkills(agent, version, cwd, excludeProject);
   const hookInventory = requested.has('hooks') ? getResourceInventory(agent, version, 'hooks', { cwd }) : undefined;
-  if (hookInventory) empty.hooks = diffHooks(agent, version, cwd, hookInventory);
+  const declined = declinedResources(agent, version, available, cwd);
+  if (hookInventory) {
+    const declinedHooks = new Set([...declined.hooks].map(name => name.replace(/\.[^./]+$/, '')));
+    empty.hooks = diffHooks(agent, version, cwd, hookInventory)
+      .filter(row => !(row.status === 'missing' && declinedHooks.has(row.name.replace(/\.[^./]+$/, ''))));
+  }
   const hookWiring = hookInventory?.wiring;
   if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
   if (requested.has('mcp')) empty.mcp = diffMcp(agent, version, cwd, available.mcp, synced.mcp);
@@ -819,7 +825,9 @@ export function diffVersionResources(
     empty.permissions = diffPermissions(
       agent,
       version,
-      supports(agent, 'allowlist', version).ok ? available.permissions : [],
+      supports(agent, 'allowlist', version).ok
+        ? available.permissions.filter(name => !declined.permissions.has(name))
+        : [],
       synced.permissions,
     );
   }
