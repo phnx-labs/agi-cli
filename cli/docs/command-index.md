@@ -387,7 +387,7 @@ agents ps migrate [session-id]  Relocate a running session onto another machine 
 agents ps migrations            Show the migration ledger — sessions handed off to/from other machines.
 agents ps preview <id...>       Show rich session cards without rendering the full transcripts
 agents ps stop <id>             Stop a live agent outright — end its process and tear down its tmux/mux session
-agents ps topic <id> <topic>    File a session under a topic you choose; the daemon never changes it back
+agents ps topic <id> <topic>    File a live session under a topic you choose; the daemon never changes it back
 agents ps watch                 Stream canonical live and recoverable session row changes as NDJSON
 ```
 

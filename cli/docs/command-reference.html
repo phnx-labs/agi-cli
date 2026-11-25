@@ -1964,7 +1964,7 @@ with `agents ps focus &lt;id&gt;`.
 
 A session that lives on another machine is stopped THERE over SSH — its pid
 and tmux socket only mean something where it actually runs.</p></article>
-<article id="ps-topic" data-search="topic ps topic  file a session under a topic you choose; the daemon never changes it back id short or full id of the live session topic the topic to file it under, 1 to 4 words (e.g. &quot;rush cloud&quot;) --local only this machine (skip the cross-host sweep) --json emit the result as json -h, --help show help # move a session to another topic (agi ext does this when you drag its card)
+<article id="ps-topic" data-search="topic ps topic  file a live session under a topic you choose; the daemon never changes it back id short or full id of the live session topic the topic to file it under: 1 to 4 words, at most 32 characters (e.g. &quot;rush cloud&quot;) --local only this machine (skip the cross-host sweep) --json emit the result as json -h, --help show help # move a session to another topic (agi ext does this when you drag its card)
 agents ps topic 4b2f1a9c &quot;rush cloud&quot;
 
 # machine-readable, for a ui
@@ -1972,9 +1972,14 @@ agents ps topic 4b2f1a9c &quot;rush cloud&quot; --json a topic is the session&#3
 `agents ps watch` and agi ext. the daemon&#39;s title job names one for every
 session; a topic set here is yours and the job never overwrites it.
 
+only a live session takes a topic: topics group the sessions running now,
+and a session that ended groups by where it ran.
+
 the topic is stored on the machine that owns the session, so a session
 running on another machine is updated there over ssh; your other machines
-pick it up with the next session sync."><div class="command-head"><h3><code>agents ps topic &lt;id&gt; &lt;topic&gt;</code></h3></div><p>File a session under a topic you choose; the daemon never changes it back</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;id&gt;</code></td><td>Short or full id of the live session</td><td></td><td></td></tr><tr><td><code>&lt;topic&gt;</code></td><td>The topic to file it under, 1 to 4 words (e.g. &quot;Rush Cloud&quot;)</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--local</code></td><td>Only this machine (skip the cross-host sweep)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the result as JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Move a session to another topic (AGI EXT does this when you drag its card)
+pick it up with the next session sync. it stays with that machine: a
+session moved with `agents ps migrate` gets its topic from the title job
+again until you set one there."><div class="command-head"><h3><code>agents ps topic &lt;id&gt; &lt;topic&gt;</code></h3></div><p>File a live session under a topic you choose; the daemon never changes it back</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;id&gt;</code></td><td>Short or full id of the live session</td><td></td><td></td></tr><tr><td><code>&lt;topic&gt;</code></td><td>The topic to file it under: 1 to 4 words, at most 32 characters (e.g. &quot;Rush Cloud&quot;)</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--local</code></td><td>Only this machine (skip the cross-host sweep)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the result as JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Move a session to another topic (AGI EXT does this when you drag its card)
 agents ps topic 4b2f1a9c &quot;Rush Cloud&quot;
 
 # Machine-readable, for a UI
@@ -1982,9 +1987,14 @@ agents ps topic 4b2f1a9c &quot;Rush Cloud&quot; --json</code></pre><h4>Notes</h4
 `agents ps watch` and AGI EXT. The daemon&#39;s title job names one for every
 session; a topic set here is yours and the job never overwrites it.
 
+Only a live session takes a topic: topics group the sessions running now,
+and a session that ended groups by where it ran.
+
 The topic is stored on the machine that owns the session, so a session
 running on another machine is updated THERE over SSH; your other machines
-pick it up with the next session sync.</p></article>
+pick it up with the next session sync. It stays with that machine: a
+session moved with `agents ps migrate` gets its topic from the title job
+again until you set one there.</p></article>
 <article id="ps-watch" data-search="watch ps watch  stream canonical live and recoverable session row changes as ndjson --json emit versioned ndjson envelopes --local watch only this machine --include-lead also stream project lead sessions (agents lead), which are hidden by default -h, --help show help # subscribe to session changes for a long-lived ui consumer
 agents ps watch --json
 

@@ -5,7 +5,7 @@ import { resolveOne } from './detach-core.js';
 import { sessionProcessHost } from '../lib/session/active.js';
 import { runOnPeer } from '../lib/session/remote-list.js';
 import { setSessionWorkstreamByUser } from '../lib/session/db.js';
-import { sanitizeWorkstream } from '../lib/session/title.js';
+import { sanitizeWorkstream, SESSION_WORKSTREAM_MAX_CHARS, SESSION_WORKSTREAM_MAX_WORDS } from '../lib/session/title.js';
 import { setHelpSections } from '../lib/help.js';
 
 // `forwarded`: the owning peer already printed the result (its stdio is ours).
@@ -15,10 +15,10 @@ export function registerPsTopicCommand(program: Command): void {
   const cmd = program
     .command('topic')
     .argument('<id>', 'Short or full id of the live session')
-    .argument('<topic>', 'The topic to file it under, 1 to 4 words (e.g. "Rush Cloud")')
+    .argument('<topic>', 'The topic to file it under: 1 to 4 words, at most 32 characters (e.g. "Rush Cloud")')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
     .option('--json', 'Emit the result as JSON')
-    .description('File a session under a topic you choose; the daemon never changes it back')
+    .description('File a live session under a topic you choose; the daemon never changes it back')
     .action(async (id: string, topic: string, _opts: unknown, invoked: Command) => {
       // `ps` declares --json and --local itself, so Commander may hand them to the parent.
       const opts = invoked.optsWithGlobals() as { local?: boolean; json?: boolean };
@@ -42,16 +42,25 @@ export function registerPsTopicCommand(program: Command): void {
       \`agents ps watch\` and AGI EXT. The daemon's title job names one for every
       session; a topic set here is yours and the job never overwrites it.
 
+      Only a live session takes a topic: topics group the sessions running now,
+      and a session that ended groups by where it ran.
+
       The topic is stored on the machine that owns the session, so a session
       running on another machine is updated THERE over SSH; your other machines
-      pick it up with the next session sync.
+      pick it up with the next session sync. It stays with that machine: a
+      session moved with \`agents ps migrate\` gets its topic from the title job
+      again until you set one there.
     `,
   });
 }
 
 async function setTopicAction(id: string, raw: string, opts: { local?: boolean; json?: boolean }): Promise<TopicResult> {
-  const topic = sanitizeWorkstream(raw);
-  if (!topic) return { ok: false, error: 'Give the topic as 1 to 4 words, e.g. "Rush Cloud".' };
+  // Refuse rather than shorten: a topic cut to fit is not the one asked for.
+  const asked = raw.replace(/\s+/g, ' ').trim();
+  const topic = asked.split(' ').length <= SESSION_WORKSTREAM_MAX_WORDS && asked.length <= SESSION_WORKSTREAM_MAX_CHARS ? sanitizeWorkstream(asked) : undefined;
+  if (!topic) {
+    return { ok: false, error: `Give the topic as 1 to 4 words, at most ${SESSION_WORKSTREAM_MAX_CHARS} characters, e.g. "Rush Cloud".` };
+  }
   const { self, activeById } = await gatherLiveTargets(!!opts.local, { selector: id });
   const s = resolveOne(activeById, id);
   if ('error' in s) return { ok: false, error: s.error };

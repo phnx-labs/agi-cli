@@ -11769,7 +11769,7 @@
           "name": "topic",
           "path": "ps topic",
           "aliases": [],
-          "description": "File a session under a topic you choose; the daemon never changes it back",
+          "description": "File a live session under a topic you choose; the daemon never changes it back",
           "args": [
             {
               "name": "id",
@@ -11781,7 +11781,7 @@
               "name": "topic",
               "required": true,
               "variadic": false,
-              "description": "The topic to file it under, 1 to 4 words (e.g. \"Rush Cloud\")"
+              "description": "The topic to file it under: 1 to 4 words, at most 32 characters (e.g. \"Rush Cloud\")"
             }
           ],
           "options": [
@@ -11815,7 +11815,7 @@
             }
           ],
           "examples": "# Move a session to another topic (AGI EXT does this when you drag its card)\nagents ps topic 4b2f1a9c \"Rush Cloud\"\n\n# Machine-readable, for a UI\nagents ps topic 4b2f1a9c \"Rush Cloud\" --json",
-          "notes": "A topic is the session's workstream: the name sessions are grouped by in\n`agents ps watch` and AGI EXT. The daemon's title job names one for every\nsession; a topic set here is yours and the job never overwrites it.\n\nThe topic is stored on the machine that owns the session, so a session\nrunning on another machine is updated THERE over SSH; your other machines\npick it up with the next session sync.",
+          "notes": "A topic is the session's workstream: the name sessions are grouped by in\n`agents ps watch` and AGI EXT. The daemon's title job names one for every\nsession; a topic set here is yours and the job never overwrites it.\n\nOnly a live session takes a topic: topics group the sessions running now,\nand a session that ended groups by where it ran.\n\nThe topic is stored on the machine that owns the session, so a session\nrunning on another machine is updated THERE over SSH; your other machines\npick it up with the next session sync. It stays with that machine: a\nsession moved with `agents ps migrate` gets its topic from the title job\nagain until you set one there.",
           "subcommands": []
         },
         {
