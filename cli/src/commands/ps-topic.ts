@@ -8,8 +8,7 @@ import { setSessionWorkstreamByUser } from '../lib/session/db.js';
 import { sanitizeWorkstream, SESSION_WORKSTREAM_MAX_CHARS, SESSION_WORKSTREAM_MAX_WORDS } from '../lib/session/title.js';
 import { setHelpSections } from '../lib/help.js';
 
-// `forwarded`: the owning peer already printed the result (its stdio is ours).
-type TopicResult = { ok: true; sessionId: string; topic: string; machine: string } | { ok: false; error: string } | { forwarded: true; ok: boolean };
+type TopicResult = { ok: true; sessionId: string; topic: string; machine: string } | { ok: false; error: string } | { printedByPeer: true; ok: boolean };
 
 export function registerPsTopicCommand(program: Command): void {
   const cmd = program
@@ -20,11 +19,10 @@ export function registerPsTopicCommand(program: Command): void {
     .option('--json', 'Emit the result as JSON')
     .description('File a live session under a topic you choose; the daemon never changes it back')
     .action(async (id: string, topic: string, _opts: unknown, invoked: Command) => {
-      // `ps` declares --json and --local itself, so Commander may hand them to the parent.
       const opts = invoked.optsWithGlobals() as { local?: boolean; json?: boolean };
       const result = await setTopicAction(id, topic, opts);
       if (!result.ok) process.exitCode = 1;
-      if ('forwarded' in result) return;
+      if ('printedByPeer' in result) return;
       if (opts.json) console.log(JSON.stringify(result));
       else if (result.ok) console.log(chalk.green(`${result.sessionId.slice(0, 8)} is under "${result.topic}" now`) + chalk.gray(` (on ${result.machine})`));
       else console.error(chalk.red(result.error));
@@ -55,7 +53,6 @@ export function registerPsTopicCommand(program: Command): void {
 }
 
 async function setTopicAction(id: string, raw: string, opts: { local?: boolean; json?: boolean }): Promise<TopicResult> {
-  // Refuse rather than shorten: a topic cut to fit is not the one asked for.
   const asked = raw.replace(/\s+/g, ' ').trim();
   const topic = asked.split(' ').length <= SESSION_WORKSTREAM_MAX_WORDS && asked.length <= SESSION_WORKSTREAM_MAX_CHARS ? sanitizeWorkstream(asked) : undefined;
   if (!topic) {
@@ -73,7 +70,7 @@ async function setTopicAction(id: string, raw: string, opts: { local?: boolean; 
     if (opts.local) return { ok: false, error: `${sessionId.slice(0, 8)} runs on ${host}; drop --local to set it there.` };
     const rc = await runOnPeer(['ps', 'topic', sessionId, topic, '--local', ...(opts.json ? ['--json'] : [])], host);
     if (rc === 'no-target') return { ok: false, error: `Can't reach ${host} to set the topic of ${sessionId.slice(0, 8)}.` };
-    return { forwarded: true, ok: rc === 'ok' };
+    return { printedByPeer: true, ok: rc === 'ok' };
   }
   if (!setSessionWorkstreamByUser(sessionId, topic)) {
     return { ok: false, error: `${sessionId.slice(0, 8)} is not indexed on this machine yet; the daemon indexes a new session within seconds, so try again.` };
