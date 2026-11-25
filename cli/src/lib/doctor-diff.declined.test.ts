@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { diffVersionResources } from './doctor-diff.js';
-import { getVersionHomePath, reopenDeclinedOptIn } from './installations/versions.js';
-import { getUserAgentsDir, setVersionResourcePatterns } from './state.js';
+import { getVersionHomePath, reopenDeclinedOptIn, setVersionResourcePatterns } from './installations/versions.js';
+import { getUserAgentsDir } from './state.js';
 
 describe('diffVersionResources honours a declined opt-in', () => {
   it('reports a declined hook as neither missing nor drifted, so heal installs nothing', () => {

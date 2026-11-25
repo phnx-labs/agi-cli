@@ -8,7 +8,7 @@ import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
 import type { AgentId, DiscoveredPlugin, VersionResources } from '../types.js';
-import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, setVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
+import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, updateMeta, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
 import { defaultPatterns, expandPatterns } from '../resource-patterns.js';
 import { resolveResource, listResources } from '../resources.js';
 import { activeRulesPreset, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
@@ -551,6 +551,20 @@ function negationPatterns(names: string[], sources: Map<string, string>): string
     if (source) bySource.set(source, [...(bySource.get(source) ?? []), name]);
   }
   return [...bySource].map(([source, group]) => `!${source}:${group.join(',')}`);
+}
+
+export function setVersionResourcePatterns(
+  agent: AgentId,
+  version: string,
+  updates: Partial<Record<'hooks' | 'permissions', string[]>>,
+): void {
+  updateMeta((meta) => {
+    const versions = meta.versions ?? {};
+    const forAgent = versions[agent] ?? {};
+    forAgent[version] = { ...(forAgent[version] ?? {}), ...updates };
+    versions[agent] = forAgent;
+    return { ...meta, versions };
+  });
 }
 
 function optInDefaults(type: 'hooks' | 'permissions', extraAliases: string[]): string[] {

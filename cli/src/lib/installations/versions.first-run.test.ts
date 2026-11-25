@@ -8,10 +8,11 @@ import {
   getAvailableResources,
   getNewResources,
   reopenDeclinedOptIn,
+  setVersionResourcePatterns,
   wholeCategorySelection,
   type AvailableResources,
 } from './versions.js';
-import { ensureVersionResourcePatterns, getUserAgentsDir, setVersionResourcePatterns } from '../state.js';
+import { ensureVersionResourcePatterns, getUserAgentsDir } from '../state.js';
 import { defaultPatterns } from '../resource-patterns.js';
 
 const available: AvailableResources = {
