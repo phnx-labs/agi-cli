@@ -66,6 +66,7 @@ describe('wholeCategorySelection', () => {
 });
 
 describe('a declined opt-in stays declined', () => {
+  const noSources = { hooks: new Map<string, string>(), permissions: new Map<string, string>() };
   const none: AvailableResources = {
     commands: [], skills: [], hooks: [], memory: [], mcp: [], permissions: [],
     subagents: [], plugins: [], workflows: [], promptcuts: false,
@@ -85,7 +86,7 @@ describe('a declined opt-in stays declined', () => {
       expect(declinedResources('claude', version, live).hooks.size).toBe(0);
 
       const categories = firstRunResourceCategories('claude', live, []).filter((c) => c.available);
-      setVersionResourcePatterns('claude', version, declinedOptInPatterns(categories, { skills: 'all' }, []));
+      setVersionResourcePatterns('claude', version, declinedOptInPatterns(categories, { skills: 'all' }, [], noSources));
       ensureVersionResourcePatterns('claude', version, { hooks: defaultPatterns([], false) });
 
       const declined = declinedResources('claude', version, live);
@@ -93,7 +94,7 @@ describe('a declined opt-in stays declined', () => {
       expect(getNewResources(live, none, undefined, declined).hooks).toEqual([]);
       expect(getNewResources(live, none).hooks.length).toBe(live.hooks.length);
 
-      reopenDeclinedOptIn('claude', version, 'hooks');
+      reopenDeclinedOptIn('claude', version, 'hooks', live.hooks);
       expect(declinedResources('claude', version, live).hooks.size).toBe(0);
     } finally {
       fs.rmSync(hookFile, { force: true });
@@ -102,10 +103,59 @@ describe('a declined opt-in stays declined', () => {
 
   it('records negated defaults only for the opt-in categories left unpicked', () => {
     const categories = firstRunResourceCategories('claude', available, [{ ruleCount: 3 }]).filter((c) => c.available);
-    expect(declinedOptInPatterns(categories, { skills: 'all' }, ['team'])).toEqual({
+    expect(declinedOptInPatterns(categories, { skills: 'all' }, ['team'], noSources)).toEqual({
       hooks: ['!system:*', '!user:*', '!team:*'],
       permissions: ['!system:*'],
     });
-    expect(declinedOptInPatterns(categories, { hooks: 'all', permissions: 'all' }, [])).toEqual({});
+    expect(declinedOptInPatterns(categories, { hooks: 'all', permissions: 'all' }, [], noSources)).toEqual({});
+  });
+
+  it('records the unpicked names of a partial pick and keeps the defaults for the rest', () => {
+    const categories = firstRunResourceCategories('claude', available, [{ ruleCount: 3 }]).filter((c) => c.available);
+    const sources = {
+      hooks: new Map([['main-branch-guard', 'system'], ['rm-guard', 'system'], ['mine', 'user']]),
+      permissions: new Map([['01-core', 'system'], ['02-net', 'system']]),
+    };
+    expect(declinedOptInPatterns(categories, { hooks: ['rm-guard'], permissions: ['01-core'] }, [], sources)).toEqual({
+      hooks: ['system:*', 'user:*', '!system:main-branch-guard', '!user:mine'],
+      permissions: ['system:*', '!system:02-net'],
+    });
+  });
+
+  it('counts only negated names as declined, so a resource outside a narrow pattern is still offered', () => {
+    const hookDir = path.join(getUserAgentsDir(), 'hooks', 'pre-tool-use');
+    fs.mkdirSync(hookDir, { recursive: true });
+    const hookFile = path.join(hookDir, `later-${Date.now()}.sh`);
+    fs.writeFileSync(hookFile, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    try {
+      const live = getAvailableResources();
+      const version = `0.0.0-narrow-${Date.now()}`;
+      setVersionResourcePatterns('claude', version, { hooks: ['system:*'], permissions: ['system:*'] });
+      const declined = declinedResources('claude', version, live);
+      expect(declined.hooks.size).toBe(0);
+      expect(getNewResources(live, none, undefined, declined).hooks).toContain(path.basename(hookFile));
+    } finally {
+      fs.rmSync(hookFile, { force: true });
+    }
+  });
+
+  it('adding one declined item reopens only that item', () => {
+    const hookDir = path.join(getUserAgentsDir(), 'hooks', 'pre-tool-use');
+    fs.mkdirSync(hookDir, { recursive: true });
+    const stamp = Date.now();
+    const chosen = path.join(hookDir, `chosen-${stamp}.sh`);
+    const other = path.join(hookDir, `other-${stamp}.sh`);
+    for (const f of [chosen, other]) fs.writeFileSync(f, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    try {
+      const live = getAvailableResources();
+      const version = `0.0.0-reopen-${stamp}`;
+      setVersionResourcePatterns('claude', version, { hooks: ['!system:*', '!user:*'] });
+      reopenDeclinedOptIn('claude', version, 'hooks', [`chosen-${stamp}`]);
+      const declined = declinedResources('claude', version, live).hooks;
+      expect(declined.has(path.basename(chosen))).toBe(false);
+      expect(declined.has(path.basename(other))).toBe(true);
+    } finally {
+      for (const f of [chosen, other]) fs.rmSync(f, { force: true });
+    }
   });
 });

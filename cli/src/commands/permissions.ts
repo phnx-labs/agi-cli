@@ -399,7 +399,7 @@ Examples:
 
             for (const [agentId, versions] of versionSelections) {
               for (const version of versions) {
-                reopenDeclinedOptIn(agentId, version, 'permissions');
+                reopenDeclinedOptIn(agentId, version, 'permissions', [setName]);
                 const versionHome = getVersionHomePath(agentId, version);
                 const applyResult = applyPermissionsToVersion(agentId, installed.set, versionHome, !options.replace);
                 if (applyResult.success) {
@@ -565,7 +565,7 @@ Examples:
             let applied = 0;
             for (const [agentId, versions] of versionSelections) {
               for (const version of versions) {
-                reopenDeclinedOptIn(agentId, version, 'permissions');
+                reopenDeclinedOptIn(agentId, version, 'permissions', [merged.name || 'default']);
                 const versionHome = getVersionHomePath(agentId, version);
                 const applyResult = applyPermissionsToVersion(agentId, merged, versionHome, !options.replace);
                 if (applyResult.success) {
@@ -702,7 +702,7 @@ Examples:
             for (const perm of permissions) {
               for (const [agentId, versions] of versionSelections) {
                 for (const version of versions) {
-                  reopenDeclinedOptIn(agentId, version, 'permissions');
+                  reopenDeclinedOptIn(agentId, version, 'permissions', [perm.name]);
                   const versionHome = getVersionHomePath(agentId, version);
                   const applyResult = applyPermissionsToVersion(agentId, perm.set, versionHome, !options.replace);
                   if (applyResult.success) {

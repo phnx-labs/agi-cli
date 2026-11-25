@@ -534,13 +534,27 @@ export function declinedResources(
   const vr = getVersionResources(agent, version);
   for (const type of ['hooks', 'permissions'] as const) {
     const patterns = vr?.[type];
-    if (!Array.isArray(patterns) || patterns.length === 0) continue;
-    const wanted = new Set(expandPatterns(patterns, resourceSourceMap(type, cwd, available)));
-    for (const name of available[type]) {
-      if (!wanted.has(name)) declined[type].add(name);
-    }
+    if (!Array.isArray(patterns)) continue;
+    for (const name of negatedNames(patterns, resourceSourceMap(type, cwd, available))) declined[type].add(name);
   }
   return declined;
+}
+
+function negatedNames(patterns: string[], sources: Map<string, string>): string[] {
+  return expandPatterns(patterns.filter(p => p.startsWith('!')).map(p => p.slice(1)), sources);
+}
+
+function negationPatterns(names: string[], sources: Map<string, string>): string[] {
+  const bySource = new Map<string, string[]>();
+  for (const name of names) {
+    const source = sources.get(name);
+    if (source) bySource.set(source, [...(bySource.get(source) ?? []), name]);
+  }
+  return [...bySource].map(([source, group]) => `!${source}:${group.join(',')}`);
+}
+
+function optInDefaults(type: 'hooks' | 'permissions', extraAliases: string[]): string[] {
+  return type === 'permissions' ? ['system:*'] : defaultPatterns(extraAliases, false);
 }
 
 export function getNewResources(
@@ -812,12 +826,19 @@ export function declinedOptInPatterns(
   available: FirstRunCategory[],
   selection: ResourceSelection,
   extraAliases: string[],
+  sources: Record<'hooks' | 'permissions', Map<string, string>>,
 ): Partial<Record<'hooks' | 'permissions', string[]>> {
   const declined: Partial<Record<'hooks' | 'permissions', string[]>> = {};
   for (const c of available) {
-    if (!OPT_IN_CATEGORIES.has(c.key) || selection[c.key]) continue;
-    const defaults = c.key === 'permissions' ? ['system:*'] : defaultPatterns(extraAliases, false);
-    declined[c.key as 'hooks' | 'permissions'] = defaults.map(p => `!${p}`);
+    if (!OPT_IN_CATEGORIES.has(c.key)) continue;
+    const key = c.key as 'hooks' | 'permissions';
+    const picked = selection[key];
+    if (!picked) {
+      declined[key] = optInDefaults(key, extraAliases).map(p => `!${p}`);
+    } else if (Array.isArray(picked)) {
+      const unpicked = [...sources[key].keys()].filter(name => !picked.includes(name));
+      if (unpicked.length > 0) declined[key] = [...optInDefaults(key, extraAliases), ...negationPatterns(unpicked, sources[key])];
+    }
   }
   return declined;
 }
@@ -828,18 +849,38 @@ function recordDeclinedOptIns(
   available: FirstRunCategory[],
   selection: ResourceSelection,
 ): ResourceSelection {
-  const declined = declinedOptInPatterns(available, selection, getEnabledExtraRepos().map(e => e.alias));
+  const resources = getAvailableResources();
+  const sources = {
+    hooks: resourceSourceMap('hooks', process.cwd(), resources),
+    permissions: resourceSourceMap('permissions', process.cwd(), resources),
+  };
+  const declined = declinedOptInPatterns(available, selection, getEnabledExtraRepos().map(e => e.alias), sources);
   if (Object.keys(declined).length > 0) setVersionResourcePatterns(agent, version, declined);
   return selection;
 }
 
-export function reopenDeclinedOptIn(agent: AgentId, version: string, type: 'hooks' | 'permissions'): void {
+export function reopenDeclinedOptIn(
+  agent: AgentId,
+  version: string,
+  type: 'hooks' | 'permissions',
+  names: string[],
+  cwd: string = process.cwd(),
+): void {
   const patterns = getVersionResources(agent, version)?.[type];
-  if (!Array.isArray(patterns) || patterns.length === 0 || !patterns.every(p => p.startsWith('!'))) return;
-  const defaults = type === 'permissions'
-    ? ['system:*']
-    : defaultPatterns(getEnabledExtraRepos().map(e => e.alias), false);
-  setVersionResourcePatterns(agent, version, { [type]: defaults });
+  if (!Array.isArray(patterns) || !patterns.some(p => p.startsWith('!'))) return;
+  const stem = (name: string) => name.replace(/\.[^./]+$/, '');
+  const wanted = new Set(names.map(stem));
+  const sources = resourceSourceMap(type, cwd, getAvailableResources());
+  const declined = negatedNames(patterns, sources);
+  if (!declined.some(name => wanted.has(stem(name)))) return;
+  const positives = patterns.filter(p => !p.startsWith('!'));
+  const kept = declined.filter(name => !wanted.has(stem(name)));
+  setVersionResourcePatterns(agent, version, {
+    [type]: [
+      ...(positives.length > 0 ? positives : optInDefaults(type, getEnabledExtraRepos().map(e => e.alias))),
+      ...negationPatterns(kept, sources),
+    ],
+  });
 }
 
 export async function promptResourceSelection(agent: AgentId, version: string): Promise<ResourceSelection | null> {
