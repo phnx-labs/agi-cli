@@ -3,7 +3,7 @@
   "command": "agents",
   "description": "Install, configure, run, and dispatch AI coding agents (Claude, Codex, Cursor, OpenCode, Grok, Droid and more) from one CLI: version homes, synced resources, sessions, teams, browser and desktop tools, secrets, and the device fleet.",
   "groups": 44,
-  "commands": 337,
+  "commands": 338,
   "root": {
     "name": "agents",
     "path": "",
@@ -11763,6 +11763,59 @@
           ],
           "examples": "# Stop a live session by a short id prefix\nagents ps stop 4b2f1a9c\n\n# Only look on this machine (skip the fleet sweep)\nagents ps stop 4b2f1a9c --local",
           "notes": "stop ENDS the session; it does not background it. To keep an agent working\nunattended instead, use `agents ps detach <id>`, and bring it back\nwith `agents ps focus <id>`.\n\nA session that lives on another machine is stopped THERE over SSH — its pid\nand tmux socket only mean something where it actually runs.",
+          "subcommands": []
+        },
+        {
+          "name": "topic",
+          "path": "ps topic",
+          "aliases": [],
+          "description": "File a session under a topic you choose; the daemon never changes it back",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false,
+              "description": "Short or full id of the live session"
+            },
+            {
+              "name": "topic",
+              "required": true,
+              "variadic": false,
+              "description": "The topic to file it under, 1 to 4 words (e.g. \"Rush Cloud\")"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit the result as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Move a session to another topic (AGI EXT does this when you drag its card)\nagents ps topic 4b2f1a9c \"Rush Cloud\"\n\n# Machine-readable, for a UI\nagents ps topic 4b2f1a9c \"Rush Cloud\" --json",
+          "notes": "A topic is the session's workstream: the name sessions are grouped by in\n`agents ps watch` and AGI EXT. The daemon's title job names one for every\nsession; a topic set here is yours and the job never overwrites it.\n\nThe topic is stored on the machine that owns the session, so a session\nrunning on another machine is updated THERE over SSH; your other machines\npick it up with the next session sync.",
           "subcommands": []
         },
         {

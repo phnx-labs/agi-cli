@@ -358,6 +358,7 @@ agents ps --json -D box-a           # one peer, over SSH
 agents ps --status waiting          # only agents waiting on you (exit 1 if any)
 agents ps --bookmarks               # only bookmarked sessions
 agents ps stop|focus|detach|migrate <id>   # act on one running agent
+agents ps topic <id> "Rush Cloud"   # file a session under a topic you choose
 agents ps migrations                # where migrated sessions went
 agents ps --status working          # actively producing work (fleet-wide)
 agents ps --status idle             # stopped between turns

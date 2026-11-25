@@ -113,6 +113,28 @@ describe('runSessionTitleTick (real index, injected model call)', () => {
     expect(db.getSessionWorkstream(id)).toBe('Auth');
   });
 
+  it('never overwrites a topic a person set, even when it re-titles the session (agents ps topic)', async () => {
+    const id = '7a7a7a7a-0000-0000-0000-0000000000a1';
+    seed(id);
+    await runSessionTitleTick({ id, run: async () => reply('First title', 'Session titles') });
+    expect(db.setSessionWorkstreamByUser(id, 'Rush Cloud')).toBe(true);
+    // An explicit refresh re-titles and answers another workstream: the title moves, the topic stays.
+    const swept = await runSessionTitleTick({ id, force: true, run: async () => reply('Second title', 'Something else') });
+    expect(swept.titles.some((t) => t.id === id)).toBe(true);
+    expect(db.getSessionById(id)?.generatedTitle).toBe('Second title');
+    expect(db.getSessionWorkstream(id)).toBe('Rush Cloud');
+    expect(db.setSessionWorkstream(id, 'Something else')).toBe(false);
+    expect(db.getSessionWorkstream(id)).toBe('Rush Cloud');
+  });
+
+  it('a person\'s topic is stored only on the box that owns the transcript', () => {
+    const id = '8b8b8b8b-0000-0000-0000-0000000000a2';
+    expect(db.setSessionWorkstreamByUser(id, 'Rush Cloud')).toBe(false);
+    db.upsertMirrorSession({ id, shortId: id.slice(0, 8), agent: 'claude', machine: 'peer-box', timestamp: '2026-09-01T10:00:00.000Z', workstream: 'From the owner' }, 'peer-box', Date.now());
+    expect(db.setSessionWorkstreamByUser(id, 'Rush Cloud')).toBe(false);
+    expect(db.getSessionWorkstream(id)).toBe('From the owner');
+  });
+
   it('keeps the stored title across a later transcript rescan', async () => {
     const id = '66666666-0000-0000-0000-000000000006';
     seed(id);
@@ -208,7 +230,7 @@ describe('a batch that fails never holds the queue (review of #4066)', () => {
 
 describe('swappable title provider (PHNX-3797)', () => {
   it('generates through an injected provider — the seam a local backend drops into', async () => {
-    const id = '88888888-0000-0000-0000-000000000008';
+    const id = '8b8b8b8b-0000-0000-0000-0000000000a2';
     seed(id, { firstUserMessage: 'wire up the local title backend' });
     let seen: { input?: string } = {};
     const provider: SessionTitleProvider = {

@@ -16,6 +16,7 @@ import { NO_FANOUT_ENV } from '../lib/session/remote-active.js';
 import { loadLocalActiveSessions } from '../lib/session/session-cache.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { registerSessionsStopCommand } from './sessions-stop.js';
+import { registerPsTopicCommand } from './ps-topic.js';
 import { registerFocusCommand } from './focus.js';
 import { registerDetachCommand } from './detach.js';
 import { registerSessionsMigrateCommand, registerSessionsMigrationsCommand } from './sessions-migrate.js';
@@ -136,6 +137,7 @@ export function registerPsCommand(program: Command): void {
   });
 
   registerSessionsStopCommand(ps);
+  registerPsTopicCommand(ps);
   registerFocusCommand(ps);
   registerDetachCommand(ps);
   registerSessionsMigrateCommand(ps);

@@ -41,7 +41,8 @@ flowchart LR
 
 `agents ps` lists the sessions running right now on this machine and every reachable
 device. It is the home of the verbs that act on a session: `ps stop`, `ps focus`,
-`ps detach`, `ps migrate`, `ps migrations` (the migration ledger), `ps preview <id>`
+`ps detach`, `ps migrate`, `ps topic` (file it under a topic you choose; the title job
+never changes it back), `ps migrations` (the migration ledger), `ps preview <id>`
 (the detail card), and `ps watch --json` (the session-only NDJSON stream; the operator
 stream is `agents feed watch --json`). Typing into a running agent is
 `agents send --channel session --to <id> --text <text>` (or `--pane <%id> [--socket <path>]`
@@ -384,7 +385,9 @@ touches the endpoint.
   shows the user's own first message. The same call names each session's **`workstream`** — 1 to 3
   words for the larger effort ("Rush Mac"), reusing a name this box already uses —
   for up to 12 sessions at a time in one model call; rows carry it as
-  `workstream` and AGI EXT groups by it. The agent's rolling last line stays where a
+  `workstream` and AGI EXT groups by it. `agents ps topic <id> <topic>` sets it by
+  hand on the box that owns the session, and the title job never changes a topic
+  set that way. The agent's rolling last line stays where a
   live status belongs: `lastAgentLine` / the preview pane. Each box titles its own
   sessions and publishes them on the fleet session mirror, so a peer's rows carry
   the same headline with no per-row SSH.
