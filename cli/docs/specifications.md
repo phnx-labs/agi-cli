@@ -498,7 +498,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `sessions.workstream` beside the title; the prompt MUST offer the workstreams
   this box already uses (`listRecentWorkstreams`) so related sessions share a
   name. A `/rename`d session MUST NOT be re-titled but is given a workstream
-  once. A workstream a person set with `agents ps topic` is stored on the owning
+  once. A workstream a person set for a live session with `agents ps topic` is stored on the owning
   box with `workstream_set_by_user = 1` and the titler MUST NOT overwrite it, on a
   re-title or a `--refresh` (`setSessionGeneratedTitle`, `setSessionWorkstream`,
   PHNX-4676). Live rows read it in `applySessionNames`, history rows in
