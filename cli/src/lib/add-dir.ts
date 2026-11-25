@@ -17,7 +17,7 @@ export const ADD_DIR_STRATEGY: Record<AgentId, AddDirStrategy> = {
   copilot: 'none',
   amp: 'none',
   goose: 'none',
-  antigravity: 'none',
+  antigravity: 'native-flag',
   droid: 'none',
   hermes: 'none',
   muse: 'none',

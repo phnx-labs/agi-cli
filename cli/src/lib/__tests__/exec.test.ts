@@ -126,12 +126,37 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--sandbox');
     });
 
-    it('antigravity plan degrades to edit (no read-only mode)', () => {
-      const planCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'plan' }));
-      const editCmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
-      expect(planCmd).toEqual(editCmd);
-      expect(planCmd).toEqual(['agy', '--print', 'do the thing']);
-      expect(planCmd).not.toContain('--dangerously-skip-permissions');
+    it('antigravity maps plan to --mode plan and edit to --mode accept-edits', () => {
+      expect(buildExecCommand(opts({ agent: 'antigravity', mode: 'plan' })))
+        .toEqual(['agy', '--mode', 'plan', '--print', 'do the thing']);
+      expect(buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' })))
+        .toEqual(['agy', '--mode', 'accept-edits', '--print', 'do the thing']);
+    });
+
+    it('antigravity resumes a conversation with --conversation <id>', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'antigravity', mode: 'edit', prompt: 'continue', resume: true, sessionId: '610fd09d-3d38-4dc6-9f7a-12e821e677a0',
+      }));
+      expect(cmd[cmd.indexOf('--conversation') + 1]).toBe('610fd09d-3d38-4dc6-9f7a-12e821e677a0');
+    });
+
+    it('antigravity keeps the prompt as --print\'s value when json and resume flags are added', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'antigravity', mode: 'edit', json: true, resume: true, sessionId: 'c-1',
+      }));
+      expect(cmd[cmd.indexOf('--print') + 1]).toBe('do the thing');
+      expect(cmd).toEqual(expect.arrayContaining(['--conversation', 'c-1', '--output-format', 'stream-json']));
+    });
+
+    it('antigravity interactive prompts use --prompt-interactive, never --print', () => {
+      const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', interactive: true }));
+      expect(cmd.slice(-2)).toEqual(['--prompt-interactive', 'do the thing']);
+      expect(cmd).not.toContain('--print');
+    });
+
+    it('antigravity --json streams NDJSON events', () => {
+      const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', json: true }));
+      expect(cmd).toEqual(expect.arrayContaining(['--output-format', 'stream-json']));
     });
 
     it('cursor headless edit trusts the selected workspace without using -f', () => {
@@ -466,7 +491,7 @@ describeExec('buildExecCommand', () => {
 
     it('antigravity infers headless from a prompt alone (adds --print, no explicit --headless)', () => {
       const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit' }));
-      expect(cmd).toEqual(['agy', '--print', 'do the thing']);
+      expect(cmd).toEqual(['agy', '--mode', 'accept-edits', '--print', 'do the thing']);
     });
 
     it('codex headless adds nothing (no printFlags)', () => {
@@ -476,7 +501,7 @@ describeExec('buildExecCommand', () => {
 
     it('antigravity headless prompts use --print before the prompt', () => {
       const cmd = buildExecCommand(opts({ agent: 'antigravity', mode: 'edit', headless: true }));
-      expect(cmd).toEqual(['agy', '--print', 'do the thing']);
+      expect(cmd).toEqual(['agy', '--mode', 'accept-edits', '--print', 'do the thing']);
     });
   });
 
@@ -1327,8 +1352,8 @@ describeExec('resolveMode', () => {
   });
 
   it("degrades 'plan' to the agent's safest mode when plan is unsupported", () => {
-    expect(AGENTS.antigravity.capabilities.modes).not.toContain('plan');
-    expect(resolveMode('antigravity', 'plan')).toBe('edit');
+    expect(AGENTS.hermes.capabilities.modes).not.toContain('plan');
+    expect(resolveMode('hermes', 'plan')).toBe('edit');
   });
 
   it("keeps 'plan' for agents that natively support it (claude)", () => {
@@ -1341,7 +1366,7 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
   it('warns exactly once when one run builds argv more than once', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const warningState = {};
-    const options = opts({ agent: 'antigravity', mode: 'plan', modeWarningState: warningState });
+    const options = opts({ agent: 'hermes', mode: 'plan', modeWarningState: warningState });
     buildExecCommand(options);
     buildExecCommand(options);
     expect(write.mock.calls.filter(([line]) => String(line).includes('(writable) instead'))).toHaveLength(1);
@@ -1352,21 +1377,21 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const shared = {};
     buildExecCommand(opts({ agent: 'goose', mode: 'plan', modeWarningState: shared }));
-    buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'hermes', mode: 'plan', modeWarningState: shared }));
     const warned = write.mock.calls
       .map(([line]) => String(line))
       .filter((line) => line.includes('(writable) instead'));
     expect(warned).toHaveLength(2);
     expect(warned.some((l) => l.includes('goose'))).toBe(true);
-    expect(warned.some((l) => l.includes('antigravity'))).toBe(true);
+    expect(warned.some((l) => l.includes('hermes'))).toBe(true);
     write.mockRestore();
   });
 
   it('still warns only once for the same agent built twice in one run', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     const shared = {};
-    buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', modeWarningState: shared }));
-    buildExecCommand(opts({ agent: 'antigravity', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'hermes', mode: 'plan', modeWarningState: shared }));
+    buildExecCommand(opts({ agent: 'hermes', mode: 'plan', modeWarningState: shared }));
     expect(
       write.mock.calls.map(([l]) => String(l)).filter((l) => l.includes('(writable) instead')),
     ).toHaveLength(1);
@@ -1428,7 +1453,7 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
 
 describeExec('defaultModeFor', () => {
   it('returns the first listed mode for each agent', () => {
-    expect(defaultModeFor('antigravity')).toBe('edit');
+    expect(defaultModeFor('antigravity')).toBe('plan');
     expect(defaultModeFor('cursor')).toBe('plan');
     expect(defaultModeFor('claude')).toBe('plan');
   });

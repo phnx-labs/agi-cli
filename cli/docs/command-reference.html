@@ -2186,7 +2186,7 @@ mode support per harness (* = the harness&#39;s native default):
   copilot      plan* edit auto skip
   amp          plan* edit
   goose        edit*
-  antigravity  edit* skip
+  antigravity  plan* edit skip
   grok         plan* edit auto skip
   kimi         plan* edit auto skip
   droid        plan* edit auto skip
@@ -2195,8 +2195,8 @@ mode support per harness (* = the harness&#39;s native default):
   warp         edit*
 
 headless plan support (a prompt makes the run headless):
-  plan works headless on claude, codex, cursor, droid, opencode.
-  kimi, grok, antigravity have no headless plan mode — a headless
+  plan works headless on claude, codex, cursor, droid, opencode, antigravity.
+  kimi and grok have no headless plan mode — a headless
   --mode plan auto-downgrades to --mode auto (with a stderr warning).
   interactive plan (omit the prompt) works everywhere it is listed.
 
@@ -2335,7 +2335,7 @@ Mode support per harness (* = the harness&#39;s native default):
   copilot      plan* edit auto skip
   amp          plan* edit
   goose        edit*
-  antigravity  edit* skip
+  antigravity  plan* edit skip
   grok         plan* edit auto skip
   kimi         plan* edit auto skip
   droid        plan* edit auto skip
@@ -2344,8 +2344,8 @@ Mode support per harness (* = the harness&#39;s native default):
   warp         edit*
 
 Headless plan support (a prompt makes the run headless):
-  plan works headless on claude, codex, cursor, droid, opencode.
-  kimi, grok, antigravity have no headless plan mode — a headless
+  plan works headless on claude, codex, cursor, droid, opencode, antigravity.
+  kimi and grok have no headless plan mode — a headless
   --mode plan auto-downgrades to --mode auto (with a stderr warning).
   Interactive plan (omit the prompt) works everywhere it is listed.
 

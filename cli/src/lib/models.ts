@@ -917,7 +917,7 @@ export function buildReasoningFlags(agent: AgentId, level: string): string[] {
   if (normalized === 'auto') {
     return agent === 'claude' ? ['--effort', 'auto'] : [];
   }
-  if (agent === 'claude') {
+  if (agent === 'claude' || agent === 'antigravity') {
     return ['--effort', normalized];
   }
   if (agent === 'codex') {

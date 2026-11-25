@@ -168,7 +168,7 @@ export const PRESETS: Preset[] = [
   },
   {
     name: 'agy',
-    description: 'Google Antigravity CLI default (gemini-3.5-flash). Optimized for speed and large context.',
+    description: 'Google Antigravity CLI (agy) on its own default model. `agy models` lists the Gemini 4 family and Gemini 3.8 Flash.',
     provider: 'google',
     host: 'antigravity',
     authEnvVar: 'ANTIGRAVITY_API_KEY',

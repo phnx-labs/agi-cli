@@ -1,115 +1,40 @@
 import { describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import { fileURLToPath } from 'url';
 import { normalizeEvents } from '../parsers.js';
 
+// Fixtures are real `agy --print … --output-format stream-json` runs (agy 1.5.16), paths anonymized.
+function fixtureEvents(name: string): any[] {
+  const p = fileURLToPath(new URL(`./testdata/${name}`, import.meta.url));
+  return fs.readFileSync(p, 'utf-8').split('\n').map((l) => l.trim()).filter(Boolean)
+    .flatMap((l) => normalizeEvents('antigravity', JSON.parse(l)));
+}
+
 describe('normalizeEvents(antigravity)', () => {
-  it('wraps a plain-string raw payload as a complete message event', () => {
-    const events = normalizeEvents('antigravity', 'hello from agy');
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'message',
-      agent: 'antigravity',
-      content: 'hello from agy',
-      complete: true,
-    });
+  it('turns a write_file run into init, file_create, message and result', () => {
+    const events = fixtureEvents('antigravity-write.jsonl');
+    expect(events.map((e) => e.type)).toEqual(['init', 'file_create', 'tool_result', 'message', 'message', 'result']);
+    expect(events[0]).toMatchObject({ type: 'init', session_id: '06f57e3e-5302-40b3-8a09-3f474b62da5f' });
+    expect(events[1]).toMatchObject({ type: 'file_create', tool: 'write_file', path: '/work/demo/fixture.txt' });
+    expect(events.filter((e) => e.type === 'message').map((e) => e.content).join('')).toBe('wrote it\n');
+    expect(events.at(-1)).toMatchObject({ type: 'result', status: 'success', session_id: '06f57e3e-5302-40b3-8a09-3f474b62da5f' });
   });
 
-  it('drops an empty string payload', () => {
-    expect(normalizeEvents('antigravity', '')).toEqual([]);
+  it('maps run_command to bash with file-op sidecars and edit_file to file_write', () => {
+    const events = fixtureEvents('antigravity-shell-edit.jsonl');
+    expect(events.find((e) => e.type === 'bash')).toMatchObject({ tool: 'run_command', command: 'echo hi > shell.txt' });
+    expect(events.find((e) => e.type === 'file_write' && e.tool === 'bash')).toMatchObject({ path: 'shell.txt' });
+    expect(events.find((e) => e.type === 'file_write' && e.tool === 'edit_file')).toMatchObject({ path: '/work/demo/fixture.txt' });
+    expect(events.filter((e) => e.type === 'tool_result').every((e) => e.success)).toBe(true);
+    expect(events.some((e) => e.type === 'unknown' || e.type === 'step_update')).toBe(false);
   });
 
-  it('emits an unknown event for null / number / non-object input', () => {
-    const nullEvents = normalizeEvents('antigravity', null);
-    expect(nullEvents).toHaveLength(1);
-    expect(nullEvents[0]).toMatchObject({
-      type: 'unknown',
-      agent: 'antigravity',
-    });
-
-    const numEvents = normalizeEvents('antigravity', 42);
-    expect(numEvents[0]).toMatchObject({
-      type: 'unknown',
-      agent: 'antigravity',
-    });
+  it('reports a non-SUCCESS result as an error', () => {
+    const [event] = normalizeEvents('antigravity', { event: 'result', result: { conversation_id: 'c1', status: 'ERROR' } });
+    expect(event).toMatchObject({ type: 'result', status: 'error', session_id: 'c1' });
   });
 
-  it('normalizes a recognizable init event with sessionId', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'init',
-      sessionId: 'agy-sess-1',
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'init',
-      agent: 'antigravity',
-      session_id: 'agy-sess-1',
-    });
-  });
-
-  it('normalizes a message event with content', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'message',
-      content: 'partial response',
-      complete: false,
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'message',
-      agent: 'antigravity',
-      content: 'partial response',
-      complete: false,
-    });
-  });
-
-  it('treats message events without explicit complete as complete:true', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'message',
-      content: 'one-shot',
-    });
-    expect(events[0]).toMatchObject({
-      type: 'message',
-      content: 'one-shot',
-      complete: true,
-    });
-  });
-
-  it('drops message events with empty content', () => {
-    expect(normalizeEvents('antigravity', { type: 'message', content: '' })).toEqual([]);
-  });
-
-  it('normalizes a result event into success by default', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'result',
-      sessionId: 'agy-sess-2',
-    });
-    expect(events[0]).toMatchObject({
-      type: 'result',
-      agent: 'antigravity',
-      status: 'success',
-      session_id: 'agy-sess-2',
-    });
-  });
-
-  it('preserves error status on result events', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'result',
-      status: 'error',
-    });
-    expect(events[0]).toMatchObject({
-      type: 'result',
-      status: 'error',
-    });
-  });
-
-  it('falls back to a generic shape for unknown event types', () => {
-    const events = normalizeEvents('antigravity', {
-      type: 'mystery',
-      payload: 'x',
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: 'mystery',
-      agent: 'antigravity',
-    });
-    expect(events[0].raw).toMatchObject({ type: 'mystery', payload: 'x' });
+  it('emits an unknown event for non-object input', () => {
+    expect(normalizeEvents('antigravity', null)[0]).toMatchObject({ type: 'unknown', agent: 'antigravity' });
   });
 });

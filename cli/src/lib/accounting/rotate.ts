@@ -18,7 +18,7 @@ import { isTierToken, resolveTier } from '../model-tiers.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
 import { resolveManagedInstallation } from '../installations/store.js';
 import { listNativeAccounts, pausedNativeIdentityKeys } from '../account-registry.js';
-import { resolveNativeSpawnHome } from '../exec-account-home.js';
+import { adoptedConfigPointsAtHome, resolveNativeSpawnHome } from '../exec-account-home.js';
 import { getProjectRunConfigs } from '../run-config.js';
 import { emit, type EventPayload } from '../feed/events.js';
 import {
@@ -128,7 +128,8 @@ export async function isVersionLaunchableHere(
 ): Promise<VersionLaunchState> {
   const home = getVersionHomePath(agent, version);
   const info = await getAccountInfo(agent, home);
-  const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
+  const launchable = adoptedConfigPointsAtHome(agent, home)
+    && isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
   return { launchable, email: launchable ? info.email : null };
 }
 
@@ -620,7 +621,10 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       if (fs.existsSync(home) && slotDirs.has(fs.realpathSync(home))) return null;
 
       const info = await getAccountInfo(agent, home);
-      const launchable = isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
+      // A symlink-adopted harness launches against whichever home its ~/.<config>
+      // symlink names, so a credential in any other version home is never used.
+      const launchable = adoptedConfigPointsAtHome(agent, home)
+        && isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
       const authHealth = authCache[authCacheKey(localHost, agent, version)];
       const authVerdict = authHealth?.verdict ?? null;
       return {

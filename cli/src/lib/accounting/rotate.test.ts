@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -41,6 +41,7 @@ import {
 import { emit, _resetForTest } from '../feed/events.js';
 import { getVersionsDir } from '../state.js';
 import { invalidateInstalledVersionsCache, getVersionHomePath } from '../installations/versions.js';
+import { getAgentConfigPath } from '../installations/shims.js';
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
 import {
@@ -199,6 +200,48 @@ describe('isVersionLaunchableHere (per-version signed-in probe for the run.launc
       expect(state.launchable).toBe(true);
       expect(state.email).toBe('muqsit@example.com');
     });
+  });
+});
+
+describe('isVersionLaunchableHere for a symlink-adopted harness (antigravity)', () => {
+  const planted: string[] = [];
+  const configPath = getAgentConfigPath('antigravity');
+  const aside = `${configPath}.rotate-test-aside`;
+  beforeEach(() => {
+    if (fs.existsSync(configPath)) fs.renameSync(configPath, aside);
+  });
+  function unlinkConfig(): void {
+    try { if (fs.lstatSync(configPath).isSymbolicLink()) fs.unlinkSync(configPath); } catch { /* absent */ }
+  }
+  afterEach(() => {
+    unlinkConfig();
+    if (fs.existsSync(aside)) fs.renameSync(aside, configPath);
+    for (const d of planted.splice(0)) fs.rmSync(d, { recursive: true, force: true });
+  });
+  function plantAgyHome(version: string, signedIn: boolean): string {
+    const home = getVersionHomePath('antigravity', version);
+    planted.push(path.dirname(home));
+    const configDir = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(configDir, { recursive: true });
+    if (signedIn) fs.writeFileSync(path.join(configDir, 'antigravity-oauth-token'), JSON.stringify({ token: { refresh_token: 'rt-agy' }, auth_method: 'oauth' }), 'utf-8');
+    return configDir;
+  }
+  function pointConfigAt(target: string): void {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    unlinkConfig();
+    fs.symlinkSync(target, configPath);
+  }
+
+  it('a signed-in version is launchable only while ~/.gemini/antigravity-cli points at its home', async () => {
+    const stamp = Date.now();
+    const loggedOutDefault = plantAgyHome(`1.0.12-${stamp}`, false);
+    const signedInOther = plantAgyHome(`1.0.13-${stamp}`, true);
+
+    pointConfigAt(loggedOutDefault);
+    expect((await isVersionLaunchableHere('antigravity', `1.0.13-${stamp}`)).launchable).toBe(false);
+
+    pointConfigAt(signedInOther);
+    expect((await isVersionLaunchableHere('antigravity', `1.0.13-${stamp}`)).launchable).toBe(true);
   });
 });
 

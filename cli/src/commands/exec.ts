@@ -843,8 +843,8 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 ${formatModeSupportTable().split('\n').map((line) => `        ${line}`).join('\n')}
 
       Headless plan support (a prompt makes the run headless):
-        plan works headless on claude, codex, cursor, droid, opencode.
-        kimi, grok, antigravity have no headless plan mode — a headless
+        plan works headless on claude, codex, cursor, droid, opencode, antigravity.
+        kimi and grok have no headless plan mode — a headless
         --mode plan auto-downgrades to --mode auto (with a stderr warning).
         Interactive plan (omit the prompt) works everywhere it is listed.
 

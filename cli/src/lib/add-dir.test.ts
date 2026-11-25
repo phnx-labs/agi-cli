@@ -55,8 +55,8 @@ describe('normalizeAddDirs', () => {
 });
 
 describe('applyAddDirs — native-flag harnesses', () => {
-  it('claude / kimi / cursor get --add-dir per directory', () => {
-    for (const agent of ['claude', 'kimi', 'cursor'] as const) {
+  it('claude / kimi / cursor / antigravity get --add-dir per directory', () => {
+    for (const agent of ['claude', 'kimi', 'cursor', 'antigravity'] as const) {
       const cmd = ['bin'];
       expect(applyAddDirs(agent, cmd, ['/a', '/b'])).toBe(true);
       expect(cmd).toEqual(['bin', '--add-dir', '/a', '--add-dir', '/b']);
