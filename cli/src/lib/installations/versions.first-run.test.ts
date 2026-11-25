@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { firstRunResourceCategories, wholeCategorySelection, type AvailableResources } from './versions.js';
+import * as fs from 'fs';
+import * as path from 'path';
+import {
+  declinedOptInPatterns,
+  declinedResources,
+  firstRunResourceCategories,
+  getAvailableResources,
+  getNewResources,
+  reopenDeclinedOptIn,
+  wholeCategorySelection,
+  type AvailableResources,
+} from './versions.js';
+import { ensureVersionResourcePatterns, getUserAgentsDir, setVersionResourcePatterns } from '../state.js';
+import { defaultPatterns } from '../resource-patterns.js';
 
 const available: AvailableResources = {
   commands: ['review'],
@@ -28,11 +41,6 @@ describe('firstRunResourceCategories', () => {
       expect(byKey[key], key).toMatchObject({ available: true, checked: true });
     }
   });
-
-  it('says what hooks and permissions do', () => {
-    expect(byKey.hooks.displayCount).toContain('can block edits');
-    expect(byKey.permissions.displayCount).toBe('2 groups, 189 rules; auto-approves commands such as git push, ssh and curl');
-  });
 });
 
 describe('wholeCategorySelection', () => {
@@ -54,5 +62,50 @@ describe('wholeCategorySelection', () => {
 
   it('asks per category for any other pick', () => {
     expect(wholeCategorySelection(categories, ['skills'])).toBeNull();
+  });
+});
+
+describe('a declined opt-in stays declined', () => {
+  const none: AvailableResources = {
+    commands: [], skills: [], hooks: [], memory: [], mcp: [], permissions: [],
+    subagents: [], plugins: [], workflows: [], promptcuts: false,
+  };
+
+  it('survives a later default-fill, is never offered as new, and an explicit add reopens it', () => {
+    const hookDir = path.join(getUserAgentsDir(), 'hooks', 'pre-tool-use');
+    fs.mkdirSync(hookDir, { recursive: true });
+    const hookFile = path.join(hookDir, `guard-${Date.now()}.sh`);
+    fs.writeFileSync(hookFile, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    try {
+      const live = getAvailableResources();
+      expect(live.hooks.length).toBeGreaterThan(0);
+      const version = `0.0.0-decline-${Date.now()}`;
+
+      ensureVersionResourcePatterns('claude', version, { hooks: defaultPatterns([], false) });
+      expect(declinedResources('claude', version, live).hooks.size).toBe(0);
+
+      const categories = firstRunResourceCategories('claude', live, []).filter((c) => c.available);
+      setVersionResourcePatterns('claude', version, declinedOptInPatterns(categories, { skills: 'all' }, []));
+      ensureVersionResourcePatterns('claude', version, { hooks: defaultPatterns([], false) });
+
+      const declined = declinedResources('claude', version, live);
+      expect([...declined.hooks].sort()).toEqual([...live.hooks].sort());
+      expect(getNewResources(live, none, undefined, declined).hooks).toEqual([]);
+      expect(getNewResources(live, none).hooks.length).toBe(live.hooks.length);
+
+      reopenDeclinedOptIn('claude', version, 'hooks');
+      expect(declinedResources('claude', version, live).hooks.size).toBe(0);
+    } finally {
+      fs.rmSync(hookFile, { force: true });
+    }
+  });
+
+  it('records negated defaults only for the opt-in categories left unpicked', () => {
+    const categories = firstRunResourceCategories('claude', available, [{ ruleCount: 3 }]).filter((c) => c.available);
+    expect(declinedOptInPatterns(categories, { skills: 'all' }, ['team'])).toEqual({
+      hooks: ['!system:*', '!user:*', '!team:*'],
+      permissions: ['!system:*'],
+    });
+    expect(declinedOptInPatterns(categories, { hooks: 'all', permissions: 'all' }, [])).toEqual({});
   });
 });

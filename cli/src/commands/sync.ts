@@ -17,6 +17,7 @@ import {
   getActuallySyncedResources,
   getProjectOnlyResources,
   getNewResources,
+  declinedResources,
   hasNewResources,
   promptResourceSelection,
   promptNewResourceSelection,
@@ -947,13 +948,13 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     const available = getAvailableResources(cwd);
     const actuallySynced = getActuallySyncedResources(agentId, version, { cwd });
     const projectOnly = getProjectOnlyResources(cwd);
-    const newResources = getNewResources(available, actuallySynced, projectOnly);
+    const newResources = getNewResources(available, actuallySynced, projectOnly, declinedResources(agentId, version, available, cwd));
     const hasAnySynced = anyResources(actuallySynced);
 
     try {
       if (!hasAnySynced) {
         outLog(chalk.cyan(`Syncing to ${agentLabel(agentId)}@${version}.`));
-        const userSelection = await promptResourceSelection(agentId);
+        const userSelection = await promptResourceSelection(agentId, version);
         if (!userSelection || Object.keys(userSelection).length === 0) {
           outLog(chalk.gray('Nothing selected. No changes made.'));
           return;

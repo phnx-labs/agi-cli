@@ -1065,6 +1065,19 @@ export function ensureVersionResourcePatterns(
   if (changed) writeMeta(meta);
 }
 
+export function setVersionResourcePatterns(
+  agent: AgentId,
+  version: string,
+  updates: Partial<Record<Exclude<keyof VersionResources, 'rulesPreset'>, ResourcePattern[]>>
+): void {
+  const meta = readMeta();
+  if (!meta.versions) meta.versions = {};
+  if (!meta.versions[agent]) meta.versions[agent] = {};
+  if (!meta.versions[agent]![version]) meta.versions[agent]![version] = {};
+  Object.assign(meta.versions[agent]![version], updates);
+  writeMeta(meta);
+}
+
 const EXTRA_ELIGIBLE_TYPES: readonly (keyof VersionResources)[] = [
   'commands', 'skills', 'hooks', 'subagents', 'plugins', 'workflows',
 ];

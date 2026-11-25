@@ -8,7 +8,7 @@ import chalk from 'chalk';
 import * as TOML from 'smol-toml';
 import { checkbox, select, confirm } from '@inquirer/prompts';
 import type { AgentId, DiscoveredPlugin, VersionResources } from '../types.js';
-import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
+import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, setVersionResourcePatterns, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
 import { defaultPatterns, expandPatterns } from '../resource-patterns.js';
 import { resolveResource, listResources } from '../resources.js';
 import { activeRulesPreset, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
@@ -519,10 +519,35 @@ export function getProjectOnlyResources(cwd: string = process.cwd()): ProjectOnl
   return empty;
 }
 
+export interface DeclinedResources {
+  hooks: Set<string>;
+  permissions: Set<string>;
+}
+
+export function declinedResources(
+  agent: AgentId,
+  version: string,
+  available: AvailableResources,
+  cwd: string = process.cwd(),
+): DeclinedResources {
+  const declined: DeclinedResources = { hooks: new Set(), permissions: new Set() };
+  const vr = getVersionResources(agent, version);
+  for (const type of ['hooks', 'permissions'] as const) {
+    const patterns = vr?.[type];
+    if (!Array.isArray(patterns) || patterns.length === 0) continue;
+    const wanted = new Set(expandPatterns(patterns, resourceSourceMap(type, cwd, available)));
+    for (const name of available[type]) {
+      if (!wanted.has(name)) declined[type].add(name);
+    }
+  }
+  return declined;
+}
+
 export function getNewResources(
   available: AvailableResources,
   actuallySynced: AvailableResources,
-  projectOnly?: ProjectOnlyResources
+  projectOnly?: ProjectOnlyResources,
+  declined?: DeclinedResources,
 ): AvailableResources {
   const exclude = projectOnly || {
     commands: new Set<string>(), skills: new Set<string>(), hooks: new Set<string>(),
@@ -531,12 +556,12 @@ export function getNewResources(
   return {
     commands: available.commands.filter(c => !actuallySynced.commands.includes(c) && !exclude.commands.has(c)),
     skills: available.skills.filter(s => !actuallySynced.skills.includes(s) && !exclude.skills.has(s)),
-    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h)),
+    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h) && !declined?.hooks.has(h)),
     memory: actuallySynced.memory.length > 0
       ? []
       : available.memory.filter(m => !actuallySynced.memory.includes(m)),
     mcp: available.mcp.filter(m => !actuallySynced.mcp.includes(m)),
-    permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p)),
+    permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p) && !declined?.permissions.has(p)),
     subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s)),
     plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p)),
     workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w)),
@@ -781,7 +806,43 @@ export function wholeCategorySelection(
   return selection;
 }
 
-export async function promptResourceSelection(agent: AgentId): Promise<ResourceSelection | null> {
+const OPT_IN_CATEGORIES = new Set<keyof ResourceSelection>(['hooks', 'permissions']);
+
+export function declinedOptInPatterns(
+  available: FirstRunCategory[],
+  selection: ResourceSelection,
+  extraAliases: string[],
+): Partial<Record<'hooks' | 'permissions', string[]>> {
+  const declined: Partial<Record<'hooks' | 'permissions', string[]>> = {};
+  for (const c of available) {
+    if (!OPT_IN_CATEGORIES.has(c.key) || selection[c.key]) continue;
+    const defaults = c.key === 'permissions' ? ['system:*'] : defaultPatterns(extraAliases, false);
+    declined[c.key as 'hooks' | 'permissions'] = defaults.map(p => `!${p}`);
+  }
+  return declined;
+}
+
+function recordDeclinedOptIns(
+  agent: AgentId,
+  version: string,
+  available: FirstRunCategory[],
+  selection: ResourceSelection,
+): ResourceSelection {
+  const declined = declinedOptInPatterns(available, selection, getEnabledExtraRepos().map(e => e.alias));
+  if (Object.keys(declined).length > 0) setVersionResourcePatterns(agent, version, declined);
+  return selection;
+}
+
+export function reopenDeclinedOptIn(agent: AgentId, version: string, type: 'hooks' | 'permissions'): void {
+  const patterns = getVersionResources(agent, version)?.[type];
+  if (!Array.isArray(patterns) || patterns.length === 0 || !patterns.every(p => p.startsWith('!'))) return;
+  const defaults = type === 'permissions'
+    ? ['system:*']
+    : defaultPatterns(getEnabledExtraRepos().map(e => e.alias), false);
+  setVersionResourcePatterns(agent, version, { [type]: defaults });
+}
+
+export async function promptResourceSelection(agent: AgentId, version: string): Promise<ResourceSelection | null> {
   const available = getAvailableResources();
   const selection: ResourceSelection = {};
 
@@ -812,14 +873,14 @@ export async function promptResourceSelection(agent: AgentId): Promise<ResourceS
   });
 
   if (selectedCategories.length === 0) {
-    return {};
+    return recordDeclinedOptIns(agent, version, availableCategories, {});
   }
 
   const whole = wholeCategorySelection(
     availableCategories,
     selectedCategories.includes(SELECT_ALL_KEY) ? availableCategories.map(c => c.key) : selectedCategories,
   );
-  if (whole) return whole;
+  if (whole) return recordDeclinedOptIns(agent, version, availableCategories, whole);
 
   for (const category of selectedCategories) {
     const categoryLabel = categories.find(c => c.key === category)!.label;
@@ -881,7 +942,7 @@ export async function promptResourceSelection(agent: AgentId): Promise<ResourceS
     }
   }
 
-  return selection;
+  return recordDeclinedOptIns(agent, version, availableCategories, selection);
 }
 
 export interface AgentSpec {

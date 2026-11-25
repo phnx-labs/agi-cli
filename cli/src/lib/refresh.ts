@@ -27,6 +27,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  declinedResources,
   getProjectOnlyResources,
   hasNewResources,
   promptNewResourceSelection,
@@ -201,7 +202,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
 
     if (!skipPrompts && !requestedSelection) {
       actuallySynced = getActuallySyncedResources(agentId, defaultVer!);
-      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources());
+      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, defaultVer!, available));
       hasAnySynced = actuallySynced.commands.length > 0 ||
         actuallySynced.skills.length > 0 ||
         actuallySynced.hooks.length > 0 ||
@@ -223,7 +224,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
         log(chalk.gray(`Skipped resource selection for ${agentLabel(agentId)}@${defaultVer!} (no terminal; rerun with --yes to sync new resources)`));
       } else if (!hasAnySynced) {
         log(chalk.yellow(`\n${agentLabel(agentId)}@${defaultVer!} has no synced resources.`));
-        const userSelection = await promptResourceSelection(agentId);
+        const userSelection = await promptResourceSelection(agentId, defaultVer!);
         if (userSelection) selection = userSelection;
       } else if (newResources && hasNewResources(newResources, agentId, defaultVer!)) {
         log(chalk.cyan(`\n${agentLabel(agentId)}@${defaultVer}:`));
