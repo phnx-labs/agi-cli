@@ -12652,7 +12652,7 @@
         },
         {
           "flags": "-e, --effort <effort>",
-          "description": "Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)",
+          "description": "Reasoning effort: low | medium | high | xhigh | max | auto (claude, codex, antigravity, droid, grok, muse)",
           "short": "-e",
           "long": "--effort",
           "required": true,
@@ -12738,7 +12738,7 @@
         },
         {
           "flags": "--add-dir <dir>",
-          "description": "Grant access to an additional directory outside the project (Claude, Codex, Cursor, Kimi, Grok; repeatable)",
+          "description": "Grant access to an additional directory outside the project (Claude, Codex, Cursor, Kimi, Grok, Antigravity; repeatable)",
           "long": "--add-dir",
           "required": true,
           "optional": false,
