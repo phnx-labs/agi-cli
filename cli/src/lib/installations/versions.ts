@@ -737,25 +737,58 @@ export async function promptNewResourceSelection(
   return selection;
 }
 
+export interface FirstRunCategory {
+  key: keyof ResourceSelection;
+  label: string;
+  available: boolean;
+  displayCount: string;
+  checked: boolean;
+}
+
+export function firstRunResourceCategories(
+  agent: AgentId,
+  available: AvailableResources,
+  permissionGroups: { ruleCount: number }[],
+): FirstRunCategory[] {
+  const agentConfig = AGENTS[agent];
+  const totalPermissionRules = permissionGroups.reduce((sum, g) => sum + g.ruleCount, 0);
+  return [
+    { key: 'commands', label: 'Commands', available: supports(agent, 'commands').ok && available.commands.length > 0, displayCount: `${available.commands.length} available`, checked: true },
+    { key: 'skills', label: 'Skills', available: available.skills.length > 0, displayCount: `${available.skills.length} available`, checked: true },
+    { key: 'hooks', label: 'Hooks', available: agentConfig.supportsHooks && available.hooks.length > 0, displayCount: `${available.hooks.length} available; scripts that run on every prompt and tool call and can block edits`, checked: false },
+    { key: 'memory', label: 'Rules', available: supports(agent, 'rules').ok && available.memory.length > 0, displayCount: `${available.memory.length} available`, checked: true },
+    { key: 'mcp', label: 'MCPs', available: supports(agent, 'mcp').ok && available.mcp.length > 0, displayCount: `${available.mcp.length} available`, checked: true },
+    { key: 'permissions', label: 'Permissions', available: supports(agent, 'allowlist').ok && permissionGroups.length > 0, displayCount: `${permissionGroups.length} groups, ${totalPermissionRules} rules; auto-approves commands such as git push, ssh and curl`, checked: false },
+    { key: 'subagents', label: 'Subagents', available: supports(agent, 'subagents').ok && available.subagents.length > 0, displayCount: `${available.subagents.length} available`, checked: true },
+    { key: 'plugins', label: 'Plugins', available: supports(agent, 'plugins').ok && available.plugins.length > 0, displayCount: `${available.plugins.length} available`, checked: true },
+  ];
+}
+
+export function wholeCategorySelection(
+  available: FirstRunCategory[],
+  selected: (keyof ResourceSelection)[],
+): ResourceSelection | null {
+  const picked = new Set(selected);
+  const keys = available.map(c => c.key);
+  const defaults = available.filter(c => c.checked).map(c => c.key);
+  const isAll = keys.every(k => picked.has(k));
+  const isDefaults = picked.size === defaults.length && defaults.every(k => picked.has(k));
+  if (!isAll && !isDefaults) return null;
+  const selection: ResourceSelection = {};
+  for (const key of keys) {
+    if (picked.has(key)) selection[key] = 'all';
+  }
+  return selection;
+}
+
 export async function promptResourceSelection(agent: AgentId): Promise<ResourceSelection | null> {
   const available = getAvailableResources();
-  const agentConfig = AGENTS[agent];
   const selection: ResourceSelection = {};
 
   const permissionGroups = discoverPermissionGroups();
-  const totalPermissionRules = permissionGroups.reduce((sum, g) => sum + g.ruleCount, 0);
 
   type CategoryKey = keyof ResourceSelection;
-  const categories: { key: CategoryKey; label: string; available: boolean; displayCount: string }[] = [
-    { key: 'commands', label: 'Commands', available: supports(agent, 'commands').ok && available.commands.length > 0, displayCount: `${available.commands.length} available` },
-    { key: 'skills', label: 'Skills', available: available.skills.length > 0, displayCount: `${available.skills.length} available` },
-    { key: 'hooks', label: 'Hooks', available: agentConfig.supportsHooks && available.hooks.length > 0, displayCount: `${available.hooks.length} available` },
-    { key: 'memory', label: 'Rules', available: supports(agent, 'rules').ok && available.memory.length > 0, displayCount: `${available.memory.length} available` },
-    { key: 'mcp', label: 'MCPs', available: supports(agent, 'mcp').ok && available.mcp.length > 0, displayCount: `${available.mcp.length} available` },
-    { key: 'permissions', label: 'Permissions', available: supports(agent, 'allowlist').ok && permissionGroups.length > 0, displayCount: `${permissionGroups.length} groups, ${totalPermissionRules} rules` },
-    { key: 'subagents', label: 'Subagents', available: supports(agent, 'subagents').ok && available.subagents.length > 0, displayCount: `${available.subagents.length} available` },
-    { key: 'plugins', label: 'Plugins', available: supports(agent, 'plugins').ok && available.plugins.length > 0, displayCount: `${available.plugins.length} available` },
-  ];
+  const categories = firstRunResourceCategories(agent, available, permissionGroups);
 
   const availableCategories = categories.filter(c => c.available);
 
@@ -773,7 +806,7 @@ export async function promptResourceSelection(agent: AgentId): Promise<ResourceS
       ...availableCategories.map(c => ({
         name: `${c.label} (${c.displayCount})`,
         value: c.key,
-        checked: true,
+        checked: c.checked,
       })),
     ],
   });
@@ -782,13 +815,11 @@ export async function promptResourceSelection(agent: AgentId): Promise<ResourceS
     return {};
   }
 
-  const allCategoryKeys = availableCategories.map(c => c.key);
-  if (selectedCategories.includes(SELECT_ALL_KEY) || allCategoryKeys.every(k => selectedCategories.includes(k))) {
-    for (const c of availableCategories) {
-      selection[c.key] = 'all';
-    }
-    return selection;
-  }
+  const whole = wholeCategorySelection(
+    availableCategories,
+    selectedCategories.includes(SELECT_ALL_KEY) ? availableCategories.map(c => c.key) : selectedCategories,
+  );
+  if (whole) return whole;
 
   for (const category of selectedCategories) {
     const categoryLabel = categories.find(c => c.key === category)!.label;
