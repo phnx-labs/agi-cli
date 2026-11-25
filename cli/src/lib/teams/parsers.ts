@@ -1140,8 +1140,6 @@ const ANTIGRAVITY_FILE_TOOLS: Record<string, 'file_create' | 'file_write' | 'fil
   view_file: 'file_read',
 };
 
-// `agy --output-format stream-json`: one `{event, <event>: {...}}` object per line
-// (init, step_update, result). Fixture: teams/__tests__/testdata/antigravity-stream.jsonl.
 function normalizeAntigravity(raw: any): any[] {
   const timestamp = new Date().toISOString();
 

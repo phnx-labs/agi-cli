@@ -621,8 +621,6 @@ export async function collectRunCandidates(agent: AgentId): Promise<RotateCandid
       if (fs.existsSync(home) && slotDirs.has(fs.realpathSync(home))) return null;
 
       const info = await getAccountInfo(agent, home);
-      // A symlink-adopted harness launches against whichever home its ~/.<config>
-      // symlink names, so a credential in any other version home is never used.
       const launchable = adoptedConfigPointsAtHome(agent, home)
         && isLaunchableSignedIn(info.signedIn, credentialPresence(agent, home));
       const authHealth = authCache[authCacheKey(localHost, agent, version)];

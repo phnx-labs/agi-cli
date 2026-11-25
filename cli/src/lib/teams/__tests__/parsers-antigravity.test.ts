@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import { normalizeEvents } from '../parsers.js';
 
-// Fixtures are real `agy --print … --output-format stream-json` runs (agy 1.5.16), paths anonymized.
 function fixtureEvents(name: string): any[] {
   const p = fileURLToPath(new URL(`./testdata/${name}`, import.meta.url));
   return fs.readFileSync(p, 'utf-8').split('\n').map((l) => l.trim()).filter(Boolean)
