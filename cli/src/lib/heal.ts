@@ -23,6 +23,7 @@ import {
   getUpstreamManifestVersion,
 } from './plugins/plugins.js';
 import { repairPluginManifestFile } from './plugins/plugin-marketplace.js';
+import { getVersionResources } from './state.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -164,7 +165,8 @@ function healVersion(
   const result: VersionHealResult = { agent, version, healed: [], skipped: [] };
 
   const home = getVersionHomePath(agent, version);
-  if (!fs.existsSync(home)) return result;
+  const firstSyncDone = Object.keys(getVersionResources(agent, version) ?? {}).length > 0;
+  if (!fs.existsSync(home) || !firstSyncDone) return result;
 
   const diffOpts = { cwd: opts.cwd, excludeProject: true } as const;
   const report = diffVersionResources(agent, version, diffOpts);
