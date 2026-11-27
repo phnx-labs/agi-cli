@@ -23,6 +23,10 @@ beforeEach(() => {
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(binDir, 'claude'), '#!/bin/sh\n');
   fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'agents:\n  claude: "2.0.0"\n');
+  fs.writeFileSync(
+    path.join(userDir, '.history', 'version-resources.json'),
+    JSON.stringify({ claude: { '2.0.0': { commands: ['system:*', 'user:*'], hooks: ['system:*', 'user:*'] } } }),
+  );
 });
 
 afterEach(() => {
