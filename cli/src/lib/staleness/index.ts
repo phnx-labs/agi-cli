@@ -57,6 +57,29 @@ export function loadManifest(agent: AgentId, version: string): SyncManifest | nu
   }
 }
 
+export function syncInstalledSkillSources(manifest: SyncManifest | null): Map<string, string> {
+  const sources = new Map<string, string>();
+  if (!manifest) return sources;
+  for (const [name, entry] of Object.entries({ ...manifest.retired?.skills, ...manifest.skills })) {
+    sources.set(name, entry.dirPath);
+  }
+  const commands = { ...manifest.retired?.commands, ...manifest.commands };
+  for (const name of manifest.writtenCommands ?? []) {
+    if (!sources.has(name) && commands[name]) sources.set(name, commands[name].source.path);
+  }
+  for (const [plugin, entry] of Object.entries(manifest.plugins ?? {})) {
+    for (const file of entry.files) {
+      const rel = path.relative(entry.dirPath, file.path).split(path.sep);
+      if (rel[0] === 'skills' && rel.length >= 3) {
+        sources.set(rel[1], path.join(entry.dirPath, 'skills', rel[1]));
+      } else if (rel[0] === 'commands' && rel.length === 2 && rel[1].endsWith('.md')) {
+        sources.set(`${plugin}-${rel[1].slice(0, -3)}`, file.path);
+      }
+    }
+  }
+  return sources;
+}
+
 export function saveManifest(agent: AgentId, version: string, manifest: SyncManifest): void {
   const p = manifestPath(agent, version);
   const tmp = p + '.tmp';

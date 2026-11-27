@@ -294,6 +294,12 @@ Pruning is **manifest-bounded**, so it never over-deletes:
 - **No cross-layer deletion.** The "still in source" set spans every layer, so a
   system command removed from `~/.agents/.system` while a same-named **user**
   command still exists is kept — it is still provided by a layer.
+- **A full sync removes only what a sync installed.** The full-sync sweep of a
+  version's `skills/` and commands dir trashes an entry only when the previous
+  manifest records sync installing it (`syncInstalledSkillSources` for skills,
+  `writtenCommands` for commands), plus, on Claude, a flat copy of a current plugin
+  skill left by the old layout. A skill or command you added to the home yourself
+  is never removed, and a removal goes to the trash, not a permanent delete.
 - **No manifest → no deletion (fail loud).** With no sync manifest yet (no prior
   full sync established a baseline), the reconcile prints a one-line notice and
   prunes nothing rather than guessing. A later `agents sync <agent>` full sync
@@ -334,8 +340,12 @@ agents sync --repo user --delete             # umbrella sync (fetch + reconcile)
   `agents-project`, `agents-<alias>`), that repo is checked out here, and it no
   longer ships the plugin (`cleanOrphanedPluginSkills` with an `OrphanPluginScope`).
   A command or skill qualifies only when the sync manifest records its source
-  under `<repo>/commands/` or `<repo>/skills/`, that source is gone, and no other
-  repo provides the name. The manifest keeps the source of a resource after it
+  under `<repo>/commands/`, `<repo>/skills/` or `<repo>/plugins/`, that source is
+  gone, and no other repo provides the name. A plugin skill flattened into a
+  harness's own `skills/` dir (every harness but Claude) and a plugin command
+  installed as the `<plugin>-<cmd>` skill take their source from the plugin's
+  recorded files (`syncInstalledSkillSources`), so a skill a plugin drops, such as
+  `swarm:orchestrate`, is removed while the plugin itself stays. The manifest keeps the source of a resource after it
   leaves its repo, in `retired`, so a full sync in between does not erase the
   proof.
 - **Everything else is kept and counted:** resources from another repo or

@@ -531,7 +531,7 @@ describe('version resource sync path handling', () => {
     expect(second.skills).toBe(false);
   });
 
-  it('sweeps a flattened plugin skill out of a Claude home and keeps only the marketplace copy', async () => {
+  it('sweeps a flattened plugin skill out of a Claude home, keeps the marketplace copy, and keeps a skill sync never installed', async () => {
     const home = makeTempHome();
     const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');
     const pluginSkillDir = path.join(pluginRoot, 'skills', 'reviews');
@@ -578,7 +578,7 @@ describe('version resource sync path handling', () => {
     expect(result.skills).toBe(false);
     expect(result.plugins).toEqual(['agents']);
     expect(fs.existsSync(path.join(versionSkillRoot, 'reviews'))).toBe(false);
-    expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(false);
+    expect(fs.existsSync(path.join(versionSkillRoot, 'old-shadow'))).toBe(true);
     expect(fs.existsSync(path.join(versionSkillRoot, 'synced', 'bucket'))).toBe(true);
     expect(fs.existsSync(marketplaceSkill)).toBe(true);
   });
