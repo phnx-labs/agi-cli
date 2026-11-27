@@ -24,6 +24,7 @@ import {
 } from './plugins/plugins.js';
 import { repairPluginManifestFile } from './plugins/plugin-marketplace.js';
 import { getVersionResources } from './state.js';
+import { loadManifest } from './staleness/index.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -46,6 +47,7 @@ export interface VersionHealResult {
   version: string;
   healed: HealedResource[];
   skipped: SkippedResource[];
+  firstSyncPending?: true;
 }
 
 export interface ManifestRepairResult {
@@ -157,6 +159,12 @@ async function refreshStaleCentralPlugins(opts: {
 }
 
 
+function firstSyncDone(agent: AgentId, version: string): boolean {
+  const recorded = Object.entries(getVersionResources(agent, version) ?? {})
+    .some(([key, patterns]) => key !== 'rulesPreset' && Array.isArray(patterns) && patterns.length > 0);
+  return recorded || loadManifest(agent, version) !== null;
+}
+
 function healVersion(
   agent: AgentId,
   version: string,
@@ -165,8 +173,8 @@ function healVersion(
   const result: VersionHealResult = { agent, version, healed: [], skipped: [] };
 
   const home = getVersionHomePath(agent, version);
-  const firstSyncDone = Object.keys(getVersionResources(agent, version) ?? {}).length > 0;
-  if (!fs.existsSync(home) || !firstSyncDone) return result;
+  if (!fs.existsSync(home)) return result;
+  if (!firstSyncDone(agent, version)) return { ...result, firstSyncPending: true };
 
   const diffOpts = { cwd: opts.cwd, excludeProject: true } as const;
   const report = diffVersionResources(agent, version, diffOpts);
