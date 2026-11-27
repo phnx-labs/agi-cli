@@ -583,6 +583,28 @@ describe('version resource sync path handling', () => {
     expect(fs.existsSync(marketplaceSkill)).toBe(true);
   });
 
+  it('trashes a command sync wrote once its source is gone, and keeps a command the user wrote', () => {
+    const home = makeTempHome();
+    const commandsSrc = path.join(home, '.agents', 'commands');
+    const commandsHome = path.join(home, '.agents', '.history', 'versions', 'claude', '2.0.65', 'home', '.claude', 'commands');
+    fs.mkdirSync(commandsSrc, { recursive: true });
+    for (const name of ['keepcmd', 'dropcmd']) {
+      fs.writeFileSync(path.join(commandsSrc, `${name}.md`), `---\ndescription: ${name}\n---\n\nBody.\n`, 'utf-8');
+    }
+    const sync = `syncResourcesToVersion('claude', '2.0.65', undefined, { cwd: home, force: true })`;
+    runVersionSync(home, sync);
+    expect(fs.existsSync(path.join(commandsHome, 'dropcmd.md'))).toBe(true);
+
+    fs.writeFileSync(path.join(commandsHome, 'mine.md'), 'a command the user wrote\n', 'utf-8');
+    fs.rmSync(path.join(commandsSrc, 'dropcmd.md'));
+    runVersionSync(home, sync);
+
+    expect(fs.existsSync(path.join(commandsHome, 'dropcmd.md'))).toBe(false);
+    expect(fs.readdirSync(path.join(home, '.agents', '.history', 'trash', 'commands', 'claude', '2.0.65', 'dropcmd'))).toHaveLength(1);
+    expect(fs.readFileSync(path.join(commandsHome, 'mine.md'), 'utf-8')).toBe('a command the user wrote\n');
+    expect(fs.existsSync(path.join(commandsHome, 'keepcmd.md'))).toBe(true);
+  });
+
   it('still force-refreshes plugin-only skills into the top-level skill home of a flattening harness', async () => {
     const home = makeTempHome();
     const pluginRoot = path.join(home, '.agents', 'plugins', 'agents');

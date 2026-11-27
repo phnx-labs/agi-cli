@@ -299,7 +299,8 @@ Pruning is **manifest-bounded**, so it never over-deletes:
   manifest records sync installing it (`syncInstalledSkillSources` for skills,
   `writtenCommands` for commands), plus, on Claude, a flat copy of a current plugin
   skill left by the old layout. A skill or command you added to the home yourself
-  is never removed, and a removal goes to the trash, not a permanent delete.
+  is never removed. A removed skill or command goes to the trash; the generated
+  command-skill copy of a removed command is deleted with it.
 - **No manifest → no deletion (fail loud).** With no sync manifest yet (no prior
   full sync established a baseline), the reconcile prints a one-line notice and
   prunes nothing rather than guessing. A later `agents sync <agent>` full sync
