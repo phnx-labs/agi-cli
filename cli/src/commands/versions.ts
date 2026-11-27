@@ -1,5 +1,4 @@
 import type { Command } from 'commander';
-import { loadManifest as loadSyncManifest } from '../lib/staleness/index.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -57,6 +56,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  installedBySync,
   declinedResources,
   getProjectOnlyResources,
   hasNewResources,
@@ -576,7 +576,7 @@ export function registerVersionsCommands(program: Command): void {
 
             const available = getAvailableResources();
             const actuallySynced = getActuallySyncedResources(agent, installedVersion);
-            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agent, installedVersion, available), loadSyncManifest(agent, installedVersion));
+            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agent, installedVersion, available), installedBySync(agent, installedVersion));
 
             const hasAnySynced = actuallySynced.commands.length > 0 ||
               actuallySynced.skills.length > 0 ||
@@ -911,7 +911,7 @@ export function registerVersionsCommands(program: Command): void {
         } else {
           const available = getAvailableResources();
           const actuallySynced = getActuallySyncedResources(agentId, finalVersion);
-          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, finalVersion, available), loadSyncManifest(agentId, finalVersion));
+          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, finalVersion, available), installedBySync(agentId, finalVersion));
 
           const hasAnySynced = actuallySynced.commands.length > 0 ||
             actuallySynced.skills.length > 0 ||

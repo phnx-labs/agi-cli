@@ -27,6 +27,7 @@ import {
   getAvailableResources,
   getActuallySyncedResources,
   getNewResources,
+  installedBySync,
   declinedResources,
   getProjectOnlyResources,
   hasNewResources,
@@ -203,7 +204,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
 
     if (!skipPrompts && !requestedSelection) {
       actuallySynced = getActuallySyncedResources(agentId, defaultVer!);
-      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, defaultVer!, available), loadSyncManifest(agentId, defaultVer!));
+      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, defaultVer!, available), installedBySync(agentId, defaultVer!));
       hasAnySynced = actuallySynced.commands.length > 0 ||
         actuallySynced.skills.length > 0 ||
         actuallySynced.hooks.length > 0 ||
@@ -283,7 +284,9 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     const hookAgents = new Set(capableAgents('hooks') as readonly AgentId[]);
     for (const agentId of agentsToSync) {
       if (!hookAgents.has(agentId)) continue;
-      const versions = listInstalledVersions(agentId);
+      const defaultVer = getGlobalDefault(agentId);
+      const versions = listInstalledVersions(agentId)
+        .filter((v) => skipPrompts || v === defaultVer || loadSyncManifest(agentId, v) !== null);
       for (const ver of versions) {
         const home = getVersionHomePath(agentId, ver);
         const result = registerHooksToSettings(agentId, home, hookManifest);

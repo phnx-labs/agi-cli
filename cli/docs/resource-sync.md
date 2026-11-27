@@ -138,15 +138,16 @@ injects `--json` on each peer so the roster can parse results.
 Bare `agents sync` without `--yes` reconciles the default version **and every
 other version that has been synced before** (it has a `.sync-manifest.json`). A
 version that was never synced is left for an explicit `agents sync
-<agent>@<version>` or `--yes`, so it never receives everything unasked. `--yes`
-reaches every installed version.
+<agent>@<version>` or `--yes`, so it never receives everything unasked. Hook
+registration follows the same versions. `--yes` reaches every installed version.
 
 A resource counts as **new** (and so asks before it is installed, or is skipped
-with `Skipped resource selection` when there is no terminal) only when the
-version's last full sync did not record it. An already installed skill or
-command whose source was edited is drift, which the reconcile updates; it no
-longer reads as new and so no longer stops a non-interactive sync from writing
-anything.
+with `Skipped resource selection` when there is no terminal) unless the
+version's last full sync recorded it **and** it is still installed. An
+installed skill or command whose source was edited is drift, which the
+reconcile updates; it no longer reads as new and so no longer stops a
+non-interactive sync from writing anything. One you removed from the version
+(`agents skills remove`) is new again, as before.
 
 `agents add <agent> --yes` and `agents use <agent>@<version> --yes` on a version
 with nothing synced run a full sync, so the version gets a sync manifest at once
@@ -176,7 +177,10 @@ homes. Two exceptions used to edit the repos themselves and no longer do:
 Each named account's home (`~/.agents/.history/accounts/<agent>/<id>/`) mirrors
 the default version home after every sync. Sync records what it put there in
 `.agents-slot-projection.json` and removes only those entries when the version
-home drops them. A skill or command you add inside an account home stays.
+home drops them. A skill or command you add inside an account home stays. A
+slot with no record yet (written by an older CLI) is not pruned on that run.
+If the version home's `.claude-plugin/plugin.json` is a symlink into the
+plugin's source, the installed copy is made a real file before it is repaired.
 
 ### Per-kind selector flags
 

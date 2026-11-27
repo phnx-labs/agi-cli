@@ -165,6 +165,15 @@ function settingsPath(agent: AgentId, versionHome: string): string {
 }
 
 
+function materializeLink(p: string): void {
+  let st: fs.Stats;
+  try { st = fs.lstatSync(p); } catch { return; }
+  if (!st.isSymbolicLink()) return;
+  const target = fs.realpathSync(p);
+  fs.unlinkSync(p);
+  fs.cpSync(target, p, { recursive: true, dereference: true });
+}
+
 function warnClaudeInvalidManifest(manifest: PluginManifest, fallbackName: string): void {
   for (const warning of validateClaudePluginManifest(manifest)) {
     process.stderr.write(
@@ -213,6 +222,8 @@ export function copyPluginToMarketplace(
   });
 
   const installedManifest = path.join(dest, '.claude-plugin', 'plugin.json');
+  materializeLink(path.dirname(installedManifest));
+  materializeLink(installedManifest);
   try {
     warnClaudeInvalidManifest(JSON.parse(fs.readFileSync(installedManifest, 'utf-8')), plugin.name);
   } catch {  }

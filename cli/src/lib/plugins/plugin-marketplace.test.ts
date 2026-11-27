@@ -294,6 +294,38 @@ describe('syncMarketplaceManifest', () => {
 });
 
 
+describe('copyPluginToMarketplace never writes through to the source', () => {
+  it('repairs a symlinked plugin.json in the installed copy and leaves the source file as written', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-mkt-link-'));
+    try {
+      const root = path.join(tmp, 'src', 'linkplug');
+      fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+      const real = JSON.stringify({ name: 'linkplug', version: '1.0.0', skills: ['loop'] });
+      fs.writeFileSync(path.join(root, 'plugin.json'), real);
+      fs.symlinkSync('../plugin.json', path.join(root, '.claude-plugin', 'plugin.json'));
+      const home = path.join(tmp, 'home');
+      fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+
+      const origWrite = process.stderr.write.bind(process.stderr);
+      process.stderr.write = (() => true) as typeof process.stderr.write;
+      let dest: string;
+      try {
+        dest = copyPluginToMarketplace(discoveredPlugin(root, 'linkplug'), SPECS.user, 'claude', home);
+      } finally {
+        process.stderr.write = origWrite;
+      }
+
+      expect(fs.readFileSync(path.join(root, 'plugin.json'), 'utf-8')).toBe(real);
+      const installed = path.join(dest!, '.claude-plugin', 'plugin.json');
+      expect(fs.lstatSync(installed).isSymbolicLink()).toBe(false);
+      expect(JSON.parse(fs.readFileSync(installed, 'utf-8')).skills).toBeUndefined();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+
 describe('register/unregister marketplace', () => {
   let tmpDir: string;
   let versionHome: string;

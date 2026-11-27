@@ -194,6 +194,29 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     }
   });
 
+  it('prunes nothing in a slot with no projection record, then records for the next run', () => {
+    const centralAlpha = path.join(os.homedir(), '.agents', 'skills', 'alpha');
+    fs.mkdirSync(centralAlpha, { recursive: true });
+    fs.writeFileSync(path.join(centralAlpha, 'SKILL.md'), '---\nname: alpha\n---\n');
+    const created = addNativeAccount('older', 'claude', 'claude:user=slot-old', 'older@example.com', 'version');
+    const slot = ensureSlot('claude', created.id);
+    try {
+      const record = path.join(slot.slotDir, '.agents-slot-projection.json');
+      fs.rmSync(record);
+      fs.rmSync(path.join(versionHome(), '.claude', 'skills', 'alpha'), { recursive: true });
+      fs.rmSync(centralAlpha, { recursive: true });
+
+      const first = projectAccountSlots('claude').find((p) => p.accountId === created.id);
+      expect(first!.pruned).toEqual([]);
+      expect(fs.existsSync(path.join(slot.slotDir, '.claude', 'skills', 'alpha', 'SKILL.md'))).toBe(true);
+      expect(fs.existsSync(record)).toBe(true);
+    } finally {
+      removeAccount('older');
+      fs.rmSync(slot.slotDir, { recursive: true, force: true });
+      fs.rmSync(centralAlpha, { recursive: true, force: true });
+    }
+  });
+
   it('symlinks the slot rules file to the version home instead of composing a duplicate', () => {
     const rulesContent = '# Composed rules\nDo not duplicate me.\n';
     fs.writeFileSync(path.join(versionHome(), '.claude', 'CLAUDE.md'), rulesContent);

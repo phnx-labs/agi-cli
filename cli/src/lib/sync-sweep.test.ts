@@ -165,3 +165,20 @@ describe('agents use --yes on a never-synced version', () => {
     expect(fs.existsSync(path.join(freshSkills, 'AGENTS'))).toBe(false);
   });
 });
+
+describe('what counts as a new resource', () => {
+  it('treats an edited installed skill as drift, and a skill removed from the version as new again', () => {
+    const probe = () => {
+      const r = spawnSync('bun', ['--eval', String.raw`
+        import { installedBySync } from './src/lib/installations/versions.ts';
+        console.log(JSON.stringify([...installedBySync('codex', '${VERSION}').skills]));
+      `], { cwd: CLI_ROOT, encoding: 'utf-8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 60_000 });
+      expect(r.status, r.stderr).toBe(0);
+      return JSON.parse(r.stdout.trim().split('\n').pop()!) as string[];
+    };
+    fs.appendFileSync(path.join(pluginDir(), 'skills', 'keep', 'SKILL.md'), '\nThird upstream edit.\n');
+    expect(probe()).toContain('keep');
+    fs.rmSync(skill('keep'), { recursive: true });
+    expect(probe()).not.toContain('keep');
+  });
+});
