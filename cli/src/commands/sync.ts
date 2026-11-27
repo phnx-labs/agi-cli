@@ -1,6 +1,5 @@
 
 import * as path from 'path';
-import { loadManifest as loadSyncManifest } from '../lib/staleness/index.js';
 import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { resolveSyncPassphraseFromEnv } from '../lib/sync-passphrase.js';
@@ -18,6 +17,7 @@ import {
   getActuallySyncedResources,
   getProjectOnlyResources,
   getNewResources,
+  installedBySync,
   declinedResources,
   hasNewResources,
   promptResourceSelection,
@@ -949,7 +949,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
     const available = getAvailableResources(cwd);
     const actuallySynced = getActuallySyncedResources(agentId, version, { cwd });
     const projectOnly = getProjectOnlyResources(cwd);
-    const newResources = getNewResources(available, actuallySynced, projectOnly, declinedResources(agentId, version, available, cwd), loadSyncManifest(agentId, version));
+    const newResources = getNewResources(available, actuallySynced, projectOnly, declinedResources(agentId, version, available, cwd), installedBySync(agentId, version));
     const hasAnySynced = anyResources(actuallySynced);
 
     try {

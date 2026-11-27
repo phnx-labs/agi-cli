@@ -57,7 +57,6 @@ import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
 import { composeRulesFromState } from '../rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale, syncInstalledSkillSources } from '../staleness/index.js';
-import type { SyncManifest } from '../staleness/types.js';
 import { removeSkillFromVersion } from '../plugins/skills.js';
 import { removeCommandFromVersion } from '../commands.js';
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
@@ -575,37 +574,49 @@ function optInDefaults(type: 'hooks' | 'permissions', extraAliases: string[]): s
   return type === 'permissions' ? ['system:*'] : defaultPatterns(extraAliases, false);
 }
 
+export interface InstalledBySync {
+  commands: Set<string>;
+  skills: Set<string>;
+}
+
+export function installedBySync(agent: AgentId, version: string): InstalledBySync {
+  const manifest = loadManifest(agent, version);
+  const skillsDir = path.join(getVersionHomePath(agent, version), agentConfigDirName(agent), 'skills');
+  const present = (name: string) => fs.existsSync(safeJoin(skillsDir, name));
+  const written = new Set((manifest?.writtenTargets ?? [])
+    .filter((p) => fs.existsSync(p))
+    .map((p) => path.basename(p).replace(/\.md$/, '')));
+  return {
+    skills: new Set([...syncInstalledSkillSources(manifest).keys()].filter(present)),
+    commands: new Set(Object.keys({ ...manifest?.retired?.commands, ...manifest?.commands })
+      .filter((name) => present(name) || written.has(name))),
+  };
+}
+
 export function getNewResources(
   available: AvailableResources,
   actuallySynced: AvailableResources,
   projectOnly?: ProjectOnlyResources,
   declined?: DeclinedResources,
-  lastSync?: SyncManifest | null,
+  installed: InstalledBySync = { commands: new Set(), skills: new Set() },
 ): AvailableResources {
   const exclude = projectOnly || {
     commands: new Set<string>(), skills: new Set<string>(), hooks: new Set<string>(),
     subagents: new Set<string>(), plugins: new Set<string>(), workflows: new Set<string>(),
   };
-  const known = {
-    commands: new Set(Object.keys({ ...lastSync?.retired?.commands, ...lastSync?.commands })),
-    skills: new Set(syncInstalledSkillSources(lastSync ?? null).keys()),
-    hooks: new Set(Object.keys(lastSync?.hooks ?? {})),
-    subagents: new Set(Object.keys(lastSync?.subagents ?? {})),
-    plugins: new Set(Object.keys(lastSync?.plugins ?? {})),
-    workflows: new Set(Object.keys(lastSync?.workflows ?? {})),
-  };
+  const known = installed;
   return {
     commands: available.commands.filter(c => !actuallySynced.commands.includes(c) && !exclude.commands.has(c) && !known.commands.has(c)),
     skills: available.skills.filter(s => !actuallySynced.skills.includes(s) && !exclude.skills.has(s) && !known.skills.has(s)),
-    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h) && !declined?.hooks.has(h) && !known.hooks.has(h)),
+    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h) && !declined?.hooks.has(h)),
     memory: actuallySynced.memory.length > 0
       ? []
       : available.memory.filter(m => !actuallySynced.memory.includes(m)),
     mcp: available.mcp.filter(m => !actuallySynced.mcp.includes(m)),
     permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p) && !declined?.permissions.has(p)),
-    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s) && !known.subagents.has(s)),
-    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p) && !known.plugins.has(p)),
-    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w) && !known.workflows.has(w)),
+    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s)),
+    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p)),
+    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w)),
     promptcuts: false,
   };
 }
