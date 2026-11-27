@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.57
+
+- **`agents ps topic <id> <topic>` files a live session under a topic you choose (PHNX-4676).** A session's topic is its `workstream`, the name AGI EXT groups the Sessions list by; until now only the daemon's title job wrote it. The topic you set is stored on the machine that owns the session (the command hops there over SSH, like `ps stop`), marked as yours, and the title job never overwrites it, even on `agents daemon index backfill titles --refresh`. Your other machines see it with the next session sync. `--json` prints one result line for a UI; AGI EXT runs it when you drag a card onto another section. A topic longer than 4 words or 32 characters is refused, not shortened. The topic stays with the machine that owns the session; one moved with `agents ps migrate` is titled there again until you set one. Schema v56 adds `sessions.workstream_set_by_user`. Source: `cli/src/commands/ps-topic.ts`, `cli/src/lib/session/db.ts`.
+
 ## 1.23.56
 
 - **The daemon no longer installs hooks and permissions on a fresh install before you choose them.** `agents setup` starts the daemon, and its self-heal pass ran about 30 seconds later, while `agents add` was still showing the first-run prompt. It saw a version with nothing synced, called every resource missing, and installed all of them, so the hooks and auto-approved commands the prompt leaves unchecked were already in place whatever you picked. Self-heal now skips a version until its first sync has recorded what you chose, and repairs it as before after that; `agents sync` and the self-heal report name a waiting version with the `agents sync <harness>@<version>` that sets it up. Source: `cli/src/lib/heal.ts`, `cli/src/lib/reconcile-and-repair.ts`, `cli/src/lib/self-heal/checks/resources.ts`.
