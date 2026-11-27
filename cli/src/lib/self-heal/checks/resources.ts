@@ -16,6 +16,7 @@ export const resourcesCheck: HealCheck = {
     let healed = 0;
     for (const v of result.versions) {
       healed += v.healed.length;
+      if (v.firstSyncPending) needsAttention.push(`${v.agent}@${v.version}: never synced (run agents sync ${v.agent}@${v.version})`);
       for (const s of v.skipped) {
         needsAttention.push(`${v.agent}@${v.version}: ${s.kind}/${s.name} (${s.reason})`);
       }

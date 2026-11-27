@@ -228,6 +228,10 @@ function renderHealText(result: HealResult, log: (s: string) => void): void {
 
   for (const v of result.versions) {
     const label = `${AGENT_NAMES[v.agent] || v.agent}@${v.version}`;
+    if (v.firstSyncPending) {
+      log(`  ${chalk.yellow('wait  ')}  ${label}  ${chalk.gray(`never synced — run \`agents sync ${v.agent}@${v.version}\` to choose what it gets`)}`);
+      continue;
+    }
     if (v.healed.length === 0 && v.skipped.length === 0) continue;
     const byKind = new Map<string, number>();
     for (const h of v.healed) byKind.set(h.kind, (byKind.get(h.kind) ?? 0) + 1);

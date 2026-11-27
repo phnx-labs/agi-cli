@@ -247,6 +247,11 @@ describe.skipIf(process.platform === 'win32')('runSelfHeal — resources never s
       path.join(home, '.agents', '.history', 'versions', 'claude', '9.9.2', '.isolated'),
       `${new Date().toISOString()}\n`,
     );
+    const synced = { commands: ['system:*', 'user:*'] };
+    fs.writeFileSync(
+      path.join(home, '.agents', '.history', 'version-resources.json'),
+      JSON.stringify({ claude: { '9.9.1': synced, '9.9.2': synced } }),
+    );
   });
   afterEach(() => { fs.rmSync(home, { recursive: true, force: true }); });
 
