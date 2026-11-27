@@ -62,8 +62,19 @@ function sourceVersion(harness: AgentId): string | null {
   return getGlobalDefault(harness) ?? listInstalledVersions(harness)[0] ?? null;
 }
 
+const PROJECTION_RECORD = '.agents-slot-projection.json';
+
+function readProjectionRecord(slotHome: string): Partial<Record<string, string[]>> | null {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(slotHome, PROJECTION_RECORD), 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
 function projectResources(harness: AgentId, version: string, destHome: string, fromHome: string): void {
   const cwd = process.cwd();
+  const record: Partial<Record<string, string[]>> = {};
   for (const kind of ALL_RESOURCE_KINDS) {
     if (!supports(harness, kindToCapability(kind), version).ok) continue;
     const writer = getWriter(kind, harness);
@@ -92,8 +103,9 @@ function projectResources(harness: AgentId, version: string, destHome: string, f
     }
     const names = getDetector(kind, harness)?.list({ version, versionHome: fromHome, cwd }) ?? [];
     if (names.length === 0) continue;
-    writer.write({ version, versionHome: destHome, selection: names, cwd });
+    record[kind] = writer.write({ version, versionHome: destHome, selection: names, cwd }).synced;
   }
+  fs.writeFileSync(path.join(destHome, PROJECTION_RECORD), JSON.stringify(record, null, 2) + '\n', 'utf-8');
   if (supports(harness, 'hooks', version).ok) {
     const tracker = installSessionTrackerHookSync(harness, version, destHome);
     if (!tracker.installed && tracker.error) {
@@ -113,6 +125,8 @@ export interface SlotProjection {
 function pruneSlotResources(harness: AgentId, version: string, slotHome: string, fromHome: string): string[] {
   const cwd = process.cwd();
   const pruned: string[] = [];
+  const projected = readProjectionRecord(slotHome);
+  if (!projected) return pruned;
   for (const kind of ALL_RESOURCE_KINDS) {
     if (!supports(harness, kindToCapability(kind), version).ok) continue;
     const writer = getWriter(kind, harness);
@@ -120,7 +134,7 @@ function pruneSlotResources(harness: AgentId, version: string, slotHome: string,
     if (!writer?.remove || !detector) continue;
     const source = new Set(detector.list({ version, versionHome: fromHome, cwd }));
     for (const name of detector.list({ version, versionHome: slotHome, cwd })) {
-      if (source.has(name)) continue;
+      if (source.has(name) || !projected[kind]?.includes(name)) continue;
       if (writer.remove({ version, versionHome: slotHome, name, cwd }).removed) pruned.push(`${kind}/${name}`);
     }
   }

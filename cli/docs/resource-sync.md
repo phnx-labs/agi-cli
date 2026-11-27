@@ -135,6 +135,49 @@ reconcile every installed agent. `--json` emits a single JSON object on stdout
 (and forces non-interactive mode); the fleet fan-out path (`--device all`)
 injects `--json` on each peer so the roster can parse results.
 
+Bare `agents sync` without `--yes` reconciles the default version **and every
+other version that has been synced before** (it has a `.sync-manifest.json`). A
+version that was never synced is left for an explicit `agents sync
+<agent>@<version>` or `--yes`, so it never receives everything unasked. `--yes`
+reaches every installed version.
+
+A resource counts as **new** (and so asks before it is installed, or is skipped
+with `Skipped resource selection` when there is no terminal) only when the
+version's last full sync did not record it. An already installed skill or
+command whose source was edited is drift, which the reconcile updates; it no
+longer reads as new and so no longer stops a non-interactive sync from writing
+anything.
+
+`agents add <agent> --yes` and `agents use <agent>@<version> --yes` on a version
+with nothing synced run a full sync, so the version gets a sync manifest at once
+and `--delete` works on it without a separate first sync.
+
+A `README.md`, `AGENTS.md`, `CLAUDE.md` or `GEMINI.md` inside a repo's
+`commands/` folder documents the folder. It is never offered or installed as a
+command (or, on harnesses that install commands as skills, as a skill).
+
+### Sync never writes to your DotAgent repos
+
+Sync reads the project, user, system and extra repos and writes only agent
+homes. Two exceptions used to edit the repos themselves and no longer do:
+
+- A plugin whose `plugin.json` lists `skills` or `commands` as bare names
+  (which Claude Code rejects) is repaired in the **installed copy** in the
+  version home, with a warning naming the plugin. The `plugin.json` in your repo
+  is left as you wrote it. (`agents sync --json` no longer carries a
+  `heal.repairedManifests` field.)
+- A plugin installed from an upstream source is refreshed by sync only when you
+  have not edited it. A locally modified plugin is held, and the run names
+  `agents plugins update <name>` as the explicit way to take the upstream
+  version.
+
+### Account homes
+
+Each named account's home (`~/.agents/.history/accounts/<agent>/<id>/`) mirrors
+the default version home after every sync. Sync records what it put there in
+`.agents-slot-projection.json` and removes only those entries when the version
+home drops them. A skill or command you add inside an account home stays.
+
 ### Per-kind selector flags
 
 Use kind flags to restrict a sync to one or more resource types. Omitting all

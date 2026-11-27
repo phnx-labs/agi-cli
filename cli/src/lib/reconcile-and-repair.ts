@@ -213,9 +213,6 @@ export function repairAfterSyncJson(report: RepairAfterSyncReport): Record<strin
 
 
 function renderHealText(result: HealResult, log: (s: string) => void): void {
-  for (const r of result.repairedManifests) {
-    log(`  ${chalk.green('repair')}  plugin ${chalk.bold(r.plugin)} ${chalk.gray(`— dropped invalid ${r.droppedFields.join(', ')} field`)}`);
-  }
   for (const r of result.refreshedPlugins) {
     log(`  ${chalk.green('refresh')} plugin ${chalk.bold(r.plugin)}  ${chalk.gray(`${r.from} → ${r.to}`)}`);
   }

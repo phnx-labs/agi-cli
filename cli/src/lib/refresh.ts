@@ -52,6 +52,7 @@ import {
   switchHomeFileSymlinks,
 } from './installations/shims.js';
 import { parseHookManifest, registerHooksToSettings } from './hooks/install.js';
+import { loadManifest as loadSyncManifest } from './staleness/index.js';
 import { isInteractiveTerminal, isPromptCancelled } from './format.js';
 
 interface RefreshOptions {
@@ -193,7 +194,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
 
     const versionsToSync = requestedSelection || skipPrompts
       ? installedVersions
-      : [defaultVer!];
+      : installedVersions.filter((v) => v === defaultVer || loadSyncManifest(agentId, v) !== null);
     if (versionsToSync.length === 0) continue;
 
     let actuallySynced: ReturnType<typeof getActuallySyncedResources> | undefined;
@@ -202,7 +203,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
 
     if (!skipPrompts && !requestedSelection) {
       actuallySynced = getActuallySyncedResources(agentId, defaultVer!);
-      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, defaultVer!, available));
+      newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, defaultVer!, available), loadSyncManifest(agentId, defaultVer!));
       hasAnySynced = actuallySynced.commands.length > 0 ||
         actuallySynced.skills.length > 0 ||
         actuallySynced.hooks.length > 0 ||
@@ -283,12 +284,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     for (const agentId of agentsToSync) {
       if (!hookAgents.has(agentId)) continue;
       const versions = listInstalledVersions(agentId);
-      const defaultVer = getGlobalDefault(agentId);
-      const targetVersions = skipPrompts
-        ? versions
-        : (defaultVer ? [defaultVer] : versions.slice(-1));
-
-      for (const ver of targetVersions) {
+      for (const ver of versions) {
         const home = getVersionHomePath(agentId, ver);
         const result = registerHooksToSettings(agentId, home, hookManifest);
         hookRegistered += result.registered.length;

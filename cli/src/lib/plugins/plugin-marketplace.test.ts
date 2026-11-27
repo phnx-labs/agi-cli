@@ -12,6 +12,7 @@ import {
   marketplaceManifestPath,
   knownMarketplacesPath,
   copyPluginToMarketplace,
+  pluginInstallDir,
   syncMarketplaceManifest,
   registerMarketplace,
   unregisterMarketplace,
@@ -261,14 +262,16 @@ describe('syncMarketplaceManifest', () => {
     expect(manifest!.plugins.map(p => p.name)).toEqual(['beta', 'zeta']);
   });
 
-  it('WIRING: warns to stderr when a synced plugin ships a Claude-invalid manifest', () => {
-    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'badplug', { skills: ['loop'] }), 'badplug'), versionHome);
-    installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'goodplug'), 'goodplug'), versionHome);
+  it('WIRING: warns once when a plugin ships a Claude-invalid manifest, and repairs only the installed copy', () => {
+    const badRoot = writePluginSource(srcDir, 'badplug', { skills: ['loop'] });
+    const sourceBefore = fs.readFileSync(path.join(badRoot, '.claude-plugin', 'plugin.json'), 'utf-8');
 
     const origWrite = process.stderr.write.bind(process.stderr);
     const captured: string[] = [];
     process.stderr.write = ((chunk: unknown) => { captured.push(String(chunk)); return true; }) as typeof process.stderr.write;
     try {
+      installInto(SPECS.user, discoveredPlugin(badRoot, 'badplug'), versionHome);
+      installInto(SPECS.user, discoveredPlugin(writePluginSource(srcDir, 'goodplug'), 'goodplug'), versionHome);
       const manifest = syncMarketplaceManifest(SPECS.user, 'claude', versionHome);
       expect(manifest!.plugins.map(p => p.name)).toEqual(['badplug', 'goodplug']);
     } finally {
@@ -282,6 +285,11 @@ describe('syncMarketplaceManifest', () => {
     expect(out).toContain('Fix:');
     expect(out).toContain('delete the "skills" field');
     expect(out).not.toContain('goodplug');
+    expect(out.split("plugin 'badplug'").length - 1).toBe(1);
+
+    expect(fs.readFileSync(path.join(badRoot, '.claude-plugin', 'plugin.json'), 'utf-8')).toBe(sourceBefore);
+    const installed = JSON.parse(fs.readFileSync(path.join(pluginInstallDir(discoveredPlugin(badRoot, 'badplug'), SPECS.user, 'claude', versionHome), '.claude-plugin', 'plugin.json'), 'utf-8'));
+    expect(installed.skills).toBeUndefined();
   });
 });
 

@@ -22,7 +22,6 @@ import {
   readPluginSourceInfo,
   getUpstreamManifestVersion,
 } from './plugins/plugins.js';
-import { repairPluginManifestFile } from './plugins/plugin-marketplace.js';
 import { getVersionResources } from './state.js';
 import { loadManifest } from './staleness/index.js';
 import * as fs from 'fs';
@@ -50,11 +49,6 @@ export interface VersionHealResult {
   firstSyncPending?: true;
 }
 
-export interface ManifestRepairResult {
-  plugin: string;
-  droppedFields: string[];
-}
-
 export interface PluginRefreshResult {
   plugin: string;
   from: string;
@@ -70,7 +64,6 @@ export interface PluginRefreshSkip {
 
 export interface HealResult {
   versions: VersionHealResult[];
-  repairedManifests: ManifestRepairResult[];
   refreshedPlugins: PluginRefreshResult[];
   skippedPlugins: PluginRefreshSkip[];
 }
@@ -102,25 +95,13 @@ function totalHealed(r: HealResult): number {
 export function healChangedAnything(r: HealResult): boolean {
   return (
     totalHealed(r) > 0 ||
-    r.repairedManifests.length > 0 ||
     r.refreshedPlugins.length > 0
   );
 }
 
 
-function repairCentralPluginManifests(dryRun = false): ManifestRepairResult[] {
-  const out: ManifestRepairResult[] = [];
-  for (const p of discoverPlugins()) {
-    const manifestPath = path.join(p.root, '.claude-plugin', 'plugin.json');
-    const dropped = repairPluginManifestFile(manifestPath, { dryRun });
-    if (dropped.length > 0) out.push({ plugin: p.name, droppedFields: dropped });
-  }
-  return out;
-}
-
 async function refreshStaleCentralPlugins(opts: {
   dryRun?: boolean;
-  allowModified: boolean;
 }): Promise<{ refreshed: PluginRefreshResult[]; skipped: PluginRefreshSkip[] }> {
   const refreshed: PluginRefreshResult[] = [];
   const skipped: PluginRefreshSkip[] = [];
@@ -136,15 +117,13 @@ async function refreshStaleCentralPlugins(opts: {
     const baselineKnown = info.version !== undefined;
     const modified = baselineKnown && info.version !== central;
 
-    if (!opts.allowModified) {
-      if (modified) {
-        skipped.push({ plugin: p.name, from: central, upstream, reason: 'modified' });
-        continue;
-      }
-      if (!baselineKnown) {
-        skipped.push({ plugin: p.name, from: central, upstream, reason: 'no-baseline' });
-        continue;
-      }
+    if (modified) {
+      skipped.push({ plugin: p.name, from: central, upstream, reason: 'modified' });
+      continue;
+    }
+    if (!baselineKnown) {
+      skipped.push({ plugin: p.name, from: central, upstream, reason: 'no-baseline' });
+      continue;
     }
 
     if (opts.dryRun) {
@@ -248,15 +227,8 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
 
   const full = opts.mode === 'full';
 
-  const repairedManifests = repairCentralPluginManifests(opts.dryRun);
-  const { refreshed, skipped: skippedPlugins } = await refreshStaleCentralPlugins({
-    dryRun: opts.dryRun,
-    allowModified: full,
-  });
-  const changedPlugins = new Set<string>([
-    ...repairedManifests.map((r) => r.plugin),
-    ...refreshed.map((r) => r.plugin),
-  ]);
+  const { refreshed, skipped: skippedPlugins } = await refreshStaleCentralPlugins({ dryRun: opts.dryRun });
+  const changedPlugins = new Set<string>(refreshed.map((r) => r.plugin));
 
   const sweep = (a: AgentId) => listInstalledVersions(a).filter((v) => !isVersionIsolated(a, v));
   const targets: Array<{ agent: AgentId; versions: string[] }> = opts.agent
@@ -272,5 +244,5 @@ export async function heal(opts: HealOptions): Promise<HealResult> {
     }
   }
 
-  return { versions, repairedManifests, refreshedPlugins: refreshed, skippedPlugins };
+  return { versions, refreshedPlugins: refreshed, skippedPlugins };
 }
