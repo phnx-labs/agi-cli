@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.23.58
+
+- **`agents sync` no longer deletes skills or commands you added yourself, and `--delete` now removes skills a plugin dropped.** A full sync swept every folder in a version's `skills/` dir that the current sources did not list, so a skill you put there by hand was deleted outright, with no message and no trash copy, the next time any source changed. It now trashes only what a previous sync recorded installing (plus, on Claude, a stale flat copy of a plugin skill). `agents sync <agent> <repo> --delete` also missed plugin skills on every harness but Claude: a skill removed from a plugin that still exists (for example `swarm:orchestrate`), and a plugin command installed as the `<plugin>-<cmd>` skill, were reported as "Nothing deleted" and stayed installed. They are now removed and trashed. Source: `cli/src/lib/installations/versions.ts`, `cli/src/lib/sync-delete.ts`, `cli/src/lib/staleness/index.ts`.
+
 ## 1.23.57
 
 - **`agents ps topic <id> <topic>` files a live session under a topic you choose (PHNX-4676).** A session's topic is its `workstream`, the name AGI EXT groups the Sessions list by; until now only the daemon's title job wrote it. The topic you set is stored on the machine that owns the session (the command hops there over SSH, like `ps stop`), marked as yours, and the title job never overwrites it, even on `agents daemon index backfill titles --refresh`. Your other machines see it with the next session sync. `--json` prints one result line for a UI; AGI EXT runs it when you drag a card onto another section. A topic longer than 4 words or 32 characters is refused, not shortened. The topic stays with the machine that owns the session; one moved with `agents ps migrate` is titled there again until you set one. Schema v56 adds `sessions.workstream_set_by_user`. Source: `cli/src/commands/ps-topic.ts`, `cli/src/lib/session/db.ts`.
