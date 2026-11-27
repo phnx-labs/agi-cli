@@ -9,7 +9,7 @@ import { removeCommandFromVersion } from './commands.js';
 import { removeSkillFromVersion } from './plugins/skills.js';
 import { cleanOrphanedPluginSkills, discoverPlugins, listVersionMarketplaceNames } from './plugins/plugins.js';
 import { marketplaceNameFor, marketplaceRoot } from './plugins/plugin-marketplace.js';
-import { loadManifest, saveManifest } from './staleness/index.js';
+import { loadManifest, saveManifest, syncInstalledSkillSources } from './staleness/index.js';
 import { getDetector } from './staleness/registry.js';
 
 export interface RepoRemovalReport {
@@ -81,9 +81,7 @@ export function pruneRepoRemovals(args: {
     commands: Object.fromEntries(
       Object.entries({ ...manifest?.retired?.commands, ...manifest?.commands }).map(([n, e]) => [n, e.source.path]),
     ),
-    skills: Object.fromEntries(
-      Object.entries({ ...manifest?.retired?.skills, ...manifest?.skills }).map(([n, e]) => [n, e.dirPath]),
-    ),
+    skills: Object.fromEntries(syncInstalledSkillSources(manifest)),
   };
   const kinds = [
     { kind: 'commands' as const, label: 'command', remove: removeCommandFromVersion },
@@ -93,10 +91,10 @@ export function pruneRepoRemovals(args: {
     const detector = getDetector(kind, agent);
     if (!detector || !supports(agent, kind, version).ok) continue;
     const provided = new Set(listResources(kind, cwd).map((r) => r.name));
-    const kindDir = path.join(root, kind);
+    const repoDirs = [path.join(root, kind), path.join(root, 'plugins')];
     for (const name of detector.list({ version, versionHome, cwd })) {
       const source = provenance[kind][name];
-      if (!source || !within(kindDir, source)) {
+      if (!source || !repoDirs.some((dir) => within(dir, source))) {
         report.kept.notFromRepo.push(`${label} ${name}`);
         continue;
       }

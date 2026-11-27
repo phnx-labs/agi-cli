@@ -56,7 +56,9 @@ import { parseHookManifest, registerHooksToSettings, selectHookManifest, pruneVe
 import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
 import { composeRulesFromState } from '../rules/compose.js';
-import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale } from '../staleness/index.js';
+import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale, syncInstalledSkillSources } from '../staleness/index.js';
+import { removeSkillFromVersion } from '../plugins/skills.js';
+import { removeCommandFromVersion } from '../commands.js';
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
 import { emit } from '../feed/events.js';
 import { withFileLockAsync } from '../fs-atomic.js';
@@ -2197,16 +2199,14 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (fs.existsSync(commandsTargetSweep)) {
       const ext = agentConfig.format === 'toml' ? '.toml' : '.md';
       const trustedCommands = new Set(commandsToSync);
-      const previouslyManagedCommands = commandsAlsoAsSkills
-        ? new Set(loadManifest(agent, version)?.writtenCommands ?? [])
-        : null;
+      const installedBySync = new Set(loadManifest(agent, version)?.writtenCommands ?? []);
       for (const entry of fs.readdirSync(commandsTargetSweep, { withFileTypes: true })) {
         if (!entry.isFile() || entry.name.startsWith('.')) continue;
         if (!entry.name.endsWith(ext)) continue;
         const name = entry.name.slice(0, -ext.length);
-        if (!trustedCommands.has(name) && (!previouslyManagedCommands || previouslyManagedCommands.has(name))) {
-          removePath(safeJoin(commandsTargetSweep, entry.name));
-        }
+        if (trustedCommands.has(name) || !installedBySync.has(name)) continue;
+        const removed = removeCommandFromVersion(agent, version, name);
+        if (!removed.success) throw new Error(`could not trash command '${name}' from ${agent}@${version}: ${removed.error}`);
       }
     }
   }
@@ -2251,11 +2251,20 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (!userPassedSelection && fs.existsSync(skillsTargetSweep) && !fs.lstatSync(skillsTargetSweep).isSymbolicLink()) {
       const trustedSkills = new Set([...skillsToSync, ...(agentConfig.ownedSkillDirs ?? [])]);
       if (commandsInstallAsSkills) for (const cmd of commandsToSync) trustedSkills.add(cmd);
+      if (commandsAsSkills) {
+        const enabled = new Set(pluginsToSync);
+        for (const plugin of discoverPlugins()) {
+          if (enabled.has(plugin.name)) for (const cmd of plugin.commands) trustedSkills.add(`${plugin.name}-${cmd}`);
+        }
+      }
+      const installedBySync = syncInstalledSkillSources(loadManifest(agent, version));
+      const flatPluginCopies = new Set(agentConfig.nativePluginSkills ? listPluginSkillNames({ plugins: new Set(pluginsToSync) }) : []);
       for (const entry of fs.readdirSync(skillsTargetSweep, { withFileTypes: true })) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-        if (!trustedSkills.has(entry.name)) {
-          removePath(safeJoin(skillsTargetSweep, entry.name));
-        }
+        if (trustedSkills.has(entry.name)) continue;
+        if (!installedBySync.has(entry.name) && !flatPluginCopies.has(entry.name)) continue;
+        const removed = removeSkillFromVersion(agent, version, entry.name);
+        if (!removed.success) throw new Error(`could not trash skill '${entry.name}' from ${agent}@${version}: ${removed.error}`);
       }
     }
   }
