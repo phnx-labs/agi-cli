@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { loadManifest as loadSyncManifest } from '../lib/staleness/index.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -575,7 +576,7 @@ export function registerVersionsCommands(program: Command): void {
 
             const available = getAvailableResources();
             const actuallySynced = getActuallySyncedResources(agent, installedVersion);
-            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agent, installedVersion, available));
+            const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agent, installedVersion, available), loadSyncManifest(agent, installedVersion));
 
             const hasAnySynced = actuallySynced.commands.length > 0 ||
               actuallySynced.skills.length > 0 ||
@@ -586,11 +587,12 @@ export function registerVersionsCommands(program: Command): void {
               actuallySynced.plugins.length > 0;
 
             let selection: ResourceSelection | undefined;
+            let fullSync = false;
 
             try {
               if (skipPrompts) {
                 if (!hasAnySynced) {
-                  selection = buildAutomaticSelection(available);
+                  fullSync = true;
                 } else if (hasNewResources(newResources, agent)) {
                   selection = buildAutomaticSelection(newResources);
                 }
@@ -613,8 +615,8 @@ export function registerVersionsCommands(program: Command): void {
               }
             }
 
-            if (selection && Object.keys(selection).length > 0) {
-              const syncResult = syncResourcesToVersion(agent, installedVersion, selection);
+            if (fullSync || (selection && Object.keys(selection).length > 0)) {
+              const syncResult = syncResourcesToVersion(agent, installedVersion, fullSync ? undefined : selection);
               const synced: string[] = [];
               if (syncResult.commands) synced.push('commands');
               if (syncResult.skills) synced.push('skills');
@@ -909,7 +911,7 @@ export function registerVersionsCommands(program: Command): void {
         } else {
           const available = getAvailableResources();
           const actuallySynced = getActuallySyncedResources(agentId, finalVersion);
-          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, finalVersion, available));
+          const newResources = getNewResources(available, actuallySynced, getProjectOnlyResources(), declinedResources(agentId, finalVersion, available), loadSyncManifest(agentId, finalVersion));
 
           const hasAnySynced = actuallySynced.commands.length > 0 ||
             actuallySynced.skills.length > 0 ||
@@ -921,13 +923,11 @@ export function registerVersionsCommands(program: Command): void {
           try {
             if (skipPrompts) {
               let selection: ResourceSelection | undefined;
-              if (!hasAnySynced) {
-                selection = buildAutomaticSelection(available);
-              } else if (hasNewResources(newResources, agentId)) {
+              if (hasAnySynced && hasNewResources(newResources, agentId)) {
                 selection = buildAutomaticSelection(newResources);
               }
 
-              if (selection && Object.keys(selection).length > 0) {
+              if (!hasAnySynced || (selection && Object.keys(selection).length > 0)) {
                 const syncResult = syncResourcesToVersion(agentId, finalVersion, selection);
                 const syncedTypes: string[] = [];
                 if (syncResult.commands) syncedTypes.push('commands');

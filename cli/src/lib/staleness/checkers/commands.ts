@@ -5,6 +5,7 @@ import { firstWinsLayers, listAcrossLayers, resolveByName } from '../layers.js';
 import { fingerprintFile, isFileStale } from '../fingerprint.js';
 import type { FileEntry } from '../types.js';
 import type { TypedResourceChecker } from './types.js';
+import { isDirectoryDoc } from '../../resources.js';
 
 export const commandsChecker: TypedResourceChecker<FileEntry> = {
   type: 'commands',
@@ -14,7 +15,7 @@ export const commandsChecker: TypedResourceChecker<FileEntry> = {
       firstWinsLayers(cwd),
       'commands',
       (name) => name.endsWith('.md')
-    ).map((n) => n.replace(/\.md$/, ''));
+    ).map((n) => n.replace(/\.md$/, '')).filter((n) => !isDirectoryDoc('commands', n));
   },
 
   build(name, cwd) {

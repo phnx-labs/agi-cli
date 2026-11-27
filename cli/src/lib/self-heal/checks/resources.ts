@@ -22,9 +22,6 @@ export const resourcesCheck: HealCheck = {
       }
     }
     if (healed > 0) fixed.push(`${healed} resource(s) reconciled`);
-    for (const m of result.repairedManifests) {
-      fixed.push(`plugin ${m.plugin}: dropped ${m.droppedFields.join(', ')}`);
-    }
     for (const p of result.refreshedPlugins) {
       fixed.push(`plugin ${p.plugin}: ${p.from} -> ${p.to}`);
     }

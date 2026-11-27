@@ -10,7 +10,7 @@ import { checkbox, select, confirm } from '@inquirer/prompts';
 import type { AgentId, DiscoveredPlugin, VersionResources } from '../types.js';
 import { getVersionsDir, getShimsDir, ensureAgentsDir, readMeta, writeMeta, getCommandsDir, getSkillsDir, getHooksDir, getResolvedRulesDir, getUserRulesDir, getPermissionsDir, getSubagentsDir, getVersionResources, recordVersionResources, ensureVersionResourcePatterns, updateMeta, getMcpDir, getProjectAgentsDir, getPromptcutsPath, getUserPromptcutsPath, getEnabledExtraRepos, getAgentsDir, getOptionalUserAgentsDir, getUserAgentsDir, getTrashVersionsDir, getActiveRulesPreset, getHomeDir } from '../state.js';
 import { defaultPatterns, expandPatterns } from '../resource-patterns.js';
-import { resolveResource, listResources } from '../resources.js';
+import { resolveResource, listResources, isDirectoryDoc } from '../resources.js';
 import { activeRulesPreset, filterNamesForActiveResourceProfile } from '../resource-profiles.js';
 import { VERSION_RE, compareVersions } from '../agent-spec/primitives.js';
 import { AGENTS, agentConfigDirName, getAccountEmail, getMcpConfigPathForHome, parseMcpConfig, resolveAgentName, formatAgentError, findInPath, isSelfUpdatingAgent, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
@@ -57,6 +57,7 @@ import { supports, explainSkip, capableAgents } from '../capabilities.js';
 import { discoverPlugins, syncPluginToVersion, isPluginSynced, pluginSupportsAgent, cleanOrphanedPluginSkills, marketplaceSpecForName } from '../plugins/plugins.js';
 import { composeRulesFromState } from '../rules/compose.js';
 import { loadManifest, saveManifest, buildManifest as buildSyncManifest, isStale, syncInstalledSkillSources } from '../staleness/index.js';
+import type { SyncManifest } from '../staleness/types.js';
 import { removeSkillFromVersion } from '../plugins/skills.js';
 import { removeCommandFromVersion } from '../commands.js';
 import { pruneRemovedResources, type PrunableKind } from '../staleness/prune.js';
@@ -244,7 +245,8 @@ export function getAvailableResources(cwd: string = process.cwd()): AvailableRes
     if (!fs.existsSync(commandsDir)) continue;
     const names = fs.readdirSync(commandsDir)
       .filter(f => f.endsWith('.md'))
-      .map(f => f.replace(/\.md$/, ''));
+      .map(f => f.replace(/\.md$/, ''))
+      .filter(name => !isDirectoryDoc('commands', name));
     for (const name of names) {
       commandNames.add(name);
     }
@@ -578,23 +580,32 @@ export function getNewResources(
   actuallySynced: AvailableResources,
   projectOnly?: ProjectOnlyResources,
   declined?: DeclinedResources,
+  lastSync?: SyncManifest | null,
 ): AvailableResources {
   const exclude = projectOnly || {
     commands: new Set<string>(), skills: new Set<string>(), hooks: new Set<string>(),
     subagents: new Set<string>(), plugins: new Set<string>(), workflows: new Set<string>(),
   };
+  const known = {
+    commands: new Set(Object.keys({ ...lastSync?.retired?.commands, ...lastSync?.commands })),
+    skills: new Set(syncInstalledSkillSources(lastSync ?? null).keys()),
+    hooks: new Set(Object.keys(lastSync?.hooks ?? {})),
+    subagents: new Set(Object.keys(lastSync?.subagents ?? {})),
+    plugins: new Set(Object.keys(lastSync?.plugins ?? {})),
+    workflows: new Set(Object.keys(lastSync?.workflows ?? {})),
+  };
   return {
-    commands: available.commands.filter(c => !actuallySynced.commands.includes(c) && !exclude.commands.has(c)),
-    skills: available.skills.filter(s => !actuallySynced.skills.includes(s) && !exclude.skills.has(s)),
-    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h) && !declined?.hooks.has(h)),
+    commands: available.commands.filter(c => !actuallySynced.commands.includes(c) && !exclude.commands.has(c) && !known.commands.has(c)),
+    skills: available.skills.filter(s => !actuallySynced.skills.includes(s) && !exclude.skills.has(s) && !known.skills.has(s)),
+    hooks: available.hooks.filter(h => !actuallySynced.hooks.includes(h) && !exclude.hooks.has(h) && !declined?.hooks.has(h) && !known.hooks.has(h)),
     memory: actuallySynced.memory.length > 0
       ? []
       : available.memory.filter(m => !actuallySynced.memory.includes(m)),
     mcp: available.mcp.filter(m => !actuallySynced.mcp.includes(m)),
     permissions: available.permissions.filter(p => !actuallySynced.permissions.includes(p) && !declined?.permissions.has(p)),
-    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s)),
-    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p)),
-    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w)),
+    subagents: available.subagents.filter(s => !actuallySynced.subagents.includes(s) && !exclude.subagents.has(s) && !known.subagents.has(s)),
+    plugins: available.plugins.filter(p => !actuallySynced.plugins.includes(p) && !exclude.plugins.has(p) && !known.plugins.has(p)),
+    workflows: available.workflows.filter(w => !actuallySynced.workflows.includes(w) && !exclude.workflows.has(w) && !known.workflows.has(w)),
     promptcuts: false,
   };
 }

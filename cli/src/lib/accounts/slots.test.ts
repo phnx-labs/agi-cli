@@ -159,15 +159,20 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
     else process.env.AGENTS_SYNC_MACHINE_ID = prevMid;
   });
 
-  it('re-projects every claude slot from the default version home and prunes a skill the source no longer has', () => {
+  it('re-projects every claude slot from the default version home, prunes only what it projected, and keeps a skill made in the slot', () => {
     expect(getGlobalDefault('claude')).toBe(VERSION);
+    const centralAlpha = path.join(os.homedir(), '.agents', 'skills', 'alpha');
+    fs.mkdirSync(centralAlpha, { recursive: true });
+    fs.writeFileSync(path.join(centralAlpha, 'SKILL.md'), '---\nname: alpha\n---\n');
     const created = addNativeAccount('work', 'claude', 'claude:user=slot-2', 'work@example.com', 'version');
     const slot = ensureSlot('claude', created.id);
     expect(readSlots(readMeta())[created.id]).toBeUndefined();
     try {
       const skillsDir = path.join(slot.slotDir, '.claude', 'skills');
-      fs.mkdirSync(path.join(skillsDir, 'zz-stale-skill'), { recursive: true });
-      fs.writeFileSync(path.join(skillsDir, 'zz-stale-skill', 'SKILL.md'), '---\nname: zz-stale-skill\n---\n');
+      expect(fs.existsSync(path.join(skillsDir, 'alpha', 'SKILL.md'))).toBe(true);
+      fs.mkdirSync(path.join(skillsDir, 'zz-made-here'), { recursive: true });
+      fs.writeFileSync(path.join(skillsDir, 'zz-made-here', 'SKILL.md'), '---\nname: zz-made-here\n---\n');
+      fs.rmSync(path.join(versionHome(), '.claude', 'skills', 'alpha'), { recursive: true });
 
       const projected = projectAccountSlots('claude');
       const mine = projected.find((p) => p.accountId === created.id);
@@ -175,14 +180,17 @@ describe('projectAccountSlots (PHNX-3940: slots follow the version home)', () =>
       expect(mine!.name).toBe('work');
       expect(mine!.slotDir).toBe(slot.slotDir);
       expect(mine!.from).toBe(VERSION);
-      expect(mine!.pruned).toEqual(['skills/zz-stale-skill']);
-      expect(fs.existsSync(path.join(skillsDir, 'zz-stale-skill'))).toBe(false);
+      expect(mine!.pruned).toEqual(['skills/alpha']);
+      expect(fs.existsSync(path.join(skillsDir, 'alpha'))).toBe(false);
+      expect(fs.existsSync(path.join(skillsDir, 'zz-made-here', 'SKILL.md'))).toBe(true);
       expect(fs.existsSync(path.join(slot.slotDir, '.claude', '.credentials.json'))).toBe(false);
 
       expect(projectAccountSlots('claude').find((p) => p.accountId === created.id)?.pruned).toEqual([]);
+      expect(fs.existsSync(path.join(skillsDir, 'zz-made-here', 'SKILL.md'))).toBe(true);
     } finally {
       removeAccount('work');
       fs.rmSync(slot.slotDir, { recursive: true, force: true });
+      fs.rmSync(centralAlpha, { recursive: true, force: true });
     }
   });
 

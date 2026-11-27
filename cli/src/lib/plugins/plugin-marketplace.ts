@@ -165,6 +165,14 @@ function settingsPath(agent: AgentId, versionHome: string): string {
 }
 
 
+function warnClaudeInvalidManifest(manifest: PluginManifest, fallbackName: string): void {
+  for (const warning of validateClaudePluginManifest(manifest)) {
+    process.stderr.write(
+      `agents-cli: plugin '${manifest.name ?? fallbackName}' has a Claude-invalid manifest — ${warning}\n`
+    );
+  }
+}
+
 export function copyPluginToMarketplace(
   plugin: DiscoveredPlugin,
   spec: MarketplaceSpec | string,
@@ -203,6 +211,12 @@ export function copyPluginToMarketplace(
       }
     },
   });
+
+  const installedManifest = path.join(dest, '.claude-plugin', 'plugin.json');
+  try {
+    warnClaudeInvalidManifest(JSON.parse(fs.readFileSync(installedManifest, 'utf-8')), plugin.name);
+  } catch {  }
+  repairPluginManifestFile(installedManifest);
 
   if (skipped.length > 0) {
     process.stderr.write(
@@ -312,11 +326,7 @@ export function syncMarketplaceManifest(spec: MarketplaceSpec, agent: AgentId, v
       continue;
     }
 
-    for (const warning of validateClaudePluginManifest(manifest)) {
-      process.stderr.write(
-        `agents-cli: plugin '${manifest.name ?? entry.name}' has a Claude-invalid manifest — ${warning}\n`
-      );
-    }
+    warnClaudeInvalidManifest(manifest, entry.name);
 
     entries.push({
       name: manifest.name,

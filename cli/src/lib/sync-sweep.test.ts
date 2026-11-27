@@ -9,9 +9,11 @@ const CLI_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const INDEX = path.join(CLI_ROOT, 'src', 'index.ts');
 const FIXTURES = path.join(CLI_ROOT, 'src', 'lib', 'testdata', 'sync-sweep');
 const VERSION = '0.130.0';
+const OLDER = '0.129.0';
 
 let home = '';
 let versionHome = '';
+let olderHome = '';
 
 function run(args: string[]): { out: string; status: number | null } {
   const r = spawnSync('bun', [INDEX, ...args], {
@@ -32,7 +34,7 @@ function run(args: string[]): { out: string; status: number | null } {
 }
 
 const pluginDir = () => path.join(home, '.agents', '.system', 'plugins', 'swarm');
-const skill = (name: string) => path.join(versionHome, '.codex', 'skills', name);
+const skill = (name: string, home = versionHome) => path.join(home, '.codex', 'skills', name);
 const trashed = (name: string) => path.join(home, '.agents', '.history', 'trash', 'skills', 'codex', VERSION, name);
 
 beforeAll(() => {
@@ -48,18 +50,22 @@ beforeAll(() => {
     import { AGENTS } from './src/lib/agents.ts';
     import { getVersionDir, getVersionHomePath, setGlobalDefault } from './src/lib/installations/versions.ts';
     const cfg = AGENTS.codex;
-    const pkgRoot = path.join(getVersionDir('codex', '${VERSION}'), 'node_modules', cfg.npmPackage);
-    fs.mkdirSync(pkgRoot, { recursive: true });
-    fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin: { [cfg.cliCommand]: 'cli.js' } }));
-    fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '#!/usr/bin/env node\n');
+    for (const v of ['${OLDER}', '${VERSION}']) {
+      const pkgRoot = path.join(getVersionDir('codex', v), 'node_modules', cfg.npmPackage);
+      fs.mkdirSync(pkgRoot, { recursive: true });
+      fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin: { [cfg.cliCommand]: 'cli.js' } }));
+      fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '#!/usr/bin/env node\n');
+      console.log(getVersionHomePath('codex', v));
+    }
     setGlobalDefault('codex', '${VERSION}');
-    console.log(getVersionHomePath('codex', '${VERSION}'));
   `], { cwd: CLI_ROOT, encoding: 'utf-8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 60_000 });
   if (setup.status !== 0) throw new Error(`fake install failed: ${setup.stderr}`);
-  versionHome = setup.stdout.trim();
+  [olderHome, versionHome] = setup.stdout.trim().split('\n');
 
-  const first = run(['sync', `codex@${VERSION}`, '--yes']);
-  if (first.status !== 0) throw new Error(`initial sync failed:\n${first.out}`);
+  for (const v of [VERSION, OLDER]) {
+    const first = run(['sync', `codex@${v}`, '--yes']);
+    if (first.status !== 0) throw new Error(`initial sync of ${v} failed:\n${first.out}`);
+  }
 });
 
 afterAll(() => {
@@ -95,5 +101,67 @@ describe('agents sync removes only what it installed (flattened plugin skills)',
     expect(fs.existsSync(path.join(skill('mine'), 'SKILL.md'))).toBe(true);
     expect(fs.existsSync(skill('swarm-plan'))).toBe(true);
     expect(fs.existsSync(trashed('swarm-plan'))).toBe(false);
+  });
+});
+
+describe('agents sync installs only real resources and leaves the source repos alone', () => {
+  it('does not rewrite a plugin manifest in the source repo', () => {
+    const manifest = path.join(pluginDir(), '.claude-plugin', 'plugin.json');
+    const bare = JSON.stringify({ name: 'swarm', version: '1.0.0', description: 'fixture plugin', commands: ['plan'] }, null, 2);
+    fs.writeFileSync(manifest, bare);
+    const r = run(['sync', `codex@${VERSION}`, '--yes', '--force']);
+    expect(r.status, r.out).toBe(0);
+    expect(fs.readFileSync(manifest, 'utf-8')).toBe(bare);
+  });
+
+  it('reaches every synced version without --yes, not just the default', () => {
+    fs.appendFileSync(path.join(pluginDir(), 'skills', 'keep', 'SKILL.md'), '\nSecond upstream edit.\n');
+    const r = run(['sync', '--local']);
+    expect(r.status, r.out).toBe(0);
+    for (const home of [versionHome, olderHome]) {
+      expect(fs.readFileSync(path.join(skill('keep', home), 'SKILL.md'), 'utf-8'), r.out).toContain('Second upstream edit.');
+    }
+  });
+});
+
+describe('agents use --yes on a never-synced version', () => {
+  it('runs a full sync that records what it installed and skips folder docs, so a later --delete can work', () => {
+    const fresh = '0.128.0';
+    const setup = spawnSync('bun', ['--eval', String.raw`
+      import * as fs from 'fs';
+      import * as path from 'path';
+      import { AGENTS } from './src/lib/agents.ts';
+      import { getVersionDir } from './src/lib/installations/versions.ts';
+      const cfg = AGENTS.codex;
+      const pkgRoot = path.join(getVersionDir('codex', '${fresh}'), 'node_modules', cfg.npmPackage);
+      fs.mkdirSync(pkgRoot, { recursive: true });
+      fs.writeFileSync(path.join(pkgRoot, 'package.json'), JSON.stringify({ bin: { [cfg.cliCommand]: 'cli.js' } }));
+      fs.writeFileSync(path.join(pkgRoot, 'cli.js'), '#!/usr/bin/env node\n');
+    `], { cwd: CLI_ROOT, encoding: 'utf-8', env: { ...process.env, HOME: home, USERPROFILE: home }, timeout: 60_000 });
+    expect(setup.status, setup.stderr).toBe(0);
+    const manifest = path.join(home, '.agents', '.history', 'versions', 'codex', fresh, 'home', '.sync-manifest.json');
+    expect(fs.existsSync(manifest)).toBe(false);
+
+    const r = run(['use', `codex@${fresh}`, '--yes']);
+    expect(r.status, r.out).toBe(0);
+    expect(fs.existsSync(manifest), r.out).toBe(true);
+    expect(JSON.parse(fs.readFileSync(manifest, 'utf-8')).writtenCommands).toContain('hello');
+    const freshSkills = path.join(path.dirname(manifest), '.codex', 'skills');
+    expect(fs.existsSync(path.join(freshSkills, 'hello', 'SKILL.md'))).toBe(true);
+    expect(fs.existsSync(path.join(freshSkills, 'README')), 'a folder README.md is not a command').toBe(false);
+    expect(fs.existsSync(path.join(freshSkills, 'AGENTS'))).toBe(false);
+  });
+
+  it('installs a newly added skill on the next use --yes without picking up folder docs as commands', () => {
+    const fresh = '0.128.0';
+    const added = path.join(home, '.agents', '.system', 'skills', 'newly-added');
+    fs.mkdirSync(added, { recursive: true });
+    fs.writeFileSync(path.join(added, 'SKILL.md'), '---\nname: newly-added\ndescription: added upstream\n---\nNew.\n');
+    const r = run(['use', `codex@${fresh}`, '--yes']);
+    expect(r.status, r.out).toBe(0);
+    const freshSkills = path.join(home, '.agents', '.history', 'versions', 'codex', fresh, 'home', '.codex', 'skills');
+    expect(fs.existsSync(path.join(freshSkills, 'newly-added', 'SKILL.md')), r.out).toBe(true);
+    expect(fs.existsSync(path.join(freshSkills, 'README')), r.out).toBe(false);
+    expect(fs.existsSync(path.join(freshSkills, 'AGENTS'))).toBe(false);
   });
 });
