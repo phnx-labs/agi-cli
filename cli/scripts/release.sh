@@ -151,7 +151,7 @@ run_ci_publish() {
     || die "npm publish failed for $PHNX_PKG@$TARGET"
   if ! $PUBLISH_DRY_RUN; then
     published="absent"
-    local visible_attempts="${RELEASE_VISIBILITY_ATTEMPTS:-30}" visible_interval="${RELEASE_VISIBILITY_INTERVAL_S:-10}" attempt
+    local visible_attempts="${RELEASE_VISIBILITY_ATTEMPTS:-90}" visible_interval="${RELEASE_VISIBILITY_INTERVAL_S:-10}" attempt
     for ((attempt = 1; attempt <= visible_attempts; attempt++)); do
       published="$(scripts/release-registry-state.sh "$PHNX_PKG" "$TARGET" 2>/dev/null || true)"
       [[ "$published" == "present" ]] && break
